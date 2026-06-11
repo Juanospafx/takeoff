@@ -1535,6 +1535,24 @@
         });
     }
 
+    window.setTakeoffInternalView = function(view) {
+        if (view === 'summary') {
+            document.body.classList.add('view-summary');
+            document.getElementById('btn-view-summary').classList.replace('btn-outline-light', 'btn-primary');
+            document.getElementById('btn-view-summary').classList.remove('border-0');
+            document.getElementById('btn-view-drawing').classList.replace('btn-primary', 'btn-outline-light');
+            document.getElementById('btn-view-drawing').classList.add('border-0');
+            // Ensure summary is rendered
+            renderSummary();
+        } else {
+            document.body.classList.remove('view-summary');
+            document.getElementById('btn-view-drawing').classList.replace('btn-outline-light', 'btn-primary');
+            document.getElementById('btn-view-drawing').classList.remove('border-0');
+            document.getElementById('btn-view-summary').classList.replace('btn-primary', 'btn-outline-light');
+            document.getElementById('btn-view-summary').classList.add('border-0');
+        }
+    };
+
     window.takeoffServices = {
         calculateCountQuantity,
         calculateLinearLength,

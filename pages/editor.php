@@ -335,8 +335,14 @@ if ($filePath !== '') {
                 <i class="fas fa-tools"></i>
             </button>
 
-            <div class="brand-logo ms-2">
+            <div class="brand-logo ms-2 me-3">
                 <i class="fas fa-bolt text-warning"></i> <span class="d-none d-md-inline">Brightronix</span>
+            </div>
+
+            <!-- VIEW TOGGLE -->
+            <div class="d-none d-md-flex bg-dark rounded border border-secondary p-1 align-items-center me-3" style="gap:2px;">
+                <button id="btn-view-drawing" class="btn btn-sm btn-primary" onclick="setTakeoffInternalView('drawing')" style="font-weight:600;">Drawing Takeoff</button>
+                <button id="btn-view-summary" class="btn btn-sm btn-outline-light border-0" onclick="setTakeoffInternalView('summary')" style="font-weight:600;">Estimate Summary</button>
             </div>
             
             <div class="file-info d-none d-lg-flex">

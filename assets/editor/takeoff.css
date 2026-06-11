@@ -6,8 +6,7 @@
 }
 
 .takeoff-panel,
-.takeoff-props,
-.takeoff-summary {
+.takeoff-props {
     position: absolute;
     pointer-events: auto;
     background: rgba(15, 23, 42, 0.95);
@@ -16,6 +15,31 @@
     color: #e5e7eb;
     box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
     overflow: hidden;
+}
+
+.takeoff-summary {
+    position: absolute;
+    inset: 12px;
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 8px;
+    color: #e5e7eb;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+    display: none;
+    flex-direction: column;
+    z-index: 100;
+    pointer-events: auto;
+}
+
+body.view-summary .takeoff-summary {
+    display: flex;
+}
+
+body.view-summary .takeoff-panel,
+body.view-summary .takeoff-props,
+body.view-summary .floating-controls {
+    display: none !important;
 }
 
 .takeoff-panel {
@@ -35,14 +59,7 @@
     overflow: auto;
 }
 
-.takeoff-summary {
-    left: 12px;
-    right: 12px;
-    bottom: 12px;
-    height: 190px;
-    display: flex;
-    flex-direction: column;
-}
+/* Removed old .takeoff-summary position */
 
 .takeoff-panel-header,
 .takeoff-panel-section,
