@@ -1,88 +1,776 @@
 <?php
-// pages/project_dashboard.php
-// CORRECCIÓN: Agregado "/.." en las rutas para salir de 'pages' y encontrar 'core'
-require_once __DIR__ . '/../core/auth/session.php';
+/**
+ * project_dashboard.php
+ * 
+ * MAIN PROJECT DASHBOARD WITH 5 TOP-LEVEL TABS
+ * 
+ * TOP NAVIGATION: Overview | Documents | Takeoff | Estimating | Proposal
+ * 
+ * Each tab is a complete view within the project context.
+ * Takeoff has 2 internal slides:
+ *   - Slide 1: Drawing Takeoff (plan view + layers panel + toolbar)
+ *   - Slide 2: Estimate Summary (cost table + totals)
+ */
+
 require_once __DIR__ . '/../core/db/connection.php';
 
-$projectId = $_GET['id'] ?? 0;
+$projectId = (int)($_GET['id'] ?? $_GET['project_id'] ?? 0);
+$activeTab = $_GET['tab'] ?? 'overview';
+$takeoffSlide = $_GET['slide'] ?? 'drawing'; // 'drawing' or 'summary'
 
-// 1. Obtener Datos del Proyecto
-$stmt = $pdo->prepare("SELECT * FROM projects WHERE id = ? AND deleted_at IS NULL");
-$stmt->execute([$projectId]);
-$project = $stmt->fetch(PDO::FETCH_ASSOC);
+// Fetch project data
+$projectStmt = $pdo->prepare("
+    SELECT * FROM projects 
+    WHERE id = ? AND deleted_at IS NULL
+");
+$projectStmt->execute([$projectId]);
+$project = $projectStmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$project) {
-    header("Location: index.php");
-    exit;
+    http_response_code(404);
+    die("Project not found");
 }
 
-$projectDesc = $project['description'] ?? '';
-if ($projectDesc === '' && !empty($project['notes'])) $projectDesc = $project['notes'];
-$projectNotes = $project['notes'] ?? '';
-if ($projectNotes === '' && !empty($project['description'])) $projectNotes = $project['description'];
-$projectAddress = $project['address'] ?? ($project['job_address'] ?? '');
-$projectContactName = $project['contact_name'] ?? ($project['site_contact_name'] ?? '');
-$projectContactPhone = $project['contact_phone'] ?? ($project['site_contact_phone'] ?? '');
-$projectCompanyName = $project['company_name'] ?? ($project['gc_company'] ?? '');
-$projectCompanyPhone = $project['company_phone'] ?? ($project['office_phone'] ?? '');
-$projectCompanyAddress = $project['company_address'] ?? ($project['hq_address'] ?? '');
+// Fetch related data based on active tab
+$drawings = [];
+$takeoffs = [];
+$estimates = [];
+$documents = [];
+$proposals = [];
+$estimateItems = [];
+$takeoffLayers = [];
+$takeoffMeasurements = [];
 
-$assignUsers = [];
-$assignedUserIds = [];
-if (($_SESSION['role'] ?? '') === 'admin') {
-    $assignUsers = $pdo->query("SELECT id, username, role FROM users ORDER BY username ASC")->fetchAll(PDO::FETCH_ASSOC);
-    $stmtAssigned = $pdo->prepare("SELECT user_id FROM directory WHERE project_id = ?");
-    $stmtAssigned->execute([$projectId]);
-    $assignedUserIds = array_map('intval', $stmtAssigned->fetchAll(PDO::FETCH_COLUMN));
+if ($activeTab === 'documents') {
+    $stmt = $pdo->prepare("
+        SELECT * FROM project_documents 
+        WHERE project_id = ? AND deleted_at IS NULL 
+        ORDER BY created_at DESC
+    ");
+    $stmt->execute([$projectId]);
+    $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-$pageTitle = $project['name'];
-$currentView = 'files'; // Forzamos la vista de archivos únicamente
-$currentFolderId = $_GET['folder_id'] ?? null;
+if ($activeTab === 'takeoff') {
+    // Fetch drawings
+    $stmt = $pdo->prepare("
+        SELECT * FROM drawings 
+        WHERE project_id = ? AND deleted_at IS NULL 
+        ORDER BY drawing_number ASC
+    ");
+    $stmt->execute([$projectId]);
+    $drawings = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // Fetch takeoffs
+    $stmt = $pdo->prepare("
+        SELECT * FROM takeoffs 
+        WHERE project_id = ? AND deleted_at IS NULL 
+        ORDER BY name ASC
+    ");
+    $stmt->execute([$projectId]);
+    $takeoffs = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    
+    // If takeoff slide is "summary", get estimate items
+    if ($takeoffSlide === 'summary' && !empty($takeoffs)) {
+        $takeoffId = $takeoffs[0]['id'];
+        
+        // Get all layers for this takeoff
+        $stmt = $pdo->prepare("
+            SELECT * FROM takeoff_layers 
+            WHERE takeoff_id = ? AND deleted_at IS NULL 
+            ORDER BY sort_order ASC
+        ");
+        $stmt->execute([$takeoffId]);
+        $takeoffLayers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Get measurements
+        $stmt = $pdo->prepare("
+            SELECT tm.*, tl.name as layer_name
+            FROM takeoff_measurements tm
+            LEFT JOIN takeoff_layers tl ON tl.id = tm.takeoff_layer_id
+            WHERE tm.takeoff_id = ? AND tm.deleted_at IS NULL 
+            ORDER BY tm.created_at DESC
+        ");
+        $stmt->execute([$takeoffId]);
+        $takeoffMeasurements = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        
+        // Get estimate items related to this takeoff
+        $stmt = $pdo->prepare("
+            SELECT ei.*, ci.name as catalog_item_name
+            FROM estimate_items ei
+            LEFT JOIN takeoff_layers tl ON tl.id = ei.takeoff_layer_id
+            LEFT JOIN catalog_items ci ON ci.id = ei.catalog_item_id
+            WHERE tl.takeoff_id = ? AND ei.deleted_at IS NULL 
+            ORDER BY ei.sort_order ASC
+        ");
+        $stmt->execute([$takeoffId]);
+        $estimateItems = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    }
+}
 
-// 2. Consulta de Carpetas (Para el menú lateral y la vista de archivos)
-$foldersStmt = $pdo->prepare("SELECT * FROM folders WHERE project_id = ? AND deleted_at IS NULL ORDER BY name ASC");
-$foldersStmt->execute([$projectId]);
-$allFolders = $foldersStmt->fetchAll(PDO::FETCH_ASSOC);
+if ($activeTab === 'estimating') {
+    $stmt = $pdo->prepare("
+        SELECT * FROM estimating 
+        WHERE project_id = ? AND deleted_at IS NULL 
+        ORDER BY name ASC
+    ");
+    $stmt->execute([$projectId]);
+    $estimates = $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
 
-// 3. Consulta de Estadísticas Rápidas (Para el Summary)
-$fileCount = $pdo->query("SELECT COUNT(*) FROM files WHERE project_id = $projectId AND deleted_at IS NULL")->fetchColumn();
-$lastActivity = $pdo->query("SELECT uploaded_at FROM files WHERE project_id = $projectId ORDER BY uploaded_at DESC LIMIT 1")->fetchColumn();
-$recentFiles = $pdo->prepare("SELECT id, filename, uploaded_at FROM files WHERE project_id = ? AND deleted_at IS NULL ORDER BY uploaded_at DESC LIMIT 6");
-$recentFiles->execute([$projectId]);
-$recentFiles = $recentFiles->fetchAll(PDO::FETCH_ASSOC);
-
-// CORRECCIÓN: Agregado "/.." para encontrar las vistas
-include __DIR__ . '/../views/header.php'; 
+if ($activeTab === 'proposal') {
+    $stmt = $pdo->prepare("
+        SELECT * FROM proposals 
+        WHERE project_id = ? AND deleted_at IS NULL 
+        ORDER BY created_at DESC
+    ");
+    $stmt->execute([$projectId]);
+    $proposals = $stmt->fetchAll(PDO::FETCH_ASSOC);
+} 
 ?>
 
-<div class="main-content d-flex flex-column h-100">
-    
-    <div class="bg-header border-bottom border-secondary p-4 d-flex justify-content-between align-items-center">
-        <div>
-            <div class="d-flex align-items-center gap-3 mb-1">
-                <a href="index.php" class="text-muted"><i class="fas fa-arrow-left"></i></a>
-                <h2 class="fw-bold mb-0 text-white"><?= htmlspecialchars($project['name']) ?></h2>
-                <span class="badge bg-success rounded-pill px-3"><?= $project['status'] ?></span>
-            </div>
-            <div class="d-flex gap-4 text-gray small mt-2">
-                <span><i class="fas fa-map-marker-alt me-1 text-accent"></i> <?= htmlspecialchars($project['address'] ?: 'No address') ?></span>
-                <span><i class="fas fa-building me-1 text-warning"></i> <?= htmlspecialchars($project['company_name'] ?: 'No Company') ?></span>
-                <span><i class="fas fa-calendar me-1"></i> Start: <?= $project['date_started'] ? date('M d, Y', strtotime($project['date_started'])) : 'TBD' ?></span>
-            </div>
-        </div>
+<?php
+
+?>
+<!doctype html>
+<html lang="en">
+<head>
+    <meta charset="utf-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1">
+    <title><?= htmlspecialchars($project['name']) ?> - Project Dashboard | Takeoff</title>
+    <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <style>
+        :root {
+            --bg: #0b1120;
+            --panel: #111827;
+            --card: #1e293b;
+            --line: rgba(148, 163, 184, 0.2);
+            --text: #f8fafc;
+            --muted: #94a3b8;
+            --primary: #2563eb;
+            --accent: #0ea5e9;
+        }
+        body {
+            background: var(--bg);
+            color: var(--text);
+            font-family: Outfit, system-ui, sans-serif;
+            margin: 0;
+            padding: 0;
+        }
+        .project-header {
+            background: linear-gradient(135deg, rgba(37, 99, 235, 0.1) 0%, rgba(14, 165, 233, 0.1) 100%);
+            border-bottom: 1px solid var(--line);
+            padding: 2rem;
+        }
+        .project-title-section h1 {
+            font-size: 1.8rem;
+            font-weight: 800;
+            margin: 0 0 0.5rem 0;
+        }
+        .project-title-section p {
+            margin: 0;
+            color: var(--muted);
+            font-size: 0.9rem;
+        }
+        .project-nav {
+            background: var(--panel);
+            border-bottom: 1px solid var(--line);
+            padding: 0;
+            display: flex;
+            gap: 0;
+            overflow-x: auto;
+            flex-wrap: nowrap;
+        }
+        .project-nav a {
+            flex: 0 0 auto;
+            padding: 1rem 1.5rem;
+            color: var(--muted);
+            text-decoration: none;
+            border-bottom: 2px solid transparent;
+            transition: all 0.3s ease;
+            display: flex;
+            align-items: center;
+            gap: 0.5rem;
+            white-space: nowrap;
+            font-weight: 500;
+        }
+        .project-nav a:hover {
+            color: var(--text);
+            background: rgba(37, 99, 235, 0.1);
+        }
+        .project-nav a.active {
+            color: var(--primary);
+            border-bottom-color: var(--primary);
+            background: rgba(37, 99, 235, 0.15);
+        }
+        .project-nav i {
+            font-size: 1rem;
+        }
+        .project-content {
+            padding: 2rem;
+            min-height: calc(100vh - 300px);
+        }
         
-        <div class="d-flex gap-2">
-            <button id="toggleProjectSidebarBtn" class="btn btn-outline-light btn-sm rounded-pill" type="button" onclick="toggleProjectSidebar()">
-                <i class="fas fa-folder-tree me-2"></i><span id="toggleProjectSidebarText">Folders</span>
-            </button>
-            <button class="btn btn-primary rounded-pill btn-sm px-4" onclick="openUploadModal()"><i class="fas fa-cloud-upload-alt me-2"></i> Upload PDF</button>
+        /* TAKEOFF INTERNAL VIEWS */
+        .takeoff-slides-nav {
+            display: flex;
+            gap: 1rem;
+            margin-bottom: 2rem;
+            border-bottom: 1px solid var(--line);
+            padding-bottom: 1rem;
+        }
+        .takeoff-slide-btn {
+            padding: 0.75rem 1.5rem;
+            background: transparent;
+            border: 1px solid var(--line);
+            color: var(--muted);
+            border-radius: 6px;
+            cursor: pointer;
+            transition: all 0.3s ease;
+            font-weight: 600;
+            text-decoration: none;
+        }
+        .takeoff-slide-btn:hover {
+            color: var(--text);
+            border-color: var(--primary);
+        }
+        .takeoff-slide-btn.active {
+            background: var(--primary);
+            color: white;
+            border-color: var(--primary);
+        }
+        
+        /* DRAWING TAKEOFF VIEW */
+        .drawing-view {
+            display: grid;
+            grid-template-columns: 300px 1fr 200px;
+            gap: 1rem;
+            height: 60vh;
+        }
+        .takeoff-panel-left {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 1rem;
+            overflow-y: auto;
+        }
+        .takeoff-panel-left h5 {
+            font-weight: 700;
+            margin-bottom: 1rem;
+        }
+        .takeoff-panel-left input {
+            background: var(--bg);
+            border: 1px solid var(--line);
+            color: var(--text);
+            margin-bottom: 1rem;
+            border-radius: 4px;
+        }
+        .takeoff-panel-left .btn {
+            width: 100%;
+            margin-bottom: 1rem;
+        }
+        .drawing-canvas {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            color: var(--muted);
+            position: relative;
+        }
+        .drawing-canvas-placeholder {
+            text-align: center;
+        }
+        .drawing-canvas-placeholder i {
+            font-size: 3rem;
+            margin-bottom: 1rem;
+            opacity: 0.3;
+        }
+        .takeoff-toolbar-right {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 1rem;
+            display: flex;
+            flex-direction: column;
+            gap: 0.75rem;
+        }
+        .takeoff-toolbar-right h5 {
+            font-weight: 700;
+            margin: 0 0 1rem 0;
+        }
+        .takeoff-toolbar-right button {
+            padding: 0.75rem;
+            background: rgba(37, 99, 235, 0.2);
+            border: 1px solid var(--primary);
+            color: var(--primary);
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        .takeoff-toolbar-right button:hover {
+            background: var(--primary);
+            color: white;
+        }
+        
+        /* ESTIMATE SUMMARY VIEW */
+        .estimate-summary-view {
+            display: flex;
+            flex-direction: column;
+            gap: 1.5rem;
+        }
+        .summary-filters {
+            display: flex;
+            gap: 1rem;
+            flex-wrap: wrap;
+        }
+        .summary-filters input,
+        .summary-filters select {
+            padding: 0.75rem;
+            background: var(--card);
+            border: 1px solid var(--line);
+            color: var(--text);
+            border-radius: 6px;
+            font-family: Outfit;
+        }
+        .summary-table {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            overflow: hidden;
+        }
+        .summary-table table {
+            width: 100%;
+            border-collapse: collapse;
+        }
+        .summary-table th,
+        .summary-table td {
+            padding: 1rem;
+            text-align: left;
+            border-bottom: 1px solid var(--line);
+        }
+        .summary-table th {
+            background: rgba(37, 99, 235, 0.2);
+            font-weight: 700;
+            color: var(--primary);
+        }
+        .summary-table tr:hover {
+            background: rgba(37, 99, 235, 0.1);
+        }
+        .summary-totals {
+            background: var(--card);
+            border: 1px solid var(--line);
+            border-radius: 8px;
+            padding: 1.5rem;
+            display: grid;
+            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
+            gap: 1rem;
+        }
+        .total-item {
+            padding: 1rem;
+            background: rgba(37, 99, 235, 0.1);
+            border-radius: 6px;
+            border-left: 3px solid var(--primary);
+        }
+        .total-item-label {
+            color: var(--muted);
+            font-size: 0.85rem;
+            margin-bottom: 0.5rem;
+        }
+        .total-item-value {
+            font-size: 1.5rem;
+            font-weight: 800;
+            color: var(--primary);
+        }
+        
+        .btn-primary-custom {
+            padding: 0.75rem 1.5rem;
+            background: var(--primary);
+            border: 0;
+            color: white;
+            border-radius: 6px;
+            cursor: pointer;
+            font-weight: 600;
+            transition: all 0.3s ease;
+        }
+        .btn-primary-custom:hover {
+            background: #1d4ed8;
+        }
+        
+        .list-group-item {
+            background: transparent;
+        }
+        .list-group-item-action {
+            color: var(--text);
+            transition: 0.2s;
+        }
+        .list-group-item-action:hover {
+            background: rgba(37, 99, 235, 0.2);
+            color: var(--accent);
+        }
+    </style>
+</head>
+<body>
+    <div class="project-header">
+        <div class="project-title-section">
+            <h1><?= htmlspecialchars($project['name']) ?></h1>
+            <p><?= htmlspecialchars($project['description'] ?? 'No description') ?></p>
         </div>
     </div>
 
-    <div id="projectLayout" class="flex-grow-1 d-flex overflow-hidden project-layout">
+    <!-- PROJECT TOP NAVIGATION -->
+    <div class="project-nav">
+        <a href="?id=<?= $projectId ?>&tab=overview" class="<?= $activeTab === 'overview' ? 'active' : '' ?>">
+            <i class="fas fa-eye"></i> Overview
+        </a>
+        <a href="?id=<?= $projectId ?>&tab=documents" class="<?= $activeTab === 'documents' ? 'active' : '' ?>">
+            <i class="fas fa-file-alt"></i> Documents
+        </a>
+        <a href="?id=<?= $projectId ?>&tab=takeoff" class="<?= $activeTab === 'takeoff' ? 'active' : '' ?>">
+            <i class="fas fa-ruler-combined"></i> Takeoff
+        </a>
+        <a href="?id=<?= $projectId ?>&tab=estimating" class="<?= $activeTab === 'estimating' ? 'active' : '' ?>">
+            <i class="fas fa-calculator"></i> Estimating
+        </a>
+        <a href="?id=<?= $projectId ?>&tab=proposal" class="<?= $activeTab === 'proposal' ? 'active' : '' ?>">
+            <i class="fas fa-file-invoice"></i> Proposal
+        </a>
+    </div>
+
+    <div class="project-content">
         
-        <aside id="projectSidebar" class="project-sidebar bg-panel border-end border-secondary" style="width: 320px; overflow-y: auto;">
+        <!-- OVERVIEW TAB -->
+        <?php if ($activeTab === 'overview'): ?>
+            <div class="overview-section">
+                <h2>Project Overview</h2>
+                <div class="row mt-4">
+                    <div class="col-md-6">
+                        <div class="card bg-dark border-secondary">
+                            <div class="card-body">
+                                <h5 class="card-title">Project Details</h5>
+                                <p><strong>Name:</strong> <?= htmlspecialchars($project['name']) ?></p>
+                                <p><strong>Status:</strong> <span class="badge bg-info"><?= $project['status'] ?></span></p>
+                                <p><strong>Client:</strong> <?= htmlspecialchars($project['client_name'] ?? 'N/A') ?></p>
+                                <p><strong>Address:</strong> <?= htmlspecialchars($project['job_address'] ?? 'N/A') ?></p>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="col-md-6">
+                        <div class="card bg-dark border-secondary">
+                            <div class="card-body">
+                                <h5 class="card-title">Dates</h5>
+                                <p><strong>Created:</strong> <?= date('M d, Y', strtotime($project['created_at'])) ?></p>
+                                <p><strong>Updated:</strong> <?= date('M d, Y', strtotime($project['updated_at'])) ?></p>
+                                <p><strong>Bid Due:</strong> <?= $project['bid_due_at'] ? date('M d, Y', strtotime($project['bid_due_at'])) : 'N/A' ?></p>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+            </div>
+        <?php endif; ?>
+
+        <!-- DOCUMENTS TAB -->
+        <?php if ($activeTab === 'documents'): ?>
+            <div class="documents-section">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2>Documents</h2>
+                    <button class="btn-primary-custom"><i class="fas fa-plus"></i> Upload Document</button>
+                </div>
+                
+                <?php if (count($documents) > 0): ?>
+                    <div class="summary-table">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Title</th>
+                                    <th>Type</th>
+                                    <th>File</th>
+                                    <th>Size</th>
+                                    <th>Date</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($documents as $doc): ?>
+                                    <tr>
+                                        <td><?= htmlspecialchars($doc['title']) ?></td>
+                                        <td><span class="badge bg-secondary"><?= $doc['document_type'] ?></span></td>
+                                        <td><?= htmlspecialchars($doc['original_filename']) ?></td>
+                                        <td><?= isset($doc['file_size']) ? round($doc['file_size'] / 1024 / 1024, 2) . ' MB' : 'N/A' ?></td>
+                                        <td><?= date('M d, Y', strtotime($doc['created_at'])) ?></td>
+                                        <td>
+                                            <a href="<?= $doc['storage_path'] ?>" class="btn btn-sm btn-outline-primary">Download</a>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php else: ?>
+                    <p class="text-muted">No documents uploaded yet.</p>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+
+        <!-- TAKEOFF TAB -->
+        <?php if ($activeTab === 'takeoff'): ?>
+            <div class="takeoff-section">
+                <h2>Takeoff Module</h2>
+                
+                <!-- INTERNAL SLIDE NAVIGATION -->
+                <div class="takeoff-slides-nav">
+                    <a href="?id=<?= $projectId ?>&tab=takeoff&slide=drawing" 
+                       class="takeoff-slide-btn <?= $takeoffSlide === 'drawing' ? 'active' : '' ?>">
+                        <i class="fas fa-image"></i> Drawing Takeoff
+                    </a>
+                    <a href="?id=<?= $projectId ?>&tab=takeoff&slide=summary" 
+                       class="takeoff-slide-btn <?= $takeoffSlide === 'summary' ? 'active' : '' ?>">
+                        <i class="fas fa-table"></i> Estimate Summary
+                    </a>
+                </div>
+
+                <!-- SLIDE 1: DRAWING TAKEOFF -->
+                <?php if ($takeoffSlide === 'drawing'): ?>
+                    <div class="drawing-view">
+                        <!-- LEFT PANEL: LAYERS -->
+                        <div class="takeoff-panel-left">
+                            <h5>Takeoff Layers</h5>
+                            <input type="text" class="form-control form-control-sm mb-3" placeholder="Search layers...">
+                            <button class="btn btn-sm btn-primary w-100 mb-3"><i class="fas fa-plus"></i> Add Layer</button>
+                            
+                            <?php if (count($takeoffLayers) > 0): ?>
+                                <div class="list-group list-group-flush">
+                                    <?php foreach ($takeoffLayers as $layer): ?>
+                                        <button class="list-group-item list-group-item-action bg-transparent border-secondary" style="text-align: left;">
+                                            <div class="d-flex justify-content-between align-items-center">
+                                                <div>
+                                                    <strong><?= htmlspecialchars($layer['name']) ?></strong><br>
+                                                    <small class="text-muted">Qty: <?= $layer['quantity'] ?></small>
+                                                </div>
+                                                <i class="fas fa-square" style="color: <?= $layer['color'] ?>"></i>
+                                            </div>
+                                        </button>
+                                    <?php endforeach; ?>
+                                </div>
+                            <?php else: ?>
+                                <p class="text-muted small">No layers created yet.</p>
+                            <?php endif; ?>
+                        </div>
+
+                        <!-- CENTER: DRAWING CANVAS -->
+                        <div class="drawing-canvas">
+                            <div class="drawing-canvas-placeholder">
+                                <i class="fas fa-file-pdf"></i>
+                                <p>PDF Drawing Area</p>
+                                <small class="text-muted">Load drawing to begin takeoff</small>
+                            </div>
+                        </div>
+
+                        <!-- RIGHT TOOLBAR -->
+                        <div class="takeoff-toolbar-right">
+                            <h5>Tools</h5>
+                            <button><i class="fas fa-save"></i> Save</button>
+                            <button><i class="fas fa-search"></i> Zoom</button>
+                            <button><i class="fas fa-ruler"></i> Scale</button>
+                            <button><i class="fas fa-mouse"></i> Select</button>
+                            <button><i class="fas fa-pen"></i> Measure</button>
+                        </div>
+                    </div>
+                <?php endif; ?>
+
+                <!-- SLIDE 2: ESTIMATE SUMMARY -->
+                <?php if ($takeoffSlide === 'summary'): ?>
+                    <div class="estimate-summary-view">
+                        <!-- FILTERS -->
+                        <div class="summary-filters">
+                            <input type="text" placeholder="Search item..." style="flex: 1; min-width: 200px;">
+                            <select style="min-width: 150px;">
+                                <option value="">Filter by group...</option>
+                            </select>
+                            <select style="min-width: 150px;">
+                                <option value="">Filter by source...</option>
+                                <option value="takeoff">Takeoff</option>
+                                <option value="manual">Manual</option>
+                                <option value="catalog">Catalog</option>
+                            </select>
+                            <button class="btn-primary-custom"><i class="fas fa-plus"></i> Add Item</button>
+                        </div>
+
+                        <!-- ITEMS TABLE -->
+                        <div class="summary-table">
+                            <table>
+                                <thead>
+                                    <tr>
+                                        <th>Item</th>
+                                        <th>Type</th>
+                                        <th>Qty</th>
+                                        <th>Unit</th>
+                                        <th>Unit Cost</th>
+                                        <th>Material</th>
+                                        <th>Labor</th>
+                                        <th>Total</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody>
+                                    <?php if (count($estimateItems) > 0): ?>
+                                        <?php foreach ($estimateItems as $item): ?>
+                                            <tr>
+                                                <td><?= htmlspecialchars($item['name']) ?></td>
+                                                <td><span class="badge bg-info"><?= $item['source_type'] ?></span></td>
+                                                <td><?= $item['quantity'] ?></td>
+                                                <td><?= $item['unit_of_measure'] ?></td>
+                                                <td>$<?= number_format($item['unit_cost'], 2) ?></td>
+                                                <td>$<?= number_format($item['material_cost'], 2) ?></td>
+                                                <td>$<?= number_format($item['labor_cost'], 2) ?></td>
+                                                <td><strong>$<?= number_format($item['total_cost'], 2) ?></strong></td>
+                                                <td>
+                                                    <button class="btn btn-sm btn-outline-primary" title="Edit"><i class="fas fa-edit"></i></button>
+                                                    <button class="btn btn-sm btn-outline-danger" title="Delete"><i class="fas fa-trash"></i></button>
+                                                </td>
+                                            </tr>
+                                        <?php endforeach; ?>
+                                    <?php else: ?>
+                                        <tr>
+                                            <td colspan="9" class="text-center text-muted">No items yet. <a href="#" class="text-primary">Create from takeoff layers</a> or <a href="#" class="text-primary">add manual item</a></td>
+                                        </tr>
+                                    <?php endif; ?>
+                                </tbody>
+                            </table>
+                        </div>
+
+                        <!-- TOTALS -->
+                        <div class="summary-totals">
+                            <div class="total-item">
+                                <div class="total-item-label">Material Subtotal</div>
+                                <div class="total-item-value">$0.00</div>
+                            </div>
+                            <div class="total-item">
+                                <div class="total-item-label">Labor Subtotal</div>
+                                <div class="total-item-value">$0.00</div>
+                            </div>
+                            <div class="total-item">
+                                <div class="total-item-label">Equipment Subtotal</div>
+                                <div class="total-item-value">$0.00</div>
+                            </div>
+                            <div class="total-item">
+                                <div class="total-item-label">Waste Total</div>
+                                <div class="total-item-value">$0.00</div>
+                            </div>
+                            <div class="total-item">
+                                <div class="total-item-label">Markup Total</div>
+                                <div class="total-item-value">$0.00</div>
+                            </div>
+                            <div class="total-item" style="border-left-color: var(--accent);">
+                                <div class="total-item-label">Estimate Total</div>
+                                <div class="total-item-value" style="color: var(--accent);">$0.00</div>
+                            </div>
+                        </div>
+                    </div>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+
+        <!-- ESTIMATING TAB -->
+        <?php if ($activeTab === 'estimating'): ?>
+            <div class="estimating-section">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2>Estimating Module</h2>
+                    <button class="btn-primary-custom"><i class="fas fa-plus"></i> Create Estimate</button>
+                </div>
+                
+                <?php if (count($estimates) > 0): ?>
+                    <div class="summary-table">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Name</th>
+                                    <th>Status</th>
+                                    <th>Currency</th>
+                                    <th>Subtotal</th>
+                                    <th>Markup</th>
+                                    <th>Total</th>
+                                    <th>Labor Hours</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($estimates as $est): ?>
+                                    <tr>
+                                        <td><?= htmlspecialchars($est['name']) ?></td>
+                                        <td><span class="badge bg-success"><?= $est['status'] ?></span></td>
+                                        <td><?= $est['currency_code'] ?></td>
+                                        <td>$<?= number_format($est['subtotal_cost'], 2) ?></td>
+                                        <td>$<?= number_format($est['markup_total'], 2) ?></td>
+                                        <td><strong>$<?= number_format($est['total_cost'], 2) ?></strong></td>
+                                        <td><?= number_format($est['labor_hours_total'], 2) ?> hrs</td>
+                                        <td>
+                                            <a href="estimate_module.php?estimate_id=<?= $est['id'] ?>" class="btn btn-sm btn-outline-primary">Edit</a>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php else: ?>
+                    <p class="text-muted">No estimates created yet.</p>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+
+        <!-- PROPOSAL TAB -->
+        <?php if ($activeTab === 'proposal'): ?>
+            <div class="proposal-section">
+                <div class="d-flex justify-content-between align-items-center mb-4">
+                    <h2>Proposals</h2>
+                    <button class="btn-primary-custom"><i class="fas fa-plus"></i> Create Proposal</button>
+                </div>
+                
+                <?php if (count($proposals) > 0): ?>
+                    <div class="summary-table">
+                        <table>
+                            <thead>
+                                <tr>
+                                    <th>Title</th>
+                                    <th>Number</th>
+                                    <th>Status</th>
+                                    <th>Subtotal</th>
+                                    <th>Total</th>
+                                    <th>Valid Until</th>
+                                    <th>Actions</th>
+                                </tr>
+                            </thead>
+                            <tbody>
+                                <?php foreach ($proposals as $prop): ?>
+                                    <tr>
+                                        <td><?= htmlspecialchars($prop['title']) ?></td>
+                                        <td><?= htmlspecialchars($prop['proposal_number'] ?? 'N/A') ?></td>
+                                        <td><span class="badge bg-warning"><?= $prop['status'] ?></span></td>
+                                        <td>$<?= number_format($prop['subtotal'], 2) ?></td>
+                                        <td><strong>$<?= number_format($prop['total'], 2) ?></strong></td>
+                                        <td><?= $prop['valid_until'] ? date('M d, Y', strtotime($prop['valid_until'])) : 'N/A' ?></td>
+                                        <td>
+                                            <button class="btn btn-sm btn-outline-primary">View</button>
+                                        </td>
+                                    </tr>
+                                <?php endforeach; ?>
+                            </tbody>
+                        </table>
+                    </div>
+                <?php else: ?>
+                    <p class="text-muted">No proposals created yet.</p>
+                <?php endif; ?>
+            </div>
+        <?php endif; ?>
+    </div>
+
+    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
+</body>
+</html>
             <div class="p-3">
                 <p class="text-muted small fw-bold text-uppercase ls-1 mb-3 ps-2">Blueprints Folders</p>
                 
