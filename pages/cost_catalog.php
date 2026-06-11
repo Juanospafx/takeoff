@@ -44,8 +44,9 @@
                 <p id="ccSubtitle">Browse catalog items by catalog, group or subgroup.</p>
             </div>
             <div class="cc-actions">
+                <button class="cc-btn primary" id="ccAddItem"><i class="fas fa-plus"></i> Add Item</button>
                 <button class="cc-btn" id="ccAddGroup"><i class="fas fa-folder-plus"></i> Add Group</button>
-                <button class="cc-btn primary" id="ccAddCatalogTop"><i class="fas fa-plus"></i> Add Catalog</button>
+                <button class="cc-btn" id="ccAddCatalogTop"><i class="fas fa-book-medical"></i> Add Catalog</button>
             </div>
         </div>
 
@@ -85,6 +86,143 @@
             </table>
         </section>
     </main>
+</div>
+
+<div class="cc-modal-backdrop" id="ccItemModal">
+    <div class="cc-modal">
+        <form id="ccItemForm">
+            <div class="cc-modal-head">
+                <strong id="ccItemModalTitle">Create Catalog Item</strong>
+                <button class="cc-btn" type="button" data-close-item-modal><i class="fas fa-times"></i></button>
+            </div>
+            <div class="cc-modal-body">
+                <div class="cc-form-grid">
+                    <div class="cc-field full">
+                        <label>Name</label>
+                        <input id="ccItemName" required>
+                    </div>
+                    <div class="cc-field full">
+                        <label>Description</label>
+                        <textarea id="ccItemDescription" rows="3"></textarea>
+                    </div>
+                    <div class="cc-field">
+                        <label>Catalog</label>
+                        <select id="ccItemCatalog" required></select>
+                    </div>
+                    <div class="cc-field">
+                        <label>Group</label>
+                        <select id="ccItemGroup"></select>
+                    </div>
+                    <div class="cc-field">
+                        <label>Item Type</label>
+                        <select id="ccItemType">
+                            <option value="material">Material</option>
+                            <option value="labor">Labor</option>
+                            <option value="equipment">Equipment</option>
+                            <option value="assembly">Assembly</option>
+                        </select>
+                    </div>
+                    <div class="cc-field">
+                        <label>Unit of Measure</label>
+                        <input id="ccItemUom" required value="ea">
+                    </div>
+                    <div class="cc-field">
+                        <label>Unit Cost</label>
+                        <input id="ccItemUnitCost" type="number" min="0" step="0.0001" value="0">
+                    </div>
+                    <div class="cc-field">
+                        <label>Unit Labor Time</label>
+                        <input id="ccItemLaborHours" type="number" min="0" step="0.0001" value="0">
+                    </div>
+                    <div class="cc-field">
+                        <label>Taxable</label>
+                        <select id="ccItemTaxable">
+                            <option value="1">Yes</option>
+                            <option value="0">No</option>
+                        </select>
+                    </div>
+                    <div class="cc-field">
+                        <label>Color</label>
+                        <input id="ccItemColor" type="color" value="#2563eb">
+                    </div>
+                    <div class="cc-field">
+                        <label>Symbol</label>
+                        <select id="ccItemSymbol">
+                            <option value="circle">Circle</option>
+                            <option value="square">Square</option>
+                            <option value="diamond">Diamond</option>
+                            <option value="triangle">Triangle</option>
+                            <option value="cross">Cross</option>
+                            <option value="line">Line</option>
+                        </select>
+                    </div>
+                    <div class="cc-field">
+                        <label>Manufacturer</label>
+                        <input id="ccItemManufacturer">
+                    </div>
+                    <div class="cc-field">
+                        <label>Supplier</label>
+                        <input id="ccItemSupplier">
+                    </div>
+                    <div class="cc-field">
+                        <label>Catalog Number</label>
+                        <input id="ccItemCatalogNumber">
+                    </div>
+                    <div class="cc-field">
+                        <label>Cost Code</label>
+                        <input id="ccItemCostCode">
+                    </div>
+                    <div class="cc-field">
+                        <label>Sub Job Code</label>
+                        <input id="ccItemSubJobCode">
+                    </div>
+                    <div class="cc-field">
+                        <label>Sub Job Name</label>
+                        <input id="ccItemSubJobName">
+                    </div>
+                    <div class="cc-field full">
+                        <label>EPD URL</label>
+                        <input id="ccItemEpdUrl" type="url">
+                    </div>
+                    <div class="cc-field full">
+                        <label>Attachment</label>
+                        <input id="ccItemAttachmentUrl" type="url">
+                    </div>
+                </div>
+            </div>
+            <div class="cc-modal-foot">
+                <button class="cc-btn" type="button" data-close-item-modal>Cancel</button>
+                <button class="cc-btn primary" type="submit">Save Item</button>
+            </div>
+        </form>
+    </div>
+</div>
+
+<div class="cc-modal-backdrop" id="ccMoveItemModal">
+    <div class="cc-modal small">
+        <form id="ccMoveItemForm">
+            <div class="cc-modal-head">
+                <strong>Move Catalog Item</strong>
+                <button class="cc-btn" type="button" data-close-item-modal><i class="fas fa-times"></i></button>
+            </div>
+            <div class="cc-modal-body">
+                <div class="cc-form-grid">
+                    <div class="cc-field full">
+                        <label>Catalog</label>
+                        <select id="ccMoveCatalog" required></select>
+                    </div>
+                    <div class="cc-field full">
+                        <label>Group</label>
+                        <select id="ccMoveGroup"></select>
+                    </div>
+                </div>
+            </div>
+            <div class="cc-modal-foot">
+                <button class="cc-btn" type="button" data-close-item-modal>Cancel</button>
+                <button class="cc-btn primary" type="submit">Move Item</button>
+            </div>
+        </form>
+    </div>
 </div>
 
 <script src="../assets/cost_catalog.js"></script>

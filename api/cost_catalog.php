@@ -39,6 +39,28 @@ function cc_add_column(PDO $pdo, string $table, string $column, string $sql): vo
     }
 }
 
+function cc_item_type_for_db(PDO $pdo, $value): string
+{
+    $value = strtolower(trim((string)($value ?? 'material')));
+    $allowed = ['material', 'labor', 'equipment', 'assembly', 'subcontractor', 'travel', 'custom', 'part'];
+    if (!in_array($value, $allowed, true)) $value = 'material';
+
+    $stmt = $pdo->query("SHOW COLUMNS FROM catalog_items LIKE 'item_type'");
+    $column = $stmt ? $stmt->fetch(PDO::FETCH_ASSOC) : null;
+    $type = strtolower((string)($column['Type'] ?? ''));
+    if ($value === 'material' && strpos($type, "'material'") === false && strpos($type, 'enum') !== false) {
+        return 'part';
+    }
+    return $value;
+}
+
+function cc_hex_or_null($value): ?string
+{
+    $value = trim((string)($value ?? ''));
+    if ($value === '') return null;
+    return preg_match('/^#[0-9a-fA-F]{6}$/', $value) ? $value : null;
+}
+
 function cc_ensure_schema(PDO $pdo): void
 {
     $pdo->exec("CREATE TABLE IF NOT EXISTS catalogs (
@@ -103,6 +125,14 @@ function cc_ensure_schema(PDO $pdo): void
         labor_hours DECIMAL(18,4) NOT NULL DEFAULT 0,
         color VARCHAR(50) NULL,
         symbol VARCHAR(50) NULL,
+        taxable TINYINT(1) NOT NULL DEFAULT 1,
+        manufacturer VARCHAR(191) NULL,
+        supplier VARCHAR(191) NULL,
+        catalog_number VARCHAR(100) NULL,
+        sub_job_code VARCHAR(100) NULL,
+        sub_job_name VARCHAR(191) NULL,
+        epd_url VARCHAR(1024) NULL,
+        attachment_url VARCHAR(1024) NULL,
         active TINYINT(1) NOT NULL DEFAULT 1,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -133,8 +163,25 @@ function cc_ensure_schema(PDO $pdo): void
     cc_add_column($pdo, 'catalog_items', 'unit_of_measure', "ALTER TABLE catalog_items ADD COLUMN unit_of_measure VARCHAR(50) NOT NULL DEFAULT 'ea'");
     cc_add_column($pdo, 'catalog_items', 'unit_cost', "ALTER TABLE catalog_items ADD COLUMN unit_cost DECIMAL(18,4) NOT NULL DEFAULT 0");
     cc_add_column($pdo, 'catalog_items', 'labor_hours', "ALTER TABLE catalog_items ADD COLUMN labor_hours DECIMAL(18,4) NOT NULL DEFAULT 0");
+    cc_add_column($pdo, 'catalog_items', 'cost_code', "ALTER TABLE catalog_items ADD COLUMN cost_code VARCHAR(100) NULL");
+    cc_add_column($pdo, 'catalog_items', 'color', "ALTER TABLE catalog_items ADD COLUMN color VARCHAR(50) NULL");
+    cc_add_column($pdo, 'catalog_items', 'symbol', "ALTER TABLE catalog_items ADD COLUMN symbol VARCHAR(50) NULL");
+    cc_add_column($pdo, 'catalog_items', 'taxable', "ALTER TABLE catalog_items ADD COLUMN taxable TINYINT(1) NOT NULL DEFAULT 1");
+    cc_add_column($pdo, 'catalog_items', 'manufacturer', "ALTER TABLE catalog_items ADD COLUMN manufacturer VARCHAR(191) NULL");
+    cc_add_column($pdo, 'catalog_items', 'supplier', "ALTER TABLE catalog_items ADD COLUMN supplier VARCHAR(191) NULL");
+    cc_add_column($pdo, 'catalog_items', 'catalog_number', "ALTER TABLE catalog_items ADD COLUMN catalog_number VARCHAR(100) NULL");
+    cc_add_column($pdo, 'catalog_items', 'sub_job_code', "ALTER TABLE catalog_items ADD COLUMN sub_job_code VARCHAR(100) NULL");
+    cc_add_column($pdo, 'catalog_items', 'sub_job_name', "ALTER TABLE catalog_items ADD COLUMN sub_job_name VARCHAR(191) NULL");
+    cc_add_column($pdo, 'catalog_items', 'epd_url', "ALTER TABLE catalog_items ADD COLUMN epd_url VARCHAR(1024) NULL");
+    cc_add_column($pdo, 'catalog_items', 'attachment_url', "ALTER TABLE catalog_items ADD COLUMN attachment_url VARCHAR(1024) NULL");
     cc_add_column($pdo, 'catalog_items', 'active', "ALTER TABLE catalog_items ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1");
     cc_add_column($pdo, 'catalog_items', 'deleted_at', "ALTER TABLE catalog_items ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL");
+
+    try {
+        $pdo->exec("ALTER TABLE catalog_items MODIFY item_type ENUM('part','material','assembly','labor','equipment','subcontractor','travel','custom') NOT NULL DEFAULT 'material'");
+    } catch (Throwable $ignored) {
+        // Existing installations may keep the older ENUM; saves map material to part when needed.
+    }
 
     $count = (int)$pdo->query("SELECT COUNT(*) FROM catalogs WHERE deleted_at IS NULL")->fetchColumn();
     if ($count === 0) {
@@ -164,14 +211,54 @@ function cc_ensure_schema(PDO $pdo): void
             $emtGroup = (int)$pdo->query("SELECT id FROM catalog_groups WHERE catalog_id = $electricalId AND name = 'EMT' LIMIT 1")->fetchColumn();
             $lightingGroup = (int)$pdo->query("SELECT id FROM catalog_groups WHERE catalog_id = $electricalId AND name = 'Lighting' LIMIT 1")->fetchColumn();
             $items = [
-                [$electricalId, $emtGroup, 'EMT Conduit 1/2 inch', 'Electrical metallic tubing', 'ft', 0.85, 0.0100],
-                [$electricalId, $emtGroup, 'EMT Connector 1/2 inch', 'Compression connector', 'ea', 1.15, 0.0200],
-                [$electricalId, $lightingGroup, 'Lighting Fixture A Assembly', 'Fixture package placeholder', 'ea', 125.00, 0.7500],
+                [$electricalId, $emtGroup, 'EMT Conduit 1/2 inch', 'Electrical metallic tubing', 'ft', 0.85, 0.0100, cc_item_type_for_db($pdo, 'material'), '#2563eb', 'line'],
+                [$electricalId, $emtGroup, 'EMT Connector 1/2 inch', 'Compression connector', 'ea', 1.15, 0.0200, cc_item_type_for_db($pdo, 'material'), '#16a34a', 'circle'],
+                [$electricalId, $lightingGroup, 'Lighting Fixture A Assembly', 'Fixture package placeholder', 'ea', 125.00, 0.7500, cc_item_type_for_db($pdo, 'assembly'), '#f59e0b', 'square'],
             ];
-            $stmt = $pdo->prepare("INSERT INTO catalog_items (catalog_id, catalog_group_id, name, description, unit_of_measure, unit_cost, labor_hours, active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)");
+            $stmt = $pdo->prepare("INSERT INTO catalog_items (catalog_id, catalog_group_id, name, description, unit_of_measure, unit_cost, labor_hours, item_type, color, symbol, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
             foreach ($items as $item) $stmt->execute($item);
         }
     }
+}
+
+function cc_item_input(PDO $pdo, array $input): array
+{
+    $catalogId = cc_int($input['catalog_id'] ?? 0);
+    $groupId = cc_int($input['catalog_group_id'] ?? 0);
+    $name = cc_str($input['name'] ?? null);
+    $uom = cc_str($input['unit_of_measure'] ?? null);
+    $unitCost = is_numeric($input['unit_cost'] ?? null) ? (float)$input['unit_cost'] : -1;
+    $laborHours = is_numeric($input['labor_hours'] ?? null) ? (float)$input['labor_hours'] : -1;
+    $color = cc_hex_or_null($input['color'] ?? null);
+
+    if (!$catalogId) cc_json(['status' => 'error', 'msg' => 'Catalog is required'], 422);
+    if (!$name) cc_json(['status' => 'error', 'msg' => 'Name is required'], 422);
+    if (!$uom) cc_json(['status' => 'error', 'msg' => 'Unit of Measure is required'], 422);
+    if ($unitCost < 0) cc_json(['status' => 'error', 'msg' => 'Unit Cost must be a number >= 0'], 422);
+    if ($laborHours < 0) cc_json(['status' => 'error', 'msg' => 'Unit Labor Time must be a number >= 0'], 422);
+    if (cc_str($input['color'] ?? null) && !$color) cc_json(['status' => 'error', 'msg' => 'Color must be a valid hex value'], 422);
+
+    return [
+        'catalog_id' => $catalogId,
+        'catalog_group_id' => $groupId ?: null,
+        'name' => $name,
+        'description' => cc_str($input['description'] ?? null),
+        'unit_of_measure' => $uom,
+        'unit_cost' => $unitCost,
+        'labor_hours' => $laborHours,
+        'taxable' => !empty($input['taxable']) ? 1 : 0,
+        'color' => $color,
+        'symbol' => cc_str($input['symbol'] ?? null),
+        'manufacturer' => cc_str($input['manufacturer'] ?? null),
+        'supplier' => cc_str($input['supplier'] ?? null),
+        'catalog_number' => cc_str($input['catalog_number'] ?? null),
+        'sub_job_code' => cc_str($input['sub_job_code'] ?? null),
+        'sub_job_name' => cc_str($input['sub_job_name'] ?? null),
+        'cost_code' => cc_str($input['cost_code'] ?? null),
+        'epd_url' => cc_str($input['epd_url'] ?? null),
+        'attachment_url' => cc_str($input['attachment_url'] ?? null),
+        'item_type' => cc_item_type_for_db($pdo, $input['item_type'] ?? 'material'),
+    ];
 }
 
 function cc_payload(PDO $pdo, string $view = 'all', int $catalogId = 0, int $groupId = 0): array
@@ -318,6 +405,54 @@ try {
             $field = ($input['field'] ?? '') === 'enabled_for_projects' ? 'enabled_for_projects' : 'active';
             $pdo->prepare("UPDATE catalog_groups SET $field = IF($field = 1, 0, 1) WHERE id = ?")->execute([$id]);
             cc_json(['status' => 'success', 'data' => cc_payload($pdo, 'group', 0, $id)]);
+
+        case 'save_item':
+            $id = cc_int($input['id'] ?? 0);
+            $data = cc_item_input($pdo, $input);
+            if ($id > 0) {
+                $set = implode(', ', array_map(function ($column) {
+                    return "$column = ?";
+                }, array_keys($data)));
+                $stmt = $pdo->prepare("UPDATE catalog_items SET $set WHERE id = ? AND deleted_at IS NULL");
+                $stmt->execute(array_merge(array_values($data), [$id]));
+            } else {
+                $columns = array_keys($data);
+                $stmt = $pdo->prepare("INSERT INTO catalog_items (" . implode(', ', $columns) . ") VALUES (" . implode(', ', array_fill(0, count($columns), '?')) . ")");
+                $stmt->execute(array_values($data));
+                $id = (int)$pdo->lastInsertId();
+            }
+            cc_json(['status' => 'success', 'id' => $id, 'data' => cc_payload($pdo, 'group', 0, (int)($data['catalog_group_id'] ?? 0))]);
+
+        case 'duplicate_item':
+            $id = cc_int($input['id'] ?? 0);
+            $stmt = $pdo->prepare("SELECT * FROM catalog_items WHERE id = ? AND deleted_at IS NULL");
+            $stmt->execute([$id]);
+            $item = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$item) cc_json(['status' => 'error', 'msg' => 'Catalog item not found'], 404);
+            unset($item['id'], $item['created_at'], $item['updated_at'], $item['deleted_at']);
+            $item['name'] = $item['name'] . ' Copy';
+            $columns = array_keys($item);
+            $stmt = $pdo->prepare("INSERT INTO catalog_items (" . implode(', ', $columns) . ") VALUES (" . implode(', ', array_fill(0, count($columns), '?')) . ")");
+            $stmt->execute(array_values($item));
+            cc_json(['status' => 'success', 'id' => (int)$pdo->lastInsertId(), 'data' => cc_payload($pdo, 'group', 0, (int)($item['catalog_group_id'] ?? 0))]);
+
+        case 'delete_item':
+            $id = cc_int($input['id'] ?? 0);
+            $pdo->prepare("UPDATE catalog_items SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?")->execute([$id]);
+            cc_json(['status' => 'success', 'data' => cc_payload($pdo, (string)($input['view'] ?? 'all'), cc_int($input['catalog_id'] ?? 0), cc_int($input['group_id'] ?? 0))]);
+
+        case 'move_item':
+            $id = cc_int($input['id'] ?? 0);
+            $catalogId = cc_int($input['catalog_id'] ?? 0);
+            $groupId = cc_int($input['catalog_group_id'] ?? 0) ?: null;
+            if (!$catalogId) cc_json(['status' => 'error', 'msg' => 'Catalog is required'], 422);
+            $pdo->prepare("UPDATE catalog_items SET catalog_id = ?, catalog_group_id = ? WHERE id = ? AND deleted_at IS NULL")->execute([$catalogId, $groupId, $id]);
+            cc_json(['status' => 'success', 'data' => cc_payload($pdo, $groupId ? 'group' : 'catalog', $catalogId, (int)$groupId)]);
+
+        case 'convert_item_assembly':
+            $id = cc_int($input['id'] ?? 0);
+            $pdo->prepare("UPDATE catalog_items SET item_type = ? WHERE id = ? AND deleted_at IS NULL")->execute([cc_item_type_for_db($pdo, 'assembly'), $id]);
+            cc_json(['status' => 'success', 'data' => cc_payload($pdo, (string)($input['view'] ?? 'all'), cc_int($input['catalog_id'] ?? 0), cc_int($input['group_id'] ?? 0))]);
 
         default:
             cc_json(['status' => 'error', 'msg' => 'Invalid action'], 404);
