@@ -49,6 +49,31 @@ function decode_json_fields(array $rows, array $fields): array
     return $rows;
 }
 
+function takeoff_columns(PDO $pdo, string $table): array
+{
+    try {
+        return $pdo->query("SHOW COLUMNS FROM `$table`")->fetchAll(PDO::FETCH_COLUMN);
+    } catch (Throwable $e) {
+        return [];
+    }
+}
+
+function takeoff_add_column(PDO $pdo, string $table, string $column, string $sql): void
+{
+    if (!in_array($column, takeoff_columns($pdo, $table), true)) {
+        $pdo->exec($sql);
+    }
+}
+
+function ensure_takeoff_layer_columns(PDO $pdo): void
+{
+    takeoff_add_column($pdo, 'takeoff_layers', 'group_name', "ALTER TABLE takeoff_layers ADD COLUMN group_name VARCHAR(191) NULL");
+    takeoff_add_column($pdo, 'takeoff_layers', 'takeoff_type', "ALTER TABLE takeoff_layers ADD COLUMN takeoff_type VARCHAR(50) NOT NULL DEFAULT 'count'");
+    takeoff_add_column($pdo, 'takeoff_layers', 'unit_of_measure', "ALTER TABLE takeoff_layers ADD COLUMN unit_of_measure VARCHAR(50) NOT NULL DEFAULT 'ea'");
+    takeoff_add_column($pdo, 'takeoff_layers', 'symbol_size', "ALTER TABLE takeoff_layers ADD COLUMN symbol_size VARCHAR(50) NULL");
+    takeoff_add_column($pdo, 'takeoff_layers', 'quantity', "ALTER TABLE takeoff_layers ADD COLUMN quantity DECIMAL(18,6) NOT NULL DEFAULT 0");
+}
+
 function catalog_payload(PDO $pdo): array
 {
     $catalogs = $pdo->query("SELECT * FROM catalogs ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
@@ -106,6 +131,8 @@ function state_payload(PDO $pdo, int $drawingId): array
 }
 
 try {
+    ensure_takeoff_layer_columns($pdo);
+
     switch ($action) {
         case 'bootstrap':
             out_json([
@@ -141,20 +168,37 @@ try {
             $layerMap = [];
             $layerStmt = $pdo->prepare(
                 "INSERT INTO takeoff_layers
-                 (drawing_id, page_number, name, type, catalog_item_id, assembly_id, color, symbol, visible, locked, tag, metadata_json)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                 (drawing_id, page_number, name, type, takeoff_type, unit_of_measure, group_name, catalog_item_id, assembly_id, color, symbol, symbol_size, quantity, visible, locked, tag, metadata_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             );
             foreach ($layers as $layer) {
                 if (!is_array($layer)) continue;
+                $layerClientId = (string)($layer['client_uid'] ?? $layer['id'] ?? '');
+                $layerQty = 0.0;
+                foreach ($markers as $markerRow) {
+                    if ((string)($markerRow['layer_client_uid'] ?? $markerRow['layer_id'] ?? '') === $layerClientId) {
+                        $layerQty += n($markerRow['quantity'] ?? $markerRow['multiplier'] ?? 1);
+                    }
+                }
+                foreach ($segments as $segmentRow) {
+                    if ((string)($segmentRow['layer_client_uid'] ?? $segmentRow['layer_id'] ?? '') === $layerClientId) {
+                        $layerQty += n($segmentRow['total_length'] ?? $segmentRow['measured_length'] ?? 0);
+                    }
+                }
                 $layerStmt->execute([
                     $drawingId,
                     i($layer['page_number'] ?? 1, 1),
                     trim((string)($layer['name'] ?? 'Takeoff Layer')) ?: 'Takeoff Layer',
                     $layer['type'] ?? 'mixed',
+                    $layer['takeoff_type'] ?? $layer['type'] ?? 'count',
+                    $layer['unit_of_measure'] ?? (($layer['takeoff_type'] ?? $layer['type'] ?? '') === 'linear' ? 'ft' : 'ea'),
+                    $layer['group_name'] ?? $layer['tag'] ?? null,
                     !empty($layer['catalog_item_id']) ? (int)$layer['catalog_item_id'] : null,
                     !empty($layer['assembly_id']) ? (int)$layer['assembly_id'] : null,
                     $layer['color'] ?? '#2563eb',
                     $layer['symbol'] ?? 'circle',
+                    $layer['symbol_size'] ?? null,
+                    $layerQty,
                     !empty($layer['visible']) ? 1 : 0,
                     !empty($layer['locked']) ? 1 : 0,
                     $layer['tag'] ?? null,

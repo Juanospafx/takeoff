@@ -10,6 +10,9 @@
         selectedItemId: null,
         selectedAssemblyId: null,
         selectedLayerUid: null,
+        selectedLayerUids: new Set(),
+        collapsedGroups: new Set(),
+        layerSearch: '',
         selectedElement: null,
         draftLine: null,
         undo: [],
@@ -82,10 +85,14 @@
             page_number: pageNum || 1,
             name: overrides?.name || assembly?.name || item?.name || 'Takeoff Layer',
             type: overrides?.type || 'mixed',
+            takeoff_type: overrides?.takeoff_type || overrides?.type || (state.tool === 'takeoff_linear' ? 'linear' : 'count'),
+            group_name: overrides?.group_name || item?.group_name || item?.category_name || 'Ungrouped',
+            unit_of_measure: overrides?.unit_of_measure || assembly?.unit_of_measure || item?.unit_of_measure || (state.tool === 'takeoff_linear' ? 'ft' : 'ea'),
             catalog_item_id: item ? Number(item.id) : null,
             assembly_id: assembly ? Number(assembly.id) : null,
             color: overrides?.color || item?.color || '#2563eb',
             symbol: overrides?.symbol || item?.symbol || 'circle',
+            symbol_size: overrides?.symbol_size || 'Medium',
             visible: 1,
             locked: 0,
             tag: null,
@@ -350,10 +357,15 @@
     }
 
     function setTakeoffPage(pg) {
-        state.markers.forEach(m => m.node && m.node.visible(m.page_number === pg));
+        state.markers.forEach(m => {
+            const layer = state.layers.find(l => l.client_uid === m.layer_client_uid);
+            m.node && m.node.visible(m.page_number === pg && Number(layer?.visible ?? 1));
+        });
         state.segments.forEach(s => {
-            if (s.node) s.node.visible(s.page_number === pg);
-            if (s.labelNode) s.labelNode.visible(s.page_number === pg);
+            const layer = state.layers.find(l => l.client_uid === s.layer_client_uid);
+            const isVisible = s.page_number === pg && Number(layer?.visible ?? 1);
+            if (s.node) s.node.visible(isVisible);
+            if (s.labelNode) s.labelNode.visible(isVisible);
             (s.handles || []).forEach(h => h.visible(s.page_number === pg && state.selectedElement?.ref === s));
         });
         if (konvaLayer) konvaLayer.batchDraw();
@@ -369,6 +381,10 @@
     function addMarker(pos) {
         snapshot();
         const layer = activeLayer();
+        if (Number(layer.locked)) {
+            showToast('Layer is locked', 'error');
+            return;
+        }
         const marker = {
             client_uid: uid(),
             layer_client_uid: layer.client_uid,
@@ -410,6 +426,10 @@
         if (!state.draftLine || state.draftLine.points.length < 2) return;
         snapshot();
         const layer = activeLayer();
+        if (Number(layer.locked)) {
+            showToast('Layer is locked', 'error');
+            return;
+        }
         const segment = {
             client_uid: uid(),
             layer_client_uid: layer.client_uid,
@@ -454,6 +474,127 @@
     function markDirty() {
         state.dirty = true;
         renderSummary();
+        renderLayers();
+    }
+
+    function layerQuantity(layer) {
+        const countQty = state.markers
+            .filter(marker => marker.layer_client_uid === layer.client_uid)
+            .reduce((sum, marker) => sum + calculateCountQuantity(marker), 0);
+        const linearQty = state.segments
+            .filter(segment => segment.layer_client_uid === layer.client_uid)
+            .reduce((sum, segment) => sum + calculateLinearLength(segment), 0);
+        return countQty + linearQty;
+    }
+
+    function layerType(layer) {
+        return layer.takeoff_type || layer.type || 'mixed';
+    }
+
+    function layerUnit(layer) {
+        return layer.unit_of_measure || (layerType(layer) === 'linear' ? 'ft' : 'ea');
+    }
+
+    function layerGroup(layer) {
+        return layer.group_name || layer.tag || 'Ungrouped';
+    }
+
+    function layerSymbol(layer) {
+        const symbol = layer.symbol || 'circle';
+        const color = layer.color || '#2563eb';
+        return `<span class="takeoff-layer-symbol ${escapeHtml(symbol)}" style="background:${escapeHtml(color)}"></span>`;
+    }
+
+    function filteredLayers() {
+        const q = String(state.layerSearch || '').toLowerCase();
+        return state.layers.filter(layer => {
+            if (!q) return true;
+            return [
+                layer.name,
+                layerGroup(layer),
+                layerType(layer),
+                layerUnit(layer)
+            ].join(' ').toLowerCase().includes(q);
+        });
+    }
+
+    function deleteLayer(layer) {
+        if (!layer || !confirm('Delete this takeoff layer and its measurements?')) return;
+        snapshot();
+        state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).forEach(marker => marker.node && marker.node.destroy());
+        state.segments.filter(segment => segment.layer_client_uid === layer.client_uid).forEach(destroySegmentNodes);
+        state.markers = state.markers.filter(marker => marker.layer_client_uid !== layer.client_uid);
+        state.segments = state.segments.filter(segment => segment.layer_client_uid !== layer.client_uid);
+        state.layers = state.layers.filter(row => row !== layer);
+        if (state.selectedLayerUid === layer.client_uid) state.selectedLayerUid = state.layers[0]?.client_uid || null;
+        state.selectedLayerUids.delete(layer.client_uid);
+        state.selectedElement = null;
+        markDirty();
+        renderAll();
+    }
+
+    function duplicateLayer(layer) {
+        if (!layer) return;
+        snapshot();
+        const copy = { ...layer, client_uid: uid(), name: `${layer.name} Copy` };
+        state.layers.push(copy);
+        state.selectedLayerUid = copy.client_uid;
+        markDirty();
+        renderAll();
+    }
+
+    function editLayer(layer) {
+        if (!layer) return;
+        const name = prompt('Layer name', layer.name || '');
+        if (name === null) return;
+        const group = prompt('Group', layerGroup(layer));
+        if (group === null) return;
+        snapshot();
+        layer.name = name.trim() || layer.name;
+        layer.group_name = group.trim() || 'Ungrouped';
+        layer.takeoff_type = prompt('Takeoff type: count, linear, area, volume, lump_sum', layerType(layer)) || layerType(layer);
+        layer.unit_of_measure = prompt('Unit of measure', layerUnit(layer)) || layerUnit(layer);
+        markDirty();
+        renderAll();
+    }
+
+    function createLayerFromPrompt() {
+        const item = currentItem();
+        const assembly = currentAssembly();
+        const name = prompt('Catalog Item Name / Layer Name', assembly?.name || item?.name || 'New Takeoff Layer');
+        if (!name) return;
+        const type = prompt('Takeoff type: count, linear, area, volume, lump_sum', state.tool === 'takeoff_linear' ? 'linear' : 'count') || 'count';
+        const uom = prompt('Unit of measure', type === 'linear' ? 'ft' : 'ea') || (type === 'linear' ? 'ft' : 'ea');
+        const group = prompt('Group', item?.group_name || item?.category_name || 'Ungrouped') || 'Ungrouped';
+        snapshot();
+        createLayer({ name, type, takeoff_type: type, unit_of_measure: uom, group_name: group });
+        markDirty();
+        renderAll();
+    }
+
+    function applyLayerBulk(action) {
+        const uids = Array.from(state.selectedLayerUids);
+        if (!uids.length && state.selectedLayerUid) uids.push(state.selectedLayerUid);
+        if (!uids.length) return;
+        snapshot();
+        uids.forEach(uidValue => {
+            const layer = state.layers.find(row => row.client_uid === uidValue);
+            if (!layer) return;
+            if (action === 'show') layer.visible = 1;
+            if (action === 'hide') layer.visible = 0;
+            if (action === 'lock') layer.locked = 1;
+            if (action === 'delete') {
+                state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).forEach(marker => marker.node && marker.node.destroy());
+                state.segments.filter(segment => segment.layer_client_uid === layer.client_uid).forEach(destroySegmentNodes);
+                state.markers = state.markers.filter(marker => marker.layer_client_uid !== layer.client_uid);
+                state.segments = state.segments.filter(segment => segment.layer_client_uid !== layer.client_uid);
+                state.layers = state.layers.filter(row => row !== layer);
+            }
+        });
+        state.selectedLayerUids.clear();
+        setTakeoffPage(pageNum);
+        markDirty();
+        renderAll();
     }
 
     function setTool(tool) {
@@ -494,7 +635,10 @@
         root.className = 'takeoff-workspace';
         root.innerHTML = `
             <section class="takeoff-panel" id="takeoffPanel">
-                <div class="takeoff-panel-header"><div class="takeoff-title"><i class="fas fa-calculator me-1"></i>Takeoff</div></div>
+                <div class="takeoff-panel-header">
+                    <div class="takeoff-title"><i class="fas fa-layer-group me-1"></i>Takeoffs (<span id="takeoffLayerCount">0</span>)</div>
+                    <button class="takeoff-icon-btn" id="takeoffNewLayerTop" title="Create takeoff layer"><i class="fas fa-plus"></i></button>
+                </div>
                 <div class="takeoff-panel-section">
                     <div class="takeoff-tool-row">
                         <button class="takeoff-icon-btn active" data-takeoff-tool="select" title="Select"><i class="fas fa-mouse-pointer"></i></button>
@@ -503,6 +647,15 @@
                         <button class="takeoff-icon-btn" id="takeoffDelete" title="Delete"><i class="fas fa-trash"></i></button>
                         <button class="takeoff-icon-btn" id="takeoffUndo" title="Undo"><i class="fas fa-undo"></i></button>
                         <button class="takeoff-icon-btn" id="takeoffRedo" title="Redo"><i class="fas fa-redo"></i></button>
+                    </div>
+                </div>
+                <div class="takeoff-panel-section">
+                    <div class="takeoff-field mb-2"><label>Search</label><input id="takeoffLayerSearch" placeholder="Layer, group, catalog item"></div>
+                    <div class="takeoff-tool-row">
+                        <button class="takeoff-command" data-layer-bulk="show"><i class="fas fa-eye me-1"></i>Show</button>
+                        <button class="takeoff-command" data-layer-bulk="hide"><i class="fas fa-eye-slash me-1"></i>Hide</button>
+                        <button class="takeoff-command" data-layer-bulk="lock"><i class="fas fa-lock me-1"></i>Lock</button>
+                        <button class="takeoff-command" data-layer-bulk="delete"><i class="fas fa-trash me-1"></i>Delete</button>
                     </div>
                 </div>
                 <div class="takeoff-panel-section">
@@ -529,7 +682,13 @@
         root.querySelectorAll('[data-takeoff-tool]').forEach(btn => btn.addEventListener('click', () => setTool(btn.dataset.takeoffTool)));
         root.querySelectorAll('[data-takeoff-tab]').forEach(btn => btn.addEventListener('click', () => activateTab(btn.dataset.takeoffTab)));
         document.getElementById('takeoffDelete').addEventListener('click', deleteSelected);
-        document.getElementById('takeoffNewLayer').addEventListener('click', () => { snapshot(); createLayer({ name: 'Layer ' + (state.layers.length + 1) }); renderAll(); markDirty(); });
+        document.getElementById('takeoffNewLayer').addEventListener('click', createLayerFromPrompt);
+        document.getElementById('takeoffNewLayerTop').addEventListener('click', createLayerFromPrompt);
+        document.getElementById('takeoffLayerSearch').addEventListener('input', event => {
+            state.layerSearch = event.target.value;
+            renderLayers();
+        });
+        root.querySelectorAll('[data-layer-bulk]').forEach(btn => btn.addEventListener('click', () => applyLayerBulk(btn.dataset.layerBulk)));
         document.getElementById('takeoffSave').addEventListener('click', saveTakeoff);
         document.getElementById('takeoffUndo').addEventListener('click', () => {
             if (!state.undo.length) return;
@@ -600,6 +759,108 @@
         el.querySelectorAll('[data-layer-uid]').forEach(row => row.addEventListener('click', () => {
             state.selectedLayerUid = row.dataset.layerUid;
             renderLayers();
+        }));
+    }
+
+    function renderLayers() {
+        const el = document.getElementById('takeoffLayersTab');
+        if (!el) return;
+        const countEl = document.getElementById('takeoffLayerCount');
+        if (countEl) countEl.textContent = String(state.layers.length);
+        const groups = {};
+        filteredLayers().forEach(layer => {
+            const group = layerGroup(layer);
+            if (!groups[group]) groups[group] = [];
+            groups[group].push(layer);
+        });
+        el.innerHTML = `<div class="takeoff-layer-groups">${Object.keys(groups).sort().map(group => {
+            const collapsed = state.collapsedGroups.has(group);
+            const rows = groups[group];
+            const groupQty = rows.reduce((sum, layer) => sum + layerQuantity(layer), 0);
+            return `<div class="takeoff-layer-group">
+                <button class="takeoff-layer-group-head" data-layer-group="${escapeHtml(group)}">
+                    <i class="fas fa-chevron-${collapsed ? 'right' : 'down'}"></i>
+                    <span>${escapeHtml(group)}</span>
+                    <small>${rows.length} | ${groupQty.toFixed(2)}</small>
+                </button>
+                <div ${collapsed ? 'hidden' : ''}>
+                    ${rows.map(l => `<div class="takeoff-list-item takeoff-layer-row ${l.client_uid === state.selectedLayerUid ? 'active' : ''}" data-layer-uid="${l.client_uid}">
+                        <input type="checkbox" class="takeoff-layer-check" data-layer-check="${l.client_uid}" ${state.selectedLayerUids.has(l.client_uid) ? 'checked' : ''}>
+                        ${layerSymbol(l)}
+                        <div class="takeoff-layer-copy">
+                            <div class="takeoff-list-title">${escapeHtml(l.name)}</div>
+                            <div class="takeoff-list-meta">Page ${l.page_number || pageNum} | ${escapeHtml(layerType(l))} | ${layerQuantity(l).toFixed(2)} ${escapeHtml(layerUnit(l))}</div>
+                        </div>
+                        <div class="takeoff-layer-actions">
+                            <button class="takeoff-mini-btn" data-layer-action="visible" data-layer-uid="${l.client_uid}" title="Show/hide"><i class="fas fa-eye${Number(l.visible) ? '' : '-slash'}"></i></button>
+                            <button class="takeoff-mini-btn" data-layer-action="lock" data-layer-uid="${l.client_uid}" title="Lock"><i class="fas fa-${Number(l.locked) ? 'lock' : 'lock-open'}"></i></button>
+                            <button class="takeoff-mini-btn" data-layer-action="menu" data-layer-uid="${l.client_uid}" title="Actions"><i class="fas fa-ellipsis-vertical"></i></button>
+                        </div>
+                    </div>`).join('')}
+                </div>
+            </div>`;
+        }).join('') || '<div class="takeoff-list-meta">No layers yet.</div>'}</div>`;
+        el.querySelectorAll('[data-layer-group]').forEach(btn => btn.addEventListener('click', () => {
+            const group = btn.dataset.layerGroup;
+            if (state.collapsedGroups.has(group)) state.collapsedGroups.delete(group);
+            else state.collapsedGroups.add(group);
+            renderLayers();
+        }));
+        el.querySelectorAll('[data-layer-uid]').forEach(row => row.addEventListener('click', () => {
+            state.selectedLayerUid = row.dataset.layerUid;
+            renderLayers();
+        }));
+        el.querySelectorAll('[data-layer-check]').forEach(box => {
+            box.addEventListener('click', event => event.stopPropagation());
+            box.addEventListener('change', () => {
+                if (box.checked) state.selectedLayerUids.add(box.dataset.layerCheck);
+                else state.selectedLayerUids.delete(box.dataset.layerCheck);
+            });
+        });
+        el.querySelectorAll('[data-layer-action]').forEach(btn => btn.addEventListener('click', event => {
+            event.stopPropagation();
+            const layer = state.layers.find(row => row.client_uid === btn.dataset.layerUid);
+            if (!layer) return;
+            const action = btn.dataset.layerAction;
+            if (action === 'visible') {
+                snapshot();
+                layer.visible = Number(layer.visible) ? 0 : 1;
+                setTakeoffPage(pageNum);
+                markDirty();
+                renderLayers();
+            }
+            if (action === 'lock') {
+                snapshot();
+                layer.locked = Number(layer.locked) ? 0 : 1;
+                markDirty();
+                renderLayers();
+            }
+            if (action === 'menu') {
+                const choice = prompt('Action: edit, duplicate, delete, color, symbol', 'edit');
+                if (!choice) return;
+                const selectedAction = choice.trim().toLowerCase();
+                if (selectedAction === 'edit') editLayer(layer);
+                if (selectedAction === 'duplicate') duplicateLayer(layer);
+                if (selectedAction === 'delete') deleteLayer(layer);
+                if (selectedAction === 'color') {
+                    const color = prompt('Hex color', layer.color || '#2563eb');
+                    if (color) {
+                        snapshot();
+                        layer.color = color;
+                        markDirty();
+                        renderAll();
+                    }
+                }
+                if (selectedAction === 'symbol') {
+                    const symbol = prompt('Symbol: circle, square, diamond, triangle, cross, line', layer.symbol || 'circle');
+                    if (symbol) {
+                        snapshot();
+                        layer.symbol = symbol;
+                        markDirty();
+                        renderAll();
+                    }
+                }
+            }
         }));
     }
 

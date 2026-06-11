@@ -313,7 +313,6 @@ try {
         <a class="nav-link-takeoff active" href="/"><i class="fas fa-file-lines"></i><span>Uploads</span></a>
         <a class="nav-link-takeoff" href="/pages/bid_board.php"><i class="fas fa-table-columns"></i><span>Bid Board</span></a>
         <a class="nav-link-takeoff" href="/pages/project_module.php"><i class="fas fa-folder-tree"></i><span>Projects</span></a>
-        <a class="nav-link-takeoff" href="/pages/takeoff_layers.php"><i class="fas fa-ruler-combined"></i><span>Takeoff Layers</span></a>
         <a class="nav-link-takeoff" href="/pages/estimate_module.php"><i class="fas fa-calculator"></i><span>Estimate</span></a>
         <a class="nav-link-takeoff" href="/pages/cost_catalog.php"><i class="fas fa-book"></i><span>Cost Catalog</span></a>
         <a class="nav-link-takeoff" href="/pages/company_settings.php"><i class="fas fa-gear"></i><span>Settings</span></a>

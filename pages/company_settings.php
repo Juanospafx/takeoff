@@ -28,7 +28,7 @@
             <button data-tab="estimateTypes"><i class="fas fa-layer-group"></i><span>Estimate Types</span></button>
             <a href="/pages/cost_catalog.php"><i class="fas fa-book"></i><span>Cost Catalog</span></a>
             <a href="/pages/project_module.php"><i class="fas fa-folder-tree"></i><span>Projects</span></a>
-            <a href="/pages/takeoff_layers.php"><i class="fas fa-ruler-combined"></i><span>Takeoff</span></a>
+            <a href="/pages/takeoff.php"><i class="fas fa-ruler-combined"></i><span>Takeoff</span></a>
             <a href="/pages/estimate_module.php"><i class="fas fa-calculator"></i><span>Estimate</span></a>
         </nav>
     </aside>

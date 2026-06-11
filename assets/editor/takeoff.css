@@ -21,7 +21,7 @@
 .takeoff-panel {
     top: 12px;
     left: 12px;
-    width: 318px;
+    width: 360px;
     max-height: calc(100% - 112px);
     display: flex;
     flex-direction: column;
@@ -163,6 +163,98 @@
     border-color: #38bdf8;
     box-shadow: inset 3px 0 0 #38bdf8;
 }
+
+.takeoff-layer-groups {
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+}
+
+.takeoff-layer-group {
+    border: 1px solid rgba(148, 163, 184, 0.16);
+    border-radius: 6px;
+    overflow: hidden;
+    background: rgba(2, 6, 23, 0.45);
+}
+
+.takeoff-layer-group-head {
+    width: 100%;
+    display: grid;
+    grid-template-columns: 18px 1fr auto;
+    align-items: center;
+    gap: 7px;
+    border: 0;
+    background: rgba(30, 41, 59, 0.92);
+    color: #e5e7eb;
+    padding: 8px;
+    text-align: left;
+    cursor: pointer;
+}
+
+.takeoff-layer-group-head small {
+    color: #94a3b8;
+}
+
+.takeoff-layer-row {
+    display: grid;
+    grid-template-columns: 18px 22px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 7px;
+    border-radius: 0;
+    border-left: 0;
+    border-right: 0;
+    border-bottom: 0;
+}
+
+.takeoff-layer-check {
+    width: 14px;
+    height: 14px;
+}
+
+.takeoff-layer-copy {
+    min-width: 0;
+}
+
+.takeoff-layer-copy .takeoff-list-title,
+.takeoff-layer-copy .takeoff-list-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.takeoff-layer-actions {
+    display: flex;
+    gap: 2px;
+}
+
+.takeoff-mini-btn {
+    width: 24px;
+    height: 24px;
+    border: 0;
+    background: transparent;
+    color: #94a3b8;
+    border-radius: 5px;
+    cursor: pointer;
+}
+
+.takeoff-mini-btn:hover {
+    color: #fff;
+    background: rgba(148, 163, 184, 0.16);
+}
+
+.takeoff-layer-symbol {
+    width: 18px;
+    height: 18px;
+    display: inline-block;
+    border: 1px solid rgba(255,255,255,.8);
+}
+
+.takeoff-layer-symbol.circle { border-radius: 50%; }
+.takeoff-layer-symbol.square { border-radius: 4px; }
+.takeoff-layer-symbol.diamond { transform: rotate(45deg); border-radius: 3px; }
+.takeoff-layer-symbol.triangle { clip-path: polygon(50% 0, 100% 100%, 0 100%); }
+.takeoff-layer-symbol.cross { clip-path: polygon(35% 0,65% 0,65% 35%,100% 35%,100% 65%,65% 65%,65% 100%,35% 100%,35% 65%,0 65%,0 35%,35% 35%); }
+.takeoff-layer-symbol.line { height: 5px; border-radius: 999px; align-self: center; }
 
 .takeoff-list-title {
     font-size: 0.82rem;
