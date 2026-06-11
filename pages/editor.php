@@ -3,6 +3,9 @@
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
+header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
+header('Pragma: no-cache');
+header('Expires: 0');
 require_once __DIR__ . '/../core/db/connection.php';
 
 $id = $_GET['id'] ?? 0;
@@ -64,8 +67,8 @@ if ($filePath !== '') {
     
     <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 
-    <link rel="stylesheet" href="../assets/editor/editor.css?v=<?= filemtime(__DIR__ . '/../assets/editor/editor.css') ?>">
-    <link rel="stylesheet" href="../assets/editor/takeoff.css?v=<?= filemtime(__DIR__ . '/../assets/editor/takeoff.css') ?>">
+    <link rel="stylesheet" href="../assets/editor/editor.css?v=takeoff-editor-20260611-2">
+    <link rel="stylesheet" href="../assets/editor/takeoff.css?v=takeoff-panel-20260611-2">
 
     <style>
         :root {
@@ -745,8 +748,6 @@ if ($filePath !== '') {
     const highOrder = [];
     const lowOrder = [];
     let renderToken = 0;
-    const tempRenderCanvas = document.createElement('canvas');
-    const tempRenderCtx = tempRenderCanvas.getContext('2d', { alpha: false, desynchronized: true });
     let prefetchBusy = false;
     const prefetchQueue = [];
     
@@ -2175,11 +2176,14 @@ if ($filePath !== '') {
     async function renderPageToDataUrl(num, scale) {
         const page = await pdfDoc.getPage(num);
         const viewport = page.getViewport({ scale });
-        tempRenderCanvas.width = Math.max(1, Math.floor(viewport.width));
-        tempRenderCanvas.height = Math.max(1, Math.floor(viewport.height));
-        await page.render({ canvasContext: tempRenderCtx, viewport }).promise;
+        const renderCanvas = document.createElement('canvas');
+        const renderCtx = renderCanvas.getContext('2d', { alpha: false, desynchronized: true });
+        renderCanvas.width = Math.max(1, Math.floor(viewport.width));
+        renderCanvas.height = Math.max(1, Math.floor(viewport.height));
+        const renderTask = page.render({ canvasContext: renderCtx, viewport });
+        await renderTask.promise;
         const quality = scale >= pdfScale ? 0.8 : 0.62;
-        return tempRenderCanvas.toDataURL('image/jpeg', quality);
+        return renderCanvas.toDataURL('image/jpeg', quality);
     }
 
     function applyBackground(url, num, token, loadAnnotations) {
@@ -3197,7 +3201,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=<?= filemtime(__DIR__ . '/../assets/editor/takeoff.js') ?>"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-panel-20260611-2"></script>
 </body>
 </html>
 
