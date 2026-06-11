@@ -1,0 +1,138 @@
+function extractSecundaryToFixedSheet(spreadsheetId) {
+  var ss = getSpreadsheet_(spreadsheetId);
+  var sheets = ss.getSheets();
+
+  var firstCol = 2;   // B
+  var lastCol  = 29;  // AC
+  var width = lastCol - firstCol + 1;
+
+  var headerRegex = /(secundary|secondary)/i;
+
+  // output headers: Source Sheet + (B..AC)
+  var outHeaders = [
+    "Source Sheet",
+    "Name","Part","Unit Labor (mins)","Difficulty Factor","Quantity","U/M",
+    "Unit Cost","Waste","Material Waste","Subtotal Item Cost","Markup or Margin",
+    "Sales Price","Subtotal Item Sales","Profit","Total Labor (hrs)","Total Labor Cost",
+    "Labor Markup","Labor Sales","Phase Name","Phase Code","Cost Code Name","Cost Code",
+    "Cost Type Name","Cost Type","Category","Total Cost","Total Cost (%)","Total Sales"
+  ];
+
+  var aggregated = [];
+  var perSheetDetails = [];
+  var processedSheets = [];
+
+  var BATCH = 400;              // filas por lectura
+  var MAX_EMPTY_STREAK = 25;    // fin del bloque
+
+  sheets.forEach(function(sheet) {
+    var sheetName = sheet.getName();
+    if (shouldSkipSheet_(sheetName)) return;
+
+    try {
+      var maxRows = sheet.getMaxRows();
+      if (maxRows < 1) return;
+
+      // 1) Buscar el header en la columna A (usa DisplayValue por si hay formatos/espacios)
+      var colA = sheet.getRange(1, 1, maxRows, 1).getDisplayValues(); // A1:Amax
+      var headerRow = -1; // 1-based
+      for (var r = 0; r < colA.length; r++) {
+        var v = String(colA[r][0] || "").trim();
+        if (headerRegex.test(v)) {
+          headerRow = r + 1; // guardo el ÚLTIMO match por seguridad
+        }
+      }
+
+      if (headerRow === -1) {
+        perSheetDetails.push({ sheet: sheetName, rowsCopied: 0, note: "No encontró 'Secundary/Secondary' en columna A" });
+        return;
+      }
+
+      processedSheets.push(sheetName);
+
+      // 2) Leer desde la fila siguiente hacia abajo en bloques (B..AC)
+      var start = headerRow + 1;
+      var extracted = [];
+      var emptyStreak = 0;
+
+      while (start <= maxRows) {
+        var take = Math.min(BATCH, maxRows - start + 1);
+        var block = sheet.getRange(start, firstCol, take, width).getValues();
+
+        for (var i = 0; i < block.length; i++) {
+          var row = block[i];
+
+          if (rowAllEmpty_(row)) {
+            emptyStreak++;
+            if (extracted.length > 0 && emptyStreak >= MAX_EMPTY_STREAK) {
+              start = maxRows + 1; // romper ambos loops
+              break;
+            }
+            continue;
+          } else {
+            emptyStreak = 0;
+          }
+
+          // Evitar re-copiar headers tipo "Name/Part..."
+          var firstCell = String(row[0] || "").toLowerCase().trim();
+          if (firstCell === "name" || firstCell === "part") continue;
+
+          extracted.push([sheetName].concat(row));
+        }
+
+        start += take;
+      }
+
+      // 3) Consolidado
+      if (extracted.length > 0) {
+        aggregated = aggregated.concat(extracted);
+      }
+
+      // 4) (Opcional) hoja por building
+      var perOutName = "Secundary Extract - " + sheetName;
+      perOutName = uniqueSheetName_(ss, perOutName);
+
+      var perOut = ss.getSheetByName(perOutName);
+      if (!perOut) perOut = ss.insertSheet(perOutName);
+      else perOut.clearContents();
+
+      perOut.getRange(1, 1, 1, outHeaders.length).setValues([outHeaders]);
+      if (extracted.length > 0) {
+        perOut.getRange(2, 1, extracted.length, outHeaders.length).setValues(extracted);
+        perOut.autoResizeColumns(1, outHeaders.length);
+      }
+
+      perSheetDetails.push({
+        sheet: sheetName,
+        headerRowFound: headerRow,
+        rowsCopied: extracted.length,
+        outSheet: perOutName
+      });
+
+    } catch (e) {
+      perSheetDetails.push({ sheet: sheetName, error: String(e) });
+    }
+  });
+
+  // 5) Hoja consolidada
+  var outName = "Secundary Extract";
+  var outSheet = ss.getSheetByName(outName);
+  if (!outSheet) outSheet = ss.insertSheet(outName);
+  else outSheet.clearContents();
+
+  outSheet.getRange(1, 1, 1, outHeaders.length).setValues([outHeaders]);
+  if (aggregated.length > 0) {
+    outSheet.getRange(2, 1, aggregated.length, outHeaders.length).setValues(aggregated);
+    outSheet.autoResizeColumns(1, outHeaders.length);
+  }
+
+  return {
+    status: "ok",
+    message: "Extracción completada (header en col A + scan por chunks).",
+    rowsCopied: aggregated.length,
+    processedSheets: processedSheets,
+    perSheetDetails: perSheetDetails,
+    spreadsheetIdUsed: ss.getId(),
+    spreadsheetName: ss.getName()
+  };
+}

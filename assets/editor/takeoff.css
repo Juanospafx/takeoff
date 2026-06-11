@@ -1,0 +1,219 @@
+.takeoff-workspace {
+    position: absolute;
+    inset: 0;
+    pointer-events: none;
+    z-index: 35;
+}
+
+.takeoff-panel,
+.takeoff-props,
+.takeoff-summary {
+    position: absolute;
+    pointer-events: auto;
+    background: rgba(15, 23, 42, 0.95);
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 8px;
+    color: #e5e7eb;
+    box-shadow: 0 18px 40px rgba(0, 0, 0, 0.35);
+    overflow: hidden;
+}
+
+.takeoff-panel {
+    top: 12px;
+    left: 12px;
+    width: 318px;
+    max-height: calc(100% - 112px);
+    display: flex;
+    flex-direction: column;
+}
+
+.takeoff-props {
+    top: 12px;
+    right: 12px;
+    width: 285px;
+    max-height: calc(100% - 112px);
+    overflow: auto;
+}
+
+.takeoff-summary {
+    left: 12px;
+    right: 12px;
+    bottom: 12px;
+    height: 190px;
+    display: flex;
+    flex-direction: column;
+}
+
+.takeoff-panel-header,
+.takeoff-panel-section,
+.takeoff-summary-head {
+    padding: 10px 12px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.18);
+}
+
+.takeoff-panel-header,
+.takeoff-summary-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.takeoff-title {
+    font-size: 0.88rem;
+    font-weight: 700;
+}
+
+.takeoff-panel-body,
+.takeoff-summary-table-wrap {
+    overflow: auto;
+    min-height: 0;
+}
+
+.takeoff-tool-row,
+.takeoff-tabs,
+.takeoff-grid-2 {
+    display: flex;
+    gap: 6px;
+}
+
+.takeoff-grid-2 > * {
+    flex: 1;
+}
+
+.takeoff-tab,
+.takeoff-icon-btn,
+.takeoff-command {
+    border: 1px solid rgba(148, 163, 184, 0.28);
+    background: #111827;
+    color: #e5e7eb;
+    border-radius: 6px;
+    min-height: 34px;
+    cursor: pointer;
+}
+
+.takeoff-icon-btn {
+    width: 36px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+}
+
+.takeoff-tab {
+    flex: 1;
+    padding: 6px 8px;
+    font-size: 0.78rem;
+}
+
+.takeoff-command {
+    padding: 6px 10px;
+    font-size: 0.78rem;
+}
+
+.takeoff-tab.active,
+.takeoff-icon-btn.active,
+.takeoff-command.primary {
+    background: #2563eb;
+    border-color: #2563eb;
+    color: #fff;
+}
+
+.takeoff-field {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+.takeoff-field label {
+    font-size: 0.67rem;
+    text-transform: uppercase;
+    color: #94a3b8;
+    font-weight: 700;
+}
+
+.takeoff-field input,
+.takeoff-field select,
+.takeoff-field textarea {
+    width: 100%;
+    min-height: 34px;
+    background: #020617;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 6px;
+    color: #e5e7eb;
+    padding: 6px 8px;
+    font-size: 0.82rem;
+}
+
+.takeoff-list {
+    display: flex;
+    flex-direction: column;
+    gap: 6px;
+}
+
+.takeoff-list-item {
+    border: 1px solid rgba(148, 163, 184, 0.18);
+    border-radius: 6px;
+    padding: 8px;
+    background: rgba(2, 6, 23, 0.75);
+    cursor: pointer;
+}
+
+.takeoff-list-item.active {
+    border-color: #38bdf8;
+    box-shadow: inset 3px 0 0 #38bdf8;
+}
+
+.takeoff-list-title {
+    font-size: 0.82rem;
+    font-weight: 700;
+}
+
+.takeoff-list-meta {
+    color: #94a3b8;
+    font-size: 0.74rem;
+}
+
+.takeoff-summary table {
+    width: 100%;
+    border-collapse: collapse;
+    font-size: 0.76rem;
+}
+
+.takeoff-summary th,
+.takeoff-summary td {
+    padding: 7px 8px;
+    border-bottom: 1px solid rgba(148, 163, 184, 0.12);
+    white-space: nowrap;
+}
+
+.takeoff-summary th {
+    color: #94a3b8;
+    text-transform: uppercase;
+    font-size: 0.65rem;
+    font-weight: 700;
+    background: #111827;
+}
+
+.takeoff-hidden {
+    display: none !important;
+}
+
+@media (max-width: 991px) {
+    .takeoff-panel,
+    .takeoff-props {
+        width: calc(100% - 24px);
+        max-height: 45%;
+    }
+
+    .takeoff-props {
+        top: auto;
+        bottom: 210px;
+        right: 12px;
+    }
+
+    .takeoff-summary {
+        height: 170px;
+        bottom: 76px;
+    }
+}
