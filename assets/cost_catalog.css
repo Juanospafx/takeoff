@@ -338,6 +338,69 @@ body {
     box-sizing: border-box;
 }
 
+.cc-assembly-section {
+    display: none;
+    margin-top: 16px;
+    border: 1px solid var(--cc-line);
+    border-radius: 8px;
+    overflow: hidden;
+}
+
+.cc-section-head {
+    display: flex;
+    justify-content: space-between;
+    gap: 12px;
+    align-items: center;
+    padding: 12px 14px;
+    border-bottom: 1px solid var(--cc-line);
+    background: rgba(2, 6, 23, .35);
+}
+
+.cc-section-head span,
+.cc-assembly-note {
+    color: var(--cc-muted);
+    font-size: .84rem;
+}
+
+.cc-assembly-add {
+    display: grid;
+    grid-template-columns: 1fr 130px auto;
+    gap: 10px;
+    padding: 12px;
+}
+
+.cc-assembly-add select,
+.cc-assembly-add input {
+    min-height: 38px;
+    background: #020617;
+    border: 1px solid var(--cc-line);
+    border-radius: 8px;
+    color: var(--cc-text);
+    padding: 8px 10px;
+}
+
+.cc-assembly-note {
+    padding: 0 12px 12px;
+}
+
+.cc-mini-table {
+    width: 100%;
+    border-collapse: collapse;
+}
+
+.cc-mini-table th,
+.cc-mini-table td {
+    padding: 10px;
+    border-top: 1px solid rgba(148, 163, 184, .15);
+    text-align: left;
+}
+
+.cc-mini-table th {
+    color: var(--cc-muted);
+    font-size: .72rem;
+    text-transform: uppercase;
+}
+
 .cc-error {
     background: #7f1d1d;
     color: #fecaca;
@@ -354,4 +417,5 @@ body {
     .cc-workspace { grid-template-columns: 1fr; }
     .cc-topbar { flex-direction: column; }
     .cc-form-grid { grid-template-columns: 1fr; }
+    .cc-assembly-add { grid-template-columns: 1fr; }
 }

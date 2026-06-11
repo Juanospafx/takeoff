@@ -23,6 +23,7 @@
             <a href="/pages/bid_board.php"><i class="fas fa-table-columns"></i><span>Bid Board</span></a>
             <a href="/pages/project_module.php"><i class="fas fa-folder-tree"></i><span>Projects</span></a>
             <a href="/pages/takeoff.php"><i class="fas fa-ruler-combined"></i><span>Takeoff</span></a>
+            <a href="/pages/company_settings.php"><i class="fas fa-gear"></i><span>Settings</span></a>
         </nav>
     </aside>
 
@@ -189,6 +190,31 @@
                         <input id="ccItemAttachmentUrl" type="url">
                     </div>
                 </div>
+                <section class="cc-assembly-section" id="ccAssemblySection">
+                    <div class="cc-section-head">
+                        <strong>Items Included</strong>
+                        <span id="ccAssemblyTotals">Cost $0.00 · Labor 0.0000</span>
+                    </div>
+                    <div class="cc-assembly-add">
+                        <select id="ccAssemblyChildItem"></select>
+                        <input id="ccAssemblyQuantity" type="number" min="0.0001" step="0.0001" value="1">
+                        <button class="cc-btn" type="button" id="ccAddAssemblyPart">Add Item</button>
+                    </div>
+                    <div class="cc-assembly-note" id="ccAssemblyNote"></div>
+                    <table class="cc-mini-table">
+                        <thead>
+                            <tr>
+                                <th>Item</th>
+                                <th>Qty</th>
+                                <th>Unit Cost</th>
+                                <th>Labor</th>
+                                <th>Total</th>
+                                <th></th>
+                            </tr>
+                        </thead>
+                        <tbody id="ccAssemblyPartsBody"></tbody>
+                    </table>
+                </section>
             </div>
             <div class="cc-modal-foot">
                 <button class="cc-btn" type="button" data-close-item-modal>Cancel</button>

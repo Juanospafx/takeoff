@@ -1,6 +1,6 @@
 (function () {
     const apiUrl = '../api/cost_catalog.php';
-    let state = { catalogs: [], groups: [], items: [] };
+    let state = { catalogs: [], groups: [], items: [], allItems: [], assemblyParts: [] };
     let selection = { view: 'all', catalogId: null, groupId: null };
     let editingItemId = null;
     let movingItemId = null;
@@ -50,6 +50,7 @@
         renderItems();
         renderTitle();
         renderItemSelects();
+        renderAssemblyItemOptions();
     }
 
     function renderTitle() {
@@ -176,6 +177,16 @@
         document.getElementById('ccMoveCatalog').innerHTML = catalogOptions;
         renderGroupSelect(document.getElementById('ccItemGroup'), Number(document.getElementById('ccItemCatalog').value || selection.catalogId || 0));
         renderGroupSelect(document.getElementById('ccMoveGroup'), Number(document.getElementById('ccMoveCatalog').value || selection.catalogId || 0));
+    }
+
+    function renderAssemblyItemOptions() {
+        const select = document.getElementById('ccAssemblyChildItem');
+        if (!select) return;
+        const source = state.allItems && state.allItems.length ? state.allItems : state.items;
+        select.innerHTML = '<option value="">Search/select item...</option>' + source
+            .filter(item => Number(item.id) !== Number(editingItemId || 0))
+            .map(item => `<option value="${item.id}">${esc(item.name)} - ${money(item.unit_cost)} - ${Number(item.labor_hours || 0).toFixed(4)} labor</option>`)
+            .join('');
     }
 
     function renderGroupSelect(select, catalogId, selectedId = '') {
@@ -343,7 +354,62 @@
         document.getElementById('ccItemSubJobName').value = item?.sub_job_name || '';
         document.getElementById('ccItemEpdUrl').value = item?.epd_url || '';
         document.getElementById('ccItemAttachmentUrl').value = item?.attachment_url || '';
+        toggleAssemblySection();
+        renderAssemblyParts();
         document.getElementById('ccItemModal').classList.add('open');
+    }
+
+    function isAssemblyType() {
+        return document.getElementById('ccItemType').value === 'assembly';
+    }
+
+    function toggleAssemblySection() {
+        const section = document.getElementById('ccAssemblySection');
+        section.style.display = isAssemblyType() ? 'block' : 'none';
+        renderAssemblyParts();
+    }
+
+    function renderAssemblyParts() {
+        const body = document.getElementById('ccAssemblyPartsBody');
+        const note = document.getElementById('ccAssemblyNote');
+        const totalsEl = document.getElementById('ccAssemblyTotals');
+        if (!body || !note || !totalsEl) return;
+        if (!isAssemblyType()) {
+            body.innerHTML = '';
+            note.textContent = '';
+            return;
+        }
+        if (!editingItemId) {
+            body.innerHTML = '<tr><td colspan="6" style="color:#94a3b8;">Save the assembly item before adding included items.</td></tr>';
+            note.textContent = 'Create the assembly first, then edit it to add included items.';
+            totalsEl.textContent = 'Cost $0.00 - Labor 0.0000';
+            return;
+        }
+        note.textContent = '';
+        const parts = state.assemblyParts.filter(part => Number(part.assembly_catalog_item_id) === Number(editingItemId));
+        let totalCost = 0;
+        let totalLabor = 0;
+        body.innerHTML = parts.map(part => {
+            const qty = Number(part.quantity || 0);
+            const unitCost = Number(part.unit_cost_snapshot || 0);
+            const labor = Number(part.unit_labor_time_snapshot || 0);
+            totalCost += qty * unitCost;
+            totalLabor += qty * labor;
+            return `
+                <tr>
+                    <td>${esc(part.child_item_name)}</td>
+                    <td>${qty.toFixed(4)}</td>
+                    <td>${money(unitCost)}</td>
+                    <td>${labor.toFixed(4)}</td>
+                    <td>${money(qty * unitCost)}</td>
+                    <td><button class="cc-btn danger" type="button" data-assembly-part-delete="${part.id}">Remove</button></td>
+                </tr>
+            `;
+        }).join('') || '<tr><td colspan="6" style="color:#94a3b8;">No items included yet.</td></tr>';
+        totalsEl.textContent = `Cost ${money(totalCost)} - Labor ${totalLabor.toFixed(4)}`;
+        body.querySelectorAll('[data-assembly-part-delete]').forEach(button => {
+            button.addEventListener('click', () => deleteAssemblyPart(Number(button.dataset.assemblyPartDelete)));
+        });
     }
 
     function openMoveItemModal(item) {
@@ -396,6 +462,35 @@
         }).catch(err => showError(err.message));
     }
 
+    function addAssemblyPart() {
+        if (!editingItemId) return showError('Save the assembly item before adding included items.');
+        const childId = Number(document.getElementById('ccAssemblyChildItem').value || 0);
+        const quantity = Number(document.getElementById('ccAssemblyQuantity').value || 0);
+        if (!childId) return showError('Select an item to include in the assembly.');
+        if (Number.isNaN(quantity) || quantity <= 0) return showError('Assembly part quantity must be greater than 0');
+        request('add_assembly_part', currentContextPayload({
+            assembly_catalog_item_id: editingItemId,
+            part_catalog_item_id: childId,
+            quantity
+        })).then(data => {
+            state = data.data;
+            const updated = state.items.find(item => Number(item.id) === Number(editingItemId));
+            render();
+            openItemModal(updated || null);
+        }).catch(err => showError(err.message));
+    }
+
+    function deleteAssemblyPart(id) {
+        request('delete_assembly_part', currentContextPayload({ id }))
+            .then(data => {
+                state = data.data;
+                const updated = state.items.find(item => Number(item.id) === Number(editingItemId));
+                render();
+                openItemModal(updated || null);
+            })
+            .catch(err => showError(err.message));
+    }
+
     function moveItem(event) {
         event.preventDefault();
         request('move_item', {
@@ -446,6 +541,8 @@
         document.getElementById('ccAddItem').addEventListener('click', () => openItemModal());
         document.getElementById('ccItemCatalog').addEventListener('change', event => renderGroupSelect(document.getElementById('ccItemGroup'), Number(event.target.value)));
         document.getElementById('ccMoveCatalog').addEventListener('change', event => renderGroupSelect(document.getElementById('ccMoveGroup'), Number(event.target.value)));
+        document.getElementById('ccItemType').addEventListener('change', toggleAssemblySection);
+        document.getElementById('ccAddAssemblyPart').addEventListener('click', addAssemblyPart);
         document.querySelectorAll('[data-close-item-modal]').forEach(btn => btn.addEventListener('click', closeItemModals));
         document.getElementById('ccItemForm').addEventListener('submit', saveItem);
         document.getElementById('ccMoveItemForm').addEventListener('submit', moveItem);

@@ -61,6 +61,22 @@ function cc_hex_or_null($value): ?string
     return preg_match('/^#[0-9a-fA-F]{6}$/', $value) ? $value : null;
 }
 
+function cc_recalculate_assembly(PDO $pdo, int $assemblyItemId): void
+{
+    if ($assemblyItemId <= 0) return;
+    $stmt = $pdo->prepare(
+        "SELECT
+            COALESCE(SUM(quantity * unit_cost_snapshot), 0) AS unit_cost,
+            COALESCE(SUM(quantity * unit_labor_time_snapshot), 0) AS labor_hours
+         FROM assembly_parts
+         WHERE assembly_catalog_item_id = ? AND deleted_at IS NULL"
+    );
+    $stmt->execute([$assemblyItemId]);
+    $totals = $stmt->fetch(PDO::FETCH_ASSOC) ?: ['unit_cost' => 0, 'labor_hours' => 0];
+    $stmt = $pdo->prepare("UPDATE catalog_items SET unit_cost = ?, labor_hours = ? WHERE id = ?");
+    $stmt->execute([(float)$totals['unit_cost'], (float)$totals['labor_hours'], $assemblyItemId]);
+}
+
 function cc_ensure_schema(PDO $pdo): void
 {
     $pdo->exec("CREATE TABLE IF NOT EXISTS catalogs (
@@ -142,6 +158,26 @@ function cc_ensure_schema(PDO $pdo): void
         KEY idx_catalog_items_group (catalog_group_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+    $pdo->exec("CREATE TABLE IF NOT EXISTS assembly_parts (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        assembly_catalog_item_id BIGINT UNSIGNED NOT NULL,
+        part_catalog_item_id BIGINT UNSIGNED NOT NULL,
+        quantity DECIMAL(18,6) NOT NULL DEFAULT 1,
+        unit_cost_snapshot DECIMAL(18,4) NOT NULL DEFAULT 0,
+        unit_labor_time_snapshot DECIMAL(18,4) NOT NULL DEFAULT 0,
+        ratio_type ENUM('fixed','per_unit','per_linear_length','per_area','per_endpoint','spacing_based') NOT NULL DEFAULT 'per_unit',
+        spacing_value DECIMAL(18,6) NULL,
+        waste_factor_percent DECIMAL(9,4) NOT NULL DEFAULT 0,
+        notes TEXT NULL,
+        metadata_json JSON NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        deleted_at TIMESTAMP NULL DEFAULT NULL,
+        PRIMARY KEY (id),
+        KEY idx_assembly_parts_assembly (assembly_catalog_item_id),
+        KEY idx_assembly_parts_part (part_catalog_item_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
     cc_add_column($pdo, 'catalogs', 'trade', "ALTER TABLE catalogs ADD COLUMN trade VARCHAR(100) NULL");
     cc_add_column($pdo, 'catalogs', 'active', "ALTER TABLE catalogs ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1");
     cc_add_column($pdo, 'catalogs', 'locked', "ALTER TABLE catalogs ADD COLUMN locked TINYINT(1) NOT NULL DEFAULT 0");
@@ -182,6 +218,10 @@ function cc_ensure_schema(PDO $pdo): void
     } catch (Throwable $ignored) {
         // Existing installations may keep the older ENUM; saves map material to part when needed.
     }
+
+    cc_add_column($pdo, 'assembly_parts', 'unit_cost_snapshot', "ALTER TABLE assembly_parts ADD COLUMN unit_cost_snapshot DECIMAL(18,4) NOT NULL DEFAULT 0");
+    cc_add_column($pdo, 'assembly_parts', 'unit_labor_time_snapshot', "ALTER TABLE assembly_parts ADD COLUMN unit_labor_time_snapshot DECIMAL(18,4) NOT NULL DEFAULT 0");
+    cc_add_column($pdo, 'assembly_parts', 'deleted_at', "ALTER TABLE assembly_parts ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL");
 
     $count = (int)$pdo->query("SELECT COUNT(*) FROM catalogs WHERE deleted_at IS NULL")->fetchColumn();
     if ($count === 0) {
@@ -304,7 +344,31 @@ function cc_payload(PDO $pdo, string $view = 'all', int $catalogId = 0, int $gro
     $stmt->execute($params);
     $items = $stmt->fetchAll(PDO::FETCH_ASSOC);
 
-    return compact('catalogs', 'groups', 'items');
+    $allItems = $pdo->query(
+        "SELECT ci.*, c.name AS catalog_name, g.name AS group_name
+         FROM catalog_items ci
+         JOIN catalogs c ON c.id = ci.catalog_id
+         LEFT JOIN catalog_groups g ON g.id = ci.catalog_group_id
+         WHERE ci.deleted_at IS NULL
+         ORDER BY c.name, g.name, ci.name
+         LIMIT 1000"
+    )->fetchAll(PDO::FETCH_ASSOC);
+
+    $assemblyParts = $pdo->query(
+        "SELECT ap.*,
+            child.name AS child_item_name,
+            child.unit_of_measure AS child_unit_of_measure,
+            child.unit_cost AS child_unit_cost,
+            child.labor_hours AS child_labor_hours,
+            assembly.name AS assembly_item_name
+         FROM assembly_parts ap
+         JOIN catalog_items child ON child.id = ap.part_catalog_item_id
+         JOIN catalog_items assembly ON assembly.id = ap.assembly_catalog_item_id
+         WHERE ap.deleted_at IS NULL
+         ORDER BY assembly.name, child.name"
+    )->fetchAll(PDO::FETCH_ASSOC);
+
+    return compact('catalogs', 'groups', 'items', 'allItems', 'assemblyParts');
 }
 
 try {
@@ -452,6 +516,34 @@ try {
         case 'convert_item_assembly':
             $id = cc_int($input['id'] ?? 0);
             $pdo->prepare("UPDATE catalog_items SET item_type = ? WHERE id = ? AND deleted_at IS NULL")->execute([cc_item_type_for_db($pdo, 'assembly'), $id]);
+            cc_json(['status' => 'success', 'data' => cc_payload($pdo, (string)($input['view'] ?? 'all'), cc_int($input['catalog_id'] ?? 0), cc_int($input['group_id'] ?? 0))]);
+
+        case 'add_assembly_part':
+            $assemblyId = cc_int($input['assembly_catalog_item_id'] ?? 0);
+            $childId = cc_int($input['part_catalog_item_id'] ?? 0);
+            $quantity = is_numeric($input['quantity'] ?? null) ? (float)$input['quantity'] : 0;
+            if (!$assemblyId || !$childId || $assemblyId === $childId) cc_json(['status' => 'error', 'msg' => 'Select a valid assembly and child item'], 422);
+            if ($quantity <= 0) cc_json(['status' => 'error', 'msg' => 'Quantity must be greater than 0'], 422);
+            $stmt = $pdo->prepare("SELECT id, unit_cost, labor_hours FROM catalog_items WHERE id = ? AND deleted_at IS NULL");
+            $stmt->execute([$childId]);
+            $child = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$child) cc_json(['status' => 'error', 'msg' => 'Child item not found'], 404);
+            $pdo->prepare("UPDATE catalog_items SET item_type = ? WHERE id = ? AND deleted_at IS NULL")->execute([cc_item_type_for_db($pdo, 'assembly'), $assemblyId]);
+            $stmt = $pdo->prepare(
+                "INSERT INTO assembly_parts (assembly_catalog_item_id, part_catalog_item_id, quantity, unit_cost_snapshot, unit_labor_time_snapshot)
+                 VALUES (?, ?, ?, ?, ?)"
+            );
+            $stmt->execute([$assemblyId, $childId, $quantity, (float)$child['unit_cost'], (float)$child['labor_hours']]);
+            cc_recalculate_assembly($pdo, $assemblyId);
+            cc_json(['status' => 'success', 'data' => cc_payload($pdo, (string)($input['view'] ?? 'all'), cc_int($input['catalog_id'] ?? 0), cc_int($input['group_id'] ?? 0))]);
+
+        case 'delete_assembly_part':
+            $id = cc_int($input['id'] ?? 0);
+            $stmt = $pdo->prepare("SELECT assembly_catalog_item_id FROM assembly_parts WHERE id = ? AND deleted_at IS NULL");
+            $stmt->execute([$id]);
+            $assemblyId = (int)$stmt->fetchColumn();
+            $pdo->prepare("UPDATE assembly_parts SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?")->execute([$id]);
+            cc_recalculate_assembly($pdo, $assemblyId);
             cc_json(['status' => 'success', 'data' => cc_payload($pdo, (string)($input['view'] ?? 'all'), cc_int($input['catalog_id'] ?? 0), cc_int($input['group_id'] ?? 0))]);
 
         default:
