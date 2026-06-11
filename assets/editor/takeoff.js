@@ -13,6 +13,8 @@
         selectedLayerUids: new Set(),
         collapsedGroups: new Set(),
         layerSearch: '',
+        layerGroupFilter: '',
+        layerTypeFilter: '',
         selectedElement: null,
         draftLine: null,
         undo: [],
@@ -505,17 +507,57 @@
         return `<span class="takeoff-layer-symbol ${escapeHtml(symbol)}" style="background:${escapeHtml(color)}"></span>`;
     }
 
+    function layerCatalogItem(layer) {
+        if (layer.catalog_item_id) {
+            return state.catalog.items.find(item => String(item.id) === String(layer.catalog_item_id)) || null;
+        }
+        return null;
+    }
+
+    function layerAssembly(layer) {
+        if (layer.assembly_id) {
+            return state.assemblies.assemblies.find(assembly => String(assembly.id) === String(layer.assembly_id)) || null;
+        }
+        return null;
+    }
+
+    function layerLinkedName(layer) {
+        const assembly = layerAssembly(layer);
+        const item = layerCatalogItem(layer);
+        return assembly?.name || item?.name || 'Manual takeoff';
+    }
+
+    function layerTypeLabel(layer) {
+        const type = layerType(layer);
+        return String(type || 'mixed').replace('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+    }
+
     function filteredLayers() {
         const q = String(state.layerSearch || '').toLowerCase();
         return state.layers.filter(layer => {
-            if (!q) return true;
-            return [
+            const matchesSearch = !q || [
                 layer.name,
                 layerGroup(layer),
                 layerType(layer),
-                layerUnit(layer)
+                layerUnit(layer),
+                layerLinkedName(layer)
             ].join(' ').toLowerCase().includes(q);
+            const matchesGroup = !state.layerGroupFilter || layerGroup(layer) === state.layerGroupFilter;
+            const matchesType = !state.layerTypeFilter || layerType(layer) === state.layerTypeFilter;
+            return matchesSearch && matchesGroup && matchesType;
         });
+    }
+
+    function renderLayerFilterOptions() {
+        const groupSelect = document.getElementById('takeoffLayerGroupFilter');
+        const typeSelect = document.getElementById('takeoffLayerTypeFilter');
+        if (!groupSelect || !typeSelect) return;
+        const groups = Array.from(new Set(state.layers.map(layerGroup))).sort();
+        const types = Array.from(new Set(state.layers.map(layerType))).sort();
+        groupSelect.innerHTML = '<option value="">All groups</option>' + groups.map(group => `<option value="${escapeHtml(group)}">${escapeHtml(group)}</option>`).join('');
+        typeSelect.innerHTML = '<option value="">All types</option>' + types.map(type => `<option value="${escapeHtml(type)}">${escapeHtml(layerTypeLabel({ takeoff_type: type }))}</option>`).join('');
+        groupSelect.value = groups.includes(state.layerGroupFilter) ? state.layerGroupFilter : '';
+        typeSelect.value = types.includes(state.layerTypeFilter) ? state.layerTypeFilter : '';
     }
 
     function deleteLayer(layer) {
@@ -651,6 +693,10 @@
                 </div>
                 <div class="takeoff-panel-section">
                     <div class="takeoff-field mb-2"><label>Search</label><input id="takeoffLayerSearch" placeholder="Layer, group, catalog item"></div>
+                    <div class="takeoff-filter-row">
+                        <select id="takeoffLayerGroupFilter"><option value="">All groups</option></select>
+                        <select id="takeoffLayerTypeFilter"><option value="">All types</option></select>
+                    </div>
                     <div class="takeoff-tool-row">
                         <button class="takeoff-command" data-layer-bulk="show"><i class="fas fa-eye me-1"></i>Show</button>
                         <button class="takeoff-command" data-layer-bulk="hide"><i class="fas fa-eye-slash me-1"></i>Hide</button>
@@ -686,6 +732,14 @@
         document.getElementById('takeoffNewLayerTop').addEventListener('click', createLayerFromPrompt);
         document.getElementById('takeoffLayerSearch').addEventListener('input', event => {
             state.layerSearch = event.target.value;
+            renderLayers();
+        });
+        document.getElementById('takeoffLayerGroupFilter').addEventListener('change', event => {
+            state.layerGroupFilter = event.target.value;
+            renderLayers();
+        });
+        document.getElementById('takeoffLayerTypeFilter').addEventListener('change', event => {
+            state.layerTypeFilter = event.target.value;
             renderLayers();
         });
         root.querySelectorAll('[data-layer-bulk]').forEach(btn => btn.addEventListener('click', () => applyLayerBulk(btn.dataset.layerBulk)));
@@ -862,6 +916,200 @@
                 }
             }
         }));
+    }
+
+    function renderLayers() {
+        const el = document.getElementById('takeoffLayersTab');
+        if (!el) return;
+        const countEl = document.getElementById('takeoffLayerCount');
+        if (countEl) countEl.textContent = String(state.layers.length);
+        renderLayerFilterOptions();
+
+        const groups = {};
+        filteredLayers().forEach(layer => {
+            const group = layerGroup(layer);
+            if (!groups[group]) groups[group] = [];
+            groups[group].push(layer);
+        });
+
+        el.innerHTML = `<div class="takeoff-layer-groups">${Object.keys(groups).sort().map(group => {
+            const collapsed = state.collapsedGroups.has(group);
+            const rows = groups[group];
+            const groupQty = rows.reduce((sum, layer) => sum + layerQuantity(layer), 0);
+            return `<div class="takeoff-layer-group">
+                <div class="takeoff-layer-group-head">
+                    <button class="takeoff-group-toggle" data-layer-group="${escapeHtml(group)}">
+                        <i class="fas fa-chevron-${collapsed ? 'right' : 'down'}"></i>
+                    </button>
+                    <span>${escapeHtml(group)}</span>
+                    <small>${rows.length} layers</small>
+                    <strong>${groupQty.toFixed(2)}</strong>
+                    <button class="takeoff-mini-btn" data-group-action="menu" data-group-name="${escapeHtml(group)}" title="Group actions"><i class="fas fa-ellipsis-vertical"></i></button>
+                </div>
+                <div ${collapsed ? 'hidden' : ''}>
+                    ${rows.map(layer => renderLayerRow(layer)).join('')}
+                </div>
+            </div>`;
+        }).join('') || '<div class="takeoff-empty-state">No takeoff layers match the current filters.</div>'}</div>`;
+
+        el.querySelectorAll('[data-layer-group]').forEach(btn => btn.addEventListener('click', event => {
+            event.stopPropagation();
+            const group = btn.dataset.layerGroup;
+            if (state.collapsedGroups.has(group)) state.collapsedGroups.delete(group);
+            else state.collapsedGroups.add(group);
+            renderLayers();
+        }));
+
+        el.querySelectorAll('[data-group-action]').forEach(btn => btn.addEventListener('click', event => {
+            event.stopPropagation();
+            handleGroupAction(btn.dataset.groupName);
+        }));
+
+        el.querySelectorAll('[data-layer-uid]').forEach(row => row.addEventListener('click', () => {
+            state.selectedLayerUid = row.dataset.layerUid;
+            renderLayers();
+        }));
+
+        el.querySelectorAll('[data-layer-check]').forEach(box => {
+            box.addEventListener('click', event => event.stopPropagation());
+            box.addEventListener('change', () => {
+                if (box.checked) state.selectedLayerUids.add(box.dataset.layerCheck);
+                else state.selectedLayerUids.delete(box.dataset.layerCheck);
+                renderLayers();
+            });
+        });
+
+        el.querySelectorAll('[data-layer-action]').forEach(btn => btn.addEventListener('click', event => {
+            event.stopPropagation();
+            const layer = state.layers.find(row => row.client_uid === btn.dataset.layerUid);
+            if (!layer) return;
+            handleLayerAction(btn.dataset.layerAction, layer);
+        }));
+    }
+
+    function renderLayerRow(layer) {
+        const qty = layerQuantity(layer);
+        const visible = Number(layer.visible) !== 0;
+        const locked = Number(layer.locked) === 1;
+        const selected = layer.client_uid === state.selectedLayerUid;
+        const checked = state.selectedLayerUids.has(layer.client_uid);
+        return `<div class="takeoff-layer-row ${selected ? 'active' : ''} ${locked ? 'locked' : ''}" data-layer-uid="${layer.client_uid}">
+            <input type="checkbox" class="takeoff-layer-check" data-layer-check="${layer.client_uid}" ${checked ? 'checked' : ''}>
+            <button class="takeoff-layer-eye ${visible ? '' : 'off'}" data-layer-action="visible" data-layer-uid="${layer.client_uid}" title="Show/hide">
+                <i class="fas fa-eye${visible ? '' : '-slash'}"></i>
+            </button>
+            <div class="takeoff-layer-mark">
+                ${layerSymbol(layer)}
+            </div>
+            <div class="takeoff-layer-copy">
+                <div class="takeoff-layer-name">${escapeHtml(layer.name)}</div>
+                <div class="takeoff-layer-linked">${escapeHtml(layerLinkedName(layer))}</div>
+                <div class="takeoff-layer-meta">${escapeHtml(layerTypeLabel(layer))} | ${escapeHtml(layerUnit(layer))} | Page ${layer.page_number || pageNum}</div>
+            </div>
+            <div class="takeoff-layer-qty">${qty.toFixed(2)}</div>
+            <button class="takeoff-mini-btn ${locked ? 'active' : ''}" data-layer-action="lock" data-layer-uid="${layer.client_uid}" title="Lock">
+                <i class="fas fa-${locked ? 'lock' : 'lock-open'}"></i>
+            </button>
+            <button class="takeoff-mini-btn" data-layer-action="menu" data-layer-uid="${layer.client_uid}" title="Layer actions"><i class="fas fa-ellipsis-vertical"></i></button>
+        </div>`;
+    }
+
+    function handleGroupAction(group) {
+        const choice = prompt('Group action: rename, show, hide, lock, delete', 'rename');
+        if (!choice) return;
+        const action = choice.trim().toLowerCase();
+        const layers = state.layers.filter(layer => layerGroup(layer) === group);
+        if (!layers.length) return;
+        if (action === 'rename') {
+            const next = prompt('New group name', group);
+            if (!next) return;
+            snapshot();
+            layers.forEach(layer => { layer.group_name = next.trim() || group; });
+        }
+        if (action === 'show' || action === 'hide' || action === 'lock') {
+            snapshot();
+            layers.forEach(layer => {
+                if (action === 'show') layer.visible = 1;
+                if (action === 'hide') layer.visible = 0;
+                if (action === 'lock') layer.locked = 1;
+            });
+            setTakeoffPage(pageNum);
+        }
+        if (action === 'delete') {
+            if (!confirm('Delete all layers in this group?')) return;
+            snapshot();
+            layers.forEach(deleteLayerWithoutConfirm);
+        }
+        markDirty();
+        renderAll();
+    }
+
+    function deleteLayerWithoutConfirm(layer) {
+        state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).forEach(marker => marker.node && marker.node.destroy());
+        state.segments.filter(segment => segment.layer_client_uid === layer.client_uid).forEach(destroySegmentNodes);
+        state.markers = state.markers.filter(marker => marker.layer_client_uid !== layer.client_uid);
+        state.segments = state.segments.filter(segment => segment.layer_client_uid !== layer.client_uid);
+        state.layers = state.layers.filter(row => row !== layer);
+        state.selectedLayerUids.delete(layer.client_uid);
+        if (state.selectedLayerUid === layer.client_uid) state.selectedLayerUid = state.layers[0]?.client_uid || null;
+    }
+
+    function handleLayerAction(action, layer) {
+        if (action === 'visible') {
+            snapshot();
+            layer.visible = Number(layer.visible) ? 0 : 1;
+            setTakeoffPage(pageNum);
+            markDirty();
+            renderLayers();
+            return;
+        }
+        if (action === 'lock') {
+            snapshot();
+            layer.locked = Number(layer.locked) ? 0 : 1;
+            markDirty();
+            renderLayers();
+            return;
+        }
+        if (action !== 'menu') return;
+        const choice = prompt('Layer action: edit, duplicate, delete, move, color, symbol, type', 'edit');
+        if (!choice) return;
+        const selectedAction = choice.trim().toLowerCase();
+        if (selectedAction === 'edit') editLayer(layer);
+        if (selectedAction === 'duplicate') duplicateLayer(layer);
+        if (selectedAction === 'delete') deleteLayer(layer);
+        if (selectedAction === 'move') {
+            const group = prompt('Move to group', layerGroup(layer));
+            if (!group) return;
+            snapshot();
+            layer.group_name = group.trim();
+            markDirty();
+            renderAll();
+        }
+        if (selectedAction === 'color') {
+            const color = prompt('Hex color', layer.color || '#2563eb');
+            if (!color) return;
+            snapshot();
+            layer.color = color;
+            markDirty();
+            renderAll();
+        }
+        if (selectedAction === 'symbol') {
+            const symbol = prompt('Symbol: circle, square, diamond, triangle, cross, line', layer.symbol || 'circle');
+            if (!symbol) return;
+            snapshot();
+            layer.symbol = symbol;
+            markDirty();
+            renderAll();
+        }
+        if (selectedAction === 'type') {
+            const type = prompt('Takeoff type: count, linear, area, volume, lump_sum', layerType(layer));
+            if (!type) return;
+            snapshot();
+            layer.takeoff_type = type.trim();
+            layer.type = type.trim();
+            markDirty();
+            renderAll();
+        }
     }
 
     function renderProperties() {

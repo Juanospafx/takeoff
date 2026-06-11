@@ -309,3 +309,234 @@
         bottom: 76px;
     }
 }
+
+/* Layer manager overrides used by the in-canvas takeoff panel. */
+.takeoff-panel {
+    width: 430px;
+}
+
+.takeoff-panel-body {
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.45) rgba(15, 23, 42, 0.35);
+}
+
+.takeoff-filter-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) 132px;
+    gap: 6px;
+    margin-bottom: 8px;
+}
+
+.takeoff-filter-row select {
+    min-height: 34px;
+    width: 100%;
+    min-width: 0;
+    background: #020617;
+    border: 1px solid rgba(148, 163, 184, 0.25);
+    border-radius: 6px;
+    color: #e5e7eb;
+    padding: 6px 8px;
+    font-size: 0.78rem;
+}
+
+.takeoff-layer-groups {
+    gap: 10px;
+}
+
+.takeoff-layer-group {
+    border-color: rgba(56, 189, 248, 0.32);
+    border-radius: 8px;
+    background: rgba(2, 6, 23, 0.68);
+}
+
+.takeoff-layer-group-head {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr) auto auto 28px;
+    min-height: 43px;
+    padding: 7px 8px;
+    background: rgba(30, 41, 59, 0.98);
+    cursor: default;
+}
+
+.takeoff-layer-group-head > span {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-size: 0.9rem;
+    font-weight: 700;
+}
+
+.takeoff-layer-group-head small,
+.takeoff-layer-group-head strong {
+    color: #a7b4c8;
+    font-size: 0.78rem;
+    font-weight: 700;
+}
+
+.takeoff-group-toggle {
+    width: 26px;
+    height: 26px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #dbeafe;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.takeoff-group-toggle:hover {
+    background: rgba(148, 163, 184, 0.15);
+}
+
+.takeoff-layer-row {
+    display: grid;
+    grid-template-columns: 18px 28px 28px minmax(0, 1fr) 70px 28px 28px;
+    min-height: 74px;
+    padding: 8px 8px;
+    gap: 8px;
+    border-top: 1px solid rgba(148, 163, 184, 0.12);
+    background: rgba(2, 6, 23, 0.74);
+    cursor: pointer;
+}
+
+.takeoff-layer-row:hover {
+    background: rgba(15, 23, 42, 0.96);
+}
+
+.takeoff-layer-row.active {
+    background: rgba(8, 47, 73, 0.62);
+    box-shadow: inset 3px 0 0 #38bdf8;
+}
+
+.takeoff-layer-row.locked {
+    opacity: 0.78;
+}
+
+.takeoff-layer-check {
+    align-self: center;
+    accent-color: #38bdf8;
+}
+
+.takeoff-layer-eye,
+.takeoff-layer-mark,
+.takeoff-mini-btn {
+    align-self: center;
+}
+
+.takeoff-layer-eye {
+    width: 28px;
+    height: 28px;
+    border: 0;
+    border-radius: 6px;
+    background: transparent;
+    color: #9fb0c8;
+    cursor: pointer;
+}
+
+.takeoff-layer-eye:hover,
+.takeoff-layer-eye:not(.off) {
+    color: #e0f2fe;
+}
+
+.takeoff-layer-eye.off {
+    color: #64748b;
+}
+
+.takeoff-layer-mark {
+    width: 28px;
+    height: 28px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 7px;
+    background: rgba(15, 23, 42, 0.88);
+    border: 1px solid rgba(148, 163, 184, 0.22);
+}
+
+.takeoff-layer-symbol {
+    width: 18px;
+    height: 18px;
+    flex: 0 0 auto;
+}
+
+.takeoff-layer-copy {
+    min-width: 0;
+}
+
+.takeoff-layer-name,
+.takeoff-layer-linked,
+.takeoff-layer-meta {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.takeoff-layer-name {
+    color: #f8fafc;
+    font-size: 0.84rem;
+    font-weight: 800;
+    line-height: 1.2;
+}
+
+.takeoff-layer-linked {
+    margin-top: 2px;
+    color: #a7b4c8;
+    font-size: 0.74rem;
+    line-height: 1.2;
+}
+
+.takeoff-layer-meta {
+    margin-top: 3px;
+    color: #7dd3fc;
+    font-size: 0.68rem;
+    font-weight: 700;
+    text-transform: uppercase;
+}
+
+.takeoff-layer-qty {
+    align-self: center;
+    justify-self: end;
+    min-width: 58px;
+    padding: 5px 7px;
+    border: 1px solid rgba(148, 163, 184, 0.2);
+    border-radius: 999px;
+    background: rgba(15, 23, 42, 0.86);
+    color: #dbeafe;
+    font-size: 0.74rem;
+    font-weight: 800;
+    text-align: right;
+}
+
+.takeoff-mini-btn.active {
+    color: #f8fafc;
+    background: rgba(56, 189, 248, 0.16);
+}
+
+.takeoff-empty-state {
+    border: 1px dashed rgba(148, 163, 184, 0.3);
+    border-radius: 8px;
+    padding: 14px;
+    color: #94a3b8;
+    background: rgba(2, 6, 23, 0.45);
+    font-size: 0.78rem;
+}
+
+@media (max-width: 991px) {
+    .takeoff-panel {
+        width: calc(100% - 24px);
+    }
+
+    .takeoff-filter-row {
+        grid-template-columns: 1fr;
+    }
+
+    .takeoff-layer-row {
+        grid-template-columns: 18px 28px 28px minmax(0, 1fr) 56px;
+    }
+
+    .takeoff-layer-row .takeoff-mini-btn {
+        display: none;
+    }
+}
