@@ -1,11 +1,11 @@
 <?php
 // Standalone Takeoff entry point. No auth/session dependency.
-require_once __DIR__ . '/../core/db/connection.php';
-
 $recentFiles = [];
 $projects = [];
 
 try {
+    require_once __DIR__ . '/../core/db/connection.php';
+
     $recentStmt = $pdo->query(
         "SELECT f.id, f.filename, f.file_type, f.uploaded_at, p.name AS project_name, fo.name AS folder_name
          FROM files f
@@ -187,7 +187,7 @@ try {
             <span>Brightronix Takeoff</span>
         </div>
         <a class="nav-link-takeoff active" href="/"><i class="fas fa-file-lines"></i><span>Drawings</span></a>
-        <a class="nav-link-takeoff" href="/pages/index.php"><i class="fas fa-folder-tree"></i><span>Legacy Workspace</span></a>
+        <a class="nav-link-takeoff" href="/pages/takeoff.php"><i class="fas fa-folder-tree"></i><span>Takeoff Home</span></a>
         <a class="nav-link-takeoff" href="/takeoff_mysql_schema.sql"><i class="fas fa-database"></i><span>Schema</span></a>
     </aside>
 

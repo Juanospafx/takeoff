@@ -1,15 +1,14 @@
 <IfModule mod_rewrite.c>
     RewriteEngine On
     RewriteBase /
-    DirectoryIndex pages/takeoff.php index.php
 
     # Root domain: open the standalone Takeoff module.
     RewriteCond %{REQUEST_URI} ^/$
-    RewriteRule ^$ pages/takeoff.php [L]
+    RewriteRule ^$ /pages/takeoff.php [L]
 
     # The old pages directory/login entry must open Takeoff now.
-    RewriteRule ^pages/?$ pages/takeoff.php [L]
-    RewriteRule ^pages/(login|logout|index)\.php$ pages/takeoff.php [L]
+    RewriteRule ^pages/?$ /pages/takeoff.php [L]
+    RewriteRule ^pages/(login|logout|index)\.php$ /pages/takeoff.php [L]
 
     # Keep existing PHP pages, APIs, assets and uploads reachable.
     RewriteCond %{REQUEST_URI} ^/(pages|api|assets|uploads|views|core|funciones|docs)/ [NC]
@@ -21,5 +20,5 @@
     RewriteRule .* - [L]
 
     # Fallback to the Takeoff module instead of login/frontend.
-    RewriteRule ^.*$ pages/takeoff.php [L]
+    RewriteRule ^.*$ /pages/takeoff.php [L]
 </IfModule>
