@@ -15,6 +15,8 @@
         layerSearch: '',
         layerGroupFilter: '',
         layerTypeFilter: '',
+        createCatalogItemId: null,
+        createLayerMode: null,
         selectedElement: null,
         draftLine: null,
         undo: [],
@@ -80,14 +82,19 @@
     }
 
     function createLayer(overrides) {
-        const item = currentItem();
+        const hasOverrideItem = overrides && Object.prototype.hasOwnProperty.call(overrides, 'catalog_item_id');
+        const overrideItemId = hasOverrideItem ? overrides.catalog_item_id : null;
+        const item = hasOverrideItem
+            ? (overrideItemId ? state.catalog.items.find(i => String(i.id) === String(overrideItemId)) || null : null)
+            : currentItem();
         const assembly = currentAssembly();
+        const takeoffType = overrides?.takeoff_type || overrides?.type || (state.tool === 'takeoff_linear' ? 'linear' : 'count');
         const layer = {
             client_uid: uid(),
             page_number: pageNum || 1,
             name: overrides?.name || assembly?.name || item?.name || 'Takeoff Layer',
-            type: overrides?.type || 'mixed',
-            takeoff_type: overrides?.takeoff_type || overrides?.type || (state.tool === 'takeoff_linear' ? 'linear' : 'count'),
+            type: takeoffType,
+            takeoff_type: takeoffType,
             group_name: overrides?.group_name || item?.group_name || item?.category_name || 'Ungrouped',
             unit_of_measure: overrides?.unit_of_measure || assembly?.unit_of_measure || item?.unit_of_measure || (state.tool === 'takeoff_linear' ? 'ft' : 'ea'),
             catalog_item_id: item ? Number(item.id) : null,
@@ -95,6 +102,10 @@
             color: overrides?.color || item?.color || '#2563eb',
             symbol: overrides?.symbol || item?.symbol || 'circle',
             symbol_size: overrides?.symbol_size || 'Medium',
+            unit_cost: num(overrides?.unit_cost ?? item?.unit_cost ?? 0),
+            unit_labor_time: num(overrides?.unit_labor_time ?? item?.labor_hours ?? 0),
+            cost_code: overrides?.cost_code || item?.cost_code || '',
+            estimate_item_id: overrides?.estimate_item_id || null,
             visible: 1,
             locked: 0,
             tag: null,
@@ -173,62 +184,46 @@
     }
 
     function calculateTakeoffSummary() {
-        const rows = new Map();
-        const add = (seed, quantity) => {
-            const key = `${seed.type}:${seed.assemblyId || ''}:${seed.itemId || ''}`;
-            const row = rows.get(key) || { ...seed, quantity: 0, unitCost: 0, laborHours: 0, material: 0, labor: 0, total: 0, waste: 0, markup: 0, components: [] };
-            row.quantity += quantity;
-            const item = seed.itemId ? state.catalog.items.find(i => String(i.id) === String(seed.itemId)) : null;
-            const assembly = seed.assemblyId ? state.assemblies.assemblies.find(a => String(a.id) === String(seed.assemblyId)) : null;
+        const rows = [];
+        state.layers.forEach(layer => {
+            const quantity = layerQuantity(layer);
+            const item = layerCatalogItem(layer);
+            const assembly = layerAssembly(layer);
+            const source = item || layer;
+            const seed = {
+                layerUid: layer.client_uid,
+                itemId: item?.id || layer.catalog_item_id || null,
+                assemblyId: assembly?.id || layer.assembly_id || null,
+                item: layer.name || item?.name || 'Manual takeoff',
+                assembly: assembly?.name || '',
+                type: layerTypeLabel(layer),
+                unit: layerUnit(layer),
+                group: layerGroup(layer),
+                sourceType: layer.estimate_item_id ? 'takeoff' : (item ? 'catalog' : 'manual'),
+                estimateLinked: Boolean(layer.estimate_item_id || item),
+            };
+            const row = { ...seed, quantity, unitCost: 0, laborHours: 0, material: 0, labor: 0, total: 0, waste: 0, markup: 0, components: [] };
             if (assembly) {
                 const cost = calculateAssemblyCost(assembly, quantity);
                 row.unitCost = quantity ? cost.total / quantity : 0;
-                row.laborHours += cost.laborHours;
-                row.material += cost.material;
-                row.labor += cost.labor;
-                row.total += cost.total;
+                row.laborHours = cost.laborHours;
+                row.material = cost.material;
+                row.labor = cost.labor;
+                row.total = cost.total;
                 row.components = cost.details;
             } else {
-                const cost = calculateItemCost(item, quantity);
+                const cost = calculateItemCost(source, quantity);
                 row.unitCost = cost.unitCost;
-                row.laborHours += cost.laborHours;
-                row.material += cost.material;
-                row.labor += cost.labor;
-                row.total += cost.total;
-                row.waste += cost.waste;
-                row.markup += cost.markup;
+                row.laborHours = cost.laborHours || (quantity * num(layer.unit_labor_time || 0));
+                row.material = cost.material || (quantity * num(layer.unit_cost || 0));
+                row.labor = cost.labor;
+                row.total = cost.total || row.material + row.labor;
+                row.waste = cost.waste;
+                row.markup = cost.markup;
             }
-            rows.set(key, row);
-        };
-
-        state.markers.forEach(marker => {
-            const layer = state.layers.find(l => l.client_uid === marker.layer_client_uid);
-            const item = state.catalog.items.find(i => String(i.id) === String(marker.catalog_item_id || layer?.catalog_item_id));
-            const assembly = state.assemblies.assemblies.find(a => String(a.id) === String(marker.assembly_id || layer?.assembly_id));
-            add({
-                itemId: item?.id || null,
-                assemblyId: assembly?.id || null,
-                item: item?.name || '',
-                assembly: assembly?.name || '',
-                type: 'Count',
-                unit: assembly?.unit_of_measure || item?.unit_of_measure || 'ea',
-            }, calculateCountQuantity(marker));
+            rows.push(row);
         });
-
-        state.segments.forEach(segment => {
-            const layer = state.layers.find(l => l.client_uid === segment.layer_client_uid);
-            const item = state.catalog.items.find(i => String(i.id) === String(segment.catalog_item_id || layer?.catalog_item_id));
-            const assembly = state.assemblies.assemblies.find(a => String(a.id) === String(segment.assembly_id || layer?.assembly_id));
-            add({
-                itemId: item?.id || null,
-                assemblyId: assembly?.id || null,
-                item: item?.name || '',
-                assembly: assembly?.name || '',
-                type: 'Linear',
-                unit: segment.unit || item?.unit_of_measure || 'ft',
-            }, calculateLinearLength(segment));
-        });
-        return Array.from(rows.values());
+        return rows;
     }
 
     function ensureKonva() {
@@ -486,7 +481,8 @@
         const linearQty = state.segments
             .filter(segment => segment.layer_client_uid === layer.client_uid)
             .reduce((sum, segment) => sum + calculateLinearLength(segment), 0);
-        return countQty + linearQty;
+        const measured = countQty + linearQty;
+        return measured || num(layer.quantity || layer.seed_quantity || 0);
     }
 
     function layerType(layer) {
@@ -601,23 +597,180 @@
     }
 
     function createLayerFromPrompt() {
-        const item = currentItem();
-        const assembly = currentAssembly();
-        const name = prompt('Catalog Item Name / Layer Name', assembly?.name || item?.name || 'New Takeoff Layer');
-        if (!name) return;
-        const type = prompt('Takeoff type: count, linear, area, volume, lump_sum', state.tool === 'takeoff_linear' ? 'linear' : 'count') || 'count';
-        const uom = prompt('Unit of measure', type === 'linear' ? 'ft' : 'ea') || (type === 'linear' ? 'ft' : 'ea');
-        const group = prompt('Group', item?.group_name || item?.category_name || 'Ungrouped') || 'Ungrouped';
+        openCreateLayerModal();
+    }
+
+    function openCreateLayerModal(layer = null) {
+        state.createLayerMode = layer;
+        state.createCatalogItemId = layer?.catalog_item_id || null;
+        const item = state.createCatalogItemId ? state.catalog.items.find(row => String(row.id) === String(state.createCatalogItemId)) : null;
+        document.getElementById('takeoffCreateName').value = layer?.name || item?.name || '';
+        document.getElementById('takeoffCreateType').value = layerType(layer || {}) === 'mixed' ? 'count' : layerType(layer || {});
+        document.getElementById('takeoffCreateUom').value = layer?.unit_of_measure || item?.unit_of_measure || '';
+        document.getElementById('takeoffCreateSymbol').value = layer?.symbol || item?.symbol || 'circle';
+        document.getElementById('takeoffCreateSize').value = layer?.symbol_size || 'Medium';
+        document.getElementById('takeoffCreateColor').value = layer?.color || item?.color || '#2563eb';
+        document.getElementById('takeoffCreateGroup').value = layerGroup(layer || item || {});
+        updateCreateMeta(item, layer);
+        document.getElementById('takeoffCreateModal').classList.remove('takeoff-hidden');
+        validateCreateLayerModal();
+        setTimeout(() => document.getElementById('takeoffCreateName').focus(), 40);
+    }
+
+    function closeCreateLayerModal() {
+        document.getElementById('takeoffCreateModal')?.classList.add('takeoff-hidden');
+        state.createLayerMode = null;
+    }
+
+    function validateCreateLayerModal() {
+        const name = document.getElementById('takeoffCreateName')?.value.trim();
+        const type = document.getElementById('takeoffCreateType')?.value;
+        const uom = document.getElementById('takeoffCreateUom')?.value.trim();
+        const button = document.getElementById('takeoffCreateSubmit');
+        if (button) button.disabled = !(name && type && uom);
+    }
+
+    function updateCreateMeta(item, layer = null) {
+        const el = document.getElementById('takeoffCreateMeta');
+        if (!el) return;
+        const source = item || layer;
+        if (!source) {
+            el.innerHTML = 'No catalog item selected. This layer will be created as a manual takeoff layer.';
+            return;
+        }
+        el.innerHTML = `
+            <span>Unit Cost: <strong>${money(source.unit_cost || layer?.unit_cost || 0)}</strong></span>
+            <span>Labor Time: <strong>${num(source.labor_hours || layer?.unit_labor_time || 0).toFixed(2)}</strong></span>
+            <span>Cost Code: <strong>${escapeHtml(source.cost_code || layer?.cost_code || '-')}</strong></span>
+        `;
+    }
+
+    function submitCreateLayerModal() {
+        const item = state.createCatalogItemId ? state.catalog.items.find(row => String(row.id) === String(state.createCatalogItemId)) : null;
+        const payload = {
+            name: document.getElementById('takeoffCreateName').value.trim(),
+            takeoff_type: document.getElementById('takeoffCreateType').value,
+            type: document.getElementById('takeoffCreateType').value,
+            unit_of_measure: document.getElementById('takeoffCreateUom').value.trim(),
+            symbol: document.getElementById('takeoffCreateSymbol').value,
+            symbol_size: document.getElementById('takeoffCreateSize').value,
+            color: document.getElementById('takeoffCreateColor').value || '#2563eb',
+            group_name: document.getElementById('takeoffCreateGroup').value.trim() || item?.group_name || 'Ungrouped',
+            catalog_item_id: item?.id || null,
+            unit_cost: item?.unit_cost || 0,
+            unit_labor_time: item?.labor_hours || 0,
+            cost_code: item?.cost_code || '',
+        };
+        if (!payload.name || !payload.takeoff_type || !payload.unit_of_measure) return;
         snapshot();
-        createLayer({ name, type, takeoff_type: type, unit_of_measure: uom, group_name: group });
+        if (state.createLayerMode) {
+            Object.assign(state.createLayerMode, payload);
+            state.selectedLayerUid = state.createLayerMode.client_uid;
+        } else {
+            createLayer(payload);
+        }
+        state.createCatalogItemId = null;
+        closeCreateLayerModal();
         markDirty();
         renderAll();
+    }
+
+    function openCatalogBrowser() {
+        document.getElementById('takeoffCatalogModal').classList.remove('takeoff-hidden');
+        renderCatalogBrowser();
+        setTimeout(() => document.getElementById('takeoffCatalogSearch').focus(), 40);
+    }
+
+    function closeCatalogBrowser() {
+        document.getElementById('takeoffCatalogModal')?.classList.add('takeoff-hidden');
+    }
+
+    function catalogSearchMatch(item, q) {
+        if (!q) return true;
+        return [
+            item.name,
+            item.description,
+            item.manufacturer,
+            item.catalog_number,
+            item.cost_code,
+            item.group_name,
+            item.catalog_name,
+            item.sku,
+        ].join(' ').toLowerCase().includes(q);
+    }
+
+    function renderCatalogBrowser() {
+        const q = String(document.getElementById('takeoffCatalogSearch')?.value || '').toLowerCase();
+        const tree = document.getElementById('takeoffCatalogTree');
+        const results = document.getElementById('takeoffCatalogResults');
+        if (!tree || !results) return;
+        const catalogs = state.catalog.catalogs || [];
+        const groups = state.catalog.groups || state.catalog.categories || [];
+        tree.innerHTML = catalogs.map(catalog => {
+            const childGroups = groups.filter(group => String(group.catalog_id) === String(catalog.id));
+            return `<div class="takeoff-catalog-node">
+                <div class="takeoff-catalog-node-title"><i class="fas fa-book"></i>${escapeHtml(catalog.name)}</div>
+                ${childGroups.map(group => `<button data-catalog-group="${group.id}">${escapeHtml(group.name)}</button>`).join('')}
+            </div>`;
+        }).join('') || '<div class="takeoff-empty-state">No catalogs found.</div>';
+        const items = (state.catalog.items || []).filter(item => catalogSearchMatch(item, q)).slice(0, 120);
+        results.innerHTML = items.map(item => `
+            <button class="takeoff-catalog-result" data-catalog-pick="${item.id}">
+                <strong>${escapeHtml(item.name)}</strong>
+                <span>${escapeHtml(item.catalog_name || 'Catalog')} / ${escapeHtml(item.group_name || 'Ungrouped')}</span>
+                <small>${escapeHtml(item.description || item.manufacturer || '')}</small>
+                <em>${escapeHtml(item.unit_of_measure || 'ea')} | ${money(item.unit_cost || 0)} | ${escapeHtml(item.cost_code || item.catalog_number || '')}</em>
+            </button>
+        `).join('') || '<div class="takeoff-empty-state">No catalog items match your search.</div>';
+        tree.querySelectorAll('[data-catalog-group]').forEach(btn => btn.addEventListener('click', () => {
+            const group = groups.find(row => String(row.id) === String(btn.dataset.catalogGroup));
+            document.getElementById('takeoffCatalogSearch').value = group?.name || '';
+            renderCatalogBrowser();
+        }));
+        results.querySelectorAll('[data-catalog-pick]').forEach(btn => btn.addEventListener('click', () => {
+            const item = state.catalog.items.find(row => String(row.id) === String(btn.dataset.catalogPick));
+            if (!item) return;
+            state.createCatalogItemId = item.id;
+            document.getElementById('takeoffCreateName').value = item.name || '';
+            document.getElementById('takeoffCreateUom').value = item.unit_of_measure || 'ea';
+            document.getElementById('takeoffCreateColor').value = item.color || '#2563eb';
+            document.getElementById('takeoffCreateSymbol').value = item.symbol || 'circle';
+            document.getElementById('takeoffCreateGroup').value = item.group_name || item.catalog_name || 'Ungrouped';
+            if (!document.getElementById('takeoffCreateType').value) {
+                document.getElementById('takeoffCreateType').value = item.unit_of_measure === 'ft' || item.unit_of_measure === 'lf' ? 'linear' : 'count';
+            }
+            updateCreateMeta(item);
+            validateCreateLayerModal();
+            closeCatalogBrowser();
+        }));
     }
 
     function applyLayerBulk(action) {
         const uids = Array.from(state.selectedLayerUids);
         if (!uids.length && state.selectedLayerUid) uids.push(state.selectedLayerUid);
         if (!uids.length) return;
+        if (action === 'move') {
+            const group = prompt('Move selected to group', 'Lighting');
+            if (!group) return;
+            snapshot();
+            uids.forEach(uidValue => {
+                const layer = state.layers.find(row => row.client_uid === uidValue);
+                if (layer) layer.group_name = group.trim();
+            });
+            markDirty();
+            renderAll();
+            return;
+        }
+        if (action === 'estimate') {
+            snapshot();
+            uids.forEach(uidValue => {
+                const layer = state.layers.find(row => row.client_uid === uidValue);
+                if (layer) layer.estimate_item_id = layer.estimate_item_id || `pending_${layer.client_uid}`;
+            });
+            markDirty();
+            renderAll();
+            return;
+        }
         snapshot();
         uids.forEach(uidValue => {
             const layer = state.layers.find(row => row.client_uid === uidValue);
@@ -701,6 +854,8 @@
                         <button class="takeoff-command" data-layer-bulk="show"><i class="fas fa-eye me-1"></i>Show</button>
                         <button class="takeoff-command" data-layer-bulk="hide"><i class="fas fa-eye-slash me-1"></i>Hide</button>
                         <button class="takeoff-command" data-layer-bulk="lock"><i class="fas fa-lock me-1"></i>Lock</button>
+                        <button class="takeoff-command" data-layer-bulk="move"><i class="fas fa-folder-open me-1"></i>Move</button>
+                        <button class="takeoff-command" data-layer-bulk="estimate"><i class="fas fa-calculator me-1"></i>Estimate</button>
                         <button class="takeoff-command" data-layer-bulk="delete"><i class="fas fa-trash me-1"></i>Delete</button>
                     </div>
                 </div>
@@ -723,6 +878,59 @@
             </section>
             <section class="takeoff-props" id="takeoffProps"></section>
             <section class="takeoff-summary" id="takeoffSummary"></section>
+            <div class="takeoff-modal-backdrop takeoff-hidden" id="takeoffCreateModal">
+                <div class="takeoff-modal">
+                    <div class="takeoff-modal-head">
+                        <h3>Create new takeoff layer</h3>
+                        <button class="takeoff-mini-btn" id="takeoffCreateClose"><i class="fas fa-times"></i></button>
+                    </div>
+                    <div class="takeoff-modal-body">
+                        <div class="takeoff-field">
+                            <label>Catalog Item Name</label>
+                            <div class="takeoff-pick-row">
+                                <input id="takeoffCreateName" placeholder="Enter material name or pick one from catalog">
+                                <button class="takeoff-command" id="takeoffBrowseCatalog" type="button">Browse Catalog</button>
+                            </div>
+                        </div>
+                        <div class="takeoff-grid-2">
+                            <div class="takeoff-field"><label>Takeoff Type</label><select id="takeoffCreateType">
+                                <option value="">Select type</option><option value="count">Count</option><option value="linear">Linear</option><option value="area">Area</option><option value="volume">Volume</option><option value="lump_sum">Lump Sum</option>
+                            </select></div>
+                            <div class="takeoff-field"><label>UOM</label><input id="takeoffCreateUom" placeholder="ea, ft, lf, sf, cy, lot"></div>
+                        </div>
+                        <div class="takeoff-grid-2">
+                            <div class="takeoff-field"><label>Symbol</label><select id="takeoffCreateSymbol">
+                                <option value="circle">Circle</option><option value="square">Square</option><option value="diamond">Diamond</option><option value="triangle">Triangle</option><option value="cross">Cross</option><option value="line">Line</option>
+                            </select></div>
+                            <div class="takeoff-field"><label>Size</label><select id="takeoffCreateSize"><option>Small</option><option selected>Medium</option><option>Large</option></select></div>
+                        </div>
+                        <div class="takeoff-grid-2">
+                            <div class="takeoff-field"><label>Color</label><input id="takeoffCreateColor" type="color" value="#2563eb"></div>
+                            <div class="takeoff-field"><label>Group</label><input id="takeoffCreateGroup" placeholder="Lighting, Controls, Gear"></div>
+                        </div>
+                        <div class="takeoff-create-meta" id="takeoffCreateMeta"></div>
+                    </div>
+                    <div class="takeoff-modal-actions">
+                        <button class="takeoff-command" id="takeoffCreateCancel">Cancel</button>
+                        <button class="takeoff-command primary" id="takeoffCreateSubmit" disabled>Create</button>
+                    </div>
+                </div>
+            </div>
+            <div class="takeoff-modal-backdrop takeoff-hidden" id="takeoffCatalogModal">
+                <div class="takeoff-modal takeoff-catalog-modal">
+                    <div class="takeoff-modal-head">
+                        <h3>Browse Catalog</h3>
+                        <button class="takeoff-mini-btn" id="takeoffCatalogClose"><i class="fas fa-times"></i></button>
+                    </div>
+                    <div class="takeoff-modal-body">
+                        <div class="takeoff-field"><label>Search Catalog</label><input id="takeoffCatalogSearch" placeholder="Item, description, manufacturer, catalog number, cost code, group"></div>
+                        <div class="takeoff-catalog-browser">
+                            <div class="takeoff-catalog-tree" id="takeoffCatalogTree"></div>
+                            <div class="takeoff-catalog-results" id="takeoffCatalogResults"></div>
+                        </div>
+                    </div>
+                </div>
+            </div>
         `;
         wrapper.appendChild(root);
         root.querySelectorAll('[data-takeoff-tool]').forEach(btn => btn.addEventListener('click', () => setTool(btn.dataset.takeoffTool)));
@@ -730,6 +938,16 @@
         document.getElementById('takeoffDelete').addEventListener('click', deleteSelected);
         document.getElementById('takeoffNewLayer').addEventListener('click', createLayerFromPrompt);
         document.getElementById('takeoffNewLayerTop').addEventListener('click', createLayerFromPrompt);
+        document.getElementById('takeoffCreateClose').addEventListener('click', closeCreateLayerModal);
+        document.getElementById('takeoffCreateCancel').addEventListener('click', closeCreateLayerModal);
+        document.getElementById('takeoffCreateSubmit').addEventListener('click', submitCreateLayerModal);
+        document.getElementById('takeoffBrowseCatalog').addEventListener('click', openCatalogBrowser);
+        document.getElementById('takeoffCatalogClose').addEventListener('click', closeCatalogBrowser);
+        document.getElementById('takeoffCatalogSearch').addEventListener('input', renderCatalogBrowser);
+        ['takeoffCreateName', 'takeoffCreateType', 'takeoffCreateUom'].forEach(id => {
+            document.getElementById(id).addEventListener('input', validateCreateLayerModal);
+            document.getElementById(id).addEventListener('change', validateCreateLayerModal);
+        });
         document.getElementById('takeoffLayerSearch').addEventListener('input', event => {
             state.layerSearch = event.target.value;
             renderLayers();
@@ -1112,6 +1330,53 @@
         }
     }
 
+    function findCatalogItemByName(name) {
+        const normalized = String(name).toLowerCase();
+        return state.catalog.items.find(item => String(item.name || '').toLowerCase() === normalized)
+            || state.catalog.items.find(item => String(item.name || '').toLowerCase().includes(normalized.split('"')[0].trim()))
+            || null;
+    }
+
+    function seedTemplateLayers() {
+        const seeds = [
+            ['Lighting', 'Lighting Fixture "A"', 0, 'count', 'ea', '#ef4444', 'square'],
+            ['Lighting', 'Lighting Fixture "B"', 15, 'count', 'ea', '#f97316', 'circle'],
+            ['Lighting', 'Lighting Fixture "C"', 0, 'count', 'ea', '#eab308', 'diamond'],
+            ['Lighting', 'Lighting Fixture "D"', 0, 'count', 'ea', '#22c55e', 'triangle'],
+            ['Lighting', 'Lighting Fixture "Y"', 8, 'count', 'ea', '#06b6d4', 'circle'],
+            ['Lighting', 'Lighting Fixture "E"', 26, 'count', 'ea', '#8b5cf6', 'square'],
+            ['Lighting', 'Lighting Package Lump Sum', 0, 'lump_sum', 'lot', '#64748b', 'diamond'],
+            ['Controls', 'Ceiling Mounted Occupancy Sensor "OS"', 0, 'count', 'ea', '#38bdf8', 'circle'],
+            ['Controls', 'Wall Occupancy Sensor Switch Dual Tech', 0, 'count', 'ea', '#0ea5e9', 'square'],
+            ['Controls', 'Dimmer Switch', 0, 'count', 'ea', '#6366f1', 'circle'],
+            ['Controls', 'Dimmer Switch 3-way', 0, 'count', 'ea', '#a855f7', 'circle'],
+            ['Controls', 'Power Pack', 0, 'count', 'ea', '#14b8a6', 'square'],
+            ['Gear', 'Panelboard', 0, 'count', 'ea', '#f59e0b', 'square'],
+            ['Rough-in', 'EMT Conduit 1/2 inch', 0, 'linear', 'ft', '#94a3b8', 'line'],
+            ['Overhead Lighting', 'Lighting Branch Circuit', 0, 'linear', 'ft', '#38bdf8', 'line'],
+            ['Overhead Power', 'Power Branch Circuit', 0, 'linear', 'ft', '#f43f5e', 'line'],
+            ['Underground', 'Underground Feeder', 0, 'linear', 'ft', '#84cc16', 'line'],
+        ];
+        seeds.forEach(([group, name, quantity, type, uom, color, symbol]) => {
+            const item = findCatalogItemByName(name);
+            const layer = createLayer({
+                name,
+                group_name: group,
+                takeoff_type: type,
+                type,
+                unit_of_measure: item?.unit_of_measure || uom,
+                catalog_item_id: item?.id || null,
+                color: item?.color || color,
+                symbol: item?.symbol || symbol,
+                unit_cost: item?.unit_cost || 0,
+                unit_labor_time: item?.labor_hours || 0,
+                cost_code: item?.cost_code || '',
+            });
+            layer.seed_quantity = quantity;
+        });
+        state.selectedLayerUid = state.layers[0]?.client_uid || null;
+    }
+
     function renderProperties() {
         const el = document.getElementById('takeoffProps');
         if (!el) return;
@@ -1159,6 +1424,20 @@
             </table></div>`;
     }
 
+    function renderSummary() {
+        const rows = calculateTakeoffSummary();
+        const el = document.getElementById('takeoffSummary');
+        if (!el) return;
+        const body = rows.length
+            ? rows.map(r => `<tr><td>${escapeHtml(r.item)}</td><td>${escapeHtml(r.assembly)}</td><td>${escapeHtml(r.type)}</td><td>${escapeHtml(r.unit)}</td><td>${r.quantity.toFixed(2)}</td><td>${money(r.unitCost)}</td><td>${r.laborHours.toFixed(2)}</td><td>${money(r.material)}</td><td>${money(r.labor)}</td><td>${money(r.total)}</td><td>${num(r.waste).toFixed(2)}</td><td>${money(r.markup)}</td></tr>`).join('')
+            : '<tr><td colspan="12">No estimate items linked yet. Create a takeoff layer from catalog or add an estimate item.</td></tr>';
+        el.innerHTML = `<div class="takeoff-summary-head"><div class="takeoff-title">Summary</div><div class="takeoff-list-meta">${rows.length} rows${state.dirty ? ' - unsaved' : ''}</div></div>
+            <div class="takeoff-summary-table-wrap"><table>
+            <thead><tr><th>Item</th><th>Assembly</th><th>Type</th><th>Unit</th><th>Qty</th><th>Unit Cost</th><th>Labor Hours</th><th>Material</th><th>Labor</th><th>Total</th><th>Waste</th><th>Markup</th></tr></thead>
+            <tbody>${body}</tbody>
+            </table></div>`;
+    }
+
     function renderAll() {
         renderCatalog();
         renderAssemblies();
@@ -1170,6 +1449,7 @@
     function saveTakeoff() {
         return request('save_state', {
             drawing_id: fileId,
+            project_id: typeof projectId !== 'undefined' ? projectId : 0,
             layers: state.layers,
             markers: state.markers.map(stripNodes),
             segments: state.segments.map(stripNodes),
@@ -1198,7 +1478,14 @@
                 state.segments = (data.segments || []).map(s => ({ ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: String(s.layer_id), points_json: s.points_json || [], metadata_json: s.metadata_json || {} }));
             }
             if (!state.selectedItemId && state.catalog.items[0]) state.selectedItemId = state.catalog.items[0].id;
-            if (!state.layers.length) createLayer({ name: 'Default Takeoff' });
+            const onlyLegacyDefault = state.layers.length === 1
+                && String(state.layers[0].name || '').toLowerCase() === 'default takeoff'
+                && !state.markers.length
+                && !state.segments.length;
+            if (!state.layers.length || onlyLegacyDefault) {
+                state.layers = [];
+                seedTemplateLayers();
+            }
             renderNodes();
             renderAll();
         }).catch(err => {

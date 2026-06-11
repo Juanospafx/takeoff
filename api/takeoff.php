@@ -65,37 +65,229 @@ function takeoff_add_column(PDO $pdo, string $table, string $column, string $sql
     }
 }
 
+function takeoff_table_exists(PDO $pdo, string $table): bool
+{
+    try {
+        $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
+        $stmt->execute([$table]);
+        return (bool)$stmt->fetchColumn();
+    } catch (Throwable $e) {
+        return false;
+    }
+}
+
 function ensure_takeoff_layer_columns(PDO $pdo): void
 {
+    takeoff_add_column($pdo, 'takeoff_layers', 'drawing_id', "ALTER TABLE takeoff_layers ADD COLUMN drawing_id BIGINT UNSIGNED NULL");
+    takeoff_add_column($pdo, 'takeoff_layers', 'page_number', "ALTER TABLE takeoff_layers ADD COLUMN page_number INT UNSIGNED NOT NULL DEFAULT 1");
+    takeoff_add_column($pdo, 'takeoff_layers', 'type', "ALTER TABLE takeoff_layers ADD COLUMN type VARCHAR(50) NOT NULL DEFAULT 'mixed'");
     takeoff_add_column($pdo, 'takeoff_layers', 'group_name', "ALTER TABLE takeoff_layers ADD COLUMN group_name VARCHAR(191) NULL");
     takeoff_add_column($pdo, 'takeoff_layers', 'takeoff_type', "ALTER TABLE takeoff_layers ADD COLUMN takeoff_type VARCHAR(50) NOT NULL DEFAULT 'count'");
     takeoff_add_column($pdo, 'takeoff_layers', 'unit_of_measure', "ALTER TABLE takeoff_layers ADD COLUMN unit_of_measure VARCHAR(50) NOT NULL DEFAULT 'ea'");
+    takeoff_add_column($pdo, 'takeoff_layers', 'assembly_id', "ALTER TABLE takeoff_layers ADD COLUMN assembly_id BIGINT UNSIGNED NULL");
+    takeoff_add_column($pdo, 'takeoff_layers', 'color', "ALTER TABLE takeoff_layers ADD COLUMN color VARCHAR(50) NOT NULL DEFAULT '#2563eb'");
+    takeoff_add_column($pdo, 'takeoff_layers', 'symbol', "ALTER TABLE takeoff_layers ADD COLUMN symbol VARCHAR(50) NOT NULL DEFAULT 'circle'");
     takeoff_add_column($pdo, 'takeoff_layers', 'symbol_size', "ALTER TABLE takeoff_layers ADD COLUMN symbol_size VARCHAR(50) NULL");
     takeoff_add_column($pdo, 'takeoff_layers', 'quantity', "ALTER TABLE takeoff_layers ADD COLUMN quantity DECIMAL(18,6) NOT NULL DEFAULT 0");
+    takeoff_add_column($pdo, 'takeoff_layers', 'visible', "ALTER TABLE takeoff_layers ADD COLUMN visible TINYINT(1) NOT NULL DEFAULT 1");
+    takeoff_add_column($pdo, 'takeoff_layers', 'locked', "ALTER TABLE takeoff_layers ADD COLUMN locked TINYINT(1) NOT NULL DEFAULT 0");
+    takeoff_add_column($pdo, 'takeoff_layers', 'tag', "ALTER TABLE takeoff_layers ADD COLUMN tag VARCHAR(100) NULL");
+    takeoff_add_column($pdo, 'takeoff_layers', 'estimate_item_id', "ALTER TABLE takeoff_layers ADD COLUMN estimate_item_id BIGINT UNSIGNED NULL");
+    takeoff_add_column($pdo, 'takeoff_layers', 'metadata_json', "ALTER TABLE takeoff_layers ADD COLUMN metadata_json JSON NULL");
+}
+
+function ensure_estimate_schema(PDO $pdo): void
+{
+    $pdo->exec("CREATE TABLE IF NOT EXISTS estimates (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        project_id BIGINT UNSIGNED NOT NULL,
+        name VARCHAR(191) NOT NULL,
+        status VARCHAR(50) NOT NULL DEFAULT 'draft',
+        currency_code CHAR(3) NOT NULL DEFAULT 'USD',
+        subtotal_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+        total_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        deleted_at TIMESTAMP NULL DEFAULT NULL,
+        PRIMARY KEY (id),
+        KEY idx_estimates_project (project_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS estimate_items (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        estimate_id BIGINT UNSIGNED NOT NULL,
+        takeoff_layer_id BIGINT UNSIGNED NULL,
+        catalog_item_id BIGINT UNSIGNED NULL,
+        source_type VARCHAR(50) NOT NULL DEFAULT 'manual',
+        is_quantity_locked_from_takeoff TINYINT(1) NOT NULL DEFAULT 0,
+        name VARCHAR(191) NOT NULL,
+        description TEXT NULL,
+        group_name VARCHAR(191) NULL,
+        cost_type VARCHAR(100) NULL,
+        quantity DECIMAL(18,6) NOT NULL DEFAULT 0,
+        unit_of_measure VARCHAR(50) NOT NULL DEFAULT 'ea',
+        unit_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+        unit_labor_time DECIMAL(18,4) NOT NULL DEFAULT 0,
+        labor_hours DECIMAL(18,4) NOT NULL DEFAULT 0,
+        material_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+        labor_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+        waste_percentage DECIMAL(9,4) NOT NULL DEFAULT 0,
+        markup_percent DECIMAL(9,4) NOT NULL DEFAULT 0,
+        taxable TINYINT(1) NOT NULL DEFAULT 1,
+        subtotal_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+        total_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        deleted_at TIMESTAMP NULL DEFAULT NULL,
+        PRIMARY KEY (id),
+        KEY idx_estimate_items_estimate (estimate_id),
+        KEY idx_estimate_items_takeoff_layer (takeoff_layer_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    foreach ([
+        'takeoff_layer_id' => "ALTER TABLE estimate_items ADD COLUMN takeoff_layer_id BIGINT UNSIGNED NULL",
+        'catalog_item_id' => "ALTER TABLE estimate_items ADD COLUMN catalog_item_id BIGINT UNSIGNED NULL",
+        'source_type' => "ALTER TABLE estimate_items ADD COLUMN source_type VARCHAR(50) NOT NULL DEFAULT 'manual'",
+        'is_quantity_locked_from_takeoff' => "ALTER TABLE estimate_items ADD COLUMN is_quantity_locked_from_takeoff TINYINT(1) NOT NULL DEFAULT 0",
+        'group_name' => "ALTER TABLE estimate_items ADD COLUMN group_name VARCHAR(191) NULL",
+        'unit_labor_time' => "ALTER TABLE estimate_items ADD COLUMN unit_labor_time DECIMAL(18,4) NOT NULL DEFAULT 0",
+        'material_cost' => "ALTER TABLE estimate_items ADD COLUMN material_cost DECIMAL(18,4) NOT NULL DEFAULT 0",
+        'subtotal_cost' => "ALTER TABLE estimate_items ADD COLUMN subtotal_cost DECIMAL(18,4) NOT NULL DEFAULT 0",
+    ] as $column => $sql) {
+        takeoff_add_column($pdo, 'estimate_items', $column, $sql);
+    }
 }
 
 function catalog_payload(PDO $pdo): array
 {
-    $catalogs = $pdo->query("SELECT * FROM catalogs ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
-    $categories = $pdo->query("SELECT * FROM catalog_categories ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
-    $items = $pdo->query("SELECT * FROM catalog_items WHERE active = 1 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
+    $catalogColumns = takeoff_columns($pdo, 'catalogs');
+    $catalogWhere = in_array('deleted_at', $catalogColumns, true) ? "WHERE deleted_at IS NULL" : "";
+    $catalogs = takeoff_table_exists($pdo, 'catalogs')
+        ? $pdo->query("SELECT * FROM catalogs $catalogWhere ORDER BY name")->fetchAll(PDO::FETCH_ASSOC)
+        : [];
+    $groupColumns = takeoff_columns($pdo, 'catalog_groups');
+    $groupWhere = in_array('deleted_at', $groupColumns, true) ? "WHERE g.deleted_at IS NULL" : "";
+    $categories = takeoff_table_exists($pdo, 'catalog_groups')
+        ? $pdo->query("SELECT g.*, c.name AS catalog_name FROM catalog_groups g LEFT JOIN catalogs c ON c.id = g.catalog_id $groupWhere ORDER BY c.name, g.name")->fetchAll(PDO::FETCH_ASSOC)
+        : (takeoff_table_exists($pdo, 'catalog_categories') ? $pdo->query("SELECT * FROM catalog_categories ORDER BY name")->fetchAll(PDO::FETCH_ASSOC) : []);
+    $itemColumns = takeoff_columns($pdo, 'catalog_items');
+    $itemDeleted = in_array('deleted_at', $itemColumns, true) ? "AND ci.deleted_at IS NULL" : "";
+    $itemActive = in_array('active', $itemColumns, true) ? "ci.active = 1" : "1 = 1";
+    $hasGroups = takeoff_table_exists($pdo, 'catalog_groups') && in_array('catalog_group_id', $itemColumns, true);
+    $groupJoin = $hasGroups ? "LEFT JOIN catalog_groups g ON g.id = ci.catalog_group_id" : "";
+    $groupNameSelect = $hasGroups ? "g.name AS group_name" : "NULL AS group_name";
+    $groupOrder = $hasGroups ? "g.name," : "";
+    $items = takeoff_table_exists($pdo, 'catalog_items')
+        ? $pdo->query(
+            "SELECT ci.*, c.name AS catalog_name, $groupNameSelect
+             FROM catalog_items ci
+             LEFT JOIN catalogs c ON c.id = ci.catalog_id
+             $groupJoin
+             WHERE $itemActive $itemDeleted
+             ORDER BY c.name, $groupOrder ci.name"
+        )->fetchAll(PDO::FETCH_ASSOC)
+        : [];
     return [
         'catalogs' => $catalogs,
         'categories' => $categories,
+        'groups' => $categories,
         'items' => decode_json_fields($items, ['tags', 'attributes_json']),
     ];
 }
 
 function assemblies_payload(PDO $pdo): array
 {
-    $assemblies = $pdo->query("SELECT * FROM assemblies WHERE active = 1 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
-    $items = $pdo->query(
-        "SELECT ai.*, ci.name AS catalog_item_name, ci.unit_of_measure, ci.unit_cost, ci.material_cost, ci.labor_cost, ci.labor_hours
-         FROM assembly_items ai
-         JOIN catalog_items ci ON ci.id = ai.catalog_item_id
-         ORDER BY ai.assembly_id, ai.id"
-    )->fetchAll(PDO::FETCH_ASSOC);
+    if (takeoff_table_exists($pdo, 'assemblies')) {
+        $assemblies = $pdo->query("SELECT * FROM assemblies WHERE active = 1 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
+        $items = takeoff_table_exists($pdo, 'assembly_items') ? $pdo->query(
+            "SELECT ai.*, ci.name AS catalog_item_name, ci.unit_of_measure, ci.unit_cost, ci.material_cost, ci.labor_cost, ci.labor_hours
+             FROM assembly_items ai
+             JOIN catalog_items ci ON ci.id = ai.catalog_item_id
+             ORDER BY ai.assembly_id, ai.id"
+        )->fetchAll(PDO::FETCH_ASSOC) : [];
+        return ['assemblies' => $assemblies, 'items' => $items];
+    }
+
+    $assemblies = takeoff_table_exists($pdo, 'catalog_items')
+        ? $pdo->query("SELECT * FROM catalog_items WHERE active = 1 AND deleted_at IS NULL AND item_type = 'assembly' ORDER BY name")->fetchAll(PDO::FETCH_ASSOC)
+        : [];
+    $items = takeoff_table_exists($pdo, 'assembly_parts') ? $pdo->query(
+        "SELECT ap.*, ap.assembly_catalog_item_id AS assembly_id, ap.part_catalog_item_id AS catalog_item_id,
+                ci.name AS catalog_item_name, ci.unit_of_measure, ci.unit_cost, ci.material_cost, ci.labor_cost, ci.labor_hours
+         FROM assembly_parts ap
+         JOIN catalog_items ci ON ci.id = ap.part_catalog_item_id
+         WHERE ap.deleted_at IS NULL
+         ORDER BY ap.assembly_catalog_item_id, ap.id"
+    )->fetchAll(PDO::FETCH_ASSOC) : [];
     return ['assemblies' => $assemblies, 'items' => $items];
+}
+
+function project_id_for_file(PDO $pdo, int $fileId, int $fallback = 0): int
+{
+    if ($fallback > 0) return $fallback;
+    if (!takeoff_table_exists($pdo, 'files')) return 1;
+    $stmt = $pdo->prepare("SELECT project_id FROM files WHERE id = ?");
+    $stmt->execute([$fileId]);
+    return (int)($stmt->fetchColumn() ?: 1);
+}
+
+function ensure_project_estimate(PDO $pdo, int $projectId): int
+{
+    $stmt = $pdo->prepare("SELECT id FROM estimates WHERE project_id = ? AND deleted_at IS NULL ORDER BY id LIMIT 1");
+    $stmt->execute([$projectId]);
+    $id = (int)$stmt->fetchColumn();
+    if ($id > 0) return $id;
+    $stmt = $pdo->prepare("INSERT INTO estimates (project_id, name, status, currency_code) VALUES (?, ?, 'draft', 'USD')");
+    $stmt->execute([$projectId, 'Takeoff Estimate']);
+    return (int)$pdo->lastInsertId();
+}
+
+function sync_estimate_items(PDO $pdo, int $estimateId, array $summary, array $layerMap): void
+{
+    if (!$summary) return;
+    $insert = $pdo->prepare(
+        "INSERT INTO estimate_items
+         (estimate_id, takeoff_layer_id, catalog_item_id, source_type, is_quantity_locked_from_takeoff, name, group_name, quantity, unit_of_measure, unit_cost, unit_labor_time, labor_hours, material_cost, labor_cost, subtotal_cost, total_cost)
+         VALUES (?, ?, ?, 'takeoff', 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+    );
+    $update = $pdo->prepare(
+        "UPDATE estimate_items SET catalog_item_id = ?, source_type = 'takeoff', is_quantity_locked_from_takeoff = 1, name = ?, group_name = ?, quantity = ?, unit_of_measure = ?, unit_cost = ?, unit_labor_time = ?, labor_hours = ?, material_cost = ?, labor_cost = ?, subtotal_cost = ?, total_cost = ?, deleted_at = NULL WHERE estimate_id = ? AND takeoff_layer_id = ?"
+    );
+    foreach ($summary as $row) {
+        if (!is_array($row)) continue;
+        $clientUid = (string)($row['layerUid'] ?? '');
+        $layerId = $layerMap[$clientUid] ?? 0;
+        if ($layerId <= 0) continue;
+        $qty = n($row['quantity'] ?? 0);
+        $unitCost = n($row['unitCost'] ?? 0);
+        $laborHours = n($row['laborHours'] ?? 0);
+        $material = n($row['material'] ?? ($qty * $unitCost));
+        $labor = n($row['labor'] ?? 0);
+        $total = n($row['total'] ?? ($material + $labor));
+        $common = [
+            !empty($row['itemId']) ? (int)$row['itemId'] : null,
+            trim((string)($row['item'] ?? 'Takeoff Item')) ?: 'Takeoff Item',
+            $row['group'] ?? null,
+            $qty,
+            $row['unit'] ?? 'ea',
+            $unitCost,
+            $qty > 0 ? $laborHours / $qty : 0,
+            $laborHours,
+            $material,
+            $labor,
+            $material + $labor,
+            $total,
+        ];
+        $exists = $pdo->prepare("SELECT id FROM estimate_items WHERE estimate_id = ? AND takeoff_layer_id = ? LIMIT 1");
+        $exists->execute([$estimateId, $layerId]);
+        if ($exists->fetchColumn()) {
+            $update->execute(array_merge($common, [$estimateId, $layerId]));
+        } else {
+            $insert->execute(array_merge([$estimateId, $layerId], $common));
+        }
+    }
+    $pdo->prepare("UPDATE estimates SET subtotal_cost = (SELECT COALESCE(SUM(subtotal_cost),0) FROM estimate_items WHERE estimate_id = ? AND deleted_at IS NULL), total_cost = (SELECT COALESCE(SUM(total_cost),0) FROM estimate_items WHERE estimate_id = ? AND deleted_at IS NULL) WHERE id = ?")
+        ->execute([$estimateId, $estimateId, $estimateId]);
 }
 
 function state_payload(PDO $pdo, int $drawingId): array
@@ -132,6 +324,7 @@ function state_payload(PDO $pdo, int $drawingId): array
 
 try {
     ensure_takeoff_layer_columns($pdo);
+    ensure_estimate_schema($pdo);
 
     switch ($action) {
         case 'bootstrap':
@@ -149,6 +342,7 @@ try {
         case 'save_state':
             $drawingId = i($input['drawing_id'] ?? 0);
             if ($drawingId <= 0) out_json(['status' => 'error', 'msg' => 'drawing_id is required'], 422);
+            $projectId = project_id_for_file($pdo, $drawingId, i($input['project_id'] ?? 0));
             $layers = is_array($input['layers'] ?? null) ? $input['layers'] : [];
             $markers = is_array($input['markers'] ?? null) ? $input['markers'] : [];
             $segments = is_array($input['segments'] ?? null) ? $input['segments'] : [];
@@ -162,14 +356,15 @@ try {
                 $in = implode(',', array_fill(0, count($oldIds), '?'));
                 $pdo->prepare("DELETE FROM takeoff_count_markers WHERE layer_id IN ($in)")->execute($oldIds);
                 $pdo->prepare("DELETE FROM takeoff_linear_segments WHERE layer_id IN ($in)")->execute($oldIds);
+                $pdo->prepare("UPDATE estimate_items SET deleted_at = CURRENT_TIMESTAMP WHERE source_type = 'takeoff' AND takeoff_layer_id IN ($in)")->execute($oldIds);
                 $pdo->prepare("DELETE FROM takeoff_layers WHERE id IN ($in)")->execute($oldIds);
             }
 
             $layerMap = [];
             $layerStmt = $pdo->prepare(
                 "INSERT INTO takeoff_layers
-                 (drawing_id, page_number, name, type, takeoff_type, unit_of_measure, group_name, catalog_item_id, assembly_id, color, symbol, symbol_size, quantity, visible, locked, tag, metadata_json)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                 (drawing_id, page_number, name, type, takeoff_type, unit_of_measure, group_name, catalog_item_id, assembly_id, color, symbol, symbol_size, quantity, visible, locked, tag, estimate_item_id, metadata_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             );
             foreach ($layers as $layer) {
                 if (!is_array($layer)) continue;
@@ -202,6 +397,7 @@ try {
                     !empty($layer['visible']) ? 1 : 0,
                     !empty($layer['locked']) ? 1 : 0,
                     $layer['tag'] ?? null,
+                    !empty($layer['estimate_item_id']) && is_numeric($layer['estimate_item_id']) ? (int)$layer['estimate_item_id'] : null,
                     json_value($layer['metadata_json'] ?? null),
                 ]);
                 $clientId = (string)($layer['client_uid'] ?? $layer['id'] ?? '');
@@ -266,6 +462,8 @@ try {
 
             $stmt = $pdo->prepare("INSERT INTO takeoff_measurement_summaries (drawing_id, summary_json) VALUES (?, ?)");
             $stmt->execute([$drawingId, json_value($summary) ?? '[]']);
+            $estimateId = ensure_project_estimate($pdo, $projectId);
+            sync_estimate_items($pdo, $estimateId, $summary, $layerMap);
             $pdo->commit();
             out_json(['status' => 'success', 'data' => state_payload($pdo, $drawingId)]);
 
