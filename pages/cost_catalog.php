@@ -22,7 +22,8 @@
             <a class="active" href="/pages/cost_catalog.php"><i class="fas fa-book"></i><span>Cost Catalog</span></a>
             <a href="/pages/bid_board.php"><i class="fas fa-table-columns"></i><span>Bid Board</span></a>
             <a href="/pages/project_module.php"><i class="fas fa-folder-tree"></i><span>Projects</span></a>
-            <a href="/pages/takeoff.php"><i class="fas fa-ruler-combined"></i><span>Takeoff</span></a>
+            <a href="/pages/takeoff_layers.php"><i class="fas fa-ruler-combined"></i><span>Takeoff</span></a>
+            <a href="/pages/estimate_module.php"><i class="fas fa-calculator"></i><span>Estimate</span></a>
             <a href="/pages/company_settings.php"><i class="fas fa-gear"></i><span>Settings</span></a>
         </nav>
     </aside>

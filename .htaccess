@@ -2,13 +2,13 @@
     RewriteEngine On
     RewriteBase /
 
-    # Root domain: open the standalone Takeoff module.
+    # Root domain: open the current Takeoff workspace.
     RewriteCond %{REQUEST_URI} ^/$
-    RewriteRule ^$ /pages/takeoff.php [L]
+    RewriteRule ^$ /pages/takeoff_layers.php [L]
 
     # The old pages directory/login entry must open Takeoff now.
-    RewriteRule ^pages/?$ /pages/takeoff.php [L]
-    RewriteRule ^pages/(login|logout|index)\.php$ /pages/takeoff.php [L]
+    RewriteRule ^pages/?$ /pages/takeoff_layers.php [L]
+    RewriteRule ^pages/(login|logout|index)\.php$ /pages/takeoff_layers.php [L]
 
     # Keep existing PHP pages, APIs, assets and uploads reachable.
     RewriteCond %{REQUEST_URI} ^/(pages|api|assets|uploads|views|core|funciones|docs)/ [NC]
@@ -20,5 +20,5 @@
     RewriteRule .* - [L]
 
     # Fallback to the Takeoff module instead of login/frontend.
-    RewriteRule ^.*$ /pages/takeoff.php [L]
+    RewriteRule ^.*$ /pages/takeoff_layers.php [L]
 </IfModule>
