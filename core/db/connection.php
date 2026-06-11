@@ -1,9 +1,9 @@
 <?php
 // db.php
 $host = 'localhost';
-$db   = 'brightro_electroplan_v2'; // Asegúrate de usar el nombre de la nueva base de datos V3
+$db   = 'brightro_takeoff'; // Asegúrate de usar el nombre de la nueva base de datos V3
 $user = 'root';           // Tu usuario de BD
-$pass = '';               // Tu contraseña de BD
+$pass = 'rootadmin01#';               // Tu contraseña de BD
 $charset = 'utf8mb4';
 
 $dsn = "mysql:host=$host;dbname=$db;charset=$charset";
