@@ -21,6 +21,7 @@
         <nav class="bid-board-nav-list">
             <a class="active" href="/pages/bid_board.php"><i class="fas fa-chart-line"></i><span>Pipeline</span></a>
             <a href="/pages/project_module.php"><i class="fas fa-folder-tree"></i><span>Projects</span></a>
+            <a href="/pages/cost_catalog.php"><i class="fas fa-book"></i><span>Cost Catalog</span></a>
         </nav>
     </aside>
 
@@ -32,13 +33,25 @@
             </div>
             <div class="bid-board-actions">
                 <button class="bb-btn primary" id="bbNewBid"><i class="fas fa-plus"></i> New Bid</button>
-                <button class="bb-btn" id="bbCreateProject"><i class="fas fa-folder-plus"></i> Create Project</button>
             </div>
         </div>
 
         <div class="alert" id="bbError" style="display:none;background:#7f1d1d;color:#fecaca;border:1px solid #991b1b;border-radius:8px;padding:12px;margin-bottom:16px;"></div>
 
+        <section class="bb-filters">
+            <div class="bb-field">
+                <label>Search</label>
+                <input id="bbSearch" placeholder="Search bids, requester, project">
+            </div>
+            <div class="bb-field">
+                <label>Status Filter</label>
+                <select id="bbStatusFilter"></select>
+            </div>
+        </section>
+
         <section class="bb-dashboard" id="bbDashboard"></section>
+
+        <section class="bb-pipeline" id="bbPipeline"></section>
 
         <section class="bb-table-wrap">
             <table class="bb-table">
@@ -125,6 +138,41 @@
         <div class="bb-modal-foot">
             <button class="bb-btn" type="button" data-close-modal>Close</button>
         </div>
+    </div>
+</div>
+
+<div class="bb-modal-backdrop" id="bbProjectModal">
+    <div class="bb-modal">
+        <form id="bbProjectForm">
+            <div class="bb-modal-head">
+                <strong>Create New Project</strong>
+                <button class="bb-btn" type="button" data-close-modal><i class="fas fa-times"></i></button>
+            </div>
+            <div class="bb-modal-body">
+                <div class="bb-create-mode">
+                    <label><input type="radio" name="bbProjectMode" value="template" checked> Create project from template</label>
+                    <label><input type="radio" name="bbProjectMode" value="empty"> Create empty new project</label>
+                </div>
+                <div class="bb-form-grid">
+                    <div class="bb-field full">
+                        <label>Project Name</label>
+                        <input id="bbProjectCreateName" required>
+                    </div>
+                    <div class="bb-field full" id="bbProjectTemplateWrap">
+                        <label>Template</label>
+                        <select id="bbProjectTemplate"></select>
+                    </div>
+                    <div class="bb-field full">
+                        <label>Source Bid</label>
+                        <input id="bbProjectSourceBid" disabled>
+                    </div>
+                </div>
+            </div>
+            <div class="bb-modal-foot">
+                <button class="bb-btn" type="button" data-close-modal>Cancel</button>
+                <button class="bb-btn primary" type="submit">Create Project</button>
+            </div>
+        </form>
     </div>
 </div>
 

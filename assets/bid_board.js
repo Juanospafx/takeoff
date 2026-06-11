@@ -1,8 +1,8 @@
 (function () {
     const apiUrl = '../api/bid_board.php';
-    let state = { statuses: [], estimators: [], dashboard: [], bids: [] };
+    let state = { statuses: [], estimators: [], templates: [], dashboard: [], bids: [] };
     let editingId = null;
-    let viewingBid = null;
+    let projectBidId = null;
 
     const money = (value, currency = 'USD') => new Intl.NumberFormat('en-US', {
         style: 'currency',
@@ -46,8 +46,18 @@
             .catch(err => showError(err.message));
     }
 
+    function filteredBids() {
+        const q = document.getElementById('bbSearch')?.value.trim().toLowerCase() || '';
+        const status = document.getElementById('bbStatusFilter')?.value || '';
+        return state.bids.filter(bid => {
+            const haystack = [bid.name, bid.requester_company, bid.project_name_snapshot, bid.estimator_name, bid.status_name].join(' ').toLowerCase();
+            return (!q || haystack.includes(q)) && (!status || String(bid.bid_status_id || '') === status);
+        });
+    }
+
     function render() {
         renderDashboard();
+        renderPipeline();
         renderTable();
         renderFormOptions();
     }
@@ -55,7 +65,7 @@
     function renderDashboard() {
         const root = document.getElementById('bbDashboard');
         root.innerHTML = state.dashboard.map(row => `
-            <article class="bb-status-card">
+            <article class="bb-status-card" data-filter-status="${row.status_id}">
                 <div class="bb-status-card-title">${esc(row.name)}</div>
                 <div class="bb-status-card-main">
                     <div class="bb-count">${Number(row.bid_count || 0)}</div>
@@ -63,42 +73,109 @@
                 </div>
             </article>
         `).join('');
+        root.querySelectorAll('[data-filter-status]').forEach(card => {
+            card.addEventListener('click', () => {
+                document.getElementById('bbStatusFilter').value = card.dataset.filterStatus;
+                render();
+            });
+        });
+    }
+
+    function renderPipeline() {
+        const root = document.getElementById('bbPipeline');
+        const bids = filteredBids();
+        root.innerHTML = state.statuses.map(status => {
+            const statusBids = bids.filter(bid => Number(bid.bid_status_id || 0) === Number(status.id));
+            const total = statusBids.reduce((sum, bid) => sum + Number(bid.total_amount || 0), 0);
+            return `
+                <section class="bb-pipeline-column">
+                    <div class="bb-pipeline-head">
+                        <strong>${esc(status.name)}</strong>
+                        <span>${statusBids.length} ${money(total)}</span>
+                    </div>
+                    <div class="bb-pipeline-list">
+                        ${statusBids.map(renderPipelineCard).join('') || '<div class="bb-empty">No bids</div>'}
+                    </div>
+                </section>
+            `;
+        }).join('');
+        root.querySelectorAll('[data-action]').forEach(button => {
+            button.addEventListener('click', () => handleAction(button.dataset.action, Number(button.dataset.id)));
+        });
+    }
+
+    function renderPipelineCard(bid) {
+        return `
+            <article class="bb-bid-card">
+                <strong>${esc(bid.name)}</strong>
+                <span>${esc(bid.requester_company || '-')}</span>
+                <div>${fmtDate(bid.due_at)} · ${money(bid.total_amount, bid.currency_code)}</div>
+                <button class="bb-mini-btn" data-action="view" data-id="${bid.id}">View</button>
+            </article>
+        `;
+    }
+
+    function statusSelect(bid) {
+        return `<select class="bb-inline-select" data-inline-action="change_status" data-id="${bid.id}">
+            <option value="">Unassigned</option>
+            ${state.statuses.map(s => `<option value="${s.id}" ${Number(s.id) === Number(bid.bid_status_id) ? 'selected' : ''}>${esc(s.name)}</option>`).join('')}
+        </select>`;
+    }
+
+    function estimatorSelect(bid) {
+        return `<select class="bb-inline-select" data-inline-action="assign_estimator" data-id="${bid.id}">
+            <option value="">Unassigned</option>
+            ${state.estimators.map(e => `<option value="${e.id}" ${Number(e.id) === Number(bid.estimator_id) ? 'selected' : ''}>${esc(e.display_name)}</option>`).join('')}
+        </select>`;
     }
 
     function renderTable() {
         const body = document.getElementById('bbTableBody');
-        body.innerHTML = state.bids.map(bid => `
+        const bids = filteredBids();
+        body.innerHTML = bids.map(bid => `
             <tr>
                 <td><strong>${esc(bid.name)}</strong></td>
                 <td>${esc(bid.requester_company || '-')}</td>
                 <td>${esc(bid.project_name_snapshot || '-')}</td>
                 <td>${fmtDate(bid.due_at)}</td>
                 <td>${money(bid.total_amount, bid.currency_code)}</td>
-                <td>${esc(bid.estimator_name || '-')}</td>
-                <td><span class="bb-pill">${esc(bid.status_name || 'Unassigned')}</span></td>
+                <td>${estimatorSelect(bid)}</td>
+                <td>${statusSelect(bid)}</td>
                 <td>
                     <div class="bb-row-actions">
                         <button class="bb-btn" data-action="view" data-id="${bid.id}">View</button>
                         <button class="bb-btn" data-action="edit" data-id="${bid.id}">Edit</button>
-                        <button class="bb-btn" data-action="duplicate" data-id="${bid.id}">Duplicate</button>
+                        <button class="bb-btn" data-action="duplicate" data-id="${bid.id}">Copy</button>
                         <button class="bb-btn" data-action="archive" data-id="${bid.id}">Archive</button>
                         <button class="bb-btn danger" data-action="delete" data-id="${bid.id}">Delete</button>
-                        <button class="bb-btn" data-action="create-project" data-id="${bid.id}">Create Project</button>
+                        <button class="bb-btn" data-action="create-project" data-id="${bid.id}" ${bid.project_id ? 'disabled' : ''}>Create Project</button>
                     </div>
                 </td>
             </tr>
-        `).join('') || `<tr><td colspan="8" style="color:#94a3b8;">No bids yet.</td></tr>`;
+        `).join('') || `<tr><td colspan="8" style="color:#94a3b8;">No bids match the current filters.</td></tr>`;
 
         body.querySelectorAll('[data-action]').forEach(button => {
             button.addEventListener('click', () => handleAction(button.dataset.action, Number(button.dataset.id)));
+        });
+        body.querySelectorAll('[data-inline-action]').forEach(select => {
+            select.addEventListener('change', () => handleInline(select.dataset.inlineAction, Number(select.dataset.id), select.value));
         });
     }
 
     function renderFormOptions() {
         const status = document.getElementById('bbStatus');
         const estimator = document.getElementById('bbEstimator');
+        const filter = document.getElementById('bbStatusFilter');
+        const template = document.getElementById('bbProjectTemplate');
         status.innerHTML = '<option value="">Unassigned</option>' + state.statuses.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
         estimator.innerHTML = '<option value="">Unassigned</option>' + state.estimators.map(e => `<option value="${e.id}">${esc(e.display_name)}</option>`).join('');
+        if (filter && !filter.dataset.ready) {
+            filter.innerHTML = '<option value="">All statuses</option>' + state.statuses.map(s => `<option value="${s.id}">${esc(s.name)}</option>`).join('');
+            filter.dataset.ready = '1';
+        }
+        if (template) {
+            template.innerHTML = '<option value="">Select template</option>' + state.templates.map(t => `<option value="${t.id}">${esc(t.name)}</option>`).join('');
+        }
     }
 
     function handleAction(action, id) {
@@ -111,9 +188,17 @@
             if (!confirm('Delete this bid?')) return;
             return mutate('delete', id);
         }
-        if (action === 'create-project') {
-            alert('Create Project is prepared for a future Projects module. No project is created in this task.');
-        }
+        if (action === 'create-project') return openCreateProject(bid);
+    }
+
+    function handleInline(action, id, value) {
+        const payload = action === 'change_status' ? { bid_status_id: value } : { estimator_id: value };
+        request(action, { id, ...payload })
+            .then(data => {
+                state = data.data;
+                render();
+            })
+            .catch(err => showError(err.message));
     }
 
     function mutate(action, id) {
@@ -126,7 +211,6 @@
     }
 
     function openView(bid) {
-        viewingBid = bid;
         document.getElementById('bbViewTitle').textContent = bid?.name || 'Bid';
         document.getElementById('bbViewBody').innerHTML = bid ? `
             <div class="bb-form-grid">
@@ -157,6 +241,22 @@
         document.getElementById('bbEditModal').classList.add('open');
     }
 
+    function openCreateProject(bid) {
+        if (!bid) return;
+        projectBidId = Number(bid.id);
+        document.getElementById('bbProjectForm').reset();
+        document.querySelector('input[name="bbProjectMode"][value="template"]').checked = true;
+        document.getElementById('bbProjectCreateName').value = bid.project_name_snapshot || bid.name || '';
+        document.getElementById('bbProjectSourceBid').value = `${bid.name} · ${bid.requester_company || 'No requester'}`;
+        toggleProjectTemplate();
+        document.getElementById('bbProjectModal').classList.add('open');
+    }
+
+    function toggleProjectTemplate() {
+        const mode = document.querySelector('input[name="bbProjectMode"]:checked')?.value || 'empty';
+        document.getElementById('bbProjectTemplateWrap').style.display = mode === 'template' ? 'block' : 'none';
+    }
+
     function closeModals() {
         document.querySelectorAll('.bb-modal-backdrop').forEach(el => el.classList.remove('open'));
     }
@@ -181,6 +281,21 @@
         }).catch(err => showError(err.message));
     }
 
+    function createProject(event) {
+        event.preventDefault();
+        const mode = document.querySelector('input[name="bbProjectMode"]:checked')?.value || 'empty';
+        request('create_project', {
+            id: projectBidId,
+            mode,
+            project_name: document.getElementById('bbProjectCreateName').value,
+            project_template_id: mode === 'template' ? document.getElementById('bbProjectTemplate').value : ''
+        }).then(data => {
+            state = data.data;
+            closeModals();
+            render();
+        }).catch(err => showError(err.message));
+    }
+
     function showError(message) {
         const el = document.getElementById('bbError');
         el.textContent = message;
@@ -189,11 +304,12 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         document.getElementById('bbNewBid').addEventListener('click', () => openEdit());
-        document.getElementById('bbCreateProject').addEventListener('click', () => {
-            alert('Create Project is prepared for a future Projects module. No project is created in this task.');
-        });
         document.querySelectorAll('[data-close-modal]').forEach(btn => btn.addEventListener('click', closeModals));
+        document.querySelectorAll('input[name="bbProjectMode"]').forEach(input => input.addEventListener('change', toggleProjectTemplate));
+        document.getElementById('bbSearch').addEventListener('input', render);
+        document.getElementById('bbStatusFilter').addEventListener('change', render);
         document.getElementById('bbBidForm').addEventListener('submit', saveBid);
+        document.getElementById('bbProjectForm').addEventListener('submit', createProject);
         load();
     });
 })();

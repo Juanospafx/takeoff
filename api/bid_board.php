@@ -93,6 +93,47 @@ function bid_board_ensure_schema(PDO $pdo): void
         KEY idx_bids_deleted (deleted_at)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
+    $pdo->exec("CREATE TABLE IF NOT EXISTS project_templates (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        name VARCHAR(191) NOT NULL,
+        description TEXT NULL,
+        trade VARCHAR(100) NULL,
+        settings_json JSON NULL,
+        active TINYINT(1) NOT NULL DEFAULT 1,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        deleted_at TIMESTAMP NULL DEFAULT NULL,
+        PRIMARY KEY (id),
+        KEY idx_project_templates_active_deleted (active, deleted_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+    $pdo->exec("CREATE TABLE IF NOT EXISTS projects (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        project_template_id BIGINT UNSIGNED NULL,
+        estimator_id BIGINT UNSIGNED NULL,
+        project_number VARCHAR(100) NULL,
+        name VARCHAR(191) NOT NULL,
+        description TEXT NULL,
+        status VARCHAR(50) NOT NULL DEFAULT 'draft',
+        client_name VARCHAR(191) NULL,
+        job_address VARCHAR(255) NULL,
+        city VARCHAR(100) NULL,
+        state VARCHAR(100) NULL,
+        postal_code VARCHAR(30) NULL,
+        country VARCHAR(100) NULL,
+        bid_due_at DATETIME NULL,
+        start_date DATE NULL,
+        end_date DATE NULL,
+        metadata_json JSON NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        deleted_at TIMESTAMP NULL DEFAULT NULL,
+        PRIMARY KEY (id),
+        KEY idx_projects_template (project_template_id),
+        KEY idx_projects_status_deleted (status, deleted_at),
+        KEY idx_projects_bid_due (bid_due_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
     $columns = $pdo->query("SHOW COLUMNS FROM bids")->fetchAll(PDO::FETCH_COLUMN);
     $pdo->exec("ALTER TABLE bids MODIFY project_id BIGINT UNSIGNED NULL");
     $add = [
@@ -101,6 +142,20 @@ function bid_board_ensure_schema(PDO $pdo): void
     ];
     foreach ($add as $column => $sql) {
         if (!in_array($column, $columns, true)) $pdo->exec($sql);
+    }
+
+    $projectColumns = $pdo->query("SHOW COLUMNS FROM projects")->fetchAll(PDO::FETCH_COLUMN);
+    $projectAdd = [
+        'project_template_id' => "ALTER TABLE projects ADD COLUMN project_template_id BIGINT UNSIGNED NULL AFTER id",
+        'estimator_id' => "ALTER TABLE projects ADD COLUMN estimator_id BIGINT UNSIGNED NULL AFTER project_template_id",
+        'project_number' => "ALTER TABLE projects ADD COLUMN project_number VARCHAR(100) NULL AFTER estimator_id",
+        'client_name' => "ALTER TABLE projects ADD COLUMN client_name VARCHAR(191) NULL AFTER status",
+        'bid_due_at' => "ALTER TABLE projects ADD COLUMN bid_due_at DATETIME NULL AFTER client_name",
+        'metadata_json' => "ALTER TABLE projects ADD COLUMN metadata_json JSON NULL AFTER bid_due_at",
+        'deleted_at' => "ALTER TABLE projects ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL AFTER updated_at",
+    ];
+    foreach ($projectAdd as $column => $sql) {
+        if (!in_array($column, $projectColumns, true)) $pdo->exec($sql);
     }
 
     $stmt = $pdo->prepare("INSERT INTO bid_statuses (code, name, sort_order, is_terminal) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), sort_order = VALUES(sort_order), is_terminal = VALUES(is_terminal)");
@@ -117,12 +172,20 @@ function bid_board_ensure_schema(PDO $pdo): void
         ['archived', 'Archived', 100, 1],
     ];
     foreach ($statuses as $status) $stmt->execute($status);
+
+    $templateCount = (int)$pdo->query("SELECT COUNT(*) FROM project_templates WHERE deleted_at IS NULL")->fetchColumn();
+    if ($templateCount === 0) {
+        $stmt = $pdo->prepare("INSERT INTO project_templates (name, description, trade, settings_json, active) VALUES (?, ?, ?, ?, 1)");
+        $stmt->execute(['Electrical Bid Template', 'Estimate, takeoff and proposal defaults for electrical bids', 'Electrical', json_encode(['source' => 'bid_board'], JSON_UNESCAPED_SLASHES)]);
+        $stmt->execute(['Commercial Shell Template', 'Base commercial project setup', 'Commercial', json_encode(['source' => 'bid_board'], JSON_UNESCAPED_SLASHES)]);
+    }
 }
 
 function bid_board_payload(PDO $pdo): array
 {
     $statuses = $pdo->query("SELECT * FROM bid_statuses ORDER BY sort_order, id")->fetchAll(PDO::FETCH_ASSOC);
     $estimators = $pdo->query("SELECT id, display_name, email FROM estimators WHERE deleted_at IS NULL AND active = 1 ORDER BY display_name")->fetchAll(PDO::FETCH_ASSOC);
+    $templates = $pdo->query("SELECT id, name, description FROM project_templates WHERE deleted_at IS NULL AND active = 1 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
 
     $dashboard = $pdo->query(
         "SELECT bs.id AS status_id, bs.code, bs.name, COUNT(b.id) AS bid_count, COALESCE(SUM(b.total_amount), 0) AS total_sales
@@ -141,7 +204,7 @@ function bid_board_payload(PDO $pdo): array
          ORDER BY COALESCE(b.due_at, '2999-12-31') ASC, b.id DESC"
     )->fetchAll(PDO::FETCH_ASSOC);
 
-    return compact('statuses', 'estimators', 'dashboard', 'bids');
+    return compact('statuses', 'estimators', 'templates', 'dashboard', 'bids');
 }
 
 try {
@@ -200,6 +263,63 @@ try {
             $stmt = $pdo->prepare("UPDATE bids SET bid_status_id = ? WHERE id = ?");
             $stmt->execute([$statusId, $id]);
             bid_board_json(['status' => 'success', 'data' => bid_board_payload($pdo)]);
+
+        case 'change_status':
+            $id = bid_board_int($input['id'] ?? 0);
+            $statusId = bid_board_int($input['bid_status_id'] ?? 0) ?: null;
+            $stmt = $pdo->prepare("UPDATE bids SET bid_status_id = ? WHERE id = ? AND deleted_at IS NULL");
+            $stmt->execute([$statusId, $id]);
+            bid_board_json(['status' => 'success', 'data' => bid_board_payload($pdo)]);
+
+        case 'assign_estimator':
+            $id = bid_board_int($input['id'] ?? 0);
+            $estimatorId = bid_board_int($input['estimator_id'] ?? 0) ?: null;
+            $stmt = $pdo->prepare("UPDATE bids SET estimator_id = ? WHERE id = ? AND deleted_at IS NULL");
+            $stmt->execute([$estimatorId, $id]);
+            bid_board_json(['status' => 'success', 'data' => bid_board_payload($pdo)]);
+
+        case 'create_project':
+            $id = bid_board_int($input['id'] ?? 0);
+            $mode = (string)($input['mode'] ?? 'empty');
+            $templateId = $mode === 'template' ? (bid_board_int($input['project_template_id'] ?? 0) ?: null) : null;
+            $stmt = $pdo->prepare(
+                "SELECT b.*, e.display_name AS estimator_name
+                 FROM bids b
+                 LEFT JOIN estimators e ON e.id = b.estimator_id
+                 WHERE b.id = ? AND b.deleted_at IS NULL"
+            );
+            $stmt->execute([$id]);
+            $bid = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$bid) bid_board_json(['status' => 'error', 'msg' => 'Bid not found'], 404);
+
+            if (!empty($bid['project_id'])) {
+                bid_board_json(['status' => 'success', 'id' => (int)$bid['project_id'], 'data' => bid_board_payload($pdo)]);
+            }
+
+            $projectName = trim((string)($input['project_name'] ?? '')) ?: ($bid['project_name_snapshot'] ?: $bid['name']);
+            $metadata = [
+                'source_bid_id' => (int)$bid['id'],
+                'source_bid_total_amount' => (float)$bid['total_amount'],
+                'create_mode' => $mode,
+                'template_snapshot_note' => $templateId ? 'Template selected for future estimate/takeoff/proposal snapshot copy.' : null,
+            ];
+            $stmt = $pdo->prepare(
+                "INSERT INTO projects (project_template_id, estimator_id, name, description, status, client_name, bid_due_at, metadata_json)
+                 VALUES (?, ?, ?, ?, 'draft', ?, ?, ?)"
+            );
+            $stmt->execute([
+                $templateId,
+                bid_board_int($bid['estimator_id'] ?? 0) ?: null,
+                $projectName,
+                'Created from bid: ' . $bid['name'],
+                $bid['requester_company'] ?: null,
+                $bid['due_at'] ?: null,
+                json_encode($metadata, JSON_UNESCAPED_SLASHES),
+            ]);
+            $projectId = (int)$pdo->lastInsertId();
+            $stmt = $pdo->prepare("UPDATE bids SET project_id = ?, project_name_snapshot = ? WHERE id = ?");
+            $stmt->execute([$projectId, $projectName, $id]);
+            bid_board_json(['status' => 'success', 'id' => $projectId, 'data' => bid_board_payload($pdo)]);
 
         case 'delete':
             $id = bid_board_int($input['id'] ?? 0);

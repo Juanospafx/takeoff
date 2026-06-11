@@ -313,6 +313,7 @@ try {
         <a class="nav-link-takeoff active" href="/"><i class="fas fa-file-lines"></i><span>Uploads</span></a>
         <a class="nav-link-takeoff" href="/pages/bid_board.php"><i class="fas fa-table-columns"></i><span>Bid Board</span></a>
         <a class="nav-link-takeoff" href="/pages/project_module.php"><i class="fas fa-folder-tree"></i><span>Projects</span></a>
+        <a class="nav-link-takeoff" href="/pages/cost_catalog.php"><i class="fas fa-book"></i><span>Cost Catalog</span></a>
     </aside>
 
     <main class="main">
