@@ -76,8 +76,8 @@ try {
     function ensure_upload_test_project(PDO $pdo): array
     {
         $pdo->exec("INSERT INTO projects (id, name, description, status)
-            VALUES (1, 'Uploads Test Project', 'Temporary project generated from the local uploads folder', 'Active')
-            ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description)");
+            VALUES (1, 'Uploads Test Project', 'Temporary project generated from the local uploads folder', 'active')
+            ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description), status = VALUES(status)");
         $pdo->exec("INSERT INTO folders (id, project_id, name)
             VALUES (1, 1, 'Uploads')
             ON DUPLICATE KEY UPDATE name = VALUES(name)");
@@ -311,6 +311,8 @@ try {
             <span>Brightronix Takeoff</span>
         </div>
         <a class="nav-link-takeoff active" href="/"><i class="fas fa-file-lines"></i><span>Uploads</span></a>
+        <a class="nav-link-takeoff" href="/pages/bid_board.php"><i class="fas fa-table-columns"></i><span>Bid Board</span></a>
+        <a class="nav-link-takeoff" href="/pages/project_module.php"><i class="fas fa-folder-tree"></i><span>Projects</span></a>
     </aside>
 
     <main class="main">

@@ -1,140 +1,210 @@
--- Takeoff / Quantity Takeoff schema for MySQL 8+, InnoDB, utf8mb4.
+-- Base architecture schema for Estimating / Bid / Catalog / Documents / Drawings / Takeoff / Estimate / Proposal.
+-- MySQL 8+, InnoDB, utf8mb4.
+-- Intentionally excludes identity and access-control tables.
+
 SET NAMES utf8mb4;
+SET FOREIGN_KEY_CHECKS = 0;
+
+CREATE TABLE IF NOT EXISTS estimators (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    display_name VARCHAR(191) NOT NULL,
+    email VARCHAR(191) NULL,
+    phone VARCHAR(100) NULL,
+    company_name VARCHAR(191) NULL,
+    trade VARCHAR(100) NULL,
+    metadata_json JSON NULL,
+    active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    PRIMARY KEY (id),
+    KEY idx_estimators_email (email),
+    KEY idx_estimators_active_deleted (active, deleted_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS project_templates (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    name VARCHAR(191) NOT NULL,
+    description TEXT NULL,
+    trade VARCHAR(100) NULL,
+    settings_json JSON NULL,
+    active TINYINT(1) NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    PRIMARY KEY (id),
+    KEY idx_project_templates_active_deleted (active, deleted_at)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS projects (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    project_template_id BIGINT UNSIGNED NULL,
+    estimator_id BIGINT UNSIGNED NULL,
+    project_number VARCHAR(100) NULL,
     name VARCHAR(191) NOT NULL,
     description TEXT NULL,
-    status VARCHAR(50) NOT NULL DEFAULT 'Active',
-    notes TEXT NULL,
-    address VARCHAR(255) NULL,
-    contact_name VARCHAR(191) NULL,
-    contact_phone VARCHAR(100) NULL,
-    company_name VARCHAR(191) NULL,
-    company_phone VARCHAR(100) NULL,
-    company_address VARCHAR(255) NULL,
-    date_bid_sent DATE NULL,
-    date_bid_awarded DATE NULL,
-    date_started DATE NULL,
-    date_finished DATE NULL,
-    date_warranty_end DATE NULL,
-    created_by BIGINT UNSIGNED NULL,
-    assigned_user_id BIGINT UNSIGNED NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'draft',
+    client_name VARCHAR(191) NULL,
+    job_address VARCHAR(255) NULL,
+    city VARCHAR(100) NULL,
+    state VARCHAR(100) NULL,
+    postal_code VARCHAR(30) NULL,
+    country VARCHAR(100) NULL,
+    bid_due_at DATETIME NULL,
+    start_date DATE NULL,
+    end_date DATE NULL,
+    metadata_json JSON NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL,
     PRIMARY KEY (id),
-    KEY idx_projects_deleted (deleted_at),
-    KEY idx_projects_created (created_at)
+    UNIQUE KEY uq_projects_project_number (project_number),
+    KEY idx_projects_template (project_template_id),
+    KEY idx_projects_estimator (estimator_id),
+    KEY idx_projects_status_deleted (status, deleted_at),
+    KEY idx_projects_bid_due (bid_due_at),
+    CONSTRAINT fk_projects_template FOREIGN KEY (project_template_id) REFERENCES project_templates(id) ON DELETE SET NULL,
+    CONSTRAINT fk_projects_estimator FOREIGN KEY (estimator_id) REFERENCES estimators(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS folders (
+CREATE TABLE IF NOT EXISTS estimating (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     project_id BIGINT UNSIGNED NOT NULL,
+    estimator_id BIGINT UNSIGNED NULL,
     name VARCHAR(191) NOT NULL,
+    description TEXT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'draft',
+    currency_code CHAR(3) NOT NULL DEFAULT 'USD',
+    settings_json JSON NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL,
     PRIMARY KEY (id),
-    KEY idx_folders_project (project_id),
-    KEY idx_folders_deleted (deleted_at),
-    CONSTRAINT fk_folders_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
+    KEY idx_estimating_project (project_id),
+    KEY idx_estimating_estimator (estimator_id),
+    KEY idx_estimating_status_deleted (status, deleted_at),
+    CONSTRAINT fk_estimating_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_estimating_estimator FOREIGN KEY (estimator_id) REFERENCES estimators(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS sub_folders (
+CREATE TABLE IF NOT EXISTS bid_statuses (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    folder_id BIGINT UNSIGNED NOT NULL,
-    name VARCHAR(191) NOT NULL,
+    code VARCHAR(50) NOT NULL,
+    name VARCHAR(100) NOT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    is_terminal TINYINT(1) NOT NULL DEFAULT 0,
+    metadata_json JSON NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    deleted_at TIMESTAMP NULL DEFAULT NULL,
     PRIMARY KEY (id),
-    KEY idx_sub_folders_folder (folder_id),
-    CONSTRAINT fk_sub_folders_folder FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE CASCADE
+    UNIQUE KEY uq_bid_statuses_code (code),
+    KEY idx_bid_statuses_sort (sort_order)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS files (
+CREATE TABLE IF NOT EXISTS bids (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     project_id BIGINT UNSIGNED NULL,
-    folder_id BIGINT UNSIGNED NULL,
-    sub_folder_id BIGINT UNSIGNED NULL,
-    filename VARCHAR(255) NOT NULL,
-    filepath VARCHAR(1024) NOT NULL,
-    file_type VARCHAR(100) NULL,
-    uploaded_by BIGINT UNSIGNED NULL,
-    version_group_id VARCHAR(100) NULL,
-    version_number INT UNSIGNED NOT NULL DEFAULT 1,
-    uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    estimating_id BIGINT UNSIGNED NULL,
+    bid_status_id BIGINT UNSIGNED NULL,
+    estimator_id BIGINT UNSIGNED NULL,
+    bid_number VARCHAR(100) NULL,
+    name VARCHAR(191) NOT NULL,
+    requester_company VARCHAR(191) NULL,
+    project_name_snapshot VARCHAR(191) NULL,
+    due_at DATETIME NULL,
+    submitted_at DATETIME NULL,
+    awarded_at DATETIME NULL,
+    total_amount DECIMAL(18,4) NOT NULL DEFAULT 0,
+    currency_code CHAR(3) NOT NULL DEFAULT 'USD',
+    notes TEXT NULL,
+    metadata_json JSON NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     deleted_at TIMESTAMP NULL DEFAULT NULL,
     PRIMARY KEY (id),
-    KEY idx_files_project (project_id),
-    KEY idx_files_folder (folder_id),
-    KEY idx_files_sub_folder (sub_folder_id),
-    KEY idx_files_deleted (deleted_at),
-    KEY idx_files_uploaded (uploaded_at),
-    CONSTRAINT fk_files_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
-    CONSTRAINT fk_files_folder FOREIGN KEY (folder_id) REFERENCES folders(id) ON DELETE SET NULL,
-    CONSTRAINT fk_files_sub_folder FOREIGN KEY (sub_folder_id) REFERENCES sub_folders(id) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS file_reports (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    file_id BIGINT UNSIGNED NOT NULL,
-    technician_name VARCHAR(191) NULL,
-    technician_role VARCHAR(191) NULL,
-    description TEXT NULL,
-    report_pdf_path VARCHAR(1024) NULL,
-    annotations_json JSON NULL,
-    attachments_json JSON NULL,
-    is_deleted TINYINT(1) NOT NULL DEFAULT 0,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id),
-    KEY idx_file_reports_file (file_id),
-    KEY idx_file_reports_deleted (is_deleted),
-    CONSTRAINT fk_file_reports_file FOREIGN KEY (file_id) REFERENCES files(id) ON DELETE CASCADE
+    UNIQUE KEY uq_bids_bid_number (bid_number),
+    KEY idx_bids_project (project_id),
+    KEY idx_bids_estimating (estimating_id),
+    KEY idx_bids_status (bid_status_id),
+    KEY idx_bids_estimator (estimator_id),
+    KEY idx_bids_due (due_at),
+    CONSTRAINT fk_bids_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE SET NULL,
+    CONSTRAINT fk_bids_estimating FOREIGN KEY (estimating_id) REFERENCES estimating(id) ON DELETE SET NULL,
+    CONSTRAINT fk_bids_status FOREIGN KEY (bid_status_id) REFERENCES bid_statuses(id) ON DELETE SET NULL,
+    CONSTRAINT fk_bids_estimator FOREIGN KEY (estimator_id) REFERENCES estimators(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS catalogs (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     name VARCHAR(191) NOT NULL,
     description TEXT NULL,
+    trade VARCHAR(100) NULL,
+    active TINYINT(1) NOT NULL DEFAULT 1,
+    metadata_json JSON NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id)
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    PRIMARY KEY (id),
+    KEY idx_catalogs_active_deleted (active, deleted_at)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS catalog_categories (
+CREATE TABLE IF NOT EXISTS cost_catalogs (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     catalog_id BIGINT UNSIGNED NOT NULL,
     name VARCHAR(191) NOT NULL,
     description TEXT NULL,
+    currency_code CHAR(3) NOT NULL DEFAULT 'USD',
+    effective_from DATE NULL,
+    effective_to DATE NULL,
+    active TINYINT(1) NOT NULL DEFAULT 1,
+    metadata_json JSON NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
     PRIMARY KEY (id),
-    KEY idx_catalog_categories_catalog (catalog_id),
-    CONSTRAINT fk_catalog_categories_catalog FOREIGN KEY (catalog_id) REFERENCES catalogs(id) ON DELETE CASCADE
+    KEY idx_cost_catalogs_catalog (catalog_id),
+    KEY idx_cost_catalogs_effective (effective_from, effective_to),
+    CONSTRAINT fk_cost_catalogs_catalog FOREIGN KEY (catalog_id) REFERENCES catalogs(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS catalog_groups (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    catalog_id BIGINT UNSIGNED NOT NULL,
+    parent_group_id BIGINT UNSIGNED NULL,
+    name VARCHAR(191) NOT NULL,
+    description TEXT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    metadata_json JSON NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    PRIMARY KEY (id),
+    KEY idx_catalog_groups_catalog (catalog_id),
+    KEY idx_catalog_groups_parent (parent_group_id),
+    CONSTRAINT fk_catalog_groups_catalog FOREIGN KEY (catalog_id) REFERENCES catalogs(id) ON DELETE CASCADE,
+    CONSTRAINT fk_catalog_groups_parent FOREIGN KEY (parent_group_id) REFERENCES catalog_groups(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS catalog_items (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     catalog_id BIGINT UNSIGNED NOT NULL,
-    category_id BIGINT UNSIGNED NULL,
+    cost_catalog_id BIGINT UNSIGNED NULL,
+    catalog_group_id BIGINT UNSIGNED NULL,
+    sku VARCHAR(100) NULL,
     name VARCHAR(191) NOT NULL,
     description TEXT NULL,
-    sku VARCHAR(100) NULL,
-    item_type ENUM('Part','Assembly','Labor','Equipment','Subcontractor','Travel','Custom') NOT NULL DEFAULT 'Part',
+    item_type ENUM('part','assembly','labor','equipment','subcontractor','travel','custom') NOT NULL DEFAULT 'part',
     cost_type VARCHAR(100) NULL,
     unit_of_measure VARCHAR(50) NOT NULL DEFAULT 'ea',
-    unit_cost DECIMAL(14,4) NOT NULL DEFAULT 0,
-    material_cost DECIMAL(14,4) NOT NULL DEFAULT 0,
-    labor_cost DECIMAL(14,4) NOT NULL DEFAULT 0,
-    equipment_cost DECIMAL(14,4) NOT NULL DEFAULT 0,
-    subcontractor_cost DECIMAL(14,4) NOT NULL DEFAULT 0,
-    labor_hours DECIMAL(14,4) NOT NULL DEFAULT 0,
-    labor_rate DECIMAL(14,4) NOT NULL DEFAULT 0,
-    markup DECIMAL(8,4) NOT NULL DEFAULT 0,
-    waste_factor DECIMAL(8,4) NOT NULL DEFAULT 0,
+    unit_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+    material_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+    labor_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+    equipment_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+    subcontractor_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+    labor_hours DECIMAL(18,4) NOT NULL DEFAULT 0,
+    labor_rate DECIMAL(18,4) NOT NULL DEFAULT 0,
+    markup_percent DECIMAL(9,4) NOT NULL DEFAULT 0,
+    waste_factor_percent DECIMAL(9,4) NOT NULL DEFAULT 0,
     size VARCHAR(100) NULL,
     diameter VARCHAR(100) NULL,
     trade_size VARCHAR(100) NULL,
@@ -147,18 +217,22 @@ CREATE TABLE IF NOT EXISTS catalog_items (
     masterformat VARCHAR(100) NULL,
     uniformat VARCHAR(100) NULL,
     attachment_url VARCHAR(1024) NULL,
-    tags JSON NULL,
+    tags_json JSON NULL,
     attributes_json JSON NULL,
     active TINYINT(1) NOT NULL DEFAULT 1,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
     PRIMARY KEY (id),
     KEY idx_catalog_items_catalog (catalog_id),
-    KEY idx_catalog_items_category (category_id),
-    KEY idx_catalog_items_type (item_type),
+    KEY idx_catalog_items_cost_catalog (cost_catalog_id),
+    KEY idx_catalog_items_group (catalog_group_id),
     KEY idx_catalog_items_sku (sku),
+    KEY idx_catalog_items_type (item_type),
+    KEY idx_catalog_items_active_deleted (active, deleted_at),
     CONSTRAINT fk_catalog_items_catalog FOREIGN KEY (catalog_id) REFERENCES catalogs(id) ON DELETE CASCADE,
-    CONSTRAINT fk_catalog_items_category FOREIGN KEY (category_id) REFERENCES catalog_categories(id) ON DELETE SET NULL
+    CONSTRAINT fk_catalog_items_cost_catalog FOREIGN KEY (cost_catalog_id) REFERENCES cost_catalogs(id) ON DELETE SET NULL,
+    CONSTRAINT fk_catalog_items_group FOREIGN KEY (catalog_group_id) REFERENCES catalog_groups(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS catalog_item_attributes (
@@ -166,176 +240,352 @@ CREATE TABLE IF NOT EXISTS catalog_item_attributes (
     catalog_item_id BIGINT UNSIGNED NOT NULL,
     attribute_name VARCHAR(100) NOT NULL,
     attribute_value TEXT NULL,
+    value_type VARCHAR(50) NOT NULL DEFAULT 'string',
+    unit_of_measure VARCHAR(50) NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (id),
     KEY idx_catalog_item_attributes_item (catalog_item_id),
     KEY idx_catalog_item_attributes_name (attribute_name),
     CONSTRAINT fk_catalog_item_attributes_item FOREIGN KEY (catalog_item_id) REFERENCES catalog_items(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS assemblies (
+CREATE TABLE IF NOT EXISTS assembly_parts (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    name VARCHAR(191) NOT NULL,
-    description TEXT NULL,
-    unit_of_measure VARCHAR(50) NOT NULL DEFAULT 'ea',
-    calculated_cost DECIMAL(14,4) NOT NULL DEFAULT 0,
-    calculated_labor_hours DECIMAL(14,4) NOT NULL DEFAULT 0,
-    override_cost DECIMAL(14,4) NULL,
-    active TINYINT(1) NOT NULL DEFAULT 1,
+    assembly_catalog_item_id BIGINT UNSIGNED NOT NULL,
+    part_catalog_item_id BIGINT UNSIGNED NOT NULL,
+    quantity DECIMAL(18,6) NOT NULL DEFAULT 1,
+    ratio_type ENUM('fixed','per_unit','per_linear_length','per_area','per_endpoint','spacing_based') NOT NULL DEFAULT 'per_unit',
+    spacing_value DECIMAL(18,6) NULL,
+    waste_factor_percent DECIMAL(9,4) NOT NULL DEFAULT 0,
+    notes TEXT NULL,
+    metadata_json JSON NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id)
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    PRIMARY KEY (id),
+    KEY idx_assembly_parts_assembly (assembly_catalog_item_id),
+    KEY idx_assembly_parts_part (part_catalog_item_id),
+    CONSTRAINT fk_assembly_parts_assembly FOREIGN KEY (assembly_catalog_item_id) REFERENCES catalog_items(id) ON DELETE CASCADE,
+    CONSTRAINT fk_assembly_parts_part FOREIGN KEY (part_catalog_item_id) REFERENCES catalog_items(id) ON DELETE RESTRICT
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS assembly_items (
+CREATE TABLE IF NOT EXISTS document_folders (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    assembly_id BIGINT UNSIGNED NOT NULL,
-    catalog_item_id BIGINT UNSIGNED NOT NULL,
-    quantity DECIMAL(14,4) NOT NULL DEFAULT 1,
-    ratio_type ENUM('fixed','per_unit','per_linear_length','per_area','per_endpoint','spacing_based') NOT NULL DEFAULT 'per_unit',
-    spacing_value DECIMAL(14,4) NULL,
-    waste_factor DECIMAL(8,4) NOT NULL DEFAULT 0,
-    notes TEXT NULL,
+    project_id BIGINT UNSIGNED NOT NULL,
+    parent_folder_id BIGINT UNSIGNED NULL,
+    name VARCHAR(191) NOT NULL,
+    description TEXT NULL,
+    sort_order INT NOT NULL DEFAULT 0,
+    metadata_json JSON NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
     PRIMARY KEY (id),
-    KEY idx_assembly_items_assembly (assembly_id),
-    KEY idx_assembly_items_catalog_item (catalog_item_id),
-    CONSTRAINT fk_assembly_items_assembly FOREIGN KEY (assembly_id) REFERENCES assemblies(id) ON DELETE CASCADE,
-    CONSTRAINT fk_assembly_items_catalog_item FOREIGN KEY (catalog_item_id) REFERENCES catalog_items(id) ON DELETE RESTRICT
+    KEY idx_document_folders_project (project_id),
+    KEY idx_document_folders_parent (parent_folder_id),
+    CONSTRAINT fk_document_folders_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_document_folders_parent FOREIGN KEY (parent_folder_id) REFERENCES document_folders(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS project_documents (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    project_id BIGINT UNSIGNED NOT NULL,
+    document_folder_id BIGINT UNSIGNED NULL,
+    document_type VARCHAR(100) NOT NULL DEFAULT 'document',
+    title VARCHAR(191) NOT NULL,
+    original_filename VARCHAR(255) NOT NULL,
+    storage_path VARCHAR(1024) NOT NULL,
+    mime_type VARCHAR(191) NULL,
+    file_size BIGINT UNSIGNED NULL,
+    version_number INT UNSIGNED NOT NULL DEFAULT 1,
+    metadata_json JSON NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    PRIMARY KEY (id),
+    KEY idx_project_documents_project (project_id),
+    KEY idx_project_documents_folder (document_folder_id),
+    KEY idx_project_documents_type (document_type),
+    CONSTRAINT fk_project_documents_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_project_documents_folder FOREIGN KEY (document_folder_id) REFERENCES document_folders(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS drawings (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    project_id BIGINT UNSIGNED NOT NULL,
+    project_document_id BIGINT UNSIGNED NULL,
+    drawing_number VARCHAR(100) NULL,
+    title VARCHAR(191) NOT NULL,
+    discipline VARCHAR(100) NULL,
+    sheet_number VARCHAR(100) NULL,
+    revision VARCHAR(100) NULL,
+    page_count INT UNSIGNED NOT NULL DEFAULT 1,
+    metadata_json JSON NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    PRIMARY KEY (id),
+    KEY idx_drawings_project (project_id),
+    KEY idx_drawings_document (project_document_id),
+    KEY idx_drawings_number (drawing_number),
+    CONSTRAINT fk_drawings_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_drawings_document FOREIGN KEY (project_document_id) REFERENCES project_documents(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS drawing_scales (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     drawing_id BIGINT UNSIGNED NOT NULL,
+    page_number INT UNSIGNED NOT NULL DEFAULT 1,
     scale_name VARCHAR(100) NOT NULL,
     ratio DECIMAL(18,8) NOT NULL,
     unit VARCHAR(50) NOT NULL DEFAULT 'ft',
+    pixels_per_unit DECIMAL(18,8) NULL,
+    calibration_json JSON NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
     PRIMARY KEY (id),
-    KEY idx_drawing_scales_drawing (drawing_id)
+    KEY idx_drawing_scales_drawing_page (drawing_id, page_number),
+    CONSTRAINT fk_drawing_scales_drawing FOREIGN KEY (drawing_id) REFERENCES drawings(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
+CREATE TABLE IF NOT EXISTS takeoffs (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    project_id BIGINT UNSIGNED NOT NULL,
+    drawing_id BIGINT UNSIGNED NULL,
+    estimate_id BIGINT UNSIGNED NULL,
+    name VARCHAR(191) NOT NULL,
+    description TEXT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'draft',
+    metadata_json JSON NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    PRIMARY KEY (id),
+    KEY idx_takeoffs_project (project_id),
+    KEY idx_takeoffs_drawing (drawing_id),
+    KEY idx_takeoffs_estimate (estimate_id),
+    KEY idx_takeoffs_status_deleted (status, deleted_at),
+    CONSTRAINT fk_takeoffs_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_takeoffs_drawing FOREIGN KEY (drawing_id) REFERENCES drawings(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS takeoff_layers (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    drawing_id BIGINT UNSIGNED NOT NULL,
+    takeoff_id BIGINT UNSIGNED NOT NULL,
+    drawing_id BIGINT UNSIGNED NULL,
     page_number INT UNSIGNED NOT NULL DEFAULT 1,
     name VARCHAR(191) NOT NULL,
-    type ENUM('count','linear','area','mixed') NOT NULL DEFAULT 'mixed',
+    layer_type ENUM('count','linear','area','volume','mixed') NOT NULL DEFAULT 'mixed',
     catalog_item_id BIGINT UNSIGNED NULL,
-    assembly_id BIGINT UNSIGNED NULL,
+    assembly_catalog_item_id BIGINT UNSIGNED NULL,
     color VARCHAR(50) NOT NULL DEFAULT '#2563eb',
     symbol VARCHAR(50) NOT NULL DEFAULT 'circle',
     visible TINYINT(1) NOT NULL DEFAULT 1,
     locked TINYINT(1) NOT NULL DEFAULT 0,
-    tag VARCHAR(100) NULL,
     metadata_json JSON NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
     PRIMARY KEY (id),
+    KEY idx_takeoff_layers_takeoff (takeoff_id),
     KEY idx_takeoff_layers_drawing_page (drawing_id, page_number),
-    KEY idx_takeoff_layers_item (catalog_item_id),
-    KEY idx_takeoff_layers_assembly (assembly_id),
-    CONSTRAINT fk_takeoff_layers_item FOREIGN KEY (catalog_item_id) REFERENCES catalog_items(id) ON DELETE SET NULL,
-    CONSTRAINT fk_takeoff_layers_assembly FOREIGN KEY (assembly_id) REFERENCES assemblies(id) ON DELETE SET NULL
+    KEY idx_takeoff_layers_catalog_item (catalog_item_id),
+    KEY idx_takeoff_layers_assembly (assembly_catalog_item_id),
+    CONSTRAINT fk_takeoff_layers_takeoff FOREIGN KEY (takeoff_id) REFERENCES takeoffs(id) ON DELETE CASCADE,
+    CONSTRAINT fk_takeoff_layers_drawing FOREIGN KEY (drawing_id) REFERENCES drawings(id) ON DELETE SET NULL,
+    CONSTRAINT fk_takeoff_layers_catalog_item FOREIGN KEY (catalog_item_id) REFERENCES catalog_items(id) ON DELETE SET NULL,
+    CONSTRAINT fk_takeoff_layers_assembly FOREIGN KEY (assembly_catalog_item_id) REFERENCES catalog_items(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-CREATE TABLE IF NOT EXISTS takeoff_count_markers (
+CREATE TABLE IF NOT EXISTS takeoff_measurements (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    client_uid VARCHAR(64) NULL,
-    layer_id BIGINT UNSIGNED NOT NULL,
-    catalog_item_id BIGINT UNSIGNED NULL,
-    assembly_id BIGINT UNSIGNED NULL,
+    takeoff_id BIGINT UNSIGNED NOT NULL,
+    takeoff_layer_id BIGINT UNSIGNED NOT NULL,
+    drawing_id BIGINT UNSIGNED NULL,
+    drawing_scale_id BIGINT UNSIGNED NULL,
     page_number INT UNSIGNED NOT NULL DEFAULT 1,
-    x DECIMAL(18,6) NOT NULL,
-    y DECIMAL(18,6) NOT NULL,
-    symbol VARCHAR(50) NOT NULL DEFAULT 'circle',
-    color VARCHAR(50) NOT NULL DEFAULT '#2563eb',
+    measurement_type ENUM('count','linear','area','volume') NOT NULL,
+    catalog_item_id BIGINT UNSIGNED NULL,
+    assembly_catalog_item_id BIGINT UNSIGNED NULL,
+    geometry_json JSON NOT NULL,
+    quantity DECIMAL(18,6) NOT NULL DEFAULT 0,
+    measured_value DECIMAL(18,6) NOT NULL DEFAULT 0,
+    multiplier DECIMAL(18,6) NOT NULL DEFAULT 1,
+    unit_of_measure VARCHAR(50) NOT NULL DEFAULT 'ea',
     label VARCHAR(191) NULL,
-    multiplier DECIMAL(14,4) NOT NULL DEFAULT 1,
-    quantity DECIMAL(14,4) NOT NULL DEFAULT 1,
     notes TEXT NULL,
     metadata_json JSON NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
     PRIMARY KEY (id),
-    KEY idx_takeoff_count_layer (layer_id),
-    CONSTRAINT fk_takeoff_count_layer FOREIGN KEY (layer_id) REFERENCES takeoff_layers(id) ON DELETE CASCADE,
-    CONSTRAINT fk_takeoff_count_item FOREIGN KEY (catalog_item_id) REFERENCES catalog_items(id) ON DELETE SET NULL,
-    CONSTRAINT fk_takeoff_count_assembly FOREIGN KEY (assembly_id) REFERENCES assemblies(id) ON DELETE SET NULL
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS takeoff_linear_segments (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    client_uid VARCHAR(64) NULL,
-    layer_id BIGINT UNSIGNED NOT NULL,
-    catalog_item_id BIGINT UNSIGNED NULL,
-    assembly_id BIGINT UNSIGNED NULL,
-    page_number INT UNSIGNED NOT NULL DEFAULT 1,
-    points_json JSON NOT NULL,
-    measured_length DECIMAL(18,6) NOT NULL DEFAULT 0,
-    multiplier DECIMAL(14,4) NOT NULL DEFAULT 1,
-    total_length DECIMAL(18,6) NOT NULL DEFAULT 0,
-    unit VARCHAR(50) NOT NULL DEFAULT 'ft',
-    color VARCHAR(50) NOT NULL DEFAULT '#2563eb',
-    stroke_width DECIMAL(8,2) NOT NULL DEFAULT 4,
-    label VARCHAR(191) NULL,
-    metadata_json JSON NULL,
-    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-    PRIMARY KEY (id),
-    KEY idx_takeoff_linear_layer (layer_id),
-    CONSTRAINT fk_takeoff_linear_layer FOREIGN KEY (layer_id) REFERENCES takeoff_layers(id) ON DELETE CASCADE,
-    CONSTRAINT fk_takeoff_linear_item FOREIGN KEY (catalog_item_id) REFERENCES catalog_items(id) ON DELETE SET NULL,
-    CONSTRAINT fk_takeoff_linear_assembly FOREIGN KEY (assembly_id) REFERENCES assemblies(id) ON DELETE SET NULL
+    KEY idx_takeoff_measurements_takeoff (takeoff_id),
+    KEY idx_takeoff_measurements_layer (takeoff_layer_id),
+    KEY idx_takeoff_measurements_drawing_page (drawing_id, page_number),
+    KEY idx_takeoff_measurements_item (catalog_item_id),
+    CONSTRAINT fk_takeoff_measurements_takeoff FOREIGN KEY (takeoff_id) REFERENCES takeoffs(id) ON DELETE CASCADE,
+    CONSTRAINT fk_takeoff_measurements_layer FOREIGN KEY (takeoff_layer_id) REFERENCES takeoff_layers(id) ON DELETE CASCADE,
+    CONSTRAINT fk_takeoff_measurements_drawing FOREIGN KEY (drawing_id) REFERENCES drawings(id) ON DELETE SET NULL,
+    CONSTRAINT fk_takeoff_measurements_scale FOREIGN KEY (drawing_scale_id) REFERENCES drawing_scales(id) ON DELETE SET NULL,
+    CONSTRAINT fk_takeoff_measurements_item FOREIGN KEY (catalog_item_id) REFERENCES catalog_items(id) ON DELETE SET NULL,
+    CONSTRAINT fk_takeoff_measurements_assembly FOREIGN KEY (assembly_catalog_item_id) REFERENCES catalog_items(id) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 CREATE TABLE IF NOT EXISTS takeoff_tags (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    project_id BIGINT UNSIGNED NULL,
     name VARCHAR(100) NOT NULL,
     color VARCHAR(50) NOT NULL DEFAULT '#64748b',
-    PRIMARY KEY (id),
-    UNIQUE KEY uq_takeoff_tags_name (name)
-) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
-
-CREATE TABLE IF NOT EXISTS takeoff_measurement_summaries (
-    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-    drawing_id BIGINT UNSIGNED NOT NULL,
-    summary_json JSON NOT NULL,
+    metadata_json JSON NULL,
     created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
     PRIMARY KEY (id),
-    KEY idx_takeoff_summaries_drawing_created (drawing_id, created_at)
+    KEY idx_takeoff_tags_project (project_id),
+    UNIQUE KEY uq_takeoff_tags_project_name (project_id, name),
+    CONSTRAINT fk_takeoff_tags_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO catalogs (id, name, description) VALUES
-    (1, 'Electrical Takeoff Catalog', 'Default material and labor catalog for electrical takeoff')
-ON DUPLICATE KEY UPDATE name = VALUES(name);
+CREATE TABLE IF NOT EXISTS takeoff_measurement_tags (
+    takeoff_measurement_id BIGINT UNSIGNED NOT NULL,
+    takeoff_tag_id BIGINT UNSIGNED NOT NULL,
+    PRIMARY KEY (takeoff_measurement_id, takeoff_tag_id),
+    KEY idx_takeoff_measurement_tags_tag (takeoff_tag_id),
+    CONSTRAINT fk_takeoff_measurement_tags_measurement FOREIGN KEY (takeoff_measurement_id) REFERENCES takeoff_measurements(id) ON DELETE CASCADE,
+    CONSTRAINT fk_takeoff_measurement_tags_tag FOREIGN KEY (takeoff_tag_id) REFERENCES takeoff_tags(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO catalog_categories (id, catalog_id, name, description) VALUES
-    (1, 1, 'Conduit', 'Raceways and conduit'),
-    (2, 1, 'Wire', 'Conductors and cable'),
-    (3, 1, 'Devices', 'Electrical devices and fixtures'),
-    (4, 1, 'Labor', 'Labor line items')
-ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description);
+CREATE TABLE IF NOT EXISTS estimates (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    project_id BIGINT UNSIGNED NOT NULL,
+    estimating_id BIGINT UNSIGNED NULL,
+    takeoff_id BIGINT UNSIGNED NULL,
+    bid_id BIGINT UNSIGNED NULL,
+    estimate_number VARCHAR(100) NULL,
+    name VARCHAR(191) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'draft',
+    currency_code CHAR(3) NOT NULL DEFAULT 'USD',
+    subtotal_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+    markup_total DECIMAL(18,4) NOT NULL DEFAULT 0,
+    tax_total DECIMAL(18,4) NOT NULL DEFAULT 0,
+    total_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+    labor_hours_total DECIMAL(18,4) NOT NULL DEFAULT 0,
+    metadata_json JSON NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_estimates_number (estimate_number),
+    KEY idx_estimates_project (project_id),
+    KEY idx_estimates_estimating (estimating_id),
+    KEY idx_estimates_takeoff (takeoff_id),
+    KEY idx_estimates_bid (bid_id),
+    KEY idx_estimates_status_deleted (status, deleted_at),
+    CONSTRAINT fk_estimates_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_estimates_estimating FOREIGN KEY (estimating_id) REFERENCES estimating(id) ON DELETE SET NULL,
+    CONSTRAINT fk_estimates_takeoff FOREIGN KEY (takeoff_id) REFERENCES takeoffs(id) ON DELETE SET NULL,
+    CONSTRAINT fk_estimates_bid FOREIGN KEY (bid_id) REFERENCES bids(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO catalog_items
-    (id, catalog_id, category_id, name, sku, item_type, cost_type, unit_of_measure, unit_cost, material_cost, labor_cost, labor_hours, labor_rate, markup, waste_factor, size, trade_size, material, color, symbol, cost_code, attributes_json)
-VALUES
-    (1, 1, 1, 'EMT Conduit 1/2 inch', 'EMT-050', 'Part', 'material', 'ft', 0.85, 0.85, 0.20, 0.0100, 85.00, 10.00, 5.00, '1/2"', '1/2"', 'Steel', '#2563eb', 'circle', '26-05-33', JSON_OBJECT('conduit_type','EMT')),
-    (2, 1, 2, 'Copper THHN 600 KCMIL', 'CU-600-THHN', 'Part', 'material', 'ft', 8.75, 8.75, 0.45, 0.0150, 85.00, 10.00, 3.00, '600 KCMIL', '600 KCMIL', 'Copper', '#dc2626', 'square', '26-05-19', JSON_OBJECT('wire_size','600 KCMIL','insulation','THHN','voltage','600V')),
-    (3, 1, 3, 'Duplex Receptacle', 'REC-DUP-20A', 'Part', 'material', 'ea', 4.50, 4.50, 12.75, 0.1500, 85.00, 10.00, 2.00, '20A', '20A', 'Nylon', '#16a34a', 'diamond', '26-27-26', JSON_OBJECT('rating','20A','voltage','125V')),
-    (4, 1, 4, 'Electrician Labor', 'LAB-ELEC', 'Labor', 'labor', 'hr', 85.00, 0.00, 85.00, 1.0000, 85.00, 0.00, 0.00, NULL, NULL, NULL, '#f59e0b', 'cross', '26-00-00', JSON_OBJECT('crew','Electrician'))
-ON DUPLICATE KEY UPDATE name = VALUES(name);
+CREATE TABLE IF NOT EXISTS estimate_items (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    estimate_id BIGINT UNSIGNED NOT NULL,
+    parent_estimate_item_id BIGINT UNSIGNED NULL,
+    takeoff_measurement_id BIGINT UNSIGNED NULL,
+    catalog_item_id BIGINT UNSIGNED NULL,
+    assembly_catalog_item_id BIGINT UNSIGNED NULL,
+    item_type VARCHAR(50) NOT NULL DEFAULT 'line_item',
+    name VARCHAR(191) NOT NULL,
+    description TEXT NULL,
+    quantity DECIMAL(18,6) NOT NULL DEFAULT 0,
+    unit_of_measure VARCHAR(50) NOT NULL DEFAULT 'ea',
+    unit_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+    material_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+    labor_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+    equipment_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+    subcontractor_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+    labor_hours DECIMAL(18,4) NOT NULL DEFAULT 0,
+    waste_factor_percent DECIMAL(9,4) NOT NULL DEFAULT 0,
+    markup_percent DECIMAL(9,4) NOT NULL DEFAULT 0,
+    total_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
+    sort_order INT NOT NULL DEFAULT 0,
+    metadata_json JSON NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    PRIMARY KEY (id),
+    KEY idx_estimate_items_estimate (estimate_id),
+    KEY idx_estimate_items_parent (parent_estimate_item_id),
+    KEY idx_estimate_items_measurement (takeoff_measurement_id),
+    KEY idx_estimate_items_catalog_item (catalog_item_id),
+    CONSTRAINT fk_estimate_items_estimate FOREIGN KEY (estimate_id) REFERENCES estimates(id) ON DELETE CASCADE,
+    CONSTRAINT fk_estimate_items_parent FOREIGN KEY (parent_estimate_item_id) REFERENCES estimate_items(id) ON DELETE SET NULL,
+    CONSTRAINT fk_estimate_items_measurement FOREIGN KEY (takeoff_measurement_id) REFERENCES takeoff_measurements(id) ON DELETE SET NULL,
+    CONSTRAINT fk_estimate_items_catalog_item FOREIGN KEY (catalog_item_id) REFERENCES catalog_items(id) ON DELETE SET NULL,
+    CONSTRAINT fk_estimate_items_assembly FOREIGN KEY (assembly_catalog_item_id) REFERENCES catalog_items(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO assemblies (id, name, description, unit_of_measure, calculated_cost, calculated_labor_hours, active)
-VALUES (1, 'EMT 1/2 inch + 600 KCMIL cable run', 'Linear assembly for conduit with cable and labor', 'ft', 0, 0, 1)
-ON DUPLICATE KEY UPDATE name = VALUES(name);
+CREATE TABLE IF NOT EXISTS estimate_markups (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    estimate_id BIGINT UNSIGNED NOT NULL,
+    name VARCHAR(191) NOT NULL,
+    markup_type ENUM('percentage','fixed','tax','discount') NOT NULL DEFAULT 'percentage',
+    basis ENUM('subtotal','material','labor','equipment','subcontractor','total') NOT NULL DEFAULT 'subtotal',
+    value DECIMAL(18,6) NOT NULL DEFAULT 0,
+    amount DECIMAL(18,4) NOT NULL DEFAULT 0,
+    sort_order INT NOT NULL DEFAULT 0,
+    metadata_json JSON NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    PRIMARY KEY (id),
+    KEY idx_estimate_markups_estimate (estimate_id),
+    CONSTRAINT fk_estimate_markups_estimate FOREIGN KEY (estimate_id) REFERENCES estimates(id) ON DELETE CASCADE
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO assembly_items (id, assembly_id, catalog_item_id, quantity, ratio_type, spacing_value, waste_factor, notes) VALUES
-    (1, 1, 1, 1.0000, 'per_linear_length', NULL, 5.0000, 'One foot of EMT per measured foot'),
-    (2, 1, 2, 1.0000, 'per_linear_length', NULL, 3.0000, 'One foot of conductor per measured foot'),
-    (3, 1, 4, 0.0200, 'per_linear_length', NULL, 0.0000, 'Labor hours per measured foot')
-ON DUPLICATE KEY UPDATE quantity = VALUES(quantity), ratio_type = VALUES(ratio_type);
+CREATE TABLE IF NOT EXISTS proposals (
+    id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    project_id BIGINT UNSIGNED NOT NULL,
+    estimate_id BIGINT UNSIGNED NULL,
+    bid_id BIGINT UNSIGNED NULL,
+    proposal_number VARCHAR(100) NULL,
+    title VARCHAR(191) NOT NULL,
+    status VARCHAR(50) NOT NULL DEFAULT 'draft',
+    valid_until DATE NULL,
+    subtotal DECIMAL(18,4) NOT NULL DEFAULT 0,
+    total DECIMAL(18,4) NOT NULL DEFAULT 0,
+    currency_code CHAR(3) NOT NULL DEFAULT 'USD',
+    terms TEXT NULL,
+    scope TEXT NULL,
+    exclusions TEXT NULL,
+    metadata_json JSON NULL,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    deleted_at TIMESTAMP NULL DEFAULT NULL,
+    PRIMARY KEY (id),
+    UNIQUE KEY uq_proposals_number (proposal_number),
+    KEY idx_proposals_project (project_id),
+    KEY idx_proposals_estimate (estimate_id),
+    KEY idx_proposals_bid (bid_id),
+    KEY idx_proposals_status_deleted (status, deleted_at),
+    CONSTRAINT fk_proposals_project FOREIGN KEY (project_id) REFERENCES projects(id) ON DELETE CASCADE,
+    CONSTRAINT fk_proposals_estimate FOREIGN KEY (estimate_id) REFERENCES estimates(id) ON DELETE SET NULL,
+    CONSTRAINT fk_proposals_bid FOREIGN KEY (bid_id) REFERENCES bids(id) ON DELETE SET NULL
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
-INSERT INTO takeoff_tags (name, color) VALUES
-    ('Electrical', '#2563eb'),
-    ('Review', '#f59e0b'),
-    ('Change order', '#dc2626')
-ON DUPLICATE KEY UPDATE color = VALUES(color);
+INSERT INTO bid_statuses (code, name, sort_order, is_terminal) VALUES
+    ('invitations', 'Invitations', 10, 0),
+    ('to_do', 'To Do', 20, 0),
+    ('estimating', 'Estimating', 30, 0),
+    ('bid_submitted', 'Bid Submitted', 40, 0),
+    ('accepted', 'Accepted', 50, 0),
+    ('in_progress', 'In Progress', 60, 0),
+    ('complete', 'Complete', 70, 1),
+    ('estimadores', 'Estimadores', 80, 0),
+    ('lost', 'Lost', 90, 1),
+    ('archived', 'Archived', 100, 1)
+ON DUPLICATE KEY UPDATE name = VALUES(name), sort_order = VALUES(sort_order), is_terminal = VALUES(is_terminal);
+
+SET FOREIGN_KEY_CHECKS = 1;
