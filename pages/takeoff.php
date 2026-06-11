@@ -2,9 +2,133 @@
 // Standalone Takeoff entry point. No auth/session dependency.
 $recentFiles = [];
 $projects = [];
+$syncedUploadCount = 0;
 
 try {
     require_once __DIR__ . '/../core/db/connection.php';
+
+    function ensure_takeoff_base_tables(PDO $pdo): void
+    {
+        $pdo->exec("CREATE TABLE IF NOT EXISTS projects (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            name VARCHAR(191) NOT NULL,
+            description TEXT NULL,
+            status VARCHAR(50) NOT NULL DEFAULT 'Active',
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            deleted_at TIMESTAMP NULL DEFAULT NULL,
+            PRIMARY KEY (id),
+            KEY idx_projects_deleted (deleted_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $pdo->exec("CREATE TABLE IF NOT EXISTS folders (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            project_id BIGINT UNSIGNED NOT NULL,
+            name VARCHAR(191) NOT NULL,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            deleted_at TIMESTAMP NULL DEFAULT NULL,
+            PRIMARY KEY (id),
+            KEY idx_folders_project (project_id),
+            KEY idx_folders_deleted (deleted_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $pdo->exec("CREATE TABLE IF NOT EXISTS files (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            project_id BIGINT UNSIGNED NULL,
+            folder_id BIGINT UNSIGNED NULL,
+            sub_folder_id BIGINT UNSIGNED NULL,
+            filename VARCHAR(255) NOT NULL,
+            filepath VARCHAR(1024) NOT NULL,
+            file_type VARCHAR(100) NULL,
+            uploaded_by BIGINT UNSIGNED NULL,
+            version_group_id VARCHAR(100) NULL,
+            version_number INT UNSIGNED NOT NULL DEFAULT 1,
+            uploaded_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            deleted_at TIMESTAMP NULL DEFAULT NULL,
+            PRIMARY KEY (id),
+            KEY idx_files_project (project_id),
+            KEY idx_files_folder (folder_id),
+            KEY idx_files_deleted (deleted_at),
+            KEY idx_files_uploaded (uploaded_at)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+
+        $pdo->exec("CREATE TABLE IF NOT EXISTS file_reports (
+            id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+            file_id BIGINT UNSIGNED NOT NULL,
+            technician_name VARCHAR(191) NULL,
+            technician_role VARCHAR(191) NULL,
+            description TEXT NULL,
+            report_pdf_path VARCHAR(1024) NULL,
+            annotations_json JSON NULL,
+            attachments_json JSON NULL,
+            is_deleted TINYINT(1) NOT NULL DEFAULT 0,
+            created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+            updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+            PRIMARY KEY (id),
+            KEY idx_file_reports_file (file_id),
+            KEY idx_file_reports_deleted (is_deleted)
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    }
+
+    function ensure_upload_test_project(PDO $pdo): array
+    {
+        $pdo->exec("INSERT INTO projects (id, name, description, status)
+            VALUES (1, 'Uploads Test Project', 'Temporary project generated from the local uploads folder', 'Active')
+            ON DUPLICATE KEY UPDATE name = VALUES(name), description = VALUES(description)");
+        $pdo->exec("INSERT INTO folders (id, project_id, name)
+            VALUES (1, 1, 'Uploads')
+            ON DUPLICATE KEY UPDATE name = VALUES(name)");
+        return [1, 1];
+    }
+
+    function sync_uploads_to_files(PDO $pdo, int $projectId, int $folderId): int
+    {
+        $roots = [
+            'uploads' => realpath(__DIR__ . '/../uploads'),
+            'api/uploads' => realpath(__DIR__ . '/../api/uploads'),
+        ];
+        $allowed = ['pdf', 'jpg', 'jpeg', 'png', 'gif', 'webp', 'bmp', 'tiff'];
+        $count = 0;
+        $exists = $pdo->prepare("SELECT id FROM files WHERE filepath = ? AND deleted_at IS NULL LIMIT 1");
+        $insert = $pdo->prepare("INSERT INTO files (project_id, folder_id, filename, filepath, file_type, uploaded_by, version_group_id, version_number, uploaded_at) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+
+        foreach ($roots as $publicRoot => $diskRoot) {
+            if (!$diskRoot || !is_dir($diskRoot)) continue;
+            $iterator = new RecursiveIteratorIterator(
+                new RecursiveDirectoryIterator($diskRoot, FilesystemIterator::SKIP_DOTS)
+            );
+            foreach ($iterator as $file) {
+                if (!$file->isFile()) continue;
+                $ext = strtolower($file->getExtension());
+                if (!in_array($ext, $allowed, true)) continue;
+                $relative = str_replace('\\', '/', substr($file->getPathname(), strlen($diskRoot) + 1));
+                $publicPath = $publicRoot . '/' . $relative;
+                $exists->execute([$publicPath]);
+                if ($exists->fetchColumn()) continue;
+                $uploadedAt = date('Y-m-d H:i:s', max(1, $file->getMTime()));
+                $insert->execute([
+                    $projectId,
+                    $folderId,
+                    $file->getFilename(),
+                    $publicPath,
+                    $ext,
+                    1,
+                    'uploads_' . md5($publicPath),
+                    1,
+                    $uploadedAt,
+                ]);
+                $count++;
+            }
+        }
+        return $count;
+    }
+
+    ensure_takeoff_base_tables($pdo);
+    [$testProjectId, $testFolderId] = ensure_upload_test_project($pdo);
+    $syncedUploadCount = sync_uploads_to_files($pdo, $testProjectId, $testFolderId);
 
     $recentStmt = $pdo->query(
         "SELECT f.id, f.filename, f.file_type, f.uploaded_at, p.name AS project_name, fo.name AS folder_name
@@ -186,29 +310,30 @@ try {
             <div class="brand-icon"><i class="fas fa-ruler-combined"></i></div>
             <span>Brightronix Takeoff</span>
         </div>
-        <a class="nav-link-takeoff active" href="/"><i class="fas fa-file-lines"></i><span>Drawings</span></a>
-        <a class="nav-link-takeoff" href="/pages/takeoff.php"><i class="fas fa-folder-tree"></i><span>Takeoff Home</span></a>
-        <a class="nav-link-takeoff" href="/takeoff_mysql_schema.sql"><i class="fas fa-database"></i><span>Schema</span></a>
+        <a class="nav-link-takeoff active" href="/"><i class="fas fa-file-lines"></i><span>Uploads</span></a>
     </aside>
 
     <main class="main">
         <div class="topbar">
             <div class="title">
                 <h1>Takeoff Module</h1>
-                <p>Select a drawing to open the Konva-based Takeoff editor.</p>
+                <p>Testing mode: PDFs and images are loaded from the local uploads folders.</p>
             </div>
         </div>
 
         <?php if (!empty($loadError)): ?>
             <div class="alert alert-danger">Database error: <?= htmlspecialchars($loadError) ?></div>
         <?php endif; ?>
+        <?php if ($syncedUploadCount > 0): ?>
+            <div class="alert alert-info">Synced <?= (int)$syncedUploadCount ?> new upload file(s) for testing.</div>
+        <?php endif; ?>
 
         <div class="row g-4">
-            <div class="col-xl-8">
+            <div class="col-12">
                 <div class="card-takeoff">
-                    <h5 class="fw-bold mb-3">Recent Drawings</h5>
+                    <h5 class="fw-bold mb-3">Uploads</h5>
                     <?php if (empty($recentFiles)): ?>
-                        <div class="meta">No drawings found. Upload drawings in the workspace first.</div>
+                        <div class="meta">No PDF or image files were found in uploads/ or api/uploads/.</div>
                     <?php endif; ?>
                     <?php foreach ($recentFiles as $file): ?>
                         <?php
@@ -220,7 +345,7 @@ try {
                             <div class="min-width-0">
                                 <div class="file-name"><?= htmlspecialchars($file['filename']) ?></div>
                                 <div class="meta">
-                                    <?= htmlspecialchars($file['project_name'] ?? 'No project') ?>
+                                    <?= htmlspecialchars($file['project_name'] ?? 'Uploads Test Project') ?>
                                     <?php if (!empty($file['folder_name'])): ?>
                                         · <?= htmlspecialchars($file['folder_name']) ?>
                                     <?php endif; ?>
@@ -231,24 +356,6 @@ try {
                                 <i class="fas fa-pen-ruler me-1"></i> Open Takeoff
                             </a>
                         </div>
-                    <?php endforeach; ?>
-                </div>
-            </div>
-
-            <div class="col-xl-4">
-                <div class="card-takeoff">
-                    <h5 class="fw-bold mb-3">Projects</h5>
-                    <?php if (empty($projects)): ?>
-                        <div class="meta">No projects found.</div>
-                    <?php endif; ?>
-                    <?php foreach ($projects as $project): ?>
-                        <a class="file-row text-decoration-none text-white" href="/pages/project_dashboard.php?id=<?= (int)$project['id'] ?>">
-                            <div class="file-icon"><i class="fas fa-folder"></i></div>
-                            <div>
-                                <div class="file-name"><?= htmlspecialchars($project['name']) ?></div>
-                                <div class="meta"><?= (int)$project['file_count'] ?> drawings</div>
-                            </div>
-                        </a>
                     <?php endforeach; ?>
                 </div>
             </div>
