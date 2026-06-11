@@ -64,8 +64,8 @@ if ($filePath !== '') {
     
     <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 
-    <link rel="stylesheet" href="../assets/editor/editor.css">
-    <link rel="stylesheet" href="../assets/editor/takeoff.css">
+    <link rel="stylesheet" href="../assets/editor/editor.css?v=<?= filemtime(__DIR__ . '/../assets/editor/editor.css') ?>">
+    <link rel="stylesheet" href="../assets/editor/takeoff.css?v=<?= filemtime(__DIR__ . '/../assets/editor/takeoff.css') ?>">
 
     <style>
         :root {
@@ -3197,7 +3197,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js"></script>
+<script src="../assets/editor/takeoff.js?v=<?= filemtime(__DIR__ . '/../assets/editor/takeoff.js') ?>"></script>
 </body>
 </html>
 

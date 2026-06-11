@@ -660,15 +660,15 @@
                 </div>
                 <div class="takeoff-panel-section">
                     <div class="takeoff-tabs">
-                        <button class="takeoff-tab active" data-takeoff-tab="catalog">Catalog</button>
+                        <button class="takeoff-tab active" data-takeoff-tab="layers">Layers</button>
+                        <button class="takeoff-tab" data-takeoff-tab="catalog">Catalog</button>
                         <button class="takeoff-tab" data-takeoff-tab="assemblies">Assemblies</button>
-                        <button class="takeoff-tab" data-takeoff-tab="layers">Layers</button>
                     </div>
                 </div>
                 <div class="takeoff-panel-body">
-                    <div id="takeoffCatalogTab" class="takeoff-panel-section"></div>
+                    <div id="takeoffLayersTab" class="takeoff-panel-section"></div>
+                    <div id="takeoffCatalogTab" class="takeoff-panel-section takeoff-hidden"></div>
                     <div id="takeoffAssembliesTab" class="takeoff-panel-section takeoff-hidden"></div>
-                    <div id="takeoffLayersTab" class="takeoff-panel-section takeoff-hidden"></div>
                 </div>
                 <div class="takeoff-panel-section">
                     <button class="takeoff-command primary" id="takeoffSave"><i class="fas fa-save me-1"></i>Save Takeoff</button>
