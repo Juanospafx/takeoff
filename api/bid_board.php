@@ -16,17 +16,17 @@ function bid_board_json(array $payload, int $status = 200): void
     exit;
 }
 
-function bid_board_num(mixed $value, float $default = 0): float
+function bid_board_num($value, float $default = 0): float
 {
     return is_numeric($value) ? (float)$value : $default;
 }
 
-function bid_board_int(mixed $value, int $default = 0): int
+function bid_board_int($value, int $default = 0): int
 {
     return is_numeric($value) ? (int)$value : $default;
 }
 
-function bid_board_date_or_null(mixed $value): ?string
+function bid_board_date_or_null($value): ?string
 {
     $value = trim((string)($value ?? ''));
     if ($value === '') return null;
@@ -135,7 +135,6 @@ function bid_board_ensure_schema(PDO $pdo): void
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
     $columns = $pdo->query("SHOW COLUMNS FROM bids")->fetchAll(PDO::FETCH_COLUMN);
-    $pdo->exec("ALTER TABLE bids MODIFY project_id BIGINT UNSIGNED NULL");
     $add = [
         'requester_company' => "ALTER TABLE bids ADD COLUMN requester_company VARCHAR(191) NULL AFTER name",
         'project_name_snapshot' => "ALTER TABLE bids ADD COLUMN project_name_snapshot VARCHAR(191) NULL AFTER requester_company",
@@ -232,9 +231,11 @@ try {
             ];
 
             if ($id > 0) {
-                $set = implode(', ', array_map(fn($column) => "$column = ?", array_keys($data)));
+                $set = implode(', ', array_map(function ($column) {
+                    return "$column = ?";
+                }, array_keys($data)));
                 $stmt = $pdo->prepare("UPDATE bids SET $set WHERE id = ?");
-                $stmt->execute([...array_values($data), $id]);
+                $stmt->execute(array_merge(array_values($data), [$id]));
             } else {
                 $columns = array_keys($data);
                 $stmt = $pdo->prepare("INSERT INTO bids (" . implode(', ', $columns) . ") VALUES (" . implode(', ', array_fill(0, count($columns), '?')) . ")");

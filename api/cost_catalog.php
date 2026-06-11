@@ -16,12 +16,12 @@ function cc_json(array $payload, int $status = 200): void
     exit;
 }
 
-function cc_int(mixed $value): int
+function cc_int($value): int
 {
     return is_numeric($value) ? (int)$value : 0;
 }
 
-function cc_str(mixed $value): ?string
+function cc_str($value): ?string
 {
     $value = trim((string)($value ?? ''));
     return $value === '' ? null : $value;
@@ -112,10 +112,29 @@ function cc_ensure_schema(PDO $pdo): void
         KEY idx_catalog_items_group (catalog_group_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 
-    cc_add_column($pdo, 'catalogs', 'locked', "ALTER TABLE catalogs ADD COLUMN locked TINYINT(1) NOT NULL DEFAULT 0 AFTER active");
-    cc_add_column($pdo, 'catalogs', 'enabled_for_projects', "ALTER TABLE catalogs ADD COLUMN enabled_for_projects TINYINT(1) NOT NULL DEFAULT 1 AFTER locked");
-    cc_add_column($pdo, 'catalog_groups', 'active', "ALTER TABLE catalog_groups ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1 AFTER sort_order");
-    cc_add_column($pdo, 'catalog_groups', 'enabled_for_projects', "ALTER TABLE catalog_groups ADD COLUMN enabled_for_projects TINYINT(1) NOT NULL DEFAULT 1 AFTER active");
+    cc_add_column($pdo, 'catalogs', 'trade', "ALTER TABLE catalogs ADD COLUMN trade VARCHAR(100) NULL");
+    cc_add_column($pdo, 'catalogs', 'active', "ALTER TABLE catalogs ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1");
+    cc_add_column($pdo, 'catalogs', 'locked', "ALTER TABLE catalogs ADD COLUMN locked TINYINT(1) NOT NULL DEFAULT 0");
+    cc_add_column($pdo, 'catalogs', 'enabled_for_projects', "ALTER TABLE catalogs ADD COLUMN enabled_for_projects TINYINT(1) NOT NULL DEFAULT 1");
+    cc_add_column($pdo, 'catalogs', 'metadata_json', "ALTER TABLE catalogs ADD COLUMN metadata_json JSON NULL");
+    cc_add_column($pdo, 'catalogs', 'deleted_at', "ALTER TABLE catalogs ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL");
+
+    cc_add_column($pdo, 'catalog_groups', 'parent_group_id', "ALTER TABLE catalog_groups ADD COLUMN parent_group_id BIGINT UNSIGNED NULL");
+    cc_add_column($pdo, 'catalog_groups', 'sort_order', "ALTER TABLE catalog_groups ADD COLUMN sort_order INT NOT NULL DEFAULT 0");
+    cc_add_column($pdo, 'catalog_groups', 'active', "ALTER TABLE catalog_groups ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1");
+    cc_add_column($pdo, 'catalog_groups', 'enabled_for_projects', "ALTER TABLE catalog_groups ADD COLUMN enabled_for_projects TINYINT(1) NOT NULL DEFAULT 1");
+    cc_add_column($pdo, 'catalog_groups', 'metadata_json', "ALTER TABLE catalog_groups ADD COLUMN metadata_json JSON NULL");
+    cc_add_column($pdo, 'catalog_groups', 'deleted_at', "ALTER TABLE catalog_groups ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL");
+
+    cc_add_column($pdo, 'catalog_items', 'cost_catalog_id', "ALTER TABLE catalog_items ADD COLUMN cost_catalog_id BIGINT UNSIGNED NULL");
+    cc_add_column($pdo, 'catalog_items', 'catalog_group_id', "ALTER TABLE catalog_items ADD COLUMN catalog_group_id BIGINT UNSIGNED NULL");
+    cc_add_column($pdo, 'catalog_items', 'sku', "ALTER TABLE catalog_items ADD COLUMN sku VARCHAR(100) NULL");
+    cc_add_column($pdo, 'catalog_items', 'item_type', "ALTER TABLE catalog_items ADD COLUMN item_type VARCHAR(50) NOT NULL DEFAULT 'part'");
+    cc_add_column($pdo, 'catalog_items', 'unit_of_measure', "ALTER TABLE catalog_items ADD COLUMN unit_of_measure VARCHAR(50) NOT NULL DEFAULT 'ea'");
+    cc_add_column($pdo, 'catalog_items', 'unit_cost', "ALTER TABLE catalog_items ADD COLUMN unit_cost DECIMAL(18,4) NOT NULL DEFAULT 0");
+    cc_add_column($pdo, 'catalog_items', 'labor_hours', "ALTER TABLE catalog_items ADD COLUMN labor_hours DECIMAL(18,4) NOT NULL DEFAULT 0");
+    cc_add_column($pdo, 'catalog_items', 'active', "ALTER TABLE catalog_items ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1");
+    cc_add_column($pdo, 'catalog_items', 'deleted_at', "ALTER TABLE catalog_items ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL");
 
     $count = (int)$pdo->query("SELECT COUNT(*) FROM catalogs WHERE deleted_at IS NULL")->fetchColumn();
     if ($count === 0) {
@@ -145,11 +164,11 @@ function cc_ensure_schema(PDO $pdo): void
             $emtGroup = (int)$pdo->query("SELECT id FROM catalog_groups WHERE catalog_id = $electricalId AND name = 'EMT' LIMIT 1")->fetchColumn();
             $lightingGroup = (int)$pdo->query("SELECT id FROM catalog_groups WHERE catalog_id = $electricalId AND name = 'Lighting' LIMIT 1")->fetchColumn();
             $items = [
-                [$electricalId, $emtGroup, 'EMT Conduit 1/2 inch', 'Electrical metallic tubing', 'ft', 0.85, 0.0100, 'part'],
-                [$electricalId, $emtGroup, 'EMT Connector 1/2 inch', 'Compression connector', 'ea', 1.15, 0.0200, 'part'],
-                [$electricalId, $lightingGroup, 'Lighting Fixture A Assembly', 'Fixture package placeholder', 'ea', 125.00, 0.7500, 'assembly'],
+                [$electricalId, $emtGroup, 'EMT Conduit 1/2 inch', 'Electrical metallic tubing', 'ft', 0.85, 0.0100],
+                [$electricalId, $emtGroup, 'EMT Connector 1/2 inch', 'Compression connector', 'ea', 1.15, 0.0200],
+                [$electricalId, $lightingGroup, 'Lighting Fixture A Assembly', 'Fixture package placeholder', 'ea', 125.00, 0.7500],
             ];
-            $stmt = $pdo->prepare("INSERT INTO catalog_items (catalog_id, catalog_group_id, name, description, unit_of_measure, unit_cost, labor_hours, item_type, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, 1)");
+            $stmt = $pdo->prepare("INSERT INTO catalog_items (catalog_id, catalog_group_id, name, description, unit_of_measure, unit_cost, labor_hours, active) VALUES (?, ?, ?, ?, ?, ?, ?, 1)");
             foreach ($items as $item) $stmt->execute($item);
         }
     }
@@ -222,7 +241,7 @@ try {
             ];
             if ($id > 0) {
                 $stmt = $pdo->prepare("UPDATE catalogs SET name = ?, description = ?, trade = ?, active = ?, locked = ?, enabled_for_projects = ? WHERE id = ?");
-                $stmt->execute([...$data, $id]);
+                $stmt->execute(array_merge($data, [$id]));
             } else {
                 $stmt = $pdo->prepare("INSERT INTO catalogs (name, description, trade, active, locked, enabled_for_projects) VALUES (?, ?, ?, ?, ?, ?)");
                 $stmt->execute($data);
@@ -271,7 +290,7 @@ try {
             $data = [$catalogId, $parentId, $name, cc_str($input['description'] ?? null), cc_int($input['sort_order'] ?? 0), !empty($input['active']) ? 1 : 0, !empty($input['enabled_for_projects']) ? 1 : 0];
             if ($id > 0) {
                 $stmt = $pdo->prepare("UPDATE catalog_groups SET catalog_id = ?, parent_group_id = ?, name = ?, description = ?, sort_order = ?, active = ?, enabled_for_projects = ? WHERE id = ?");
-                $stmt->execute([...$data, $id]);
+                $stmt->execute(array_merge($data, [$id]));
             } else {
                 $stmt = $pdo->prepare("INSERT INTO catalog_groups (catalog_id, parent_group_id, name, description, sort_order, active, enabled_for_projects) VALUES (?, ?, ?, ?, ?, ?, ?)");
                 $stmt->execute($data);

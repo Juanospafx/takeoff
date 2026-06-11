@@ -16,12 +16,12 @@ function project_json(array $payload, int $status = 200): void
     exit;
 }
 
-function project_int(mixed $value, int $default = 0): int
+function project_int($value, int $default = 0): int
 {
     return is_numeric($value) ? (int)$value : $default;
 }
 
-function project_date_or_null(mixed $value): ?string
+function project_date_or_null($value): ?string
 {
     $value = trim((string)($value ?? ''));
     if ($value === '') return null;
@@ -29,7 +29,7 @@ function project_date_or_null(mixed $value): ?string
     return $ts ? date('Y-m-d', $ts) : null;
 }
 
-function project_json_value(mixed $value): ?string
+function project_json_value($value): ?string
 {
     if ($value === null || $value === '') return null;
     if (is_string($value)) {
@@ -176,9 +176,11 @@ try {
             if ($data['name'] === '') project_json(['status' => 'error', 'msg' => 'Project name is required'], 422);
 
             if ($id > 0) {
-                $set = implode(', ', array_map(fn($column) => "$column = ?", array_keys($data)));
+                $set = implode(', ', array_map(function ($column) {
+                    return "$column = ?";
+                }, array_keys($data)));
                 $stmt = $pdo->prepare("UPDATE projects SET $set WHERE id = ?");
-                $stmt->execute([...array_values($data), $id]);
+                $stmt->execute(array_merge(array_values($data), [$id]));
             } else {
                 $columns = array_keys($data);
                 $stmt = $pdo->prepare("INSERT INTO projects (" . implode(', ', $columns) . ") VALUES (" . implode(', ', array_fill(0, count($columns), '?')) . ")");
