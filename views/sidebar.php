@@ -27,17 +27,12 @@ $isAdminSidebar = (strtolower($userRoleRawSidebar) === 'admin');
     </div>
     
     <div class="flex-grow-1">
-        <a href="../pages/index.php" class="menu-item <?= $isDashboard ? 'active' : '' ?>">
-            <i class="fas fa-th-large"></i><span class="menu-label">Dashboard</span>
+        <a href="../pages/takeoff.php" class="menu-item <?= $isDashboard ? 'active' : '' ?>">
+            <i class="fas fa-ruler-combined"></i><span class="menu-label">Takeoff</span>
         </a>
         
         <a href="../pages/archivos.php" class="menu-item <?= $isFiles ? 'active' : '' ?>">
             <i class="fas fa-file-pdf"></i><span class="menu-label">All PDFs</span>
-        </a>
-    </div>
-    <div>
-        <a href="../pages/logout.php" class="menu-item text-danger">
-            <i class="fas fa-sign-out-alt"></i><span class="menu-label">Logout</span>
         </a>
     </div>
 </nav>

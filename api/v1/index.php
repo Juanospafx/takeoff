@@ -2,7 +2,6 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/helpers.php';
-require_once __DIR__ . '/middleware_auth.php';
 
 $config = require __DIR__ . '/config.php';
 
@@ -42,9 +41,7 @@ foreach ($routes as $route) {
         $handler = $route[2];
         $authRequired = $route[3];
 
-        if ($authRequired) {
-            verify_hmac_auth($config);
-        }
+        // Standalone Takeoff mode: API v1 routes are not protected by auth middleware.
 
         // Controller binding
         [$controllerName, $action] = explode('@', $handler, 2);

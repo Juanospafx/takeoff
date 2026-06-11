@@ -1,23 +1,15 @@
 <?php
-// core/auth/session.php
-session_start();
-
-// Verificamos no solo el ID, sino tambien el username y el role.
-// Si falta CUALQUIERA de los tres, cerramos sesion y mandamos al login.
-if (!isset($_SESSION['user_id']) || !isset($_SESSION['username']) || !isset($_SESSION['role'])) {
-    // Destruir sesion corrupta por si acaso
-    session_destroy();
-    session_unset();
-
-    // Redirigir al login
-    header("Location: ../pages/login.php");
-    exit();
+// Compatibility shim for legacy pages.
+// The standalone Takeoff module does not use login, roles, or access control.
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
 }
 
-// Opcional: Funcion para chequear roles especificos
+$_SESSION['user_id'] = $_SESSION['user_id'] ?? 1;
+$_SESSION['username'] = $_SESSION['username'] ?? 'Takeoff';
+$_SESSION['role'] = $_SESSION['role'] ?? 'admin';
+
 function requireRole($role) {
-    if ($_SESSION['role'] !== $role && $_SESSION['role'] !== 'admin') {
-        die("Acceso denegado: Se requieren permisos de " . $role);
-    }
+    return true;
 }
 ?>
