@@ -133,10 +133,24 @@
             const dy = points[index].y - points[index - 1].y;
             px += Math.sqrt(dx * dx + dy * dy);
         }
-        const measured = pixelsPerFoot > 0 ? px / pixelsPerFoot : px;
+        const measured = getPlanScale() > 0 ? px / getPlanScale() : 0;
         segment.measured_length = measured;
         segment.total_length = measured * num(segment.multiplier || 1);
+        segment.unit = 'ft';
         return segment.total_length;
+    }
+
+    function getPlanScale() {
+        return (typeof pixelsPerFoot !== 'undefined' && Number(pixelsPerFoot) > 0) ? Number(pixelsPerFoot) : 0;
+    }
+
+    function hasPlanScale() {
+        return getPlanScale() > 0;
+    }
+
+    function formatFeetLabel(feet) {
+        if (typeof formatFeetForDisplay === 'function') return formatFeetForDisplay(feet);
+        return `${num(feet).toFixed(2)} ft`;
     }
 
     function calculateItemCost(item, quantity) {
@@ -273,9 +287,12 @@
         if (!segment.node) return;
         segment.node.points((segment.points_json || []).flatMap(p => [p.x, p.y]));
         calculateLinearLength(segment);
-        const mid = segment.points_json[Math.floor((segment.points_json.length - 1) / 2)] || { x: 0, y: 0 };
+        const points = segment.points_json || [];
+        const mid = points.length >= 2
+            ? { x: (points[0].x + points[points.length - 1].x) / 2, y: (points[0].y + points[points.length - 1].y) / 2 }
+            : (points[0] || { x: 0, y: 0 });
         segment.labelNode.position({ x: mid.x + 8, y: mid.y - 18 });
-        segment.labelNode.text(`${segment.total_length.toFixed(2)} ${segment.unit || 'ft'}`);
+        segment.labelNode.text(formatFeetLabel(segment.total_length));
         (segment.handles || []).forEach((handle, index) => {
             if (segment.points_json[index]) handle.position(segment.points_json[index]);
         });
@@ -298,12 +315,13 @@
             points: (segment.points_json || []).flatMap(p => [p.x, p.y]),
             stroke: segment.color || '#2563eb',
             strokeWidth: num(segment.stroke_width || 4),
+            hitStrokeWidth: 16,
             lineCap: 'round',
             lineJoin: 'round',
             draggable: true,
             visible,
         });
-        const label = new Konva.Text({ fill: segment.color || '#2563eb', fontSize: 14, padding: 3, visible });
+        const label = new Konva.Text({ fill: segment.color || '#22c55e', fontSize: 16, padding: 4, visible, listening: false });
         const handles = (segment.points_json || []).map((point, index) => {
             const handle = new Konva.Circle({ x: point.x, y: point.y, radius: 5, fill: '#fff', stroke: segment.color || '#2563eb', strokeWidth: 2, draggable: true, visible: false });
             handle.on('dragmove', () => {
@@ -407,10 +425,22 @@
     }
 
     function addLinearPoint(pos) {
+        if (!hasPlanScale()) {
+            showToast('Set the plan scale before drawing line items.', 'error');
+            if (typeof setMode === 'function') setMode('cal');
+            return;
+        }
         if (!state.draftLine) {
+            const layer = activeLayer();
             state.draftLine = {
                 points: [pos],
-                preview: new Konva.Line({ points: [pos.x, pos.y], stroke: '#38bdf8', strokeWidth: 3, dash: [8, 6], lineCap: 'round', lineJoin: 'round' }),
+                preview: new Konva.Line({
+                    points: [pos.x, pos.y, pos.x, pos.y],
+                    stroke: layer.color || '#22c55e',
+                    strokeWidth: 4,
+                    lineCap: 'round',
+                    lineJoin: 'round'
+                }),
             };
             konvaLayer.add(state.draftLine.preview);
             return;
@@ -418,6 +448,7 @@
         state.draftLine.points.push(pos);
         state.draftLine.preview.points(state.draftLine.points.flatMap(p => [p.x, p.y]));
         konvaLayer.batchDraw();
+        finishLinear();
     }
 
     function finishLinear() {
@@ -825,6 +856,15 @@
         });
         konvaStage.on('dblclick dbltap', () => {
             if (state.tool === 'takeoff_linear') finishLinear();
+        });
+        konvaStage.on('mousemove touchmove', () => {
+            if (state.tool !== 'takeoff_linear' || !state.draftLine?.preview || state.draftLine.points.length !== 1) return;
+            const pos = konvaStage.getPointerPosition();
+            if (!pos) return;
+            const world = screenToWorld(pos);
+            const start = state.draftLine.points[0];
+            state.draftLine.preview.points([start.x, start.y, world.x, world.y]);
+            konvaLayer.batchDraw();
         });
     }
 
@@ -1330,6 +1370,13 @@
         state.selectedLayerUid = layer.client_uid;
         state.selectedLayerUids = new Set([layer.client_uid]);
         const type = layerType(layer);
+        if (type === 'linear' && !hasPlanScale()) {
+            setTool('select');
+            showToast('Set the plan scale before drawing line items.', 'error');
+            if (typeof setMode === 'function') setMode('cal');
+            renderLayers();
+            return;
+        }
         setTool(type === 'linear' ? 'takeoff_linear' : 'takeoff_count');
         showToast(`${layer.name} active`, 'success');
         renderLayers();

@@ -1322,6 +1322,9 @@ if ($filePath !== '') {
             r.group.draggable(allowEdit);
             r.a1.draggable(allowEdit);
             r.a2.draggable(allowEdit);
+            const selected = allowEdit && konvaSelectedNode?.type === 'ruler' && konvaSelectedNode.ref === r;
+            r.a1.visible(selected);
+            r.a2.visible(selected);
         });
         konvaNotes.forEach(n => {
             n.group.draggable(allowEdit);
@@ -1349,6 +1352,10 @@ if ($filePath !== '') {
             konvaTransformer.nodes([]);
         }
         konvaSelectedNode = null;
+        konvaRulers.forEach(r => {
+            r.a1.visible(false);
+            r.a2.visible(false);
+        });
         if (konvaLayer) konvaLayer.batchDraw();
     }
 
@@ -1365,7 +1372,8 @@ if ($filePath !== '') {
             fill: '#ffffff',
             stroke: '#22c55e',
             strokeWidth: 2,
-            draggable: true
+            draggable: true,
+            visible: false
         });
         const a2 = new Konva.Circle({
             x: p2.x, y: p2.y,
@@ -1373,7 +1381,8 @@ if ($filePath !== '') {
             fill: '#ffffff',
             stroke: '#22c55e',
             strokeWidth: 2,
-            draggable: true
+            draggable: true,
+            visible: false
         });
         const label = new Konva.Text({
             x: (p1.x + p2.x) / 2,
@@ -1413,6 +1422,12 @@ if ($filePath !== '') {
             if (currentMode !== 'smart') return;
             if (konvaTransformer) konvaTransformer.nodes([group]);
             konvaSelectedNode = { type: 'ruler', ref: ruler };
+            konvaRulers.forEach(r => {
+                const active = r === ruler;
+                r.a1.visible(active);
+                r.a2.visible(active);
+            });
+            konvaLayer.batchDraw();
         });
 
         updateKonvaLabel(ruler);
@@ -1786,6 +1801,11 @@ if ($filePath !== '') {
             }
             if (currentMode === 'smart' && isEmpty) {
                 konvaSelectedNode = null;
+                konvaRulers.forEach(r => {
+                    r.a1.visible(false);
+                    r.a2.visible(false);
+                });
+                if (konvaLayer) konvaLayer.batchDraw();
             }
         });
         konvaStage.on('mousemove', (e) => {
