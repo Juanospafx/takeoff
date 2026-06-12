@@ -327,6 +327,436 @@ body.view-summary .floating-controls {
     }
 }
 
+/* Final Procore-style overrides: keep this block last. */
+.takeoff-panel { width: 485px; max-height: calc(100% - 24px); background: #f7f7f7; color: #222; border: 1px solid #d4d4d4; border-radius: 0; box-shadow: 0 2px 8px rgba(0,0,0,.16); }
+.takeoff-props { display: none; }
+.takeoff-panel-header { height: 48px; padding: 0 16px; background: #fff; color: #1f2933; border-bottom: 1px solid #ddd; }
+.takeoff-title { font-size: 16px; font-weight: 700; }
+.takeoff-panel-header .takeoff-icon-btn { width: 28px; height: 28px; min-height: 28px; border: 0; background: transparent; color: #222; }
+.takeoff-panel-section { padding: 8px 14px; background: #fff; border-bottom: 1px solid #ddd; }
+.takeoff-search-input { width: 100%; height: 34px; border: 1px solid #bdbdbd; border-radius: 2px; background: #fff; color: #222; padding: 6px 10px; font-size: 14px; }
+.takeoff-actions-strip { height: 44px; display: grid; grid-template-columns: 28px auto 1fr; align-items: center; gap: 10px; padding: 0 14px; background: #fff; border-bottom: 1px solid #ddd; color: #59636e; font-size: 13px; }
+.takeoff-actions-btn { justify-self: start; border: 0; background: transparent; color: #333; font-weight: 500; padding: 6px 8px; }
+.takeoff-panel-body { background: #f7f7f7; overflow: auto; }
+.takeoff-layer-groups { gap: 0; }
+.takeoff-layer-group { border: 0; border-radius: 0; background: transparent; }
+.takeoff-layer-group-head { min-height: 42px; display: grid; grid-template-columns: 24px 24px 22px minmax(0,1fr) 28px; gap: 4px; align-items: center; padding: 5px 12px; background: #f7f7f7; border-bottom: 1px solid #e2e2e2; color: #222; }
+.takeoff-layer-group-head > span { font-size: 13px; font-weight: 700; }
+.takeoff-group-eye, .takeoff-group-toggle, .takeoff-layer-eye, .takeoff-mini-btn { width: 24px; height: 24px; min-height: 24px; border: 0; border-radius: 2px; background: transparent; color: #59636e; display: inline-flex; align-items: center; justify-content: center; cursor: pointer; }
+.takeoff-group-eye:hover, .takeoff-group-toggle:hover, .takeoff-layer-eye:hover, .takeoff-mini-btn:hover { background: #e9e9e9; color: #222; }
+.takeoff-group-check, .takeoff-layer-check { width: 17px; height: 17px; accent-color: #2b6cb0; }
+.takeoff-layer-row { min-height: 42px; display: grid; grid-template-columns: 24px 24px minmax(0,1fr) 28px; gap: 4px; align-items: start; padding: 5px 12px; background: #f7f7f7; border-top: 0; border-bottom: 1px solid #ebebeb; color: #222; cursor: pointer; }
+.takeoff-layer-row:hover { background: #efefef; }
+.takeoff-layer-row.active { background: #e8f1fb; box-shadow: inset 3px 0 0 #2b6cb0; }
+.takeoff-layer-copy { min-width: 0; padding-left: 28px; }
+.takeoff-layer-name { color: #333; font-size: 12px; line-height: 16px; font-weight: 400; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.takeoff-layer-meta { margin-top: 2px; display: flex; align-items: center; gap: 7px; color: #4a4a4a; font-size: 12px; font-weight: 400; text-transform: none; }
+.takeoff-layer-symbol { width: 11px; height: 11px; border: 0; box-shadow: none; }
+.takeoff-layer-symbol.square { border-radius: 1px; }
+.takeoff-layer-symbol.pentagon { clip-path: polygon(50% 0, 100% 38%, 82% 100%, 18% 100%, 0 38%); }
+.takeoff-layer-symbol.line { width: 18px; height: 3px; }
+.takeoff-menu { position: absolute; z-index: 120; width: 212px; background: #fff; border: 1px solid #ddd; box-shadow: 0 3px 12px rgba(0,0,0,.22); padding: 6px 0; pointer-events: auto; }
+.takeoff-menu button { width: 100%; min-height: 34px; border: 0; background: #fff; color: #333; display: grid; grid-template-columns: 24px 1fr; align-items: center; gap: 8px; padding: 7px 14px; text-align: left; font-size: 13px; }
+.takeoff-menu button:hover { background: #f0f0f0; }
+.takeoff-menu-divider { height: 1px; background: #ececec; margin: 6px 0; }
+.takeoff-modal-backdrop { background: rgba(0,0,0,.55); }
+.takeoff-modal { width: min(765px, calc(100vw - 64px)); background: #fff; color: #333; border: 1px solid #cfcfcf; border-radius: 4px; box-shadow: 0 12px 38px rgba(0,0,0,.34); }
+.takeoff-modal-head { min-height: 76px; padding: 0 26px; border-bottom: 1px solid #ddd; }
+.takeoff-modal-head h3 { color: #333; font-size: 18px; font-weight: 700; }
+.takeoff-modal .takeoff-mini-btn { color: #333; font-size: 22px; }
+.takeoff-modal-body { padding: 20px 26px 26px; }
+.takeoff-field label { color: #555; text-transform: none; font-size: 12px; font-weight: 700; }
+.takeoff-field input, .takeoff-field select, .takeoff-field textarea { min-height: 31px; background: #fff; border: 1px solid #9b9b9b; border-radius: 2px; color: #333; padding: 5px 9px; font-size: 13px; }
+.takeoff-pick-row { grid-template-columns: minmax(0,1fr) 134px; }
+.takeoff-create-row { display: grid; grid-template-columns: minmax(240px,1fr) 62px 64px 70px 64px; gap: 14px; align-items: end; margin-top: 18px; }
+.takeoff-command.browse { min-height: 31px; background: #f05a28; border: 0; color: #fff; font-weight: 700; border-radius: 3px; }
+.takeoff-create-meta { margin-top: 4px; padding: 0 0 0 13px; border: 0; background: transparent; color: #555; font-size: 12px; }
+.takeoff-modal-actions { min-height: 72px; padding: 0 26px; border-top: 1px solid #ddd; }
+.takeoff-modal-actions .takeoff-command { background: transparent; border: 0; color: #333; font-size: 13px; }
+.takeoff-modal-actions .takeoff-command.primary { background: #f05a28; color: #fff; border: 0; border-radius: 4px; min-width: 62px; }
+.takeoff-modal-actions .takeoff-command.primary:disabled { background: #fac8b7; color: #fff; opacity: 1; }
+
+/* Procore-style Takeoffs panel */
+.takeoff-panel {
+    top: 12px;
+    left: 12px;
+    width: 485px;
+    max-height: calc(100% - 24px);
+    background: #f7f7f7;
+    color: #222;
+    border: 1px solid #d4d4d4;
+    border-radius: 0;
+    box-shadow: 0 2px 8px rgba(0,0,0,.16);
+}
+
+.takeoff-props {
+    display: none;
+}
+
+.takeoff-panel-header {
+    height: 48px;
+    padding: 0 16px;
+    background: #fff;
+    color: #1f2933;
+    border-bottom: 1px solid #ddd;
+}
+
+.takeoff-title {
+    font-size: 16px;
+    font-weight: 700;
+}
+
+.takeoff-panel-header .takeoff-icon-btn {
+    width: 28px;
+    height: 28px;
+    min-height: 28px;
+    border: 0;
+    background: transparent;
+    color: #222;
+    font-size: 15px;
+}
+
+.takeoff-panel-header .takeoff-icon-btn:hover {
+    background: #eee;
+}
+
+.takeoff-panel-section {
+    padding: 8px 14px;
+    background: #fff;
+    border-bottom: 1px solid #ddd;
+}
+
+.takeoff-search-input {
+    width: 100%;
+    height: 34px;
+    border: 1px solid #bdbdbd;
+    border-radius: 2px;
+    background: #fff;
+    color: #222;
+    padding: 6px 10px;
+    font-size: 14px;
+}
+
+.takeoff-actions-strip {
+    height: 44px;
+    display: grid;
+    grid-template-columns: 28px auto 1fr;
+    align-items: center;
+    gap: 10px;
+    padding: 0 14px;
+    background: #fff;
+    border-bottom: 1px solid #ddd;
+    color: #59636e;
+    font-size: 13px;
+}
+
+.takeoff-actions-btn {
+    justify-self: start;
+    border: 0;
+    background: transparent;
+    color: #333;
+    font-weight: 500;
+    padding: 6px 8px;
+}
+
+.takeoff-panel-body {
+    background: #f7f7f7;
+    overflow: auto;
+}
+
+.takeoff-layer-groups {
+    gap: 0;
+}
+
+.takeoff-layer-group {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+}
+
+.takeoff-layer-group-head {
+    min-height: 42px;
+    display: grid;
+    grid-template-columns: 24px 24px 22px minmax(0,1fr) 28px;
+    gap: 4px;
+    align-items: center;
+    padding: 5px 12px;
+    background: #f7f7f7;
+    border-bottom: 1px solid #e2e2e2;
+    color: #222;
+}
+
+.takeoff-layer-group-head > span {
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.takeoff-group-eye,
+.takeoff-group-toggle,
+.takeoff-layer-eye,
+.takeoff-mini-btn {
+    width: 24px;
+    height: 24px;
+    min-height: 24px;
+    border: 0;
+    border-radius: 2px;
+    background: transparent;
+    color: #59636e;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    cursor: pointer;
+}
+
+.takeoff-group-eye:hover,
+.takeoff-group-toggle:hover,
+.takeoff-layer-eye:hover,
+.takeoff-mini-btn:hover {
+    background: #e9e9e9;
+    color: #222;
+}
+
+.takeoff-group-check,
+.takeoff-layer-check {
+    width: 17px;
+    height: 17px;
+    accent-color: #2b6cb0;
+}
+
+.takeoff-layer-row {
+    min-height: 42px;
+    display: grid;
+    grid-template-columns: 24px 24px minmax(0,1fr) 28px;
+    gap: 4px;
+    align-items: start;
+    padding: 5px 12px;
+    padding-left: 12px;
+    background: #f7f7f7;
+    border-top: 0;
+    border-bottom: 1px solid #ebebeb;
+    color: #222;
+    cursor: pointer;
+}
+
+.takeoff-layer-row:hover {
+    background: #efefef;
+}
+
+.takeoff-layer-row.active {
+    background: #e8f1fb;
+    box-shadow: inset 3px 0 0 #2b6cb0;
+}
+
+.takeoff-layer-copy {
+    min-width: 0;
+    padding-left: 28px;
+}
+
+.takeoff-layer-name {
+    color: #333;
+    font-size: 12px;
+    line-height: 16px;
+    font-weight: 400;
+}
+
+.takeoff-layer-meta {
+    margin-top: 2px;
+    display: flex;
+    align-items: center;
+    gap: 7px;
+    color: #4a4a4a;
+    font-size: 12px;
+    font-weight: 400;
+    text-transform: none;
+}
+
+.takeoff-layer-symbol {
+    width: 11px;
+    height: 11px;
+    border: 0;
+    box-shadow: none;
+}
+
+.takeoff-layer-symbol.square {
+    border-radius: 1px;
+}
+
+.takeoff-layer-symbol.pentagon {
+    clip-path: polygon(50% 0, 100% 38%, 82% 100%, 18% 100%, 0 38%);
+}
+
+.takeoff-layer-symbol.line {
+    width: 18px;
+    height: 3px;
+}
+
+.takeoff-empty-state {
+    border: 0;
+    border-radius: 0;
+    background: transparent;
+    color: #555;
+    padding: 14px;
+}
+
+.takeoff-menu {
+    position: absolute;
+    z-index: 120;
+    width: 212px;
+    background: #fff;
+    border: 1px solid #ddd;
+    box-shadow: 0 3px 12px rgba(0,0,0,.22);
+    padding: 6px 0;
+    pointer-events: auto;
+}
+
+.takeoff-menu button {
+    width: 100%;
+    min-height: 34px;
+    border: 0;
+    background: #fff;
+    color: #333;
+    display: grid;
+    grid-template-columns: 24px 1fr;
+    align-items: center;
+    gap: 8px;
+    padding: 7px 14px;
+    text-align: left;
+    font-size: 13px;
+}
+
+.takeoff-menu button:hover {
+    background: #f0f0f0;
+}
+
+.takeoff-menu-divider {
+    height: 1px;
+    background: #ececec;
+    margin: 6px 0;
+}
+
+.takeoff-modal-backdrop {
+    background: rgba(0,0,0,.55);
+}
+
+.takeoff-modal {
+    width: min(765px, calc(100vw - 64px));
+    background: #fff;
+    color: #333;
+    border: 1px solid #cfcfcf;
+    border-radius: 4px;
+    box-shadow: 0 12px 38px rgba(0,0,0,.34);
+}
+
+.takeoff-modal-head {
+    min-height: 76px;
+    padding: 0 26px;
+    border-bottom: 1px solid #ddd;
+}
+
+.takeoff-modal-head h3 {
+    color: #333;
+    font-size: 18px;
+    font-weight: 700;
+}
+
+.takeoff-modal .takeoff-mini-btn {
+    color: #333;
+    font-size: 22px;
+}
+
+.takeoff-modal-body {
+    padding: 20px 26px 26px;
+}
+
+.takeoff-field label {
+    color: #555;
+    text-transform: none;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.takeoff-field input,
+.takeoff-field select,
+.takeoff-field textarea {
+    min-height: 31px;
+    background: #fff;
+    border: 1px solid #9b9b9b;
+    border-radius: 2px;
+    color: #333;
+    padding: 5px 9px;
+    font-size: 13px;
+}
+
+.takeoff-pick-row {
+    grid-template-columns: minmax(0,1fr) 134px;
+}
+
+.takeoff-create-row {
+    display: grid;
+    grid-template-columns: minmax(240px,1fr) 62px 64px 70px 64px;
+    gap: 14px;
+    align-items: end;
+    margin-top: 18px;
+}
+
+.takeoff-command.browse {
+    min-height: 31px;
+    background: #f05a28;
+    border: 0;
+    color: #fff;
+    font-weight: 700;
+    border-radius: 3px;
+}
+
+.takeoff-create-meta {
+    margin-top: 4px;
+    padding: 0 0 0 13px;
+    border: 0;
+    background: transparent;
+    color: #555;
+    font-size: 12px;
+}
+
+.takeoff-modal-actions {
+    min-height: 72px;
+    padding: 0 26px;
+    border-top: 1px solid #ddd;
+}
+
+.takeoff-modal-actions .takeoff-command {
+    background: transparent;
+    border: 0;
+    color: #333;
+    font-size: 13px;
+}
+
+.takeoff-modal-actions .takeoff-command.primary {
+    background: #f05a28;
+    color: #fff;
+    border: 0;
+    border-radius: 4px;
+    min-width: 62px;
+}
+
+.takeoff-command:disabled,
+.takeoff-modal-actions .takeoff-command.primary:disabled {
+    background: #fac8b7;
+    color: #fff;
+    opacity: 1;
+}
+
+@media (max-width: 991px) {
+    .takeoff-panel {
+        width: calc(100% - 24px);
+        max-height: 58%;
+    }
+
+    .takeoff-create-row,
+    .takeoff-pick-row {
+        grid-template-columns: 1fr;
+    }
+}
+
 /* Layer manager overrides used by the in-canvas takeoff panel. */
 .takeoff-panel {
     width: 430px;
@@ -718,4 +1148,55 @@ body.view-summary .floating-controls {
     .takeoff-catalog-browser {
         grid-template-columns: 1fr;
     }
+}
+
+/* Last-word overrides for Procore-like layer list. */
+.takeoff-panel {
+    width: 485px;
+    max-height: calc(100% - 24px);
+    background: #f7f7f7;
+    color: #222;
+    border: 1px solid #d4d4d4;
+    border-radius: 0;
+}
+.takeoff-props { display: none; }
+.takeoff-panel-header,
+.takeoff-panel-section,
+.takeoff-actions-strip {
+    background: #fff;
+    color: #222;
+    border-bottom: 1px solid #ddd;
+}
+.takeoff-panel-body,
+.takeoff-layer-group,
+.takeoff-layer-group-head,
+.takeoff-layer-row {
+    background: #f7f7f7;
+    color: #222;
+}
+.takeoff-layer-group-head {
+    grid-template-columns: 24px 24px 22px minmax(0,1fr) 28px;
+    min-height: 42px;
+    border-bottom: 1px solid #e2e2e2;
+}
+.takeoff-layer-row {
+    grid-template-columns: 24px 24px minmax(0,1fr) 28px;
+    min-height: 42px;
+    border-bottom: 1px solid #ebebeb;
+}
+.takeoff-layer-row.active {
+    background: #e8f1fb;
+    box-shadow: inset 3px 0 0 #2b6cb0;
+}
+.takeoff-layer-copy { padding-left: 28px; }
+.takeoff-layer-name { color: #333; font-size: 12px; font-weight: 400; }
+.takeoff-layer-meta { color: #4a4a4a; font-size: 12px; text-transform: none; }
+.takeoff-layer-symbol { width: 11px; height: 11px; border: 0; }
+.takeoff-menu,
+.takeoff-menu button,
+.takeoff-modal,
+.takeoff-field input,
+.takeoff-field select {
+    background: #fff;
+    color: #333;
 }
