@@ -1420,7 +1420,7 @@ if ($filePath !== '') {
         group.on('dragend', saveCurrentPageAnnotations);
         group.on('click tap', () => {
             if (currentMode !== 'smart') return;
-            if (konvaTransformer) konvaTransformer.nodes([group]);
+            if (konvaTransformer) konvaTransformer.nodes([]);
             konvaSelectedNode = { type: 'ruler', ref: ruler };
             konvaRulers.forEach(r => {
                 const active = r === ruler;

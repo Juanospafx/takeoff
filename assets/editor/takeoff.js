@@ -519,7 +519,15 @@
     }
 
     function layerType(layer) {
-        return layer.takeoff_type || layer.type || 'mixed';
+        const raw = String(layer.takeoff_type || layer.type || layer.layer_type || '').toLowerCase();
+        if (['linear', 'line', 'lines', 'lf', 'ft'].includes(raw)) return 'linear';
+        if (['count', 'counts', 'point', 'points', 'ea'].includes(raw)) return 'count';
+        if (['area', 'sf'].includes(raw)) return 'area';
+        if (['volume', 'cy'].includes(raw)) return 'volume';
+        if (['lump_sum', 'lump sum', 'lot'].includes(raw)) return 'lump_sum';
+        const uom = String(layer.unit_of_measure || '').toLowerCase();
+        if (['lf', 'ft'].includes(uom)) return 'linear';
+        return raw || 'mixed';
     }
 
     function layerUnit(layer) {
@@ -682,6 +690,7 @@
 
     function submitCreateLayerModal() {
         const item = state.createCatalogItemId ? state.catalog.items.find(row => String(row.id) === String(state.createCatalogItemId)) : null;
+        const previousType = state.createLayerMode ? layerType(state.createLayerMode) : null;
         const payload = {
             name: document.getElementById('takeoffCreateName').value.trim(),
             takeoff_type: document.getElementById('takeoffCreateType').value,
@@ -706,11 +715,24 @@
         } else {
             targetLayer = createLayer(payload);
         }
+        if (targetLayer && previousType && previousType !== layerType(targetLayer)) {
+            clearIncompatibleMeasurements(targetLayer, layerType(targetLayer));
+        }
         state.createCatalogItemId = null;
         closeCreateLayerModal();
         if (targetLayer) activateLayerForInsert(targetLayer.client_uid);
         markDirty();
         renderAll();
+    }
+
+    function clearIncompatibleMeasurements(layer, nextType) {
+        if (nextType === 'linear') {
+            state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).forEach(marker => marker.node && marker.node.destroy());
+            state.markers = state.markers.filter(marker => marker.layer_client_uid !== layer.client_uid);
+        } else if (nextType === 'count') {
+            state.segments.filter(segment => segment.layer_client_uid === layer.client_uid).forEach(destroySegmentNodes);
+            state.segments = state.segments.filter(segment => segment.layer_client_uid !== layer.client_uid);
+        }
     }
 
     function openCatalogBrowser() {
@@ -849,10 +871,18 @@
         konvaStage.on('click tap', evt => {
             if (state.tool !== 'takeoff_count' && state.tool !== 'takeoff_linear') return;
             if (evt.target !== konvaStage && evt.target.getParent() !== konvaLayer) return;
+            const layer = activeLayer();
+            const activeType = layerType(layer);
+            if (activeType === 'linear' && state.tool !== 'takeoff_linear') {
+                setTool('takeoff_linear');
+            }
+            if (activeType !== 'linear' && state.tool !== 'takeoff_count') {
+                setTool('takeoff_count');
+            }
             const pos = konvaStage.getPointerPosition();
             const world = screenToWorld(pos);
-            if (state.tool === 'takeoff_count') addMarker(world);
-            if (state.tool === 'takeoff_linear') addLinearPoint(world);
+            if (layerType(layer) === 'linear') addLinearPoint(world);
+            else addMarker(world);
         });
         konvaStage.on('dblclick dbltap', () => {
             if (state.tool === 'takeoff_linear') finishLinear();
