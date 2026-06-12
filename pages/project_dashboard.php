@@ -1,143 +1,242 @@
 <?php
-/**
- * project_dashboard.php
- * 
- * MAIN PROJECT DASHBOARD WITH 5 TOP-LEVEL TABS
- * 
- * TOP NAVIGATION: Overview | Documents | Takeoff | Estimating | Proposal
- * 
- * Each tab is a complete view within the project context.
- * Takeoff has 2 internal slides:
- *   - Slide 1: Drawing Takeoff (plan view + layers panel + toolbar)
- *   - Slide 2: Estimate Summary (cost table + totals)
- */
-
 require_once __DIR__ . '/../core/db/connection.php';
 
 $projectId = (int)($_GET['id'] ?? $_GET['project_id'] ?? 0);
 $activeTab = $_GET['tab'] ?? 'overview';
-$takeoffSlide = $_GET['slide'] ?? 'drawing'; // 'drawing' or 'summary'
+$selectedDocumentId = (int)($_GET['file_id'] ?? $_GET['document_id'] ?? 0);
 
-// Fetch project data
-$projectStmt = $pdo->prepare("
-    SELECT * FROM projects 
-    WHERE id = ? AND deleted_at IS NULL
-");
-$projectStmt->execute([$projectId]);
-$project = $projectStmt->fetch(PDO::FETCH_ASSOC);
-
-if (!$project) {
-    http_response_code(404);
-    die("Project not found");
-}
-
-// Fetch related data based on active tab
-$drawings = [];
-$takeoffs = [];
-$estimates = [];
-$documents = [];
-$proposals = [];
-$estimateItems = [];
-$takeoffLayers = [];
-$takeoffMeasurements = [];
-
-if ($activeTab === 'documents') {
-    $stmt = $pdo->prepare("
-        SELECT * FROM project_documents 
-        WHERE project_id = ? AND deleted_at IS NULL 
-        ORDER BY created_at DESC
-    ");
-    $stmt->execute([$projectId]);
-    $documents = $stmt->fetchAll(PDO::FETCH_ASSOC);
-}
-
-if ($activeTab === 'takeoff') {
-    // Fetch drawings
-    $stmt = $pdo->prepare("
-        SELECT * FROM drawings 
-        WHERE project_id = ? AND deleted_at IS NULL 
-        ORDER BY drawing_number ASC
-    ");
-    $stmt->execute([$projectId]);
-    $drawings = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    // Fetch takeoffs
-    $stmt = $pdo->prepare("
-        SELECT * FROM takeoffs 
-        WHERE project_id = ? AND deleted_at IS NULL 
-        ORDER BY name ASC
-    ");
-    $stmt->execute([$projectId]);
-    $takeoffs = $stmt->fetchAll(PDO::FETCH_ASSOC);
-    
-    // If takeoff slide is "summary", get estimate items
-    if ($takeoffSlide === 'summary' && !empty($takeoffs)) {
-        $takeoffId = $takeoffs[0]['id'];
-        
-        // Get all layers for this takeoff
-        $stmt = $pdo->prepare("
-            SELECT * FROM takeoff_layers 
-            WHERE takeoff_id = ? AND deleted_at IS NULL 
-            ORDER BY sort_order ASC
-        ");
-        $stmt->execute([$takeoffId]);
-        $takeoffLayers = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        // Get measurements
-        $stmt = $pdo->prepare("
-            SELECT tm.*, tl.name as layer_name
-            FROM takeoff_measurements tm
-            LEFT JOIN takeoff_layers tl ON tl.id = tm.takeoff_layer_id
-            WHERE tm.takeoff_id = ? AND tm.deleted_at IS NULL 
-            ORDER BY tm.created_at DESC
-        ");
-        $stmt->execute([$takeoffId]);
-        $takeoffMeasurements = $stmt->fetchAll(PDO::FETCH_ASSOC);
-        
-        // Get estimate items related to this takeoff
-        $stmt = $pdo->prepare("
-            SELECT ei.*, ci.name as catalog_item_name
-            FROM estimate_items ei
-            LEFT JOIN takeoff_layers tl ON tl.id = ei.takeoff_layer_id
-            LEFT JOIN catalog_items ci ON ci.id = ei.catalog_item_id
-            WHERE tl.takeoff_id = ? AND ei.deleted_at IS NULL 
-            ORDER BY ei.sort_order ASC
-        ");
-        $stmt->execute([$takeoffId]);
-        $estimateItems = $stmt->fetchAll(PDO::FETCH_ASSOC);
+function dash_table_exists(PDO $pdo, string $table): bool
+{
+    try {
+        $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?");
+        $stmt->execute([$table]);
+        return (int)$stmt->fetchColumn() > 0;
+    } catch (Throwable $e) {
+        return false;
     }
 }
 
-if ($activeTab === 'estimating') {
-    $stmt = $pdo->prepare("
-        SELECT * FROM estimating 
-        WHERE project_id = ? AND deleted_at IS NULL 
-        ORDER BY name ASC
-    ");
-    $stmt->execute([$projectId]);
-    $estimates = $stmt->fetchAll(PDO::FETCH_ASSOC);
+function dash_column_exists(PDO $pdo, string $table, string $column): bool
+{
+    try {
+        $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");
+        $stmt->execute([$column]);
+        return (bool)$stmt->fetch(PDO::FETCH_ASSOC);
+    } catch (Throwable $e) {
+        return false;
+    }
 }
 
-if ($activeTab === 'proposal') {
+function dash_public_path(?string $path): string
+{
+    $path = str_replace('\\', '/', (string)$path);
+    if ($path === '') return '';
+    if (preg_match('~(api/)?uploads/[^\\s]+$~', $path, $m)) {
+        $path = $m[0];
+    }
+    if (strpos($path, 'uploads/') === 0 || strpos($path, 'api/uploads/') === 0) {
+        return '../' . $path;
+    }
+    return $path;
+}
+
+function money_fmt(float $value): string
+{
+    return '$' . number_format($value, 2);
+}
+
+$stmt = $pdo->prepare("SELECT * FROM projects WHERE id = ? AND deleted_at IS NULL");
+$stmt->execute([$projectId]);
+$project = $stmt->fetch(PDO::FETCH_ASSOC);
+
+if (!$project) {
+    http_response_code(404);
+    die('Project not found');
+}
+
+$folders = [];
+if (dash_table_exists($pdo, 'folders')) {
+    $stmt = $pdo->prepare("SELECT id, name FROM folders WHERE project_id = ? AND deleted_at IS NULL ORDER BY name ASC");
+    $stmt->execute([$projectId]);
+    $folders = $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+$documents = [];
+if (dash_table_exists($pdo, 'files')) {
     $stmt = $pdo->prepare("
-        SELECT * FROM proposals 
-        WHERE project_id = ? AND deleted_at IS NULL 
-        ORDER BY created_at DESC
+        SELECT f.*, fo.name AS folder_name
+        FROM files f
+        LEFT JOIN folders fo ON fo.id = f.folder_id
+        WHERE f.project_id = ? AND f.deleted_at IS NULL
+        ORDER BY f.uploaded_at DESC, f.id DESC
     ");
     $stmt->execute([$projectId]);
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $file) {
+        $ext = strtolower(pathinfo((string)$file['filename'], PATHINFO_EXTENSION));
+        $documents[] = [
+            'id' => (int)$file['id'],
+            'source' => 'legacy_file',
+            'folder_id' => isset($file['folder_id']) ? (int)$file['folder_id'] : null,
+            'folder_name' => $file['folder_name'] ?: 'Documents',
+            'title' => $file['filename'],
+            'filename' => $file['filename'],
+            'path' => dash_public_path($file['filepath'] ?? ''),
+            'mime_type' => $file['file_type'] ?? '',
+            'extension' => $ext,
+            'uploaded_at' => $file['uploaded_at'] ?? $file['created_at'] ?? null,
+        ];
+    }
+}
+
+if (dash_table_exists($pdo, 'project_documents')) {
+    $hasDocumentFolders = dash_table_exists($pdo, 'document_folders');
+    $stmt = $pdo->prepare($hasDocumentFolders ? "
+        SELECT pd.*, df.name AS folder_name
+        FROM project_documents pd
+        LEFT JOIN document_folders df ON df.id = pd.document_folder_id
+        WHERE pd.project_id = ? AND pd.deleted_at IS NULL
+        ORDER BY pd.created_at DESC, pd.id DESC
+    " : "
+        SELECT pd.*, NULL AS folder_name
+        FROM project_documents pd
+        WHERE pd.project_id = ? AND pd.deleted_at IS NULL
+        ORDER BY pd.created_at DESC, pd.id DESC
+    ");
+    $stmt->execute([$projectId]);
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $doc) {
+        $ext = strtolower(pathinfo((string)$doc['original_filename'], PATHINFO_EXTENSION));
+        $documents[] = [
+            'id' => (int)$doc['id'],
+            'source' => 'project_document',
+            'folder_id' => isset($doc['document_folder_id']) ? (int)$doc['document_folder_id'] : null,
+            'folder_name' => $doc['folder_name'] ?: 'Documents',
+            'title' => $doc['title'],
+            'filename' => $doc['original_filename'],
+            'path' => dash_public_path($doc['storage_path'] ?? ''),
+            'mime_type' => $doc['mime_type'] ?? '',
+            'extension' => $ext,
+            'uploaded_at' => $doc['created_at'] ?? null,
+        ];
+    }
+}
+
+if ($selectedDocumentId === 0 && !empty($documents)) {
+    foreach ($documents as $doc) {
+        if ($doc['source'] === 'legacy_file' && in_array($doc['extension'], ['pdf', 'png', 'jpg', 'jpeg', 'webp'], true)) {
+            $selectedDocumentId = (int)$doc['id'];
+            break;
+        }
+    }
+    if ($selectedDocumentId === 0) {
+        $selectedDocumentId = (int)$documents[0]['id'];
+    }
+}
+
+$drawings = [];
+if (dash_table_exists($pdo, 'drawings')) {
+    $stmt = $pdo->prepare("SELECT * FROM drawings WHERE project_id = ? AND deleted_at IS NULL ORDER BY drawing_number ASC, id DESC");
+    $stmt->execute([$projectId]);
+    $drawings = $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+$takeoffLayers = [];
+if (dash_table_exists($pdo, 'takeoff_layers')) {
+    $stmt = $pdo->prepare(dash_column_exists($pdo, 'takeoff_layers', 'project_id') ? "
+        SELECT * FROM takeoff_layers
+        WHERE project_id = ? AND deleted_at IS NULL
+        ORDER BY sort_order ASC, id DESC
+    " : "
+        SELECT tl.*
+        FROM takeoff_layers tl
+        INNER JOIN takeoffs t ON t.id = tl.takeoff_id
+        WHERE t.project_id = ? AND tl.deleted_at IS NULL
+        ORDER BY tl.sort_order ASC, tl.id DESC
+    ");
+    $stmt->execute([$projectId]);
+    $takeoffLayers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+$estimateItems = [];
+if (dash_table_exists($pdo, 'estimate_items') && dash_table_exists($pdo, 'estimates')) {
+    $stmt = $pdo->prepare("
+        SELECT ei.*, ci.name AS catalog_item_name
+        FROM estimate_items ei
+        INNER JOIN estimates e ON e.id = ei.estimate_id
+        LEFT JOIN catalog_items ci ON ci.id = ei.catalog_item_id
+        WHERE e.project_id = ? AND ei.deleted_at IS NULL AND e.deleted_at IS NULL
+        ORDER BY ei.sort_order ASC, ei.id DESC
+    ");
+    $stmt->execute([$projectId]);
+    $estimateItems = $stmt->fetchAll(PDO::FETCH_ASSOC);
+}
+
+$proposals = [];
+if (dash_table_exists($pdo, 'proposals')) {
+    $stmt = $pdo->prepare("SELECT * FROM proposals WHERE project_id = ? AND deleted_at IS NULL ORDER BY created_at DESC");
+    $stmt->execute([$projectId]);
     $proposals = $stmt->fetchAll(PDO::FETCH_ASSOC);
-} 
-?>
+}
 
-<?php
+$estimatorName = 'Unassigned';
+if (!empty($project['estimator_id']) && dash_table_exists($pdo, 'estimators')) {
+    $stmt = $pdo->prepare("SELECT display_name FROM estimators WHERE id = ? LIMIT 1");
+    $stmt->execute([(int)$project['estimator_id']]);
+    $estimatorName = $stmt->fetchColumn() ?: 'Unassigned';
+}
 
+$materialSubtotal = 0.0;
+$laborSubtotal = 0.0;
+$equipmentSubtotal = 0.0;
+$wasteTotal = 0.0;
+$markupTotal = 0.0;
+$estimateTotal = 0.0;
+foreach ($estimateItems as $item) {
+    $materialSubtotal += (float)($item['material_cost'] ?? 0);
+    $laborSubtotal += (float)($item['labor_cost'] ?? 0);
+    $equipmentSubtotal += (float)($item['equipment_cost'] ?? 0);
+    $estimateTotal += (float)($item['total_cost'] ?? $item['subtotal_cost'] ?? 0);
+    $wasteTotal += ((float)($item['subtotal_cost'] ?? 0)) * ((float)($item['waste_factor_percent'] ?? $item['waste_percentage'] ?? 0) / 100);
+    $markupTotal += ((float)($item['subtotal_cost'] ?? 0)) * ((float)($item['markup_percent'] ?? $item['margin_percentage'] ?? 0) / 100);
+}
+
+$proposalStatus = $proposals[0]['status'] ?? 'Not started';
+$selectedDoc = null;
+foreach ($documents as $doc) {
+    if ((int)$doc['id'] === $selectedDocumentId && $doc['source'] === 'legacy_file') {
+        $selectedDoc = $doc;
+        break;
+    }
+}
+if (!$selectedDoc) {
+    foreach ($documents as $doc) {
+        if ((int)$doc['id'] === $selectedDocumentId) {
+            $selectedDoc = $doc;
+            break;
+        }
+    }
+}
+
+$state = [
+    'projectId' => $projectId,
+    'activeTab' => $activeTab,
+    'projectInfo' => $project,
+    'documents' => $documents,
+    'folders' => $folders,
+    'selectedDocumentId' => $selectedDocumentId,
+    'selectedDrawingId' => $selectedDocumentId,
+    'takeoffGroups' => [],
+    'takeoffLayers' => $takeoffLayers,
+    'takeoffMeasurements' => [],
+    'estimateItems' => $estimateItems,
+    'proposalDraft' => $proposals[0] ?? null,
+];
 ?>
 <!doctype html>
 <html lang="en">
 <head>
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
-    <title><?= htmlspecialchars($project['name']) ?> - Project Dashboard | Takeoff</title>
+    <title><?= htmlspecialchars($project['name']) ?> - Project Workspace</title>
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -145,1391 +244,566 @@ if ($activeTab === 'proposal') {
         :root {
             --bg: #0b1120;
             --panel: #111827;
-            --card: #1e293b;
-            --line: rgba(148, 163, 184, 0.2);
+            --card: #182235;
+            --card-2: #1f2a3d;
+            --line: rgba(148, 163, 184, 0.22);
             --text: #f8fafc;
             --muted: #94a3b8;
             --primary: #2563eb;
             --accent: #0ea5e9;
+            --success: #16a34a;
         }
+        * { box-sizing: border-box; }
         body {
+            margin: 0;
+            min-height: 100vh;
             background: var(--bg);
             color: var(--text);
             font-family: Outfit, system-ui, sans-serif;
-            margin: 0;
-            padding: 0;
         }
+        a { color: inherit; }
+        .workspace-shell { min-height: 100vh; display: flex; flex-direction: column; }
         .project-header {
-            background: linear-gradient(135deg, rgba(37, 99, 235, 0.1) 0%, rgba(14, 165, 233, 0.1) 100%);
+            padding: 18px 24px;
             border-bottom: 1px solid var(--line);
-            padding: 2rem;
-        }
-        .project-title-section h1 {
-            font-size: 1.8rem;
-            font-weight: 800;
-            margin: 0 0 0.5rem 0;
-        }
-        .project-title-section p {
-            margin: 0;
-            color: var(--muted);
-            font-size: 0.9rem;
-        }
-        .project-nav {
-            background: var(--panel);
-            border-bottom: 1px solid var(--line);
-            padding: 0;
-            display: flex;
-            gap: 0;
-            overflow-x: auto;
-            flex-wrap: nowrap;
-        }
-        .project-nav a {
-            flex: 0 0 auto;
-            padding: 1rem 1.5rem;
-            color: var(--muted);
-            text-decoration: none;
-            border-bottom: 2px solid transparent;
-            transition: all 0.3s ease;
+            background: #0f172a;
             display: flex;
             align-items: center;
-            gap: 0.5rem;
-            white-space: nowrap;
-            font-weight: 500;
+            justify-content: space-between;
+            gap: 16px;
         }
-        .project-nav a:hover {
-            color: var(--text);
-            background: rgba(37, 99, 235, 0.1);
-        }
-        .project-nav a.active {
-            color: var(--primary);
-            border-bottom-color: var(--primary);
-            background: rgba(37, 99, 235, 0.15);
-        }
-        .project-nav i {
-            font-size: 1rem;
-        }
-        .project-content {
-            padding: 2rem;
-            min-height: calc(100vh - 300px);
-        }
-        
-        /* TAKEOFF INTERNAL VIEWS */
-        .takeoff-slides-nav {
+        .project-header h1 { margin: 0; font-size: 1.35rem; font-weight: 800; }
+        .project-header p { margin: 4px 0 0; color: var(--muted); font-size: .9rem; }
+        .top-tabs {
             display: flex;
-            gap: 1rem;
-            margin-bottom: 2rem;
+            gap: 2px;
+            padding: 0 18px;
+            background: var(--panel);
             border-bottom: 1px solid var(--line);
-            padding-bottom: 1rem;
+            overflow-x: auto;
         }
-        .takeoff-slide-btn {
-            padding: 0.75rem 1.5rem;
+        .top-tabs button {
+            height: 52px;
+            padding: 0 18px;
+            border: 0;
+            border-bottom: 2px solid transparent;
             background: transparent;
-            border: 1px solid var(--line);
             color: var(--muted);
-            border-radius: 6px;
-            cursor: pointer;
-            transition: all 0.3s ease;
-            font-weight: 600;
-            text-decoration: none;
-        }
-        .takeoff-slide-btn:hover {
-            color: var(--text);
-            border-color: var(--primary);
-        }
-        .takeoff-slide-btn.active {
-            background: var(--primary);
-            color: white;
-            border-color: var(--primary);
-        }
-        
-        /* DRAWING TAKEOFF VIEW */
-        .drawing-view {
-            display: grid;
-            grid-template-columns: 300px 1fr 200px;
-            gap: 1rem;
-            height: 60vh;
-        }
-        .takeoff-panel-left {
-            background: var(--card);
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            padding: 1rem;
-            overflow-y: auto;
-        }
-        .takeoff-panel-left h5 {
             font-weight: 700;
-            margin-bottom: 1rem;
+            white-space: nowrap;
         }
-        .takeoff-panel-left input {
-            background: var(--bg);
-            border: 1px solid var(--line);
-            color: var(--text);
-            margin-bottom: 1rem;
-            border-radius: 4px;
+        .top-tabs button:hover { color: var(--text); background: rgba(255,255,255,.04); }
+        .top-tabs button.active {
+            color: #60a5fa;
+            border-bottom-color: var(--primary);
+            background: rgba(37, 99, 235, .14);
         }
-        .takeoff-panel-left .btn {
-            width: 100%;
-            margin-bottom: 1rem;
-        }
-        .drawing-canvas {
+        .workspace-main { flex: 1; min-height: 0; }
+        .tab-panel { display: none; padding: 24px; }
+        .tab-panel.active { display: block; }
+        .tab-panel.fullscreen { padding: 0; height: calc(100vh - 129px); }
+        .grid { display: grid; gap: 16px; }
+        .overview-grid { grid-template-columns: repeat(12, minmax(0, 1fr)); }
+        .card-panel {
             background: var(--card);
             border: 1px solid var(--line);
             border-radius: 8px;
+            padding: 18px;
+            min-width: 0;
+        }
+        .card-panel h2, .card-panel h3 { margin: 0 0 14px; font-size: 1rem; font-weight: 800; }
+        .span-3 { grid-column: span 3; }
+        .span-4 { grid-column: span 4; }
+        .span-6 { grid-column: span 6; }
+        .span-8 { grid-column: span 8; }
+        .span-12 { grid-column: span 12; }
+        .metric-value { font-size: 1.6rem; font-weight: 800; color: #60a5fa; }
+        .label { color: var(--muted); font-size: .78rem; text-transform: uppercase; letter-spacing: .04em; }
+        .value { font-weight: 700; color: var(--text); }
+        .info-list { display: grid; gap: 12px; }
+        .info-row { display: flex; justify-content: space-between; gap: 16px; border-bottom: 1px solid rgba(255,255,255,.06); padding-bottom: 10px; }
+        .btn-main, .btn-ghost {
+            border: 0;
+            border-radius: 6px;
+            padding: 10px 14px;
+            font-weight: 700;
+            text-decoration: none;
+            display: inline-flex;
+            align-items: center;
+            gap: 8px;
+            cursor: pointer;
+        }
+        .btn-main { background: var(--primary); color: #fff; }
+        .btn-ghost { background: rgba(255,255,255,.07); color: var(--text); border: 1px solid var(--line); }
+        .btn-ghost:disabled { opacity: .45; cursor: not-allowed; }
+        .quick-actions { display: flex; flex-wrap: wrap; gap: 10px; }
+        .documents-layout {
+            display: grid;
+            grid-template-columns: 260px minmax(280px, 430px) 1fr;
+            gap: 16px;
+            height: calc(100vh - 177px);
+            min-height: 580px;
+        }
+        .folder-list, .document-list { overflow: auto; }
+        .folder-item, .doc-item {
+            width: 100%;
+            border: 1px solid transparent;
+            background: transparent;
+            color: var(--text);
+            text-align: left;
+            padding: 10px 12px;
+            border-radius: 6px;
+            display: flex;
+            align-items: center;
+            gap: 10px;
+            cursor: pointer;
+        }
+        .folder-item:hover, .doc-item:hover { background: rgba(255,255,255,.05); }
+        .folder-item.active, .doc-item.active { background: rgba(37, 99, 235, .18); border-color: rgba(96,165,250,.35); }
+        .doc-title { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-weight: 700; }
+        .doc-meta { color: var(--muted); font-size: .78rem; }
+        .preview-frame, .takeoff-frame {
+            width: 100%;
+            height: 100%;
+            border: 0;
+            background: #0f172a;
+            border-radius: 8px;
+        }
+        .preview-empty, .takeoff-empty {
+            height: 100%;
             display: flex;
             align-items: center;
             justify-content: center;
-            color: var(--muted);
-            position: relative;
-        }
-        .drawing-canvas-placeholder {
             text-align: center;
-        }
-        .drawing-canvas-placeholder i {
-            font-size: 3rem;
-            margin-bottom: 1rem;
-            opacity: 0.3;
-        }
-        .takeoff-toolbar-right {
-            background: var(--card);
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            padding: 1rem;
-            display: flex;
-            flex-direction: column;
-            gap: 0.75rem;
-        }
-        .takeoff-toolbar-right h5 {
-            font-weight: 700;
-            margin: 0 0 1rem 0;
-        }
-        .takeoff-toolbar-right button {
-            padding: 0.75rem;
-            background: rgba(37, 99, 235, 0.2);
-            border: 1px solid var(--primary);
-            color: var(--primary);
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: 600;
-            transition: all 0.3s ease;
-        }
-        .takeoff-toolbar-right button:hover {
-            background: var(--primary);
-            color: white;
-        }
-        
-        /* ESTIMATE SUMMARY VIEW */
-        .estimate-summary-view {
-            display: flex;
-            flex-direction: column;
-            gap: 1.5rem;
-        }
-        .summary-filters {
-            display: flex;
-            gap: 1rem;
-            flex-wrap: wrap;
-        }
-        .summary-filters input,
-        .summary-filters select {
-            padding: 0.75rem;
-            background: var(--card);
-            border: 1px solid var(--line);
-            color: var(--text);
-            border-radius: 6px;
-            font-family: Outfit;
-        }
-        .summary-table {
-            background: var(--card);
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            overflow: hidden;
-        }
-        .summary-table table {
-            width: 100%;
-            border-collapse: collapse;
-        }
-        .summary-table th,
-        .summary-table td {
-            padding: 1rem;
-            text-align: left;
-            border-bottom: 1px solid var(--line);
-        }
-        .summary-table th {
-            background: rgba(37, 99, 235, 0.2);
-            font-weight: 700;
-            color: var(--primary);
-        }
-        .summary-table tr:hover {
-            background: rgba(37, 99, 235, 0.1);
-        }
-        .summary-totals {
-            background: var(--card);
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            padding: 1.5rem;
-            display: grid;
-            grid-template-columns: repeat(auto-fit, minmax(200px, 1fr));
-            gap: 1rem;
-        }
-        .total-item {
-            padding: 1rem;
-            background: rgba(37, 99, 235, 0.1);
-            border-radius: 6px;
-            border-left: 3px solid var(--primary);
-        }
-        .total-item-label {
             color: var(--muted);
-            font-size: 0.85rem;
-            margin-bottom: 0.5rem;
+            border: 1px dashed var(--line);
+            border-radius: 8px;
         }
-        .total-item-value {
-            font-size: 1.5rem;
-            font-weight: 800;
-            color: var(--primary);
-        }
-        
-        .btn-primary-custom {
-            padding: 0.75rem 1.5rem;
-            background: var(--primary);
-            border: 0;
-            color: white;
-            border-radius: 6px;
-            cursor: pointer;
-            font-weight: 600;
-            transition: all 0.3s ease;
-        }
-        .btn-primary-custom:hover {
-            background: #1d4ed8;
-        }
-        
-        .list-group-item {
-            background: transparent;
-        }
-        .list-group-item-action {
+        .takeoff-workspace { height: 100%; background: #0f172a; }
+        .estimating-toolbar { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; }
+        .estimating-toolbar input, .estimating-toolbar select {
+            background: var(--card);
             color: var(--text);
-            transition: 0.2s;
+            border: 1px solid var(--line);
+            border-radius: 6px;
+            padding: 10px 12px;
         }
-        .list-group-item-action:hover {
-            background: rgba(37, 99, 235, 0.2);
-            color: var(--accent);
+        .table-wrap { background: var(--card); border: 1px solid var(--line); border-radius: 8px; overflow: auto; }
+        table { width: 100%; border-collapse: collapse; min-width: 980px; }
+        th, td { padding: 12px 14px; border-bottom: 1px solid rgba(255,255,255,.07); text-align: left; vertical-align: middle; }
+        th { color: #93c5fd; background: rgba(37, 99, 235, .16); font-size: .78rem; text-transform: uppercase; }
+        td { color: #e2e8f0; }
+        .totals-grid { grid-template-columns: repeat(6, minmax(150px, 1fr)); margin-top: 16px; }
+        .proposal-sheet {
+            max-width: 920px;
+            margin: 0 auto;
+            background: #f8fafc;
+            color: #0f172a;
+            border-radius: 8px;
+            padding: 32px;
+        }
+        .proposal-sheet h2 { margin: 0; font-weight: 800; }
+        .proposal-line { border-bottom: 1px solid #cbd5e1; padding: 12px 0; }
+        @media (max-width: 1100px) {
+            .documents-layout { grid-template-columns: 220px 1fr; height: auto; }
+            .documents-layout .preview-card { grid-column: 1 / -1; min-height: 560px; }
+            .span-3, .span-4, .span-6, .span-8 { grid-column: span 12; }
+            .totals-grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+        }
+        @media (max-width: 720px) {
+            .project-header { align-items: flex-start; flex-direction: column; }
+            .tab-panel { padding: 16px; }
+            .documents-layout { grid-template-columns: 1fr; }
+            .totals-grid { grid-template-columns: 1fr; }
         }
     </style>
 </head>
 <body>
-    <div class="project-header">
-        <div class="project-title-section">
+<div class="workspace-shell">
+    <header class="project-header">
+        <div>
             <h1><?= htmlspecialchars($project['name']) ?></h1>
-            <p><?= htmlspecialchars($project['description'] ?? 'No description') ?></p>
+            <p><?= htmlspecialchars($project['description'] ?? $project['job_address'] ?? 'Project workspace') ?></p>
         </div>
-    </div>
+        <a class="btn-ghost" href="projects.php"><i class="fas fa-arrow-left"></i> Projects</a>
+    </header>
 
-    <!-- PROJECT TOP NAVIGATION -->
-    <div class="project-nav">
-        <a href="?id=<?= $projectId ?>&tab=overview" class="<?= $activeTab === 'overview' ? 'active' : '' ?>">
-            <i class="fas fa-eye"></i> Overview
-        </a>
-        <a href="?id=<?= $projectId ?>&tab=documents" class="<?= $activeTab === 'documents' ? 'active' : '' ?>">
-            <i class="fas fa-file-alt"></i> Documents
-        </a>
-        <a href="?id=<?= $projectId ?>&tab=takeoff" class="<?= $activeTab === 'takeoff' ? 'active' : '' ?>">
-            <i class="fas fa-ruler-combined"></i> Takeoff
-        </a>
-        <a href="?id=<?= $projectId ?>&tab=estimating" class="<?= $activeTab === 'estimating' ? 'active' : '' ?>">
-            <i class="fas fa-calculator"></i> Estimating
-        </a>
-        <a href="?id=<?= $projectId ?>&tab=proposal" class="<?= $activeTab === 'proposal' ? 'active' : '' ?>">
-            <i class="fas fa-file-invoice"></i> Proposal
-        </a>
-    </div>
+    <nav class="top-tabs" aria-label="Project workspace tabs">
+        <button type="button" data-tab="overview">Overview</button>
+        <button type="button" data-tab="documents">Documents</button>
+        <button type="button" data-tab="takeoff">Takeoff</button>
+        <button type="button" data-tab="estimating">Estimating</button>
+        <button type="button" data-tab="proposal">Proposal</button>
+    </nav>
 
-    <div class="project-content">
-        
-        <!-- OVERVIEW TAB -->
-        <?php if ($activeTab === 'overview'): ?>
-            <div class="overview-section">
-                <h2>Project Overview</h2>
-                <div class="row mt-4">
-                    <div class="col-md-6">
-                        <div class="card bg-dark border-secondary">
-                            <div class="card-body">
-                                <h5 class="card-title">Project Details</h5>
-                                <p><strong>Name:</strong> <?= htmlspecialchars($project['name']) ?></p>
-                                <p><strong>Status:</strong> <span class="badge bg-info"><?= $project['status'] ?></span></p>
-                                <p><strong>Client:</strong> <?= htmlspecialchars($project['client_name'] ?? 'N/A') ?></p>
-                                <p><strong>Address:</strong> <?= htmlspecialchars($project['job_address'] ?? 'N/A') ?></p>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="card bg-dark border-secondary">
-                            <div class="card-body">
-                                <h5 class="card-title">Dates</h5>
-                                <p><strong>Created:</strong> <?= date('M d, Y', strtotime($project['created_at'])) ?></p>
-                                <p><strong>Updated:</strong> <?= date('M d, Y', strtotime($project['updated_at'])) ?></p>
-                                <p><strong>Bid Due:</strong> <?= $project['bid_due_at'] ? date('M d, Y', strtotime($project['bid_due_at'])) : 'N/A' ?></p>
-                            </div>
-                        </div>
-                    </div>
-                </div>
-            </div>
-        <?php endif; ?>
+    <main class="workspace-main">
+        <section id="tab-overview" class="tab-panel">
+            <div class="grid overview-grid">
+                <div class="card-panel span-3"><div class="label">Documents</div><div class="metric-value"><?= count($documents) ?></div></div>
+                <div class="card-panel span-3"><div class="label">Takeoff Layers</div><div class="metric-value"><?= count($takeoffLayers) ?></div></div>
+                <div class="card-panel span-3"><div class="label">Estimate Items</div><div class="metric-value"><?= count($estimateItems) ?></div></div>
+                <div class="card-panel span-3"><div class="label">Proposal</div><div class="metric-value" style="font-size:1.15rem;"><?= htmlspecialchars($proposalStatus) ?></div></div>
 
-        <!-- DOCUMENTS TAB -->
-        <?php if ($activeTab === 'documents'): ?>
-            <div class="documents-section">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h2>Documents</h2>
-                    <button class="btn-primary-custom"><i class="fas fa-plus"></i> Upload Document</button>
-                </div>
-                
-                <?php if (count($documents) > 0): ?>
-                    <div class="summary-table">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Title</th>
-                                    <th>Type</th>
-                                    <th>File</th>
-                                    <th>Size</th>
-                                    <th>Date</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($documents as $doc): ?>
-                                    <tr>
-                                        <td><?= htmlspecialchars($doc['title']) ?></td>
-                                        <td><span class="badge bg-secondary"><?= $doc['document_type'] ?></span></td>
-                                        <td><?= htmlspecialchars($doc['original_filename']) ?></td>
-                                        <td><?= isset($doc['file_size']) ? round($doc['file_size'] / 1024 / 1024, 2) . ' MB' : 'N/A' ?></td>
-                                        <td><?= date('M d, Y', strtotime($doc['created_at'])) ?></td>
-                                        <td>
-                                            <a href="<?= $doc['storage_path'] ?>" class="btn btn-sm btn-outline-primary">Download</a>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                <?php else: ?>
-                    <p class="text-muted">No documents uploaded yet.</p>
-                <?php endif; ?>
-            </div>
-        <?php endif; ?>
-
-        <!-- TAKEOFF TAB -->
-        <?php if ($activeTab === 'takeoff'): ?>
-            <div class="takeoff-section">
-                <h2>Takeoff Module</h2>
-                
-                <!-- INTERNAL SLIDE NAVIGATION -->
-                <div class="takeoff-slides-nav">
-                    <a href="?id=<?= $projectId ?>&tab=takeoff&slide=drawing" 
-                       class="takeoff-slide-btn <?= $takeoffSlide === 'drawing' ? 'active' : '' ?>">
-                        <i class="fas fa-image"></i> Drawing Takeoff
-                    </a>
-                    <a href="?id=<?= $projectId ?>&tab=takeoff&slide=summary" 
-                       class="takeoff-slide-btn <?= $takeoffSlide === 'summary' ? 'active' : '' ?>">
-                        <i class="fas fa-table"></i> Estimate Summary
-                    </a>
-                </div>
-
-                <!-- SLIDE 1: DRAWING TAKEOFF -->
-                <?php if ($takeoffSlide === 'drawing'): ?>
-                    <div class="drawing-view">
-                        <!-- LEFT PANEL: LAYERS -->
-                        <div class="takeoff-panel-left">
-                            <h5>Takeoff Layers</h5>
-                            <input type="text" class="form-control form-control-sm mb-3" placeholder="Search layers...">
-                            <button class="btn btn-sm btn-primary w-100 mb-3"><i class="fas fa-plus"></i> Add Layer</button>
-                            
-                            <?php if (count($takeoffLayers) > 0): ?>
-                                <div class="list-group list-group-flush">
-                                    <?php foreach ($takeoffLayers as $layer): ?>
-                                        <button class="list-group-item list-group-item-action bg-transparent border-secondary" style="text-align: left;">
-                                            <div class="d-flex justify-content-between align-items-center">
-                                                <div>
-                                                    <strong><?= htmlspecialchars($layer['name']) ?></strong><br>
-                                                    <small class="text-muted">Qty: <?= $layer['quantity'] ?></small>
-                                                </div>
-                                                <i class="fas fa-square" style="color: <?= $layer['color'] ?>"></i>
-                                            </div>
-                                        </button>
-                                    <?php endforeach; ?>
-                                </div>
-                            <?php else: ?>
-                                <p class="text-muted small">No layers created yet.</p>
-                            <?php endif; ?>
-                        </div>
-
-                        <!-- CENTER: DRAWING CANVAS -->
-                        <div class="drawing-canvas">
-                            <div class="drawing-canvas-placeholder">
-                                <i class="fas fa-file-pdf"></i>
-                                <p>PDF Drawing Area</p>
-                                <small class="text-muted">Load drawing to begin takeoff</small>
-                            </div>
-                        </div>
-
-                        <!-- RIGHT TOOLBAR -->
-                        <div class="takeoff-toolbar-right">
-                            <h5>Tools</h5>
-                            <button><i class="fas fa-save"></i> Save</button>
-                            <button><i class="fas fa-search"></i> Zoom</button>
-                            <button><i class="fas fa-ruler"></i> Scale</button>
-                            <button><i class="fas fa-mouse"></i> Select</button>
-                            <button><i class="fas fa-pen"></i> Measure</button>
-                        </div>
-                    </div>
-                <?php endif; ?>
-
-                <!-- SLIDE 2: ESTIMATE SUMMARY -->
-                <?php if ($takeoffSlide === 'summary'): ?>
-                    <div class="estimate-summary-view">
-                        <!-- FILTERS -->
-                        <div class="summary-filters">
-                            <input type="text" placeholder="Search item..." style="flex: 1; min-width: 200px;">
-                            <select style="min-width: 150px;">
-                                <option value="">Filter by group...</option>
-                            </select>
-                            <select style="min-width: 150px;">
-                                <option value="">Filter by source...</option>
-                                <option value="takeoff">Takeoff</option>
-                                <option value="manual">Manual</option>
-                                <option value="catalog">Catalog</option>
-                            </select>
-                            <button class="btn-primary-custom"><i class="fas fa-plus"></i> Add Item</button>
-                        </div>
-
-                        <!-- ITEMS TABLE -->
-                        <div class="summary-table">
-                            <table>
-                                <thead>
-                                    <tr>
-                                        <th>Item</th>
-                                        <th>Type</th>
-                                        <th>Qty</th>
-                                        <th>Unit</th>
-                                        <th>Unit Cost</th>
-                                        <th>Material</th>
-                                        <th>Labor</th>
-                                        <th>Total</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody>
-                                    <?php if (count($estimateItems) > 0): ?>
-                                        <?php foreach ($estimateItems as $item): ?>
-                                            <tr>
-                                                <td><?= htmlspecialchars($item['name']) ?></td>
-                                                <td><span class="badge bg-info"><?= $item['source_type'] ?></span></td>
-                                                <td><?= $item['quantity'] ?></td>
-                                                <td><?= $item['unit_of_measure'] ?></td>
-                                                <td>$<?= number_format($item['unit_cost'], 2) ?></td>
-                                                <td>$<?= number_format($item['material_cost'], 2) ?></td>
-                                                <td>$<?= number_format($item['labor_cost'], 2) ?></td>
-                                                <td><strong>$<?= number_format($item['total_cost'], 2) ?></strong></td>
-                                                <td>
-                                                    <button class="btn btn-sm btn-outline-primary" title="Edit"><i class="fas fa-edit"></i></button>
-                                                    <button class="btn btn-sm btn-outline-danger" title="Delete"><i class="fas fa-trash"></i></button>
-                                                </td>
-                                            </tr>
-                                        <?php endforeach; ?>
-                                    <?php else: ?>
-                                        <tr>
-                                            <td colspan="9" class="text-center text-muted">No items yet. <a href="#" class="text-primary">Create from takeoff layers</a> or <a href="#" class="text-primary">add manual item</a></td>
-                                        </tr>
-                                    <?php endif; ?>
-                                </tbody>
-                            </table>
-                        </div>
-
-                        <!-- TOTALS -->
-                        <div class="summary-totals">
-                            <div class="total-item">
-                                <div class="total-item-label">Material Subtotal</div>
-                                <div class="total-item-value">$0.00</div>
-                            </div>
-                            <div class="total-item">
-                                <div class="total-item-label">Labor Subtotal</div>
-                                <div class="total-item-value">$0.00</div>
-                            </div>
-                            <div class="total-item">
-                                <div class="total-item-label">Equipment Subtotal</div>
-                                <div class="total-item-value">$0.00</div>
-                            </div>
-                            <div class="total-item">
-                                <div class="total-item-label">Waste Total</div>
-                                <div class="total-item-value">$0.00</div>
-                            </div>
-                            <div class="total-item">
-                                <div class="total-item-label">Markup Total</div>
-                                <div class="total-item-value">$0.00</div>
-                            </div>
-                            <div class="total-item" style="border-left-color: var(--accent);">
-                                <div class="total-item-label">Estimate Total</div>
-                                <div class="total-item-value" style="color: var(--accent);">$0.00</div>
-                            </div>
-                        </div>
-                    </div>
-                <?php endif; ?>
-            </div>
-        <?php endif; ?>
-
-        <!-- ESTIMATING TAB -->
-        <?php if ($activeTab === 'estimating'): ?>
-            <div class="estimating-section">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h2>Estimating Module</h2>
-                    <button class="btn-primary-custom"><i class="fas fa-plus"></i> Create Estimate</button>
-                </div>
-                
-                <?php if (count($estimates) > 0): ?>
-                    <div class="summary-table">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Name</th>
-                                    <th>Status</th>
-                                    <th>Currency</th>
-                                    <th>Subtotal</th>
-                                    <th>Markup</th>
-                                    <th>Total</th>
-                                    <th>Labor Hours</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($estimates as $est): ?>
-                                    <tr>
-                                        <td><?= htmlspecialchars($est['name']) ?></td>
-                                        <td><span class="badge bg-success"><?= $est['status'] ?></span></td>
-                                        <td><?= $est['currency_code'] ?></td>
-                                        <td>$<?= number_format($est['subtotal_cost'], 2) ?></td>
-                                        <td>$<?= number_format($est['markup_total'], 2) ?></td>
-                                        <td><strong>$<?= number_format($est['total_cost'], 2) ?></strong></td>
-                                        <td><?= number_format($est['labor_hours_total'], 2) ?> hrs</td>
-                                        <td>
-                                            <a href="estimate_module.php?estimate_id=<?= $est['id'] ?>" class="btn btn-sm btn-outline-primary">Edit</a>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                <?php else: ?>
-                    <p class="text-muted">No estimates created yet.</p>
-                <?php endif; ?>
-            </div>
-        <?php endif; ?>
-
-        <!-- PROPOSAL TAB -->
-        <?php if ($activeTab === 'proposal'): ?>
-            <div class="proposal-section">
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h2>Proposals</h2>
-                    <button class="btn-primary-custom"><i class="fas fa-plus"></i> Create Proposal</button>
-                </div>
-                
-                <?php if (count($proposals) > 0): ?>
-                    <div class="summary-table">
-                        <table>
-                            <thead>
-                                <tr>
-                                    <th>Title</th>
-                                    <th>Number</th>
-                                    <th>Status</th>
-                                    <th>Subtotal</th>
-                                    <th>Total</th>
-                                    <th>Valid Until</th>
-                                    <th>Actions</th>
-                                </tr>
-                            </thead>
-                            <tbody>
-                                <?php foreach ($proposals as $prop): ?>
-                                    <tr>
-                                        <td><?= htmlspecialchars($prop['title']) ?></td>
-                                        <td><?= htmlspecialchars($prop['proposal_number'] ?? 'N/A') ?></td>
-                                        <td><span class="badge bg-warning"><?= $prop['status'] ?></span></td>
-                                        <td>$<?= number_format($prop['subtotal'], 2) ?></td>
-                                        <td><strong>$<?= number_format($prop['total'], 2) ?></strong></td>
-                                        <td><?= $prop['valid_until'] ? date('M d, Y', strtotime($prop['valid_until'])) : 'N/A' ?></td>
-                                        <td>
-                                            <button class="btn btn-sm btn-outline-primary">View</button>
-                                        </td>
-                                    </tr>
-                                <?php endforeach; ?>
-                            </tbody>
-                        </table>
-                    </div>
-                <?php else: ?>
-                    <p class="text-muted">No proposals created yet.</p>
-                <?php endif; ?>
-            </div>
-        <?php endif; ?>
-    </div>
-
-    <script src="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/js/bootstrap.bundle.min.js"></script>
-</body>
-</html>
-            <div class="p-3">
-                <p class="text-muted small fw-bold text-uppercase ls-1 mb-3 ps-2">Blueprints Folders</p>
-                
-                <nav class="nav flex-column gap-1 nav-pills custom-pills">
-                    
-                    <?php foreach($allFolders as $folder): ?>
-                        <div class="d-flex align-items-start justify-content-between folder-row gap-2">
-                            <a href="?id=<?= $projectId ?>&view=files&folder_id=<?= $folder['id'] ?>" class="nav-link folder-link <?= ($currentView=='files' && $currentFolderId==$folder['id'])?'active':'' ?>" title="<?= htmlspecialchars($folder['name']) ?>">
-                                <i class="fas fa-folder me-2 text-warning opacity-75"></i><span class="folder-link-text"><?= htmlspecialchars($folder['name']) ?></span>
-                            </a>
-                            <?php if(($_SESSION['role'] ?? '') === 'admin' && $folder['name'] !== 'Reports'): ?>
-                                <div class="d-flex gap-1 folder-actions">
-                                    <button class="btn btn-sm btn-outline-warning border-0" onclick="openMoveFolderModal(<?= (int)$folder['id'] ?>)" title="Move Folder"><i class="fas fa-exchange-alt"></i></button>
-                                    <button class="btn btn-sm btn-outline-danger border-0" onclick="deleteFolder(<?= (int)$folder['id'] ?>)" title="Delete Folder"><i class="fas fa-trash"></i></button>
-                                </div>
-                            <?php endif; ?>
-                        </div>
-                    <?php endforeach; ?>
-                </nav>
-            </div>
-        </aside>
-
-        <main class="project-content flex-grow-1 p-4 overflow-auto">
-            
-            <?php if($currentView === 'summary'): ?>
-                <h4 class="fw-bold mb-4">Project Summary</h4>
-                <div class="row g-4">
-                    <div class="col-md-3">
-                        <div class="box-card p-4 text-center">
-                            <h1 class="fw-bold text-primary mb-0"><?= $fileCount ?></h1>
-                            <p class="text-gray">Total Files</p>
-                        </div>
-                    </div>
-                    <div class="col-md-3">
-                        <div class="box-card p-4 text-center">
-                            <h1 class="fw-bold text-success mb-0"><?= count($allFolders) ?></h1>
-                            <p class="text-gray">Active Folders</p>
-                        </div>
-                    </div>
-                    <div class="col-md-6">
-                        <div class="box-card p-4">
-                            <h6 class="text-white mb-2">Last Activity</h6>
-                            <p class="text-gray mb-0"><?= $lastActivity ? date('F d, Y h:i A', strtotime($lastActivity)) : 'No activity yet' ?></p>
-                        </div>
+                <div class="card-panel span-6">
+                    <h2>Project Information</h2>
+                    <div class="info-list">
+                        <div class="info-row"><span class="label">Project Name</span><span class="value"><?= htmlspecialchars($project['name']) ?></span></div>
+                        <div class="info-row"><span class="label">Client / Requester</span><span class="value"><?= htmlspecialchars($project['client_name'] ?? 'N/A') ?></span></div>
+                        <div class="info-row"><span class="label">Project Status</span><span class="value"><?= htmlspecialchars($project['status'] ?? 'draft') ?></span></div>
+                        <div class="info-row"><span class="label">Estimator</span><span class="value"><?= htmlspecialchars($estimatorName) ?></span></div>
+                        <div class="info-row"><span class="label">Due Date</span><span class="value"><?= !empty($project['bid_due_at']) ? date('M d, Y', strtotime($project['bid_due_at'])) : 'N/A' ?></span></div>
                     </div>
                 </div>
 
-                <div class="mt-5">
-                    <h5 class="fw-bold mb-3">Recent Uploads</h5>
-                    <?php if(empty($recentFiles)): ?>
-                        <div class="text-gray">No files uploaded yet.</div>
+                <div class="card-panel span-6">
+                    <h2>Estimate Totals</h2>
+                    <div class="info-list">
+                        <div class="info-row"><span class="label">Total Estimated Amount</span><span class="value"><?= money_fmt($estimateTotal) ?></span></div>
+                        <div class="info-row"><span class="label">Current Drawing / File</span><span class="value"><?= htmlspecialchars($selectedDoc['filename'] ?? 'No drawing selected') ?></span></div>
+                        <div class="info-row"><span class="label">Created Date</span><span class="value"><?= !empty($project['created_at']) ? date('M d, Y', strtotime($project['created_at'])) : 'N/A' ?></span></div>
+                        <div class="info-row"><span class="label">Last Updated</span><span class="value"><?= !empty($project['updated_at']) ? date('M d, Y', strtotime($project['updated_at'])) : 'N/A' ?></span></div>
+                    </div>
+                </div>
+
+                <div class="card-panel span-8">
+                    <h2>Recent Activity</h2>
+                    <?php if (empty($documents)): ?>
+                        <p class="text-secondary mb-0">No recent document activity.</p>
                     <?php else: ?>
-                        <div class="row g-3">
-                            <?php foreach($recentFiles as $rf): ?>
-                                <div class="col-md-4 col-xl-3">
-                                    <div class="box-card p-3 d-flex align-items-center justify-content-between recent-upload-card">
-                                        <div class="me-3 recent-upload-info">
-                                            <div class="fw-bold text-truncate"><?= htmlspecialchars($rf['filename']) ?></div>
-                                            <div class="small text-gray"><?= date('M d, Y', strtotime($rf['uploaded_at'])) ?></div>
-                                        </div>
-                                        <div class="d-flex gap-2 recent-upload-actions">
-                                            <a href="preview.php?id=<?= (int)$rf['id'] ?>" class="btn-icon" title="Preview"><i class="fas fa-eye"></i></a>
-                                            <?php if(($_SESSION['role'] ?? '') !== 'viewer'): ?>
-                                                <a href="editor.php?id=<?= (int)$rf['id'] ?>" class="btn-icon text-primary border-primary" title="Edit"><i class="fas fa-pen"></i></a>
-                                            <?php endif; ?>
-                                            <?php if(($_SESSION['role'] ?? '') === 'admin'): ?>
-                                                <button class="btn-icon text-danger border-danger" title="Delete" onclick="deleteFile(<?= (int)$rf['id'] ?>)"><i class="fas fa-trash"></i></button>
-                                            <?php endif; ?>
-                                        </div>
-                                    </div>
+                        <div class="info-list">
+                            <?php foreach (array_slice($documents, 0, 5) as $doc): ?>
+                                <div class="info-row">
+                                    <span class="value"><?= htmlspecialchars($doc['filename']) ?></span>
+                                    <span class="label"><?= $doc['uploaded_at'] ? date('M d, Y', strtotime($doc['uploaded_at'])) : '' ?></span>
                                 </div>
                             <?php endforeach; ?>
                         </div>
                     <?php endif; ?>
                 </div>
 
-            <?php elseif($currentView === 'desc'): ?>
-                <h4 class="fw-bold mb-4">Description of Work</h4>
-                <div class="box-card p-4">
-                    <p class="text-white mb-4"><?= nl2br(htmlspecialchars($project['notes'] ?: 'No detailed description available.')) ?></p>
-                    
-                    <hr class="border-secondary opacity-25 my-4">
-                    
-                    <h6 class="fw-bold text-accent mb-3">Contact Information</h6>
-                    <div class="row">
-                        <div class="col-md-6">
-                            <p class="small text-gray mb-1">Site Contact</p>
-                            <p class="text-white"><?= htmlspecialchars($project['contact_name']) ?> <br> <?= htmlspecialchars($project['contact_phone']) ?></p>
-                        </div>
-                        <div class="col-md-6">
-                            <p class="small text-gray mb-1">Company Contact</p>
-                            <p class="text-white"><?= htmlspecialchars($project['company_name']) ?> <br> <?= htmlspecialchars($project['company_phone']) ?></p>
-                        </div>
+                <div class="card-panel span-4">
+                    <h2>Quick Actions</h2>
+                    <div class="quick-actions">
+                        <button class="btn-ghost" data-action-tab="documents"><i class="fas fa-folder-open"></i> Open Documents</button>
+                        <button class="btn-main" data-action-tab="takeoff"><i class="fas fa-ruler-combined"></i> Start Takeoff</button>
+                        <button class="btn-ghost" data-action-tab="estimating"><i class="fas fa-calculator"></i> Open Estimating</button>
+                        <button class="btn-ghost" disabled><i class="fas fa-file-invoice"></i> Generate Proposal</button>
                     </div>
                 </div>
-
-            <?php elseif($currentView === 'files'): 
-                // Lógica para obtener archivos de la carpeta seleccionada
-                $files = [];
-                $folderName = "Select a Folder";
-                if($currentFolderId) {
-                    $fStmt = $pdo->prepare("SELECT * FROM files WHERE folder_id = ? AND deleted_at IS NULL ORDER BY uploaded_at DESC");
-                    $fStmt->execute([$currentFolderId]);
-                    $files = $fStmt->fetchAll(PDO::FETCH_ASSOC);
-                    
-                    // Buscar nombre de la carpeta actual
-                    $currFolder = array_filter($allFolders, fn($f) => $f['id'] == $currentFolderId);
-                    $folderName = !empty($currFolder) ? reset($currFolder)['name'] : "Unknown Folder";
-                }
-            ?>
-                <div class="d-flex justify-content-between align-items-center mb-4">
-                    <h4 class="fw-bold mb-0"><i class="fas fa-folder-open text-warning me-2"></i> <?= htmlspecialchars($folderName) ?></h4>
-                    <span class="badge bg-secondary"><?= count($files) ?> files</span>
-                </div>
-
-                <?php if(empty($files)): ?>
-                    <div class="text-center py-5">
-                        <i class="fas fa-cloud-upload-alt fa-3x text-gray mb-3 opacity-25"></i>
-                        <p class="text-gray">This folder is empty.</p>
-                        <button class="btn btn-outline-primary btn-sm rounded-pill" onclick="openUploadModal()">Upload Here</button>
-                    </div>
-                <?php else: ?>
-                    <div class="row g-3">
-                        <?php foreach($files as $f): 
-                             $ft = strtolower(pathinfo($f['filename'], PATHINFO_EXTENSION));
-                             $icon = ($ft === 'pdf') ? 'fa-file-pdf text-danger' : 'fa-file-image text-primary';
-                        ?>
-                        <div class="col-md-3 col-xl-2">
-                            <div class="box-card p-3 text-center h-100 file-hover">
-                                <i class="fas <?= $icon ?> fa-3x mb-3"></i>
-                                <h6 class="text-truncate small mb-1"><?= htmlspecialchars($f['filename']) ?></h6>
-                                <small class="text-gray d-block mb-2"><?= date('M d', strtotime($f['uploaded_at'])) ?></small>
-                                <div class="d-flex justify-content-center gap-2 file-actions-row">
-                                    <a href="preview.php?id=<?= $f['id'] ?>" class="btn btn-sm btn-dark rounded-circle"><i class="fas fa-eye"></i></a>
-                                    <a href="editor.php?id=<?= $f['id'] ?>" class="btn btn-sm btn-dark rounded-circle text-primary"><i class="fas fa-pen"></i></a>
-                                    <?php if(($_SESSION['role'] ?? '') === 'admin'): ?>
-                                        <button class="btn btn-sm btn-dark rounded-circle text-warning" onclick="openMoveModal(<?= (int)$f['id'] ?>)" title="Move"><i class="fas fa-exchange-alt"></i></button>
-                                        <button class="btn btn-sm btn-dark rounded-circle text-danger" onclick="deleteFile(<?= (int)$f['id'] ?>)" title="Delete"><i class="fas fa-trash"></i></button>
-                                    <?php endif; ?>
-                                </div>
-                            </div>
-                        </div>
-                        <?php endforeach; ?>
-                    </div>
-                <?php endif; ?>
-
-            <?php else: ?>
-                <div class="text-center py-5">
-                    <p class="text-gray">Module under development.</p>
-                </div>
-            <?php endif; ?>
-
-        </main>
-    </div>
-</div>
-
-<style>
-    .project-sidebar .nav-link {
-        color: var(--text-muted);
-        border-radius: 8px;
-        padding: 10px 15px;
-        transition: 0.2s;
-        font-size: 0.95rem;
-        white-space: nowrap;
-        overflow: hidden;
-        text-overflow: ellipsis;
-    }
-    .project-sidebar .nav-link:hover {
-        background: rgba(255,255,255,0.05);
-        color: white;
-    }
-    .project-sidebar .nav-link.active {
-        background: var(--primary);
-        color: white;
-        font-weight: 500;
-        box-shadow: 0 4px 10px rgba(99, 102, 241, 0.3);
-    }
-    .project-layout { min-width: 0; }
-    .project-sidebar { flex: 0 0 320px; min-width: 320px; transition: all .25s ease; }
-    .project-content { min-width: 0; }
-    .project-layout.sidebar-collapsed .project-sidebar { display: none; }
-
-    .project-sidebar .p-3 { min-width: 0; }
-    .folder-row { min-width: 0; align-items: center !important; }
-    .folder-link {
-        min-width: 0;
-        max-width: calc(100% - 64px);
-        flex: 1 1 auto;
-        white-space: nowrap;
-        line-height: 1.35;
-        display: flex;
-        align-items: center;
-        overflow: hidden;
-    }
-    .folder-link-text {
-        min-width: 0;
-        overflow: hidden;
-        text-overflow: ellipsis;
-        white-space: nowrap;
-        display: block;
-        max-width: 100%;
-    }
-    .folder-actions { flex: 0 0 56px; width: 56px; padding-top: 0; justify-content: flex-end; }
-    .file-hover {
-        position: relative;
-        overflow: hidden;
-        min-height: 214px;
-        padding-bottom: 54px !important;
-    }
-    .file-actions-row {
-        position: absolute;
-        left: 0;
-        right: 0;
-        bottom: 10px;
-        min-height: 34px;
-        align-items: center;
-        justify-content: center;
-        flex-wrap: nowrap;
-        z-index: 2;
-    }
-    .file-actions-row .btn {
-        display: inline-flex;
-        align-items: center;
-        justify-content: center;
-        width: 32px;
-        height: 32px;
-        padding: 0;
-        line-height: 1;
-    }
-    .file-hover:hover {
-        background: rgba(255,255,255,0.05);
-        transform: translateY(-2px);
-    }
-
-    @media (max-width: 992px) {
-        .bg-header { flex-direction: column; align-items: flex-start; gap: 12px; }
-        .bg-header .d-flex.gap-2 { width: 100%; flex-wrap: wrap; }
-        .project-sidebar {
-            width: 100% !important;
-            min-width: 100%;
-            border-right: 0;
-            border-bottom: 1px solid rgba(255,255,255,0.08);
-        }
-        .project-content { padding: 20px !important; }
-        .project-layout { flex-direction: column; }
-    }
-
-    .recent-upload-card { gap: 12px; }
-    .recent-upload-info { min-width: 0; }
-    .recent-upload-actions { flex-shrink: 0; }
-    @media (max-width: 768px) {
-        .recent-upload-card { flex-wrap: wrap; }
-        .recent-upload-actions { width: 100%; justify-content: flex-end; }
-    }
-</style>
-
-<?php include __DIR__ . '/../views/modals.php'; ?>
-
-<div class="modal fade" id="uploadFileModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content p-3">
-            <div class="modal-header">
-                <h5 class="modal-title fw-bold">Upload File</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
             </div>
-            <form id="uploadFileForm">
-                <div class="modal-body">
-                    <label class="text-gray small mb-2">Select File</label>
-                    <input type="file" name="file" id="upload_file_input" class="form-control mb-3" required>
+        </section>
 
-                    <label class="text-gray small mb-2">Select Folder</label>
-                    <select name="folder_id" id="upload_folder_select" class="form-select text-white bg-dark border-secondary" required>
-                        <option value="">Select a folder...</option>
-                        <?php foreach($allFolders as $folder): ?>
-                            <option value="<?= (int)$folder['id'] ?>"><?= htmlspecialchars($folder['name']) ?></option>
-                        <?php endforeach; ?>
-                    </select>
-                    <?php if(empty($allFolders)): ?>
-                        <div class="text-muted small mt-2">No folders available. Create a folder first.</div>
+        <section id="tab-documents" class="tab-panel">
+            <div class="documents-layout">
+                <aside class="card-panel folder-list">
+                    <h2>Folders</h2>
+                    <button class="folder-item active" data-folder="all"><i class="fas fa-layer-group text-info"></i> All Documents</button>
+                    <button class="folder-item" data-folder="drawings"><i class="fas fa-file-pdf text-danger"></i> Drawings</button>
+                    <button class="folder-item" data-folder="attachments"><i class="fas fa-paperclip text-warning"></i> Attachments</button>
+                    <?php foreach ($folders as $folder): ?>
+                        <button class="folder-item" data-folder="<?= (int)$folder['id'] ?>"><i class="fas fa-folder text-warning"></i> <?= htmlspecialchars($folder['name']) ?></button>
+                    <?php endforeach; ?>
+                    <div class="quick-actions mt-3">
+                        <button class="btn-main" onclick="openUploadModal()"><i class="fas fa-upload"></i> Upload</button>
+                        <button class="btn-ghost" onclick="openNewFolderModal()"><i class="fas fa-folder-plus"></i> Create Folder</button>
+                    </div>
+                </aside>
+
+                <aside class="card-panel document-list">
+                    <h2>Documents</h2>
+                    <?php if (empty($documents)): ?>
+                        <p class="text-secondary">No documents uploaded yet.</p>
                     <?php endif; ?>
-                </div>
-                <div class="modal-footer">
-                    <button type="submit" class="btn-main w-100">Upload</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
+                    <?php foreach ($documents as $doc): ?>
+                        <button class="doc-item <?= (int)$doc['id'] === $selectedDocumentId ? 'active' : '' ?>"
+                                data-doc-id="<?= (int)$doc['id'] ?>"
+                                data-source="<?= htmlspecialchars($doc['source']) ?>"
+                                data-folder-id="<?= htmlspecialchars((string)($doc['folder_id'] ?? '')) ?>"
+                                data-extension="<?= htmlspecialchars($doc['extension']) ?>"
+                                data-path="<?= htmlspecialchars($doc['path']) ?>">
+                            <i class="fas <?= $doc['extension'] === 'pdf' ? 'fa-file-pdf text-danger' : 'fa-file text-info' ?>"></i>
+                            <span style="min-width:0;">
+                                <span class="doc-title"><?= htmlspecialchars($doc['filename']) ?></span>
+                                <span class="doc-meta d-block"><?= htmlspecialchars($doc['folder_name']) ?></span>
+                            </span>
+                        </button>
+                    <?php endforeach; ?>
+                </aside>
 
-<div id="uploadProgressWrap" class="position-fixed bottom-0 end-0 m-3" style="z-index: 2000; width: 280px; display:none;">
-    <div class="box-card p-3">
-        <div class="small text-gray mb-2">Uploading file...</div>
-        <div class="progress" style="height:8px;">
-            <div id="uploadProgressBar" class="progress-bar" role="progressbar" style="width:0%"></div>
-        </div>
-        <div class="small text-gray mt-2" id="uploadProgressText">0%</div>
-    </div>
-</div>
-
-<?php if(($_SESSION['role'] ?? '') === 'admin'): ?>
-<div class="modal fade" id="moveFolderModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content p-3">
-            <div class="modal-header">
-                <h5 class="modal-title fw-bold">Move Folder</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <form id="moveFolderForm">
-                <input type="hidden" name="action" value="move_folder">
-                <input type="hidden" name="folder_id" id="move_folder_id" value="">
-                <div class="modal-body">
-                    <label class="text-gray small mb-2">Target Project</label>
-                    <select name="target_project_id" id="move_folder_project_select" class="form-select text-white bg-dark border-secondary" onchange="loadFoldersForFolderMove(this.value)" required>
-                        <option value="">Loading projects...</option>
-                    </select>
-
-                    <label class="text-gray small mb-2 mt-3">Move Into Folder (Optional)</label>
-                    <select name="target_parent_folder_id" id="move_folder_parent_select" class="form-select text-white bg-dark border-secondary">
-                        <option value="">Keep as top-level</option>
-                    </select>
-                    <div class="text-muted small mt-2">Select a parent folder to create a subfolder with the current name.</div>
-                </div>
-                <div class="modal-footer">
-                    <button type="submit" class="btn-main w-100">Move Folder</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<div class="modal fade" id="newFolderModalDash" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content p-3">
-            <div class="modal-header">
-                <h5 class="modal-title fw-bold">Add Folder</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <form id="newFolderFormDash">
-                <div class="modal-body">
-                    <div id="newFolderError" class="alert alert-danger py-2 px-3 mb-3 d-none" role="alert"></div>
-                    <label class="text-gray small mb-2">Folder Name</label>
-                    <input type="text" name="name" class="form-control" required maxlength="255">
-                </div>
-                <div class="modal-footer">
-                    <button type="submit" class="btn-main w-100">Create</button>
-                </div>
-            </form>
-        </div>
-    </div>
-</div>
-
-<div class="modal fade" id="assignUsersModal" tabindex="-1">
-    <div class="modal-dialog modal-dialog-centered">
-        <div class="modal-content p-3">
-            <div class="modal-header">
-                <h5 class="modal-title fw-bold">Assign Users to Project</h5>
-                <button type="button" class="btn-close" data-bs-dismiss="modal"></button>
-            </div>
-            <form id="assignUsersForm">
-                <input type="hidden" name="action" value="assign_project_users">
-                <input type="hidden" name="project_id" value="<?= (int)$projectId ?>">
-                <div class="modal-body">
-                    <label class="text-gray small mb-2">Assign Users</label>
-                    <div class="border rounded p-2" style="max-height:200px; overflow:auto;">
-                        <?php foreach($assignUsers as $u): ?>
-                            <label class="d-flex align-items-center gap-2 small text-gray mb-2">
-                                <input type="checkbox" name="user_ids[]" value="<?= (int)$u['id'] ?>" data-role="<?= htmlspecialchars($u['role']) ?>" <?= in_array((int)$u['id'], $assignedUserIds, true) ? 'checked' : '' ?>>
-                                <span><?= htmlspecialchars($u['username']) ?> (<?= htmlspecialchars($u['role']) ?>)</span>
-                            </label>
-                        <?php endforeach; ?>
-                        <?php if(empty($assignUsers)): ?>
-                            <div class="text-gray small">No users available.</div>
+                <section class="card-panel preview-card">
+                    <div class="d-flex justify-content-between align-items-center gap-2 mb-3">
+                        <h2 class="mb-0">Preview</h2>
+                        <div class="quick-actions">
+                            <a id="downloadDocBtn" class="btn-ghost" href="<?= htmlspecialchars($selectedDoc['path'] ?? '#') ?>" download><i class="fas fa-download"></i> Download</a>
+                            <button id="setActiveDrawingBtn" class="btn-ghost"><i class="fas fa-thumbtack"></i> Set Active</button>
+                            <button id="renameDocBtn" class="btn-ghost"><i class="fas fa-pen"></i> Rename</button>
+                            <button id="deleteDocBtn" class="btn-ghost"><i class="fas fa-trash"></i> Delete</button>
+                            <button id="openTakeoffBtn" class="btn-main"><i class="fas fa-ruler-combined"></i> Open in Takeoff</button>
+                        </div>
+                    </div>
+                    <div style="height: calc(100% - 55px); min-height: 500px;">
+                        <?php if ($selectedDoc && !empty($selectedDoc['path'])): ?>
+                            <iframe id="documentPreviewFrame" class="preview-frame" src="<?= htmlspecialchars($selectedDoc['path']) ?>"></iframe>
+                        <?php else: ?>
+                            <div id="documentPreviewEmpty" class="preview-empty">Select a PDF or document to preview it here.</div>
+                            <iframe id="documentPreviewFrame" class="preview-frame" style="display:none;"></iframe>
                         <?php endif; ?>
                     </div>
+                </section>
+            </div>
+        </section>
+
+        <section id="tab-takeoff" class="tab-panel fullscreen">
+            <div class="takeoff-workspace" id="takeoffWorkspace">
+                <?php if ($selectedDoc && $selectedDoc['source'] === 'legacy_file'): ?>
+                    <iframe id="takeoffFrame" class="takeoff-frame" src="editor.php?id=<?= (int)$selectedDoc['id'] ?>&embedded=1"></iframe>
+                <?php else: ?>
+                    <div id="takeoffEmpty" class="takeoff-empty">
+                        <div>
+                            <i class="fas fa-file-pdf fa-3x mb-3"></i>
+                            <h3>Select a drawing from Documents to start takeoff.</h3>
+                            <button class="btn-main mt-2" data-action-tab="documents">Open Documents</button>
+                        </div>
+                    </div>
+                    <iframe id="takeoffFrame" class="takeoff-frame" style="display:none;"></iframe>
+                <?php endif; ?>
+            </div>
+        </section>
+
+        <section id="tab-estimating" class="tab-panel">
+            <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-3">
+                <h2 class="mb-0 fw-bold">Estimating</h2>
+                <div class="quick-actions">
+                    <button class="btn-main"><i class="fas fa-plus"></i> Add Item</button>
+                    <button class="btn-ghost"><i class="fas fa-link"></i> Link Takeoff Layer</button>
+                    <button class="btn-ghost"><i class="fas fa-wand-magic-sparkles"></i> Create From Takeoff</button>
+                    <button class="btn-ghost"><i class="fas fa-rotate"></i> Refresh Totals</button>
+                    <button class="btn-ghost"><i class="fas fa-file-export"></i> Export</button>
                 </div>
-                <div class="modal-footer">
-                    <button type="submit" class="btn-main w-100">Assign Selected Users</button>
+            </div>
+            <div class="estimating-toolbar">
+                <input type="search" placeholder="Search item" id="estimateSearch">
+                <select><option>Group</option></select>
+                <select><option>Source Type</option><option>takeoff</option><option>manual</option><option>catalog</option><option>assembly</option></select>
+                <select><option>Cost Type</option></select>
+            </div>
+            <div class="table-wrap">
+                <table>
+                    <thead>
+                        <tr>
+                            <th>Item</th><th>Assembly</th><th>Type</th><th>Unit</th><th>Qty</th><th>Unit Cost</th><th>Labor Hours</th><th>Material</th><th>Labor</th><th>Total</th><th>Waste</th><th>Markup</th><th>Source</th>
+                        </tr>
+                    </thead>
+                    <tbody>
+                    <?php if (empty($estimateItems)): ?>
+                        <tr><td colspan="13" class="text-center text-secondary">No estimate items yet. Create estimate items from takeoff layers or add a manual item.</td></tr>
+                    <?php else: ?>
+                        <?php foreach ($estimateItems as $item): ?>
+                            <tr>
+                                <td><?= htmlspecialchars($item['name'] ?? '') ?></td>
+                                <td><?= htmlspecialchars($item['catalog_item_name'] ?? $item['assembly_catalog_item_id'] ?? '') ?></td>
+                                <td><?= htmlspecialchars($item['item_type'] ?? '') ?></td>
+                                <td><?= htmlspecialchars($item['unit_of_measure'] ?? '') ?></td>
+                                <td><?= number_format((float)($item['quantity'] ?? 0), 2) ?><?= ($item['source_type'] ?? '') === 'takeoff' ? ' locked' : '' ?></td>
+                                <td><?= money_fmt((float)($item['unit_cost'] ?? 0)) ?></td>
+                                <td><?= number_format((float)($item['labor_hours'] ?? 0), 2) ?></td>
+                                <td><?= money_fmt((float)($item['material_cost'] ?? 0)) ?></td>
+                                <td><?= money_fmt((float)($item['labor_cost'] ?? 0)) ?></td>
+                                <td><strong><?= money_fmt((float)($item['total_cost'] ?? 0)) ?></strong></td>
+                                <td><?= number_format((float)($item['waste_factor_percent'] ?? $item['waste_percentage'] ?? 0), 2) ?>%</td>
+                                <td><?= number_format((float)($item['markup_percent'] ?? $item['margin_percentage'] ?? 0), 2) ?>%</td>
+                                <td><?= htmlspecialchars($item['source_type'] ?? 'manual') ?></td>
+                            </tr>
+                        <?php endforeach; ?>
+                    <?php endif; ?>
+                    </tbody>
+                </table>
+            </div>
+            <div class="grid totals-grid">
+                <div class="card-panel"><div class="label">Material subtotal</div><div class="metric-value"><?= money_fmt($materialSubtotal) ?></div></div>
+                <div class="card-panel"><div class="label">Labor subtotal</div><div class="metric-value"><?= money_fmt($laborSubtotal) ?></div></div>
+                <div class="card-panel"><div class="label">Equipment subtotal</div><div class="metric-value"><?= money_fmt($equipmentSubtotal) ?></div></div>
+                <div class="card-panel"><div class="label">Waste total</div><div class="metric-value"><?= money_fmt($wasteTotal) ?></div></div>
+                <div class="card-panel"><div class="label">Markup total</div><div class="metric-value"><?= money_fmt($markupTotal) ?></div></div>
+                <div class="card-panel"><div class="label">Estimate total</div><div class="metric-value"><?= money_fmt($estimateTotal) ?></div></div>
+            </div>
+        </section>
+
+        <section id="tab-proposal" class="tab-panel">
+            <div class="proposal-sheet">
+                <div class="d-flex justify-content-between gap-3 flex-wrap">
+                    <div>
+                        <h2><?= htmlspecialchars($project['name']) ?></h2>
+                        <div>Client: <?= htmlspecialchars($project['client_name'] ?? 'N/A') ?></div>
+                    </div>
+                    <div class="text-end">
+                        <div><strong>Quote Number:</strong> <?= htmlspecialchars($proposals[0]['proposal_number'] ?? 'Draft') ?></div>
+                        <div><strong>Date:</strong> <?= date('M d, Y') ?></div>
+                    </div>
                 </div>
-            </form>
-        </div>
-    </div>
+                <div class="proposal-line mt-4"><strong>Scope of Work</strong><br>Placeholder for proposal scope.</div>
+                <div class="proposal-line"><strong>Included</strong><br>Placeholder for included work and materials.</div>
+                <div class="proposal-line"><strong>Excluded</strong><br>Placeholder for exclusions and assumptions.</div>
+                <div class="proposal-line"><strong>Total Quoted Amount</strong><br><span style="font-size:1.6rem;font-weight:800;"><?= money_fmt($estimateTotal) ?></span></div>
+                <div class="proposal-line"><strong>Acceptance / Signature</strong><br><br>Signature: ______________________________ Date: _______________</div>
+            </div>
+        </section>
+    </main>
 </div>
-<?php endif; ?>
 
 <input type="file" id="projectUploadInput" class="d-none">
 
 <script>
-    const pId = <?= $projectId ?>;
-    const fId = <?= $currentFolderId ?? 'null' ?>;
+    window.ProjectState = <?= json_encode($state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
 
-    function applyProjectSidebarState(collapsed) {
-        const layout = document.getElementById('projectLayout');
-        const text = document.getElementById('toggleProjectSidebarText');
-        if (!layout) return;
-        layout.classList.toggle('sidebar-collapsed', collapsed);
-        if (text) text.textContent = collapsed ? 'Show Menu' : 'Hide Menu';
+    const tabs = document.querySelectorAll('[data-tab]');
+    const panels = document.querySelectorAll('.tab-panel');
+    const docButtons = document.querySelectorAll('.doc-item');
+    const previewFrame = document.getElementById('documentPreviewFrame');
+    const downloadDocBtn = document.getElementById('downloadDocBtn');
+    const takeoffFrame = document.getElementById('takeoffFrame');
+    const takeoffEmpty = document.getElementById('takeoffEmpty');
+
+    function setActiveTab(tab, push = true) {
+        ProjectState.activeTab = tab;
+        tabs.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
+        panels.forEach(panel => panel.classList.toggle('active', panel.id === 'tab-' + tab));
+        if (push) {
+            const url = new URL(window.location.href);
+            url.searchParams.set('tab', tab);
+            if (ProjectState.selectedDocumentId) url.searchParams.set('file_id', ProjectState.selectedDocumentId);
+            history.replaceState(ProjectState, '', url.toString());
+        }
     }
 
-    function toggleProjectSidebar() {
-        const layout = document.getElementById('projectLayout');
-        if (!layout) return;
-        const collapsed = !layout.classList.contains('sidebar-collapsed');
-        applyProjectSidebarState(collapsed);
-        try { localStorage.setItem('projectSidebarCollapsed', collapsed ? '1' : '0'); } catch (e) {}
+    function selectedDocument() {
+        return ProjectState.documents.find(doc => Number(doc.id) === Number(ProjectState.selectedDocumentId));
     }
 
-    document.addEventListener('DOMContentLoaded', function() {
-        let collapsed = false;
-        try { collapsed = localStorage.getItem('projectSidebarCollapsed') === '1'; } catch (e) {}
-        applyProjectSidebarState(collapsed);
-    });
+    function selectDocument(id) {
+        ProjectState.selectedDocumentId = Number(id);
+        ProjectState.selectedDrawingId = Number(id);
+        const doc = selectedDocument();
+        docButtons.forEach(btn => btn.classList.toggle('active', Number(btn.dataset.docId) === Number(id)));
+        if (doc && previewFrame) {
+            previewFrame.src = doc.path || 'about:blank';
+            previewFrame.style.display = doc.path ? 'block' : 'none';
+        }
+        if (downloadDocBtn && doc) downloadDocBtn.href = doc.path || '#';
+    }
 
-    function openUploadModal() {
-        if (fId) {
-            const input = document.getElementById('projectUploadInput');
-            if (input) input.click();
+    function setActiveDrawing() {
+        const doc = selectedDocument();
+        if (!doc) return;
+        ProjectState.selectedDocumentId = Number(doc.id);
+        ProjectState.selectedDrawingId = Number(doc.id);
+        alert('Active drawing set to: ' + doc.filename);
+    }
+
+    function renameSelectedDocument() {
+        const doc = selectedDocument();
+        if (!doc) return;
+        const nextName = prompt('Rename document', doc.filename);
+        if (!nextName || nextName === doc.filename) return;
+        alert('Rename is not wired to the API yet. Requested name: ' + nextName);
+    }
+
+    function deleteSelectedDocument() {
+        const doc = selectedDocument();
+        if (!doc) return;
+        if (doc.source !== 'legacy_file') {
+            alert('Delete is currently available for uploaded project files only.');
             return;
         }
-        const modalEl = document.getElementById('uploadFileModal');
-        if (modalEl) new bootstrap.Modal(modalEl).show();
-    }
-
-    const projectUploadInput = document.getElementById('projectUploadInput');
-    if (projectUploadInput) {
-        projectUploadInput.addEventListener('change', function() {
-            if (!this.files || this.files.length === 0) return;
-            if (!fId) return;
-            const fd = new FormData();
-            fd.append('action', 'upload_file');
-            fd.append('project_id', pId);
-            if (fId) fd.append('folder_id', fId);
-            fd.append('file', this.files[0]);
-            fetch('../api/api.php', { method:'POST', body: fd })
-                .then(r => r.json())
-                .then(d => {
-                    if (d.status === 'success') location.reload();
-                    else alert('Error uploading file: ' + (d.msg || 'Unknown'));
-                })
-                .catch(() => alert('Connection error'));
-        });
-    }
-
-    function showUploadProgress() {
-        const wrap = document.getElementById('uploadProgressWrap');
-        const bar = document.getElementById('uploadProgressBar');
-        const txt = document.getElementById('uploadProgressText');
-        if (!wrap || !bar || !txt) return;
-        wrap.style.display = 'block';
-        bar.style.width = '0%';
-        txt.textContent = '0%';
-    }
-
-    function updateUploadProgress(pct) {
-        const bar = document.getElementById('uploadProgressBar');
-        const txt = document.getElementById('uploadProgressText');
-        if (!bar || !txt) return;
-        const clamped = Math.max(0, Math.min(100, Math.round(pct)));
-        bar.style.width = clamped + '%';
-        txt.textContent = clamped + '%';
-    }
-
-    function hideUploadProgress(delay = 1200) {
-        const wrap = document.getElementById('uploadProgressWrap');
-        if (!wrap) return;
-        setTimeout(() => { wrap.style.display = 'none'; }, delay);
-    }
-
-    function uploadWithProgress(fd) {
-        showUploadProgress();
-        return new Promise((resolve, reject) => {
-            const xhr = new XMLHttpRequest();
-            xhr.open('POST', '../api/api.php', true);
-            xhr.upload.addEventListener('progress', (e) => {
-                if (e.lengthComputable) {
-                    updateUploadProgress((e.loaded / e.total) * 100);
-                }
-            });
-            xhr.addEventListener('load', () => {
-                updateUploadProgress(100);
-                try {
-                    const res = JSON.parse(xhr.responseText);
-                    resolve(res);
-                } catch (err) {
-                    reject(err);
-                }
-            });
-            xhr.addEventListener('error', () => reject(new Error('Upload failed')));
-            xhr.send(fd);
-        });
-    }
-
-    const uploadFileForm = document.getElementById('uploadFileForm');
-    if (uploadFileForm) {
-        uploadFileForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            const fileInput = document.getElementById('upload_file_input');
-            const folderSelect = document.getElementById('upload_folder_select');
-            if (!fileInput || !fileInput.files || fileInput.files.length === 0) {
-                alert('Please select a file.');
-                return;
-            }
-            if (!folderSelect || !folderSelect.value) {
-                alert('Please select a folder.');
-                return;
-            }
-            const fd = new FormData();
-            fd.append('action', 'upload_file');
-            fd.append('project_id', pId);
-            fd.append('folder_id', folderSelect.value);
-            fd.append('file', fileInput.files[0]);
-            const modalEl = document.getElementById('uploadFileModal');
-            if (modalEl) {
-                const inst = bootstrap.Modal.getInstance(modalEl) || new bootstrap.Modal(modalEl);
-                inst.hide();
-            }
-            uploadWithProgress(fd)
-                .then(d => {
-                    if (d.status === 'success') {
-                        hideUploadProgress(800);
-                        location.reload();
-                    } else {
-                        hideUploadProgress(1500);
-                        alert('Error uploading file: ' + (d.msg || 'Unknown'));
-                    }
-                })
-                .catch(() => {
-                    hideUploadProgress(1500);
-                    alert('Upload failed. The file may still finish uploading in the background.');
-                });
-        });
-    }
-
-
-    function openAssignUsersModal() {
-        const modalEl = document.getElementById('assignUsersModal');
-        if (!modalEl) return;
-        new bootstrap.Modal(modalEl).show();
-    }
-    const assignUsersForm = document.getElementById('assignUsersForm');
-    if (assignUsersForm) {
-        assignUsersForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            const checked = Array.from(this.querySelectorAll('input[name="user_ids[]"]:checked'));
-            const hasAdmin = checked.some(i => i.dataset.role === 'admin');
-            if (checked.length === 0 || !hasAdmin) {
-                alert('At least one admin must be assigned to the project.');
-                return;
-            }
-            const fd = new FormData(this);
-            fetch('../api/api.php', { method:'POST', body:fd })
-                .then(r => r.json())
-                .then(d => {
-                    if (d.status === 'success') location.reload();
-                    else alert('Error assigning users: ' + (d.msg || 'Unknown'));
-                })
-                .catch(() => alert('Connection error'));
-        });
-    }
-
-    function deleteFile(id) {
-        if(!confirm("Move file to Recycle Bin?")) return;
+        if (!confirm('Move this document to Recycle Bin?')) return;
         const fd = new FormData();
         fd.append('action', 'delete_entity');
         fd.append('type', 'file');
-        fd.append('id', id);
-        fetch('../api/api.php', { method:'POST', body: fd })
-            .then(r => r.json())
-            .then(d => {
-                if(d.status === 'success') location.reload();
-                else alert('Error deleting file: ' + (d.msg || 'Unknown'));
-            })
-            .catch(() => alert('Connection error'));
-    }
-
-    function deleteFolder(id) {
-        if(!confirm("Move folder to Recycle Bin?")) return;
-        const fd = new FormData();
-        fd.append('action', 'delete_entity');
-        fd.append('type', 'folder');
-        fd.append('id', id);
-        fetch('../api/api.php', { method:'POST', body: fd })
-            .then(r => r.json())
-            .then(d => {
-                if(d.status === 'success') location.reload();
-                else alert('Error deleting folder: ' + (d.msg || 'Unknown'));
-            })
-            .catch(() => alert('Connection error'));
-    }
-
-    function openMoveModal(fileId) {
-        const moveId = document.getElementById('move_id');
-        const moveType = document.getElementById('move_type');
-        const projSelect = document.getElementById('move_project_select');
-        const folderSelect = document.getElementById('move_folder_select');
-        if (!moveId || !moveType || !projSelect || !folderSelect) return;
-
-        moveId.value = fileId;
-        moveType.value = 'file';
-        projSelect.innerHTML = '<option value="">Loading projects...</option>';
-        folderSelect.innerHTML = '<option value="">Root Folder</option>';
-
-        const modalEl = document.getElementById('moveFileModal');
-        if (modalEl) new bootstrap.Modal(modalEl).show();
-
-        const fd = new FormData();
-        fd.append('action', 'get_projects_list');
+        fd.append('id', doc.id);
         fetch('../api/api.php', { method: 'POST', body: fd })
             .then(r => r.json())
             .then(res => {
-                if(res.status === 'success') {
-                    projSelect.innerHTML = '<option value="">Select Target Project...</option>';
-                    res.data.forEach(p => { projSelect.innerHTML += `<option value="${p.id}">${p.name}</option>`; });
-                } else {
-                    projSelect.innerHTML = '<option value="">Error loading</option>';
-                }
+                if (res.status === 'success') location.reload();
+                else alert('Delete failed: ' + (res.msg || 'Unknown error'));
             })
-            .catch(() => { projSelect.innerHTML = '<option value="">Connection Error</option>'; });
+            .catch(() => alert('Delete failed.'));
     }
 
-    function loadFoldersForMove(projId) {
-        const folderSel = document.getElementById('move_folder_select');
-        if (!folderSel) return;
-        folderSel.innerHTML = '<option value="">Loading...</option>';
-        if(!projId) { folderSel.innerHTML = '<option value="">Root Folder</option>'; return; }
-
-        const fd = new FormData();
-        fd.append('action', 'get_folders_list');
-        fd.append('project_id', projId);
-        fetch('../api/api.php', { method: 'POST', body: fd })
-            .then(r => r.json())
-            .then(res => {
-                folderSel.innerHTML = '<option value="">Root Folder (No specific folder)</option>';
-                if(res.status === 'success') {
-                    res.data.forEach(f => { folderSel.innerHTML += `<option value="${f.id}">${f.name}</option>`; });
-                }
-            })
-            .catch(() => { folderSel.innerHTML = '<option value="">Connection Error</option>'; });
+    function openSelectedInTakeoff() {
+        const doc = selectedDocument();
+        if (!doc || doc.source !== 'legacy_file') {
+            alert('Select an uploaded drawing file to open in Takeoff.');
+            return;
+        }
+        if (takeoffFrame) {
+            takeoffFrame.src = 'editor.php?id=' + encodeURIComponent(doc.id) + '&embedded=1';
+            takeoffFrame.style.display = 'block';
+        }
+        if (takeoffEmpty) takeoffEmpty.style.display = 'none';
+        setActiveTab('takeoff');
     }
 
-    const moveForm = document.getElementById('moveFileForm');
-    if (moveForm) {
-        moveForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            const fd = new FormData(this);
-            fetch('../api/api.php', { method: 'POST', body: fd })
-                .then(r => r.json())
-                .then(d => {
-                    if(d.status === 'success') location.reload();
-                    else alert('Error moving file: ' + (d.msg || 'Unknown'));
-                })
-                .catch(() => alert('Connection error'));
+    tabs.forEach(btn => btn.addEventListener('click', () => setActiveTab(btn.dataset.tab)));
+    document.querySelectorAll('[data-action-tab]').forEach(btn => btn.addEventListener('click', () => setActiveTab(btn.dataset.actionTab)));
+    docButtons.forEach(btn => btn.addEventListener('click', () => selectDocument(btn.dataset.docId)));
+    document.getElementById('openTakeoffBtn')?.addEventListener('click', openSelectedInTakeoff);
+    document.getElementById('setActiveDrawingBtn')?.addEventListener('click', setActiveDrawing);
+    document.getElementById('renameDocBtn')?.addEventListener('click', renameSelectedDocument);
+    document.getElementById('deleteDocBtn')?.addEventListener('click', deleteSelectedDocument);
+
+    document.querySelectorAll('.folder-item').forEach(btn => {
+        btn.addEventListener('click', () => {
+            document.querySelectorAll('.folder-item').forEach(item => item.classList.remove('active'));
+            btn.classList.add('active');
+            const folder = btn.dataset.folder;
+            docButtons.forEach(doc => {
+                const isDrawing = ['pdf', 'png', 'jpg', 'jpeg', 'webp'].includes(doc.dataset.extension);
+                const visible = folder === 'all'
+                    || (folder === 'drawings' && isDrawing)
+                    || (folder === 'attachments' && !isDrawing)
+                    || doc.dataset.folderId === folder;
+                doc.style.display = visible ? 'flex' : 'none';
+            });
         });
-    }
+    });
 
-    function openMoveFolderModal(folderId) {
-        const moveFolderId = document.getElementById('move_folder_id');
-        const projSelect = document.getElementById('move_folder_project_select');
-        const parentSelect = document.getElementById('move_folder_parent_select');
-        if (!moveFolderId || !projSelect || !parentSelect) return;
-
-        moveFolderId.value = folderId;
-        projSelect.innerHTML = '<option value="">Loading projects...</option>';
-        parentSelect.innerHTML = '<option value="">Keep as top-level</option>';
-
-        const modalEl = document.getElementById('moveFolderModal');
-        if (modalEl) new bootstrap.Modal(modalEl).show();
-
-        const fd = new FormData();
-        fd.append('action', 'get_projects_list');
-        fetch('../api/api.php', { method: 'POST', body: fd })
-            .then(r => r.json())
-            .then(res => {
-                if(res.status === 'success') {
-                    projSelect.innerHTML = '<option value="">Select Target Project...</option>';
-                    res.data.forEach(p => { projSelect.innerHTML += `<option value="${p.id}">${p.name}</option>`; });
-                } else {
-                    projSelect.innerHTML = '<option value="">Error loading</option>';
-                }
-            })
-            .catch(() => { projSelect.innerHTML = '<option value="">Connection Error</option>'; });
-    }
-
-    function loadFoldersForFolderMove(projId) {
-        const parentSel = document.getElementById('move_folder_parent_select');
-        if (!parentSel) return;
-        parentSel.innerHTML = '<option value="">Loading...</option>';
-        if(!projId) { parentSel.innerHTML = '<option value="">Keep as top-level</option>'; return; }
-
-        const currentFolderId = parseInt(document.getElementById('move_folder_id').value || '0', 10);
-        const fd = new FormData();
-        fd.append('action', 'get_folders_list');
-        fd.append('project_id', projId);
-        fetch('../api/api.php', { method: 'POST', body: fd })
-            .then(r => r.json())
-            .then(res => {
-                parentSel.innerHTML = '<option value="">Keep as top-level</option>';
-                if(res.status === 'success') {
-                    res.data.forEach(f => {
-                        if (parseInt(f.id, 10) === currentFolderId) return;
-                        parentSel.innerHTML += `<option value="${f.id}">${f.name}</option>`;
-                    });
-                }
-            })
-            .catch(() => { parentSel.innerHTML = '<option value="">Connection Error</option>'; });
-    }
-
-    const moveFolderForm = document.getElementById('moveFolderForm');
-    if (moveFolderForm) {
-        moveFolderForm.addEventListener('submit', function(e) {
-            e.preventDefault();
-            const fd = new FormData(this);
-            fetch('../api/api.php', { method: 'POST', body: fd })
-                .then(r => r.json())
-                .then(d => {
-                    if(d.status === 'success') location.reload();
-                    else alert('Error moving folder: ' + (d.msg || 'Unknown'));
-                })
-                .catch(() => alert('Connection error'));
-        });
+    function openUploadModal() {
+        const input = document.getElementById('projectUploadInput');
+        if (input) input.click();
     }
 
     function openNewFolderModal() {
-        const modalEl = document.getElementById('newFolderModalDash');
-        if (!modalEl) return;
-        if (typeof clearNewFolderError === 'function') clearNewFolderError();
-        new bootstrap.Modal(modalEl).show();
+        const name = prompt('Folder name');
+        if (!name) return;
+        const fd = new FormData();
+        fd.append('action', 'create_folder');
+        fd.append('project_id', ProjectState.projectId);
+        fd.append('name', name);
+        fetch('../api/api.php', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(res => {
+                if (res.status === 'success') location.reload();
+                else alert('Create folder failed: ' + (res.msg || 'Unknown error'));
+            })
+            .catch(() => alert('Create folder failed.'));
     }
-    const newFolderFormDash = document.getElementById('newFolderFormDash');
-    const newFolderError = document.getElementById('newFolderError');
-    const showNewFolderError = (msg) => {
-        if (!newFolderError) return;
-        newFolderError.textContent = msg;
-        newFolderError.classList.remove('d-none');
-    };
-    const clearNewFolderError = () => {
-        if (!newFolderError) return;
-        newFolderError.textContent = '';
-        newFolderError.classList.add('d-none');
-    };
 
-    if (newFolderFormDash) {
-        newFolderFormDash.addEventListener('submit', function(e) {
-            e.preventDefault();
-            clearNewFolderError();
-            const fd = new FormData(this);
-            fd.append('action', 'create_folder');
-            fd.append('project_id', pId);
-            fetch('../api/api.php', { method:'POST', body: fd })
-                .then(r => r.json())
-                .then(d => {
-                    if (d.status === 'success') {
-                        location.reload();
-                    } else {
-                        showNewFolderError('Error creating folder: ' + (d.msg || 'Unknown'));
-                    }
-                })
-                .catch(() => showNewFolderError('Connection error while creating folder.'));
-        });
-    }
+    document.getElementById('projectUploadInput')?.addEventListener('change', function() {
+        if (!this.files || !this.files.length) return;
+        const fd = new FormData();
+        fd.append('action', 'upload_file');
+        fd.append('project_id', ProjectState.projectId);
+        fd.append('file', this.files[0]);
+        fetch('../api/api.php', { method: 'POST', body: fd })
+            .then(r => r.json())
+            .then(res => {
+                if (res.status === 'success') location.reload();
+                else alert('Upload failed: ' + (res.msg || 'Unknown error'));
+            })
+            .catch(() => alert('Upload failed.'));
+    });
+
+    setActiveTab(ProjectState.activeTab || 'overview', false);
 </script>
-
-<?php include __DIR__ . '/../views/footer.php'; ?>
+</body>
+</html>

@@ -22,6 +22,7 @@ $projectId = $file['project_id'];
 $folderId = $file['folder_id'];
 $projectDashboardUrl = "project_dashboard.php?id={$projectId}";
 $backUrl = $projectDashboardUrl . "&tab=takeoff";
+$embedded = ($_GET['embedded'] ?? '') === '1';
 
 $stmtRep = $pdo->prepare("SELECT annotations_json FROM file_reports WHERE file_id=? ORDER BY created_at DESC LIMIT 1");
 $stmtRep->execute([$id]);
@@ -72,7 +73,7 @@ if ($filePath !== '') {
 
     <style>
         :root {
-            --project-nav-height: 48px;
+            --project-nav-height: <?= $embedded ? '0px' : '48px' ?>;
             --header-height: 60px;
             --sb-right-w: 70px; /* Ancho Desktop */
             --sb-mobile-h: 65px; /* Alto Mobile */
@@ -346,7 +347,7 @@ if ($filePath !== '') {
 
     </style>
 </head>
-<body>
+<body class="<?= $embedded ? 'embedded-editor' : '' ?>">
 
 <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeAllOverlays()"></div>
 
@@ -358,6 +359,7 @@ if ($filePath !== '') {
 </div>
 
 <div class="app-container">
+    <?php if (!$embedded): ?>
     <nav class="project-flow-nav" aria-label="Project navigation">
         <a href="<?= $projectDashboardUrl ?>&tab=overview">Overview</a>
         <a href="<?= $projectDashboardUrl ?>&tab=documents">Documents</a>
@@ -365,6 +367,7 @@ if ($filePath !== '') {
         <a href="<?= $projectDashboardUrl ?>&tab=estimating">Estimating</a>
         <a href="<?= $projectDashboardUrl ?>&tab=proposal">Proposal</a>
     </nav>
+    <?php endif; ?>
     
     <header class="app-header">
         <div class="header-left">
@@ -382,12 +385,6 @@ if ($filePath !== '') {
                 <i class="fas fa-bolt text-warning"></i> <span class="d-none d-md-inline">Brightronix</span>
             </div>
 
-            <!-- VIEW TOGGLE -->
-            <div class="d-none d-md-flex bg-dark rounded border border-secondary p-1 align-items-center me-3" style="gap:2px;">
-                <button id="btn-view-drawing" class="btn btn-sm btn-primary" onclick="setTakeoffInternalView('drawing')" style="font-weight:600;">Drawing Takeoff</button>
-                <button id="btn-view-summary" class="btn btn-sm btn-outline-light border-0" onclick="setTakeoffInternalView('summary')" style="font-weight:600;">Estimate Summary</button>
-            </div>
-            
             <div class="file-info d-none d-lg-flex">
                 <small>Editing File</small>
                 <span><?= htmlspecialchars($file['filename']) ?></span>
