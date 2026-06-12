@@ -18,7 +18,7 @@ if(!$file) die("File not found");
 $projectId = $file['project_id'];
 $folderId = $file['folder_id'] ?? null;
 $backUrl = "project_dashboard.php?id={$projectId}";
-$backUrl .= $folderId ? "&view=files&folder_id={$folderId}" : "&view=summary";
+$backUrl .= "&tab=takeoff";
 
 // 3. Historial (Solo activos)
 $stmtRep = $pdo->prepare("SELECT * FROM file_reports WHERE file_id=? AND is_deleted = 0 ORDER BY created_at DESC");

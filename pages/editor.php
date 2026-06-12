@@ -20,8 +20,8 @@ if(!$file) {
 
 $projectId = $file['project_id'];
 $folderId = $file['folder_id'];
-$backUrl = "project_dashboard.php?id={$projectId}";
-$backUrl .= $folderId ? "&view=files&folder_id={$folderId}" : "&view=summary";
+$projectDashboardUrl = "project_dashboard.php?id={$projectId}";
+$backUrl = $projectDashboardUrl . "&tab=takeoff";
 
 $stmtRep = $pdo->prepare("SELECT annotations_json FROM file_reports WHERE file_id=? ORDER BY created_at DESC LIMIT 1");
 $stmtRep->execute([$id]);
@@ -72,6 +72,7 @@ if ($filePath !== '') {
 
     <style>
         :root {
+            --project-nav-height: 48px;
             --header-height: 60px;
             --sb-right-w: 70px; /* Ancho Desktop */
             --sb-mobile-h: 65px; /* Alto Mobile */
@@ -87,12 +88,46 @@ if ($filePath !== '') {
             height: 100vh;
             width: 100vw;
             grid-template-columns: 1fr var(--sb-right-w); 
-            grid-template-rows: var(--header-height) 1fr;
+            grid-template-rows: var(--project-nav-height) var(--header-height) 1fr;
             grid-template-areas: 
+                "projectnav projectnav"
                 "header header"
                 "canvas right";
         }
 
+        .project-flow-nav {
+            grid-area: projectnav;
+            z-index: 60;
+            display: flex;
+            align-items: center;
+            gap: 4px;
+            padding: 0 16px;
+            background: #0b1120;
+            border-bottom: 1px solid var(--border-color);
+            overflow-x: auto;
+            white-space: nowrap;
+        }
+        .project-flow-nav a {
+            display: inline-flex;
+            align-items: center;
+            height: 100%;
+            padding: 0 14px;
+            color: rgba(255,255,255,0.68);
+            text-decoration: none;
+            border-bottom: 2px solid transparent;
+            font-size: 0.9rem;
+            font-weight: 700;
+            transition: color .2s, background .2s, border-color .2s;
+        }
+        .project-flow-nav a:hover {
+            color: #fff;
+            background: rgba(255,255,255,0.04);
+        }
+        .project-flow-nav a.active {
+            color: #60a5fa;
+            border-bottom-color: #3b82f6;
+            background: rgba(59, 130, 246, 0.12);
+        }
         .app-header { grid-area: header; z-index: 50; border-bottom: 1px solid var(--border-color); }
         .canvas-area { grid-area: canvas; position: relative; overflow: hidden; background: #1e293b; }
         #konva-overlay { position: absolute; inset: 0; z-index: 25; pointer-events: none; }
@@ -100,7 +135,7 @@ if ($filePath !== '') {
         /* --- SIDEBAR IZQUIERDA (Overlay Universal) --- */
         .sidebar-left {
             position: fixed !important;
-            top: var(--header-height); left: 0; bottom: 0; width: 260px;
+            top: calc(var(--project-nav-height) + var(--header-height)); left: 0; bottom: 0; width: 260px;
             background: var(--bg-dark); border-right: 1px solid var(--border-color);
             z-index: 1000; transform: translateX(-100%);
             transition: transform 0.3s cubic-bezier(0.4, 0, 0.2, 1);
@@ -108,7 +143,7 @@ if ($filePath !== '') {
         }
         .sidebar-left.show { transform: translateX(0); }
         .sidebar-overlay {
-            position: fixed; top: var(--header-height); left: 0; right: 0; bottom: 0;
+            position: fixed; top: calc(var(--project-nav-height) + var(--header-height)); left: 0; right: 0; bottom: 0;
             background: rgba(0,0,0,0.5); z-index: 999; display: none; opacity: 0; transition: opacity 0.3s;
         }
         .sidebar-overlay.show { display: block; opacity: 1; }
@@ -238,6 +273,7 @@ if ($filePath !== '') {
             .app-container {
                 grid-template-columns: 1fr; /* Una sola columna */
                 grid-template-areas: 
+                    "projectnav"
                     "header"
                     "canvas";
             }
@@ -322,6 +358,13 @@ if ($filePath !== '') {
 </div>
 
 <div class="app-container">
+    <nav class="project-flow-nav" aria-label="Project navigation">
+        <a href="<?= $projectDashboardUrl ?>&tab=overview">Overview</a>
+        <a href="<?= $projectDashboardUrl ?>&tab=documents">Documents</a>
+        <a href="<?= $projectDashboardUrl ?>&tab=takeoff" class="active" aria-current="page">Takeoff</a>
+        <a href="<?= $projectDashboardUrl ?>&tab=estimating">Estimating</a>
+        <a href="<?= $projectDashboardUrl ?>&tab=proposal">Proposal</a>
+    </nav>
     
     <header class="app-header">
         <div class="header-left">
