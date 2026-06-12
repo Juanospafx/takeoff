@@ -674,6 +674,12 @@ $state = [
             if (ProjectState.selectedDocumentId) url.searchParams.set('file_id', ProjectState.selectedDocumentId);
             history.replaceState(ProjectState, '', url.toString());
         }
+        if (tab === 'takeoff') {
+            requestAnimationFrame(() => {
+                const frame = document.getElementById('takeoffFrame');
+                frame?.contentWindow?.postMessage({ type: 'takeoff-visible' }, '*');
+            });
+        }
     }
 
     function selectedDocument() {

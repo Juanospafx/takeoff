@@ -130,8 +130,26 @@ if ($filePath !== '') {
             background: rgba(59, 130, 246, 0.12);
         }
         .app-header { grid-area: header; z-index: 50; border-bottom: 1px solid var(--border-color); }
-        .canvas-area { grid-area: canvas; position: relative; overflow: hidden; background: #1e293b; }
+        .canvas-area { grid-area: canvas; position: relative; overflow: hidden; background: #343a40; }
+        .canvas-area .canvas-container {
+            box-shadow: 0 18px 45px rgba(0,0,0,0.34);
+        }
         #konva-overlay { position: absolute; inset: 0; z-index: 25; pointer-events: none; }
+        .drawing-loading {
+            position: absolute;
+            inset: 0;
+            z-index: 35;
+            display: flex;
+            align-items: center;
+            justify-content: center;
+            background: #343a40;
+            color: #e2e8f0;
+            font-weight: 700;
+            letter-spacing: .01em;
+        }
+        .drawing-loading.hidden {
+            display: none;
+        }
 
         /* --- SIDEBAR IZQUIERDA (Overlay Universal) --- */
         .sidebar-left {
@@ -512,6 +530,9 @@ if ($filePath !== '') {
     <main class="canvas-area" id="canvas-wrapper">
         <canvas id="c"></canvas>
         <div id="konva-overlay"></div>
+        <div class="drawing-loading" id="drawingLoading">
+            <span><i class="fas fa-spinner fa-spin me-2"></i>Loading drawing...</span>
+        </div>
         
         <div class="floating-controls">
             <button class="float-btn" onclick="changePage(-1)"><i class="fas fa-chevron-left"></i></button>
@@ -785,18 +806,17 @@ if ($filePath !== '') {
     let konvaDrawing = null;
     let konvaIsPanning = false;
     const isMobileViewport = window.innerWidth <= 768;
-    const dpr = Math.min(window.devicePixelRatio || 1, 1.6);
-    let pdfDoc = null, pageNum = 1, pdfScale = (isMobileViewport ? 1.35 : 1.8) * dpr;
-    const LOW_RES_SCALE = (isMobileViewport ? 0.72 : 0.95) * Math.min(dpr, 1.25);
-    const PREFETCH_DISTANCE = isMobileViewport ? 1 : 2;
-    const MAX_HIGH_CACHE = isMobileViewport ? 3 : 5;
-    const MAX_LOW_CACHE = isMobileViewport ? 5 : 8;
-    const pageCache = new Map();
-    const highOrder = [];
-    const lowOrder = [];
+    const dpr = window.devicePixelRatio || 1;
+    const PDF_PADDING = isMobileViewport ? 18 : 36;
+    const MAX_PDF_RENDER_SCALE = 6;
+    let pdfDoc = null, pageNum = 1;
+    let pdfWorldWidth = 0;
+    let pdfWorldHeight = 0;
+    let pdfFitZoom = 1;
+    let currentPdfRenderZoom = 0;
     let renderToken = 0;
-    let prefetchBusy = false;
-    const prefetchQueue = [];
+    let pdfRerenderTimer = null;
+    const drawingLoading = document.getElementById('drawingLoading');
     
     // STATES
     let pixelsPerFoot = 0;
@@ -1029,14 +1049,10 @@ if ($filePath !== '') {
 
     async function getPdfPixelsPerInch() {
         if (!pdfDoc) return null;
-        const bg = canvas.backgroundImage;
         const page = await pdfDoc.getPage(pageNum);
         const viewport = page.getViewport({ scale: 1 });
-        const bgWidth = bg ? bg.width : viewport.width * pdfScale;
-        if (!bgWidth || !viewport.width) return null;
-        const renderScale = bgWidth / viewport.width;
-        if (!isFinite(renderScale) || renderScale <= 0) return null;
-        return 72 * renderScale;
+        if (!viewport.width) return null;
+        return 72;
     }
 
     async function applyScalePreset(value) {
@@ -1144,15 +1160,38 @@ if ($filePath !== '') {
 
     function resize() {
         const w = document.getElementById('canvas-wrapper');
-        if(w) { canvas.setWidth(w.clientWidth); canvas.setHeight(w.clientHeight); }
+        if(w && w.clientWidth > 0 && w.clientHeight > 0) {
+            canvas.setWidth(w.clientWidth);
+            canvas.setHeight(w.clientHeight);
+        }
         if (konvaStage && w) {
             konvaStage.width(w.clientWidth);
             konvaStage.height(w.clientHeight);
             konvaStage.draw();
         }
+        if (pdfDoc && pdfWorldWidth && pdfWorldHeight) {
+            fitPdfToView(false);
+            schedulePdfRerender();
+        }
     }
     window.addEventListener('resize', resize);
     setTimeout(resize, 100); 
+    window.addEventListener('message', event => {
+        if (!event.data || event.data.type !== 'takeoff-visible') return;
+        resize();
+        if (pdfDoc && !canvas.backgroundImage) {
+            renderPage(pageNum, true);
+        } else if (pdfDoc) {
+            fitPdfToView(false);
+            schedulePdfRerender();
+        }
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden) {
+            resize();
+            if (pdfDoc) schedulePdfRerender();
+        }
+    });
 
     function setKonvaActive(active) {
         if (!konvaOverlay) return;
@@ -1710,6 +1749,7 @@ if ($filePath !== '') {
             document.getElementById('zoom-disp').innerText = Math.round(zoom * 100) + '%';
             updateTextScales(zoom);
             syncKonvaToFabric();
+            schedulePdfRerender();
         }, { passive: false });
 
         // Pan desde Konva -> Fabric (ALT o botón derecho)
@@ -2112,6 +2152,7 @@ if ($filePath !== '') {
                     document.getElementById('zoom-disp').innerText = Math.round(newZoom * 100) + '%';
                     updateTextScales(newZoom);
                     if (useKonvaRuler) syncKonvaToFabric();
+                    schedulePdfRerender();
                 }
 
                 // Actualizar referencias para el siguiente frame
@@ -2161,6 +2202,10 @@ if ($filePath !== '') {
             document.getElementById('p-total').textContent = pdf.numPages;
             renderPageList(pdf.numPages);
             renderPage(pageNum);
+        }).catch(error => {
+            console.error(error);
+            showDrawingLoading(false);
+            showToast("Error loading PDF", "error");
         });
     } else if (fileExt === 'heic') {
         document.getElementById('p-total').textContent = '1'; renderPageList(1);
@@ -2193,138 +2238,156 @@ if ($filePath !== '') {
         document.getElementById('p-curr').innerText = curr;
     }
 
-    function touchOrder(order, num) {
-        const idx = order.indexOf(num);
-        if(idx >= 0) order.splice(idx, 1);
-        order.push(num);
+    function showDrawingLoading(show) {
+        if (drawingLoading) drawingLoading.classList.toggle('hidden', !show);
     }
 
-    function trimCache() {
-        while(highOrder.length > MAX_HIGH_CACHE) {
-            const evict = highOrder.shift();
-            const entry = pageCache.get(evict);
-            if(entry) { delete entry.high; if(!entry.low) pageCache.delete(evict); }
-        }
-        while(lowOrder.length > MAX_LOW_CACHE) {
-            const evict = lowOrder.shift();
-            const entry = pageCache.get(evict);
-            if(entry) { delete entry.low; if(!entry.high) pageCache.delete(evict); }
-        }
+    function getCanvasWrapper() {
+        return document.getElementById('canvas-wrapper');
     }
 
-    function setCache(num, type, url) {
-        const entry = pageCache.get(num) || {};
-        entry[type] = url; pageCache.set(num, entry);
-        if(type === 'high') touchOrder(highOrder, num); else touchOrder(lowOrder, num);
-        trimCache();
-    }
-    function getCache(num) { return pageCache.get(num); }
-
-    async function renderPageToDataUrl(num, scale) {
-        const page = await pdfDoc.getPage(num);
-        const viewport = page.getViewport({ scale });
-        const renderCanvas = document.createElement('canvas');
-        const renderCtx = renderCanvas.getContext('2d', { alpha: false, desynchronized: true });
-        renderCanvas.width = Math.max(1, Math.floor(viewport.width));
-        renderCanvas.height = Math.max(1, Math.floor(viewport.height));
-        const renderTask = page.render({ canvasContext: renderCtx, viewport });
-        await renderTask.promise;
-        const quality = scale >= pdfScale ? 0.8 : 0.62;
-        return renderCanvas.toDataURL('image/jpeg', quality);
+    function wrapperHasSize() {
+        const w = getCanvasWrapper();
+        return !!(w && w.clientWidth > 0 && w.clientHeight > 0);
     }
 
-    function applyBackground(url, num, token, loadAnnotations) {
-        fabric.Image.fromURL(url, img => {
-            if(token !== renderToken) return;
-            setBg(img);
-            if(loadAnnotations) loadPageAnnotations(num);
+    function waitForWrapperSize() {
+        return new Promise(resolve => {
+            const tick = () => {
+                if (wrapperHasSize()) {
+                    resize();
+                    resolve();
+                } else {
+                    requestAnimationFrame(tick);
+                }
+            };
+            tick();
         });
     }
 
-    async function renderHigh(num, token) {
-        const cached = getCache(num);
-        if(cached && cached.high) { applyBackground(cached.high, num, token, false); return; }
-        const url = await renderPageToDataUrl(num, pdfScale);
-        if(token !== renderToken) return;
-        setCache(num, 'high', url);
-        applyBackground(url, num, token, false);
-    }
-
-    async function renderLowThenHigh(num, token) {
-        const cached = getCache(num);
-        if(cached && cached.low) {
-            applyBackground(cached.low, num, token, true);
-            if(!cached.high) renderHigh(num, token);
-            return;
-        }
-        const url = await renderPageToDataUrl(num, LOW_RES_SCALE);
-        if(token !== renderToken) return;
-        setCache(num, 'low', url);
-        applyBackground(url, num, token, true);
-        renderHigh(num, token);
-    }
-
-    function queuePrefetch(num) {
-        if (prefetchQueue.includes(num)) return;
-        prefetchQueue.push(num);
-    }
-
-    async function flushPrefetchQueue() {
-        if (prefetchBusy || !pdfDoc || prefetchQueue.length === 0) return;
-        prefetchBusy = true;
-        try {
-            while (prefetchQueue.length) {
-                const n = prefetchQueue.shift();
-                const cached = getCache(n);
-                if (cached && (cached.low || cached.high)) continue;
-                try {
-                    const url = await renderPageToDataUrl(n, LOW_RES_SCALE);
-                    setCache(n, 'low', url);
-                } catch (_) {}
-            }
-        } finally {
-            prefetchBusy = false;
+    function fitPdfToView(force = false) {
+        if (!pdfWorldWidth || !pdfWorldHeight || !wrapperHasSize()) return;
+        const w = getCanvasWrapper();
+        const availableW = Math.max(120, w.clientWidth - PDF_PADDING * 2);
+        const availableH = Math.max(120, w.clientHeight - PDF_PADDING * 2);
+        const nextFit = Math.min(availableW / pdfWorldWidth, availableH / pdfWorldHeight);
+        if (!isFinite(nextFit) || nextFit <= 0) return;
+        pdfFitZoom = nextFit;
+        if (force || Math.abs(canvas.getZoom() - nextFit) < 0.02 || canvas.getZoom() === 1) {
+            centerPdfAtZoom(nextFit);
         }
     }
 
-    function scheduleIdlePrefetch() {
-        const runner = () => flushPrefetchQueue();
-        if (typeof window.requestIdleCallback === 'function') {
-            window.requestIdleCallback(runner, { timeout: 800 });
-        } else {
-            setTimeout(runner, 120);
-        }
+    function centerPdfAtZoom(zoom) {
+        const w = getCanvasWrapper();
+        if (!w || !pdfWorldWidth || !pdfWorldHeight) return;
+        const left = Math.max(PDF_PADDING, (w.clientWidth - pdfWorldWidth * zoom) / 2);
+        const top = Math.max(PDF_PADDING, (w.clientHeight - pdfWorldHeight * zoom) / 2);
+        canvas.setViewportTransform([zoom, 0, 0, zoom, left, top]);
+        document.getElementById('zoom-disp').innerText = Math.round(zoom * 100) + '%';
+        if (useKonvaRuler) syncKonvaToFabric();
+        updateTextScales(zoom);
+        canvas.requestRenderAll();
     }
 
-    function prefetchNeighbors(num) {
-        if(!pdfDoc) return;
-        const total = pdfDoc.numPages;
-        for (let step = 1; step <= PREFETCH_DISTANCE; step++) {
-            const left = num - step;
-            const right = num + step;
-            if (left >= 1) queuePrefetch(left);
-            if (right <= total) queuePrefetch(right);
-        }
-        scheduleIdlePrefetch();
+    async function renderPageToBitmap(num, zoom) {
+        const page = await pdfDoc.getPage(num);
+        const baseViewport = page.getViewport({ scale: 1 });
+        pdfWorldWidth = baseViewport.width;
+        pdfWorldHeight = baseViewport.height;
+
+        const outputScale = dpr;
+        const viewportScale = Math.min(MAX_PDF_RENDER_SCALE, Math.max(1, zoom));
+        const viewport = page.getViewport({ scale: viewportScale });
+        const renderCanvas = document.createElement('canvas');
+        const renderCtx = renderCanvas.getContext('2d', { alpha: false });
+
+        renderCanvas.width = Math.max(1, Math.floor(viewport.width * outputScale));
+        renderCanvas.height = Math.max(1, Math.floor(viewport.height * outputScale));
+        renderCanvas.style.width = viewport.width + 'px';
+        renderCanvas.style.height = viewport.height + 'px';
+        renderCtx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+        renderCtx.fillStyle = '#ffffff';
+        renderCtx.fillRect(0, 0, viewport.width, viewport.height);
+        await page.render({ canvasContext: renderCtx, viewport }).promise;
+
+        return new Promise(resolve => {
+            renderCanvas.toBlob(blob => {
+                if (!blob) {
+                    resolve(null);
+                    return;
+                }
+                resolve({
+                    url: URL.createObjectURL(blob),
+                    bitmapWidth: renderCanvas.width,
+                    bitmapHeight: renderCanvas.height,
+                    worldWidth: baseViewport.width,
+                    worldHeight: baseViewport.height
+                });
+            }, 'image/png');
+        });
     }
 
-    async function renderPage(num) {
+    function applyPdfBackground(bitmap, token, loadAnnotations) {
+        fabric.Image.fromURL(bitmap.url, img => {
+            URL.revokeObjectURL(bitmap.url);
+            if (token !== renderToken) return;
+            setBg(img, bitmap.worldWidth, bitmap.worldHeight);
+            currentPdfRenderZoom = canvas.getZoom();
+            showDrawingLoading(false);
+            if (loadAnnotations) loadPageAnnotations(pageNum);
+        });
+    }
+
+    async function renderPage(num, loadAnnotations = true) {
         updatePageListUI(num);
         if(!pdfDoc) return;
-        renderToken++;
-        const token = renderToken;
-        const cached = getCache(num);
-        if(cached && (cached.high || cached.low)) {
-            const url = cached.high || cached.low;
-            applyBackground(url, num, token, true);
-            if(!cached.high) renderHigh(num, token);
-        } else { renderLowThenHigh(num, token); }
-        prefetchNeighbors(num);
+        showDrawingLoading(true);
+        try {
+            await waitForWrapperSize();
+            renderToken++;
+            const token = renderToken;
+            const page = await pdfDoc.getPage(num);
+            const baseViewport = page.getViewport({ scale: 1 });
+            pdfWorldWidth = baseViewport.width;
+            pdfWorldHeight = baseViewport.height;
+            fitPdfToView(loadAnnotations);
+            const bitmap = await renderPageToBitmap(num, canvas.getZoom());
+            if (!bitmap) throw new Error('PDF bitmap generation failed');
+            if(token !== renderToken) return;
+            applyPdfBackground(bitmap, token, loadAnnotations);
+        } catch (error) {
+            console.error(error);
+            showDrawingLoading(false);
+            showToast("Error rendering PDF page", "error");
+        }
     }
 
-    function setBg(img) {
-        img.excludeFromHistory = true; 
-        canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas), { originX: 'left', originY: 'top' });
+    function schedulePdfRerender() {
+        if (!pdfDoc) return;
+        clearTimeout(pdfRerenderTimer);
+        pdfRerenderTimer = setTimeout(() => {
+            const z = canvas.getZoom();
+            if (Math.abs(z - currentPdfRenderZoom) > 0.12) {
+                renderPage(pageNum, false);
+            }
+        }, 180);
+    }
+
+    function setBg(img, worldWidth = img.width, worldHeight = img.height) {
+        img.excludeFromHistory = true;
+        img.set({
+            originX: 'left',
+            originY: 'top',
+            left: 0,
+            top: 0,
+            scaleX: worldWidth / img.width,
+            scaleY: worldHeight / img.height,
+            selectable: false,
+            evented: false
+        });
+        canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
+        showDrawingLoading(false);
     }
 
     function jumpToPage(targetPage) {
@@ -3234,6 +3297,7 @@ if ($filePath !== '') {
         document.getElementById('zoom-disp').innerText = Math.round(zoom * 100) + '%';
         if (useKonvaRuler) syncKonvaToFabric();
         updateTextScales(zoom);
+        schedulePdfRerender();
         opt.e.preventDefault(); opt.e.stopPropagation();
     });
 
