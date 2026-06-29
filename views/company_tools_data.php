@@ -65,3 +65,31 @@ if (!function_exists('company_tools_existing_categories')) {
         return $categories;
     }
 }
+
+if (!function_exists('company_tool_find')) {
+    function company_tool_find(string $label): ?array
+    {
+        foreach (company_tools_existing_categories() as $category) {
+            foreach ($category['links'] as $link) {
+                if (strcasecmp($link['label'] ?? '', $label) === 0) {
+                    return $link;
+                }
+            }
+        }
+        return null;
+    }
+}
+
+if (!function_exists('company_tools_favorites')) {
+    function company_tools_favorites(): array
+    {
+        $favorites = [];
+        foreach (['Bid Board', 'Cost Catalog', 'Dashboard'] as $label) {
+            $link = company_tool_find($label);
+            if ($link) {
+                $favorites[] = $link;
+            }
+        }
+        return $favorites;
+    }
+}
