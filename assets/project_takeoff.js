@@ -234,7 +234,20 @@
         activeLayerId: null,
         editingLayerId: null,
         pendingLayerGroupId: 'default',
+        pendingCatalogItem: null,
         query: ''
+    };
+
+    const catalogState = {
+        loaded: false,
+        loading: false,
+        error: '',
+        catalogs: [],
+        groups: [],
+        items: [],
+        query: '',
+        category: '',
+        uom: ''
     };
 
     function takeoffStoreKey() {
@@ -245,6 +258,29 @@
         if (type === 'Linear') return 'ft';
         if (type === 'Area') return 'sq ft';
         return 'ea';
+    }
+
+    function inferTakeoffTypeFromUom(uom) {
+        const value = String(uom || '').trim().toLowerCase();
+        if (['ea', 'each', 'unit', 'units', 'pcs', 'piece', 'pieces'].includes(value)) return 'Count';
+        if (['ft', 'lf', 'linear ft', 'linear feet', 'feet', 'foot', 'm', 'lm'].includes(value)) return 'Linear';
+        if (['sq ft', 'sf', 'sqft', 'ft2', 'm2', 'sqm', 'sq m'].includes(value)) return 'Area';
+        return '';
+    }
+
+    function setSelectValue(select, value) {
+        if (!select || !value) return;
+        const normalized = String(value).trim();
+        const match = Array.from(select.options).find(option => option.value.toLowerCase() === normalized.toLowerCase());
+        if (match) {
+            select.value = match.value;
+            return;
+        }
+        const option = document.createElement('option');
+        option.value = normalized;
+        option.textContent = normalized;
+        select.appendChild(option);
+        select.value = normalized;
     }
 
     function normalizeTakeoffType(value) {
@@ -292,7 +328,15 @@
                 symbol: layer.symbol || 'Solid Circle',
                 size: layer.symbol_size || 'Medium',
                 color: layer.color || '#111827',
-                quantity: Number(layer.quantity || layer.count || layer.measurement_count || 0)
+                quantity: Number(layer.quantity || layer.count || layer.measurement_count || 0),
+                catalogItemId: layer.catalog_item_id || layer.catalogItemId || null,
+                catalog_item_id: layer.catalog_item_id || layer.catalogItemId || null,
+                unitCost: Number(layer.unit_cost || layer.unitCost || 0),
+                unit_cost: Number(layer.unit_cost || layer.unitCost || 0),
+                laborHours: Number(layer.labor_hours || layer.laborHours || 0),
+                labor_hours: Number(layer.labor_hours || layer.laborHours || 0),
+                category: layer.category || layer.catalog_name || layer.group_name || '',
+                description: layer.description || ''
             });
         });
         return groups;
@@ -324,7 +368,15 @@
                 symbol: layer.symbol || 'Solid Circle',
                 size: layer.size || 'Medium',
                 color: layer.color || '#111827',
-                quantity: Number(layer.quantity || 0)
+                quantity: Number(layer.quantity || 0),
+                catalogItemId: layer.catalogItemId || layer.catalog_item_id || null,
+                catalog_item_id: layer.catalog_item_id || layer.catalogItemId || null,
+                unitCost: Number(layer.unitCost || layer.unit_cost || 0),
+                unit_cost: Number(layer.unit_cost || layer.unitCost || 0),
+                laborHours: Number(layer.laborHours || layer.labor_hours || 0),
+                labor_hours: Number(layer.labor_hours || layer.laborHours || 0),
+                category: layer.category || '',
+                description: layer.description || ''
             }))
         }));
     }
@@ -402,7 +454,7 @@
                     ${visibleLayers.map(layer => `<div class="pro-tree-row pro-tree-item ${takeoffState.activeLayerId === layer.id ? 'active' : ''}" data-layer-row="${esc(layer.id)}">
                         <input type="checkbox" checked aria-label="Layer visibility">
                         <span class="pro-layer-symbol" style="color:${esc(layer.color)}">${symbolGlyph(layer)}</span>
-                        <span class="pro-tree-name">${esc(layer.name)}</span>
+                        <span class="pro-tree-name">${esc(layer.name)}${layer.catalogItemId ? '<small class="pro-catalog-linked">Linked to catalog</small>' : ''}</span>
                         <span class="pro-tree-qty">${esc(quantityLabel(layer))}</span>
                         <button class="pro-row-menu-btn" type="button" data-layer-menu="${esc(layer.id)}"><i class="fas fa-ellipsis-vertical"></i></button>
                     </div>`).join('')}
@@ -479,6 +531,7 @@
                         <input id="layerNameInput" type="text" placeholder="Enter item name">
                         <button class="pro-create-layer-btn" type="button" data-takeoff-action="browse-catalog">Browse Catalog</button>
                     </div>
+                    <div class="pro-catalog-selected" id="layerCatalogSelected" hidden></div>
                 </div>
                 <div class="pro-field pro-field-wide">
                     <label for="layerTypeInput">Takeoff Type</label>
@@ -506,6 +559,10 @@
         document.body.appendChild(modal);
         modal.querySelectorAll('[data-layer-modal-close]').forEach(btn => btn.addEventListener('click', closeLayerModal));
         $('layerNameInput').addEventListener('input', updateLayerSubmitState);
+        modal.querySelector('[data-takeoff-action="browse-catalog"]')?.addEventListener('click', event => {
+            event.stopPropagation();
+            openCatalogModal();
+        });
         $('layerTypeInput').addEventListener('change', () => {
             const type = $('layerTypeInput').value;
             $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[type];
@@ -514,6 +571,7 @@
         });
         $('layerColorInput').addEventListener('change', updateLayerColorSwatch);
         $('layerCreateSubmit').addEventListener('click', submitLayerModal);
+        ensureCatalogModal();
     }
 
     function openLayerModal(groupId = takeoffState.activeGroupId, layerId = null) {
@@ -521,15 +579,26 @@
         const layer = layerId ? findLayer(layerId) : null;
         takeoffState.pendingLayerGroupId = groupId || layer?.groupId || takeoffState.activeGroupId || 'default';
         takeoffState.editingLayerId = layerId;
+        takeoffState.pendingCatalogItem = layer?.catalogItemId ? {
+            id: layer.catalogItemId,
+            name: layer.name,
+            unit_of_measure: layer.uom,
+            unit_cost: layer.unitCost,
+            labor_hours: layer.laborHours,
+            catalog_name: layer.category,
+            group_name: layer.category,
+            description: layer.description
+        } : null;
         $('takeoffLayerModalTitle').textContent = layer ? 'Edit takeoff layer' : 'Create new takeoff layer';
         $('layerNameInput').value = layer?.name || '';
         $('layerTypeInput').value = layer?.type || 'Count';
         $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[$('layerTypeInput').value];
-        $('layerUomInput').value = layer?.uom || typeToUom($('layerTypeInput').value);
+        setSelectValue($('layerUomInput'), layer?.uom || typeToUom($('layerTypeInput').value));
         $('layerSymbolInput').value = layer?.symbol || 'Solid Circle';
         $('layerSizeInput').value = layer?.size || 'Medium';
         $('layerColorInput').value = layer?.color || '#111827';
         $('layerCreateSubmit').textContent = layer ? 'Save' : 'Create';
+        updateCatalogSelectionIndicator();
         updateLayerColorSwatch();
         updateLayerSubmitState();
         $('takeoffLayerModal').hidden = false;
@@ -540,6 +609,7 @@
         const modal = $('takeoffLayerModal');
         if (modal) modal.hidden = true;
         takeoffState.editingLayerId = null;
+        takeoffState.pendingCatalogItem = null;
     }
 
     function updateLayerColorSwatch() {
@@ -550,6 +620,57 @@
     function updateLayerSubmitState() {
         const submit = $('layerCreateSubmit');
         if (submit) submit.disabled = !$('layerNameInput')?.value.trim();
+    }
+
+    function updateCatalogSelectionIndicator() {
+        const box = $('layerCatalogSelected');
+        if (!box) return;
+        const item = takeoffState.pendingCatalogItem;
+        box.hidden = !item;
+        if (!item) {
+            box.innerHTML = '';
+            return;
+        }
+        box.innerHTML = `<i class="fas fa-link"></i>
+            <span>Linked to catalog: <strong>${esc(item.name || 'Catalog item')}</strong></span>`;
+    }
+
+    function catalogItemMeta(item) {
+        return {
+            catalogItemId: item?.id || null,
+            catalog_item_id: item?.id || null,
+            unitCost: Number(item?.unit_cost || 0),
+            unit_cost: Number(item?.unit_cost || 0),
+            laborHours: Number(item?.labor_hours || 0),
+            labor_hours: Number(item?.labor_hours || 0),
+            category: item?.group_name || item?.catalog_name || '',
+            description: item?.description || '',
+            catalogName: item?.catalog_name || '',
+            catalogGroupName: item?.group_name || '',
+            catalogNumber: item?.catalog_number || item?.sku || item?.cost_code || '',
+            itemType: item?.item_type || ''
+        };
+    }
+
+    function applyCatalogItemToLayerForm(item) {
+        if (!item) return;
+        takeoffState.pendingCatalogItem = item;
+        $('layerNameInput').value = item.name || '';
+        setSelectValue($('layerUomInput'), item.unit_of_measure || 'ea');
+        const inferred = inferTakeoffTypeFromUom(item.unit_of_measure);
+        if (inferred) {
+            $('layerTypeInput').value = inferred;
+            $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[inferred];
+        }
+        if (item.symbol && TAKEOFF_SYMBOLS.includes(item.symbol)) $('layerSymbolInput').value = item.symbol;
+        if (item.color && TAKEOFF_COLORS.some(color => color.value.toLowerCase() === String(item.color).toLowerCase())) {
+            $('layerColorInput').value = item.color;
+            updateLayerColorSwatch();
+        }
+        updateCatalogSelectionIndicator();
+        updateLayerSubmitState();
+        closeCatalogModal();
+        setTimeout(() => $('layerCreateSubmit')?.focus(), 40);
     }
 
     function submitLayerModal() {
@@ -564,6 +685,7 @@
             size: $('layerSizeInput').value || 'Medium',
             color: $('layerColorInput').value || '#111827'
         };
+        if (takeoffState.pendingCatalogItem) Object.assign(payload, catalogItemMeta(takeoffState.pendingCatalogItem));
         if (takeoffState.editingLayerId) {
             const layer = findLayer(takeoffState.editingLayerId);
             if (layer) Object.assign(layer, payload);
@@ -584,6 +706,212 @@
         closeLayerModal();
         saveTakeoffState();
         renderTakeoffPanel();
+    }
+
+    function ensureCatalogModal() {
+        if ($('takeoffCatalogModal')) return;
+        const modal = document.createElement('div');
+        modal.id = 'takeoffCatalogModal';
+        modal.className = 'pro-modal-backdrop pro-catalog-backdrop';
+        modal.hidden = true;
+        modal.innerHTML = `<div class="pro-catalog-modal" role="dialog" aria-modal="true" aria-labelledby="takeoffCatalogModalTitle">
+            <div class="pro-layer-modal-head">
+                <h3 id="takeoffCatalogModalTitle">Browse Catalog</h3>
+                <button class="pro-icon-btn" type="button" data-catalog-close aria-label="Close"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="pro-catalog-toolbar">
+                <div class="pro-field">
+                    <label for="takeoffCatalogSearch">Search catalog items</label>
+                    <input id="takeoffCatalogSearch" type="search" placeholder="Search catalog items...">
+                </div>
+                <div class="pro-field">
+                    <label for="takeoffCatalogCategory">Category</label>
+                    <select id="takeoffCatalogCategory"><option value="">All categories</option></select>
+                </div>
+                <div class="pro-field">
+                    <label for="takeoffCatalogUom">UoM</label>
+                    <select id="takeoffCatalogUom"><option value="">All UoM</option></select>
+                </div>
+                <a class="pro-toolbar-btn" href="/pages/cost_catalog.php" target="_blank" rel="noopener">
+                    <i class="fas fa-arrow-up-right-from-square"></i> Open Cost Catalog
+                </a>
+            </div>
+            <div class="pro-catalog-status" id="takeoffCatalogStatus" hidden></div>
+            <div class="pro-catalog-table-wrap">
+                <table class="pro-catalog-table">
+                    <thead>
+                        <tr>
+                            <th>Item Name</th>
+                            <th>Category</th>
+                            <th>UoM</th>
+                            <th>Unit Cost</th>
+                            <th>Labor Hours</th>
+                            <th>Description</th>
+                            <th></th>
+                        </tr>
+                    </thead>
+                    <tbody id="takeoffCatalogRows"></tbody>
+                </table>
+            </div>
+        </div>`;
+        document.body.appendChild(modal);
+        modal.querySelectorAll('[data-catalog-close]').forEach(btn => btn.addEventListener('click', closeCatalogModal));
+        modal.addEventListener('click', event => {
+            if (event.target.id === 'takeoffCatalogModal') closeCatalogModal();
+        });
+        $('takeoffCatalogSearch')?.addEventListener('input', event => {
+            clearTimeout(event.target._catalogTimer);
+            event.target._catalogTimer = setTimeout(() => {
+                catalogState.query = event.target.value.trim().toLowerCase();
+                renderCatalogBrowser();
+            }, 120);
+        });
+        $('takeoffCatalogCategory')?.addEventListener('change', event => {
+            catalogState.category = event.target.value;
+            renderCatalogBrowser();
+        });
+        $('takeoffCatalogUom')?.addEventListener('change', event => {
+            catalogState.uom = event.target.value;
+            renderCatalogBrowser();
+        });
+    }
+
+    function openCatalogModal() {
+        ensureTakeoffModal();
+        ensureCatalogModal();
+        $('takeoffCatalogModal').hidden = false;
+        renderCatalogBrowser();
+        loadCatalogItems();
+        setTimeout(() => $('takeoffCatalogSearch')?.focus(), 40);
+    }
+
+    function closeCatalogModal() {
+        const modal = $('takeoffCatalogModal');
+        if (modal) modal.hidden = true;
+    }
+
+    async function loadCatalogItems() {
+        if (catalogState.loaded || catalogState.loading) return;
+        catalogState.loading = true;
+        catalogState.error = '';
+        renderCatalogBrowser();
+        try {
+            const response = await fetch('../api/cost_catalog.php?action=list&view=all', { headers: { Accept: 'application/json' } });
+            const json = await response.json();
+            if (!response.ok || json.status !== 'success') throw new Error(json.msg || 'Unable to load Cost Catalog');
+            catalogState.catalogs = json.data?.catalogs || [];
+            catalogState.groups = json.data?.groups || [];
+            catalogState.items = json.data?.allItems || json.data?.items || [];
+            catalogState.loaded = true;
+            populateCatalogFilters();
+        } catch (e) {
+            console.warn('Cost Catalog load failed', e);
+            catalogState.error = e.message || 'Unable to load Cost Catalog';
+        } finally {
+            catalogState.loading = false;
+            renderCatalogBrowser();
+        }
+    }
+
+    function populateCatalogFilters() {
+        const categorySelect = $('takeoffCatalogCategory');
+        const uomSelect = $('takeoffCatalogUom');
+        if (categorySelect) {
+            const categories = Array.from(new Set(catalogState.items.map(item => item.group_name || item.catalog_name || '').filter(Boolean))).sort();
+            categorySelect.innerHTML = '<option value="">All categories</option>' + categories.map(category => `<option value="${esc(category)}">${esc(category)}</option>`).join('');
+            categorySelect.value = catalogState.category;
+        }
+        if (uomSelect) {
+            const uoms = Array.from(new Set(catalogState.items.map(item => item.unit_of_measure || '').filter(Boolean))).sort();
+            uomSelect.innerHTML = '<option value="">All UoM</option>' + uoms.map(uom => `<option value="${esc(uom)}">${esc(uom)}</option>`).join('');
+            uomSelect.value = catalogState.uom;
+        }
+    }
+
+    function catalogSearchMatch(item) {
+        const category = item.group_name || item.catalog_name || '';
+        if (catalogState.category && category !== catalogState.category) return false;
+        if (catalogState.uom && String(item.unit_of_measure || '') !== catalogState.uom) return false;
+        const q = catalogState.query;
+        if (!q) return true;
+        return [
+            item.name,
+            item.description,
+            item.catalog_name,
+            item.group_name,
+            item.sku,
+            item.catalog_number,
+            item.cost_code,
+            item.unit_of_measure,
+            item.item_type,
+            item.manufacturer,
+            item.supplier
+        ].join(' ').toLowerCase().includes(q);
+    }
+
+    function money(value) {
+        const number = Number(value || 0);
+        return number ? `$${number.toFixed(2)}` : '-';
+    }
+
+    function renderCatalogBrowser() {
+        const rows = $('takeoffCatalogRows');
+        const status = $('takeoffCatalogStatus');
+        if (!rows || !status) return;
+        if (catalogState.loading) {
+            status.hidden = false;
+            status.textContent = 'Loading Cost Catalog...';
+            rows.innerHTML = '';
+            return;
+        }
+        if (catalogState.error) {
+            status.hidden = false;
+            status.innerHTML = `${esc(catalogState.error)} <button class="pro-toolbar-btn" type="button" data-catalog-retry>Retry</button>`;
+            status.querySelector('[data-catalog-retry]')?.addEventListener('click', () => {
+                catalogState.loaded = false;
+                loadCatalogItems();
+            });
+            rows.innerHTML = '';
+            return;
+        }
+        status.hidden = true;
+        const items = catalogState.items.filter(catalogSearchMatch);
+        if (!catalogState.loaded) {
+            rows.innerHTML = '';
+            return;
+        }
+        if (!items.length) {
+            rows.innerHTML = `<tr><td colspan="7">
+                <div class="pro-catalog-empty">
+                    <strong>No catalog items found</strong>
+                    <span>Add items in Cost Catalog before selecting them for takeoff layers.</span>
+                    <a class="pro-toolbar-btn" href="/pages/cost_catalog.php" target="_blank" rel="noopener">Open Cost Catalog</a>
+                </div>
+            </td></tr>`;
+            return;
+        }
+        rows.innerHTML = items.slice(0, 250).map(item => {
+            const category = item.group_name || item.catalog_name || '-';
+            return `<tr data-catalog-item="${esc(item.id)}">
+                <td>
+                    <strong>${esc(item.name)}</strong>
+                    <small>${esc(item.catalog_number || item.sku || item.cost_code || '')}</small>
+                </td>
+                <td>${esc(category)}</td>
+                <td>${esc(item.unit_of_measure || 'ea')}</td>
+                <td>${money(item.unit_cost)}</td>
+                <td>${Number(item.labor_hours || 0).toFixed(4)}</td>
+                <td>${esc(item.description || item.item_type || '-')}</td>
+                <td><button class="pro-create-layer-btn" type="button" data-catalog-select="${esc(item.id)}">Select</button></td>
+            </tr>`;
+        }).join('');
+        rows.querySelectorAll('[data-catalog-item]').forEach(row => {
+            row.addEventListener('click', event => {
+                const id = event.target.closest('[data-catalog-select]')?.dataset.catalogSelect || row.dataset.catalogItem;
+                const item = catalogState.items.find(candidate => String(candidate.id) === String(id));
+                if (item) applyCatalogItemToLayerForm(item);
+            });
+        });
     }
 
     function createTakeoffGroup() {
@@ -717,7 +1045,12 @@
             symbol: layer.symbol,
             symbol_size: layer.size,
             color: layer.color,
-            quantity: layer.quantity
+            quantity: layer.quantity,
+            catalog_item_id: layer.catalogItemId || null,
+            unit_cost: layer.unitCost || 0,
+            labor_hours: layer.laborHours || 0,
+            category: layer.category || '',
+            description: layer.description || ''
         };
         if (layer.type === 'Linear') callEditor('setMode', 'measure');
         if (layer.type === 'Area') callEditor('setMode', 'draw');
@@ -768,7 +1101,7 @@
         if (action === 'create-layer') return openLayerModal(takeoffState.activeGroupId);
         if (action === 'collapse-all') return collapseAllTakeoffGroups();
         if (action === 'export-excel') return showPrepared('Excel export is ready to be connected.');
-        if (action === 'browse-catalog') return showPrepared('Catalog browser is ready to be connected.');
+        if (action === 'browse-catalog') return openCatalogModal();
         showPrepared(action);
     }
 
