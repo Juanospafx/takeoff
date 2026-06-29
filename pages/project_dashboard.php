@@ -477,6 +477,7 @@ $state = [
         }
     </style>
     <link rel="stylesheet" href="../assets/project_overview.css">
+    <link rel="stylesheet" href="../assets/project_takeoff.css">
 </head>
 <body>
 <div class="workspace-shell">
@@ -744,19 +745,150 @@ $state = [
         </section>
 
         <section id="tab-takeoff" class="tab-panel fullscreen">
-            <div class="takeoff-workspace" id="takeoffWorkspace">
-                <?php if ($selectedDoc && $selectedDoc['source'] === 'legacy_file'): ?>
-                    <iframe id="takeoffFrame" class="takeoff-frame" src="editor.php?id=<?= (int)$selectedDoc['id'] ?>&embedded=1"></iframe>
-                <?php else: ?>
-                    <div id="takeoffEmpty" class="takeoff-empty">
+            <div class="takeoff-workspace pro-takeoff-workspace" id="takeoffWorkspace">
+                <aside class="pro-takeoff-items" id="takeoffItemsPanel">
+                    <div class="pro-takeoff-panel-head">
                         <div>
-                            <i class="fas fa-file-pdf fa-3x mb-3"></i>
-                            <h3>Select a drawing from Documents to start takeoff.</h3>
-                            <button class="btn-main mt-2" data-action-tab="documents">Open Documents</button>
+                            <h2>Takeoff Items (<?= count($takeoffLayers) ?>)</h2>
+                        </div>
+                        <button class="pro-icon-btn" type="button" id="toggleTakeoffItemsPanel" title="Collapse panel" aria-label="Collapse items panel">
+                            <i class="fas fa-angles-left"></i>
+                        </button>
+                    </div>
+                    <div class="pro-takeoff-searchbar">
+                        <div class="pro-search-input">
+                            <input id="takeoffItemSearch" type="search" placeholder="Search items...">
+                            <i class="fas fa-magnifying-glass"></i>
+                        </div>
+                        <div class="pro-menu-wrap">
+                            <button class="pro-icon-btn" type="button" data-takeoff-menu-toggle="takeoffItemsActions" aria-label="Items actions">
+                                <i class="fas fa-ellipsis-vertical"></i>
+                            </button>
+                            <div class="pro-menu" id="takeoffItemsActions">
+                                <button type="button" data-takeoff-action="new-folder"><i class="fas fa-folder-plus"></i> New Folder</button>
+                                <button type="button" data-takeoff-action="new-item"><i class="fas fa-plus"></i> New Item</button>
+                                <button type="button" data-takeoff-action="new-assembly"><i class="fas fa-layer-group"></i> New Assembly</button>
+                                <button type="button" data-takeoff-action="expand-all"><i class="fas fa-up-right-and-down-left-from-center"></i> Expand All</button>
+                                <button type="button" data-takeoff-action="collapse-all"><i class="fas fa-down-left-and-up-right-to-center"></i> Collapse All</button>
+                            </div>
                         </div>
                     </div>
-                    <iframe id="takeoffFrame" class="takeoff-frame" style="display:none;"></iframe>
-                <?php endif; ?>
+                    <div class="pro-takeoff-tree" id="takeoffItemsTree">
+                        <?php if (empty($takeoffLayers)): ?>
+                            <div class="pro-items-empty">
+                                <strong>No takeoff items yet</strong>
+                                <span>Create items from the takeoff tools or connect estimate items later.</span>
+                                <button type="button" class="btn-main mt-2" data-takeoff-action="new-item"><i class="fas fa-plus"></i> Add item</button>
+                            </div>
+                        <?php else: ?>
+                            <div class="pro-tree-row pro-tree-folder open" data-tree-row>
+                                <button class="pro-tree-toggle" type="button" data-tree-toggle><i class="fas fa-chevron-down"></i></button>
+                                <input type="checkbox" checked>
+                                <span class="pro-tree-name"><i class="fas fa-folder-open"></i> Project Takeoff</span>
+                                <span class="pro-color-dot" style="background:#1f6fb2"></span>
+                                <span class="pro-tree-qty"><?= count($takeoffLayers) ?></span>
+                                <button class="pro-row-menu-btn" type="button" data-row-menu><i class="fas fa-ellipsis-vertical"></i></button>
+                            </div>
+                            <div class="pro-tree-children">
+                                <?php foreach ($takeoffLayers as $index => $layer): ?>
+                                    <?php
+                                        $layerName = $layer['name'] ?? $layer['title'] ?? ('Takeoff Item ' . ($index + 1));
+                                        $layerColor = $layer['color'] ?? $layer['stroke_color'] ?? '#f97316';
+                                        $layerQty = $layer['quantity'] ?? $layer['count'] ?? $layer['measurement_count'] ?? 0;
+                                    ?>
+                                    <div class="pro-tree-row pro-tree-item" data-tree-row data-search-text="<?= htmlspecialchars(strtolower((string)$layerName)) ?>">
+                                        <button class="pro-tree-toggle muted" type="button" aria-hidden="true"><i class="fas fa-minus"></i></button>
+                                        <input type="checkbox" checked>
+                                        <span class="pro-tree-name"><?= htmlspecialchars((string)$layerName) ?></span>
+                                        <span class="pro-color-dot" style="background:<?= htmlspecialchars((string)$layerColor) ?>"></span>
+                                        <span class="pro-tree-qty"><?= htmlspecialchars((string)$layerQty) ?></span>
+                                        <button class="pro-row-menu-btn" type="button" data-row-menu><i class="fas fa-ellipsis-vertical"></i></button>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
+                    </div>
+                    <div class="pro-takeoff-footer">
+                        <div>
+                            <span>Estimate Total</span>
+                            <strong><?= money_fmt($estimateTotal) ?></strong>
+                            <small><i class="fas fa-circle-check"></i> Synced</small>
+                        </div>
+                        <button class="pro-add-btn" type="button" data-takeoff-action="new-item" aria-label="Add takeoff item"><i class="fas fa-plus"></i></button>
+                    </div>
+                </aside>
+
+                <section class="pro-takeoff-viewer">
+                    <div class="pro-viewer-toolbar">
+                        <div class="pro-toolbar-group">
+                            <button class="pro-icon-btn" type="button" data-viewer-command="previous" title="Previous sheet"><i class="fas fa-chevron-left"></i></button>
+                            <button class="pro-icon-btn" type="button" data-viewer-command="next" title="Next sheet"><i class="fas fa-chevron-right"></i></button>
+                            <select class="pro-sheet-select" id="takeoffSheetSelect" aria-label="Active sheet">
+                                <?php if ($selectedDoc): ?>
+                                    <option><?= htmlspecialchars($selectedDoc['filename'] ?? 'Active Drawing') ?></option>
+                                <?php else: ?>
+                                    <option>No drawing selected</option>
+                                <?php endif; ?>
+                            </select>
+                        </div>
+                        <div class="pro-toolbar-group center">
+                            <button type="button" class="pro-toolbar-btn" data-viewer-command="compare"><i class="fas fa-code-compare"></i> Compare</button>
+                            <button type="button" class="pro-toolbar-btn" data-viewer-command="popout"><i class="fas fa-up-right-from-square"></i> Pop out</button>
+                            <button type="button" class="pro-toolbar-btn" data-viewer-command="download"><i class="fas fa-download"></i> Download</button>
+                        </div>
+                        <div class="pro-scale-status" id="takeoffScaleStatus"><i class="fas fa-triangle-exclamation"></i> Scale not set</div>
+                    </div>
+
+                    <div class="pro-canvas-shell">
+                        <?php if ($selectedDoc && $selectedDoc['source'] === 'legacy_file'): ?>
+                            <iframe id="takeoffFrame" class="takeoff-frame pro-takeoff-frame" src="editor.php?id=<?= (int)$selectedDoc['id'] ?>&embedded=1"></iframe>
+                        <?php else: ?>
+                            <div id="takeoffEmpty" class="takeoff-empty pro-takeoff-empty">
+                                <div>
+                                    <i class="fas fa-file-pdf fa-3x mb-3"></i>
+                                    <h3>No drawing selected</h3>
+                                    <p>Upload drawings in Documents to start takeoff.</p>
+                                    <button class="btn-main mt-2" data-action-tab="documents"><i class="fas fa-upload"></i> Upload Drawings</button>
+                                </div>
+                            </div>
+                            <iframe id="takeoffFrame" class="takeoff-frame pro-takeoff-frame" style="display:none;"></iframe>
+                        <?php endif; ?>
+
+                        <div class="pro-floating-controls">
+                            <button class="pro-icon-btn" type="button" data-viewer-command="zoom-out" title="Zoom out"><i class="fas fa-minus"></i></button>
+                            <input id="takeoffZoomSlider" type="range" min="25" max="400" value="100" aria-label="Zoom">
+                            <span id="takeoffZoomPercent">100%</span>
+                            <button class="pro-icon-btn" type="button" data-viewer-command="zoom-in" title="Zoom in"><i class="fas fa-plus"></i></button>
+                            <button class="pro-chip-btn" type="button" data-viewer-command="fit">Fit</button>
+                            <button class="pro-chip-btn" type="button" data-viewer-command="grid">Grid</button>
+                            <button class="pro-chip-btn" type="button" data-viewer-command="layers">Layers</button>
+                            <button class="pro-icon-btn" type="button" data-viewer-command="fullscreen" title="Fullscreen"><i class="fas fa-expand"></i></button>
+                        </div>
+                    </div>
+
+                    <div class="pro-row-menu" id="takeoffRowMenu">
+                        <button type="button"><i class="fas fa-pen"></i> Rename</button>
+                        <button type="button"><i class="fas fa-copy"></i> Duplicate</button>
+                        <button type="button"><i class="fas fa-sliders"></i> Edit Properties</button>
+                        <button type="button"><i class="fas fa-palette"></i> Change Color</button>
+                        <button type="button" class="danger"><i class="fas fa-trash"></i> Delete</button>
+                    </div>
+                </section>
+
+                <aside class="pro-tools-bar" aria-label="Takeoff tools">
+                    <button class="pro-tool-btn active" type="button" data-tool-command="smart" title="Pointer"><i class="fas fa-mouse-pointer"></i></button>
+                    <button class="pro-tool-btn" type="button" data-tool-command="pan" title="Pan"><i class="fas fa-hand"></i></button>
+                    <div class="pro-tool-separator"></div>
+                    <button class="pro-tool-btn" type="button" data-tool-command="area" title="Area"><i class="fas fa-draw-polygon"></i></button>
+                    <button class="pro-tool-btn" type="button" data-tool-command="measure" title="Line"><i class="fas fa-ruler-horizontal"></i></button>
+                    <button class="pro-tool-btn" type="button" data-tool-command="stamp" title="Pin"><i class="fas fa-location-dot"></i></button>
+                    <button class="pro-tool-btn" type="button" data-tool-command="cloud" title="Shape"><i class="fas fa-vector-square"></i></button>
+                    <button class="pro-tool-btn" type="button" data-tool-command="text" title="Text"><i class="fas fa-font"></i></button>
+                    <div class="pro-tool-separator"></div>
+                    <button class="pro-tool-btn" type="button" data-tool-command="undo" title="Undo"><i class="fas fa-rotate-left"></i></button>
+                    <button class="pro-tool-btn" type="button" data-tool-command="redo" title="Redo"><i class="fas fa-rotate-right"></i></button>
+                    <button class="pro-tool-btn danger" type="button" data-tool-command="delete" title="Delete"><i class="fas fa-trash"></i></button>
+                </aside>
             </div>
         </section>
 
@@ -1011,5 +1143,6 @@ $state = [
     setActiveTab(ProjectState.activeTab || 'overview', false);
 </script>
 <script src="../assets/project_overview.js"></script>
+<script src="../assets/project_takeoff.js"></script>
 </body>
 </html>

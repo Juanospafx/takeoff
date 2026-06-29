@@ -82,6 +82,23 @@ if ($filePath !== '') {
         }
 
         body { overflow: hidden; background: var(--bg-dark); }
+        body.embedded-editor .app-container {
+            grid-template-columns: 1fr;
+            grid-template-rows: 1fr;
+            grid-template-areas: "canvas";
+        }
+        body.embedded-editor .app-header,
+        body.embedded-editor .sidebar-right,
+        body.embedded-editor .project-flow-nav,
+        body.embedded-editor .floating-controls,
+        body.embedded-editor .takeoff-panel,
+        body.embedded-editor .takeoff-props {
+            display: none !important;
+        }
+        body.embedded-editor .canvas-area {
+            grid-area: canvas;
+            background: #dfe4ea;
+        }
 
         /* --- LAYOUT GRID (Desktop Default) --- */
         .app-container {
