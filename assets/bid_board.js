@@ -1,35 +1,27 @@
 (function () {
-    const apiUrl = '../api/bid_board.php';
+    const projectApiUrl = '../api/project_module.php';
     const pipelineStatuses = ['Draft', 'Invited', 'Bidding', 'Submitted', 'Awarded', 'Lost'];
     const statusAliases = {
         draft: 'Draft',
-        invitations: 'Invited',
+        active: 'Bidding',
         invited: 'Invited',
-        to_do: 'Draft',
-        estimating: 'Bidding',
         bidding: 'Bidding',
-        bid_submitted: 'Submitted',
         submitted: 'Submitted',
-        accepted: 'Awarded',
         awarded: 'Awarded',
-        in_progress: 'Awarded',
-        complete: 'Awarded',
-        estimadores: 'Bidding',
+        accepted: 'Awarded',
         lost: 'Lost',
         archived: 'Lost'
     };
 
-    let state = { statuses: [], estimators: [], templates: [], dashboard: [], bids: [] };
-    let activeStatus = 'Bidding';
+    let state = { templates: [], projects: [] };
+    let activeStatus = 'Draft';
     let sortDirection = 'asc';
-    let editingId = null;
-    let projectBidId = null;
-    let usingMockData = false;
 
-    const money = (value, currency = 'USD') => new Intl.NumberFormat('en-US', {
+    const money = (value) => new Intl.NumberFormat('en-US', {
         style: 'currency',
-        currency: currency || 'USD',
-        maximumFractionDigits: 0
+        currency: 'USD',
+        minimumFractionDigits: 2,
+        maximumFractionDigits: 2
     }).format(Number(value || 0));
 
     const esc = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({
@@ -63,176 +55,79 @@
         return `Overdue by ${Math.abs(days)} day${days === -1 ? '' : 's'}`;
     };
 
-    const initials = (name) => String(name || 'UA')
-        .split(/\s+/)
-        .filter(Boolean)
-        .slice(0, 2)
-        .map(part => part[0])
-        .join('')
-        .toUpperCase() || 'UA';
-
     const statusSlug = (status) => String(status || 'Draft').toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
-    function request(action, payload = {}) {
-        return fetch(apiUrl, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action, ...payload })
-        }).then(r => r.json()).then(data => {
-            if (data.status !== 'success') throw new Error(data.msg || 'Bid Board request failed');
-            return data;
-        });
-    }
-
     function load() {
-        return fetch(`${apiUrl}?action=list`)
+        return fetch(`${projectApiUrl}?action=list`)
             .then(r => r.json())
             .then(data => {
-                if (data.status !== 'success') throw new Error(data.msg || 'Bid Board could not load');
+                if (data.status !== 'success') throw new Error(data.msg || 'Project list could not load');
                 state = data.data;
-                usingMockData = !state.bids || state.bids.length === 0;
-                if (usingMockData) {
-                    state = mockState(state);
-                }
-                if (!normalizedBids().some(bid => bid.status === activeStatus)) {
-                    activeStatus = pipelineStatuses.find(status => normalizedBids().some(bid => bid.status === status)) || 'Draft';
-                }
                 render();
             })
-            .catch(err => {
-                state = mockState();
-                usingMockData = true;
-                showError(`${err.message}. Showing local sample bid data.`);
-                render();
-            });
+            .catch(err => showError(err.message));
     }
 
-    function mockState(base = {}) {
-        const statuses = pipelineStatuses.map((name, index) => ({
-            id: `mock-${statusSlug(name)}`,
-            code: statusSlug(name),
-            name,
-            sort_order: (index + 1) * 10
-        }));
-        const estimators = [
-            { id: 'mock-jp', display_name: 'Juan Pablo', email: 'juan@brightronix.com' },
-            { id: 'mock-ar', display_name: 'Ava Roberts', email: 'ava@brightronix.com' },
-            { id: 'mock-ms', display_name: 'Marco Silva', email: 'marco@brightronix.com' }
-        ];
-        const bids = [
-            mockBid(1, 'Electrical Package - Building A', 'Commercial / New Construction', 'Brighton Development Group', 'kelly@brightondev.com', 'PRJ-1042', '2026-07-15', 125400, 'Juan Pablo', 'Bidding'),
-            mockBid(2, 'Low Voltage Systems - North Tower', 'Technology / Tenant Improvement', 'Summit Medical Partners', 'rachel@summitmed.com', 'PRJ-1088', '2026-07-09', 86300, 'Ava Roberts', 'Invited'),
-            mockBid(3, 'Parking Garage Lighting Retrofit', 'Infrastructure / Retrofit', 'Harborview Properties', 'matt@harborview.com', 'PRJ-0997', '2026-06-27', 214750, 'Marco Silva', 'Submitted'),
-            mockBid(4, 'Main Service Upgrade', 'Industrial / Service', 'Vector Logistics', 'procurement@vectorlog.com', 'PRJ-1101', '2026-07-22', 342900, 'Juan Pablo', 'Draft'),
-            mockBid(5, 'Hotel Guestroom Power Rough-In', 'Hospitality / Renovation', 'Luna Hospitality Group', 'sandra@lunahotels.com', 'PRJ-1059', '2026-07-03', 498000, 'Ava Roberts', 'Bidding'),
-            mockBid(6, 'Warehouse Distribution Controls', 'Industrial / Controls', 'Redwood Fulfillment', 'ops@redwoodfulfill.com', 'PRJ-1120', '2026-08-04', 276450, 'Marco Silva', 'Awarded'),
-            mockBid(7, 'Emergency Generator Scope', 'Healthcare / Backup Power', 'Central Care Viera', 'facilities@ccviera.com', 'PRJ-1073', '2026-06-29', 188200, 'Juan Pablo', 'Bidding'),
-            mockBid(8, 'Shell Building Lighting Package', 'Commercial / Shell', 'Oakland Exchange LLC', 'bids@oaklandexchange.com', 'PRJ-1035', '2026-07-18', 154800, 'Ava Roberts', 'Invited'),
-            mockBid(9, 'Restaurant TI Electrical', 'Retail / Tenant Improvement', 'Platinum Celebrations', 'nina@platinumti.com', 'PRJ-1064', '2026-07-11', 93900, 'Marco Silva', 'Lost'),
-            mockBid(10, 'Photometrics Revision Package', 'Site / Exterior Lighting', 'Meridian Civil Group', 'design@meridiancivil.com', 'PRJ-1019', '2026-07-01', 61250, 'Juan Pablo', 'Submitted'),
-            mockBid(11, 'School Gym Modernization', 'Education / Renovation', 'Evergreen School District', 'sam@evergreenschools.org', 'PRJ-1092', '2026-07-26', 319700, 'Ava Roberts', 'Draft'),
-            mockBid(12, 'Auto Shop Permit Set', 'Automotive / New Construction', 'Yuexing Auto Group', 'permits@yuexingauto.com', 'PRJ-1008', '2026-06-25', 227600, 'Marco Silva', 'Lost')
-        ];
-        return {
-            statuses: base.statuses && base.statuses.length ? mergePipelineStatuses(base.statuses) : statuses,
-            estimators: base.estimators && base.estimators.length ? base.estimators : estimators,
-            templates: base.templates || [],
-            dashboard: base.dashboard || [],
-            bids
-        };
+    function canonicalStatus(project) {
+        const status = String(project?.status || 'draft').toLowerCase();
+        return statusAliases[status] || 'Draft';
     }
 
-    function mockBid(id, recordName, category, requestingEntity, requestingContact, projectId, dueDate, totalValue, responsibleName, status) {
-        return {
-            id: `mock-${id}`,
-            name: recordName,
-            category,
-            requester_company: requestingEntity,
-            requesting_contact: requestingContact,
-            project_name_snapshot: projectId,
-            due_at: `${dueDate} 12:00:00`,
-            total_amount: totalValue,
-            currency_code: 'USD',
-            estimator_name: responsibleName,
-            responsible_initials: initials(responsibleName),
-            status_name: status,
-            status_code: statusSlug(status),
-            notes: 'Sample bid board record'
-        };
-    }
-
-    function mergePipelineStatuses(apiStatuses) {
-        const existing = new Map();
-        apiStatuses.forEach(status => {
-            const canonical = canonicalStatus(status);
-            const code = String(status?.code || '').toLowerCase();
-            const name = String(status?.name || '').toLowerCase();
-            const isExact = code === statusSlug(canonical) || name === canonical.toLowerCase();
-            if (!existing.has(canonical) || isExact) {
-                existing.set(canonical, status);
+    function normalizedProjects() {
+        return (state.projects || []).map(project => {
+            let metadata = {};
+            try {
+                metadata = project.metadata_json ? JSON.parse(project.metadata_json) : {};
+            } catch (e) {
+                metadata = {};
             }
-        });
-        return pipelineStatuses.map((name, index) => existing.get(name) || {
-            id: `virtual-${statusSlug(name)}`,
-            code: statusSlug(name),
-            name,
-            sort_order: (index + 1) * 10
-        });
-    }
-
-    function canonicalStatus(row) {
-        const code = String(row?.status_code || row?.code || '').toLowerCase();
-        const name = String(row?.status_name || row?.name || '').toLowerCase();
-        return statusAliases[code] || statusAliases[name] || pipelineStatuses.find(status => status.toLowerCase() === name) || 'Draft';
-    }
-
-    function normalizedBids() {
-        return (state.bids || []).map((bid, index) => {
-            const responsibleName = bid.estimator_name || bid.responsibleName || 'Unassigned';
-            const projectId = bid.project_name_snapshot || bid.bid_number || `BID-${String(index + 1).padStart(4, '0')}`;
+            const dueDate = project.bid_due_at || '';
             return {
-                ...bid,
-                status: canonicalStatus(bid),
-                recordName: bid.name || bid.recordName || 'Untitled bid',
-                category: bid.category || inferCategory(bid.notes) || 'Commercial / Electrical',
-                requestingEntity: bid.requester_company || bid.requestingEntity || 'Unassigned requester',
-                requestingContact: bid.requesting_contact || bid.requestingContact || bid.email || 'contact pending',
-                projectId,
-                dueDate: bid.due_at || bid.dueDate,
-                totalValue: Number(bid.total_amount ?? bid.totalValue ?? 0),
-                responsibleName,
-                responsibleInitials: bid.responsible_initials || initials(responsibleName),
-                currency: bid.currency_code || 'USD'
+                ...project,
+                status: canonicalStatus(project),
+                recordName: project.name || 'Untitled project',
+                category: project.template_name || 'Empty Project',
+                requestingEntity: project.client_name || '',
+                requestingContact: metadata.customer_email || metadata.primary_contact || '',
+                projectId: project.project_number || `Project #${project.id}`,
+                dueDate,
+                totalValue: Number(metadata.estimate_total || 0),
+                responsibleName: metadata.estimator || 'Juan Estevez',
+                responsibleInitials: initials(metadata.estimator || 'Juan Estevez')
             };
         });
     }
 
-    function inferCategory(notes) {
-        const text = String(notes || '');
-        const match = text.match(/category:\s*([^;]+)/i);
-        return match ? match[1].trim() : '';
+    function initials(name) {
+        return String(name || 'JE')
+            .split(/\s+/)
+            .filter(Boolean)
+            .slice(0, 2)
+            .map(part => part[0])
+            .join('')
+            .toUpperCase() || 'JE';
     }
 
-    function visibleBids() {
+    function visibleProjects() {
         const q = document.getElementById('bbSearch')?.value.trim().toLowerCase() || '';
         const sortBy = document.getElementById('bbSortBy')?.value || 'dueDate';
         const direction = sortDirection === 'asc' ? 1 : -1;
-        return normalizedBids()
-            .filter(bid => bid.status === activeStatus)
-            .filter(bid => {
+        return normalizedProjects()
+            .filter(project => project.status === activeStatus)
+            .filter(project => {
                 const haystack = [
-                    bid.recordName,
-                    bid.requestingEntity,
-                    bid.requestingContact,
-                    bid.projectId,
-                    bid.responsibleName
+                    project.recordName,
+                    project.requestingEntity,
+                    project.requestingContact,
+                    project.projectId,
+                    project.responsibleName
                 ].join(' ').toLowerCase();
                 return !q || haystack.includes(q);
             })
-            .sort((a, b) => compareBids(a, b, sortBy) * direction);
+            .sort((a, b) => compareProjects(a, b, sortBy) * direction);
     }
 
-    function compareBids(a, b, sortBy) {
+    function compareProjects(a, b, sortBy) {
         if (sortBy === 'dueDate') return (toDate(a.dueDate)?.getTime() || 0) - (toDate(b.dueDate)?.getTime() || 0);
         if (sortBy === 'totalValue') return a.totalValue - b.totalValue;
         if (sortBy === 'recordName') return a.recordName.localeCompare(b.recordName);
@@ -242,22 +137,26 @@
     }
 
     function statusSummary() {
-        const bids = normalizedBids();
+        const projects = normalizedProjects();
         return pipelineStatuses.map(status => {
-            const statusBids = bids.filter(bid => bid.status === status);
+            const statusProjects = projects.filter(project => project.status === status);
             return {
                 name: status,
-                count: statusBids.length,
-                total: statusBids.reduce((sum, bid) => sum + bid.totalValue, 0)
+                count: statusProjects.length,
+                total: statusProjects.reduce((sum, project) => sum + project.totalValue, 0)
             };
         });
     }
 
     function render() {
         renderPipelineTabs();
-        renderTable();
-        renderFormOptions();
+        renderTemplateOptions();
         renderSortIcon();
+        const isEmpty = !state.projects || state.projects.length === 0;
+        document.getElementById('bbEmptyState').hidden = !isEmpty;
+        document.getElementById('bbTableControls').hidden = isEmpty;
+        document.querySelector('.bb-table-shell').hidden = isEmpty;
+        if (!isEmpty) renderTable();
     }
 
     function renderPipelineTabs() {
@@ -278,49 +177,40 @@
 
     function renderTable() {
         const body = document.getElementById('bbTableBody');
-        const bids = visibleBids();
-        body.innerHTML = bids.map(bid => `
+        const projects = visibleProjects();
+        body.innerHTML = projects.map(project => `
             <tr>
                 <td>
-                    <a class="bb-record-name" href="#" data-action="view" data-id="${esc(bid.id)}">${esc(bid.recordName)}</a>
-                    <span class="bb-subtext">${esc(bid.category)}</span>
+                    <a class="bb-record-name" href="project_dashboard.php?id=${encodeURIComponent(project.id)}&tab=overview">${esc(project.recordName)}</a>
+                    <span class="bb-subtext">${esc(project.category)}</span>
                 </td>
                 <td class="bb-metrics-cell">
                     <span class="bb-metrics-btn" title="Metrics"><i class="fas fa-chart-column"></i></span>
                 </td>
                 <td>
-                    <strong>${esc(bid.requestingEntity)}</strong>
-                    <span class="bb-subtext">${esc(bid.requestingContact)}</span>
+                    <strong>${esc(project.requestingEntity || '-')}</strong>
+                    <span class="bb-subtext">${esc(project.requestingContact || '-')}</span>
                 </td>
-                <td>${esc(bid.projectId)}</td>
+                <td>${esc(project.projectId || '-')}</td>
                 <td>
-                    <strong>${fmtDate(bid.dueDate)}</strong>
-                    <span class="bb-subtext">${esc(daysUntil(bid.dueDate))}</span>
+                    <strong>${fmtDate(project.dueDate)}</strong>
+                    <span class="bb-subtext">${esc(daysUntil(project.dueDate))}</span>
                 </td>
-                <td class="bb-money">${money(bid.totalValue, bid.currency)}</td>
+                <td class="bb-money">${money(project.totalValue)}</td>
                 <td>
                     <span class="bb-responsible">
-                        <span class="bb-avatar">${esc(bid.responsibleInitials)}</span>
-                        <span>${esc(bid.responsibleName)}</span>
+                        <span class="bb-avatar">${esc(project.responsibleInitials)}</span>
+                        <span>${esc(project.responsibleName)}</span>
                     </span>
                 </td>
-                <td>${statusBadge(bid.status)}</td>
+                <td>${statusBadge(project.status)}</td>
                 <td>
                     <div class="bb-row-actions">
-                        <button class="bb-btn secondary" data-action="view" data-id="${esc(bid.id)}">View</button>
-                        <button class="bb-btn secondary" data-action="edit" data-id="${esc(bid.id)}" ${usingMockData ? 'disabled' : ''}>Edit</button>
-                        <button class="bb-btn secondary" data-action="create-project" data-id="${esc(bid.id)}" ${usingMockData || bid.project_id ? 'disabled' : ''}>Project</button>
+                        <a class="bb-btn secondary" href="project_dashboard.php?id=${encodeURIComponent(project.id)}&tab=overview">Open</a>
                     </div>
                 </td>
             </tr>
-        `).join('') || `<tr><td colspan="9" class="bb-empty-row">No bids match the current status, search, and sort criteria.</td></tr>`;
-
-        body.querySelectorAll('[data-action]').forEach(button => {
-            button.addEventListener('click', event => {
-                event.preventDefault();
-                handleAction(button.dataset.action, button.dataset.id);
-            });
-        });
+        `).join('') || `<tr><td colspan="9" class="bb-empty-row">No projects match the current status, search, and sort criteria.</td></tr>`;
     }
 
     function statusBadge(status) {
@@ -333,82 +223,17 @@
         icon.className = sortDirection === 'asc' ? 'fas fa-arrow-down-wide-short' : 'fas fa-arrow-up-short-wide';
     }
 
-    function statusSelectOptions(selectedId = '') {
-        return mergePipelineStatuses(state.statuses || []).map(status => {
-            const selected = String(status.id) === String(selectedId) || canonicalStatus(status) === activeStatus ? 'selected' : '';
-            return `<option value="${esc(status.id)}" ${selected}>${esc(canonicalStatus(status))}</option>`;
-        }).join('');
-    }
-
-    function renderFormOptions() {
-        const status = document.getElementById('bbStatus');
-        const estimator = document.getElementById('bbEstimator');
+    function renderTemplateOptions() {
         const template = document.getElementById('bbProjectTemplate');
-        if (status) status.innerHTML = '<option value="">Unassigned</option>' + statusSelectOptions();
-        if (estimator) {
-            estimator.innerHTML = '<option value="">Unassigned</option>' + (state.estimators || [])
-                .map(e => `<option value="${esc(e.id)}">${esc(e.display_name)}</option>`)
-                .join('');
-        }
-        if (template) {
-            template.innerHTML = '<option value="">Select template</option>' + (state.templates || [])
-                .map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`)
-                .join('');
-        }
+        if (!template) return;
+        template.innerHTML = '<option value="">Select a template</option>' + (state.templates || [])
+            .map(t => `<option value="${esc(t.id)}">${esc(t.name)}</option>`)
+            .join('');
     }
 
-    function findBid(id) {
-        return normalizedBids().find(row => String(row.id) === String(id));
-    }
-
-    function handleAction(action, id) {
-        const bid = findBid(id);
-        if (action === 'view') return openView(bid);
-        if (usingMockData) return;
-        if (action === 'edit') return openEdit(bid);
-        if (action === 'create-project') return openCreateProject(bid);
-    }
-
-    function openView(bid) {
-        document.getElementById('bbViewTitle').textContent = bid?.recordName || 'Bid';
-        document.getElementById('bbViewBody').innerHTML = bid ? `
-            <div class="bb-form-grid">
-                <div><strong>Requesting Entity</strong><br>${esc(bid.requestingEntity)}</div>
-                <div><strong>Contact</strong><br>${esc(bid.requestingContact)}</div>
-                <div><strong>ID / Project</strong><br>${esc(bid.projectId)}</div>
-                <div><strong>Due Date</strong><br>${fmtDate(bid.dueDate)}<br><span class="bb-subtext">${esc(daysUntil(bid.dueDate))}</span></div>
-                <div><strong>Total Value</strong><br>${money(bid.totalValue, bid.currency)}</div>
-                <div><strong>Responsible</strong><br>${esc(bid.responsibleName)}</div>
-                <div><strong>Status</strong><br>${statusBadge(bid.status)}</div>
-                <div><strong>Category</strong><br>${esc(bid.category)}</div>
-                <div class="bb-field full"><strong>Notes</strong><br>${esc(bid.notes || '-')}</div>
-            </div>
-        ` : '';
-        document.getElementById('bbViewModal').classList.add('open');
-    }
-
-    function openEdit(bid = null) {
-        editingId = bid ? Number(bid.id) : null;
-        document.getElementById('bbModalTitle').textContent = editingId ? 'Edit Bid' : 'New Bid';
-        document.getElementById('bbName').value = bid?.recordName || '';
-        document.getElementById('bbRequesterCompany').value = bid?.requestingEntity || '';
-        document.getElementById('bbProjectName').value = bid?.projectId || '';
-        document.getElementById('bbDueDate').value = bid?.dueDate ? String(bid.dueDate).slice(0, 10) : '';
-        document.getElementById('bbTotalSales').value = bid?.totalValue || '';
-        document.getElementById('bbCurrency').value = bid?.currency || 'USD';
-        document.getElementById('bbEstimator').value = bid?.estimator_id || '';
-        document.getElementById('bbStatus').value = bid?.bid_status_id || '';
-        document.getElementById('bbNotes').value = bid?.notes || '';
-        document.getElementById('bbEditModal').classList.add('open');
-    }
-
-    function openCreateProject(bid) {
-        if (!bid) return;
-        projectBidId = Number(bid.id);
+    function openCreateProject() {
         document.getElementById('bbProjectForm').reset();
         document.querySelector('input[name="bbProjectMode"][value="template"]').checked = true;
-        document.getElementById('bbProjectCreateName').value = bid.projectId || bid.recordName || '';
-        document.getElementById('bbProjectSourceBid').value = `${bid.recordName} - ${bid.requestingEntity || 'No requester'}`;
         toggleProjectTemplate();
         document.getElementById('bbProjectModal').classList.add('open');
     }
@@ -418,44 +243,27 @@
         document.getElementById('bbProjectTemplateWrap').style.display = mode === 'template' ? 'block' : 'none';
     }
 
-    function closeModals() {
-        document.querySelectorAll('.bb-modal-backdrop').forEach(el => el.classList.remove('open'));
-    }
-
-    function saveBid(event) {
-        event.preventDefault();
-        request('save', {
-            id: editingId,
-            name: document.getElementById('bbName').value,
-            requester_company: document.getElementById('bbRequesterCompany').value,
-            project_name_snapshot: document.getElementById('bbProjectName').value,
-            due_at: document.getElementById('bbDueDate').value,
-            total_amount: document.getElementById('bbTotalSales').value,
-            currency_code: document.getElementById('bbCurrency').value,
-            estimator_id: document.getElementById('bbEstimator').value,
-            bid_status_id: document.getElementById('bbStatus').value,
-            notes: document.getElementById('bbNotes').value
-        }).then(data => {
-            state = data.data;
-            usingMockData = false;
-            closeModals();
-            render();
-        }).catch(err => showError(err.message));
-    }
-
-    function createProject(event) {
+    function createProjectDraft(event) {
         event.preventDefault();
         const mode = document.querySelector('input[name="bbProjectMode"]:checked')?.value || 'empty';
-        request('create_project', {
-            id: projectBidId,
+        const templateId = mode === 'template' ? document.getElementById('bbProjectTemplate').value : '';
+        const template = (state.templates || []).find(row => String(row.id) === String(templateId));
+        const draft = {
             mode,
-            project_name: document.getElementById('bbProjectCreateName').value,
-            project_template_id: mode === 'template' ? document.getElementById('bbProjectTemplate').value : ''
-        }).then(data => {
-            state = data.data;
-            closeModals();
-            render();
-        }).catch(err => showError(err.message));
+            project_template_id: templateId,
+            template_name: template?.name || '',
+            name: 'New Project',
+            estimator: 'Juan Estevez',
+            measurement_system: 'US',
+            estimate_pricing: 'Unlocked',
+            created_at: new Date().toISOString()
+        };
+        localStorage.setItem('takeoff.projectDraft', JSON.stringify(draft));
+        window.location.href = `project_dashboard.php?draft=1${templateId ? `&template_id=${encodeURIComponent(templateId)}` : ''}`;
+    }
+
+    function closeModals() {
+        document.querySelectorAll('.bb-modal-backdrop').forEach(el => el.classList.remove('open'));
     }
 
     function showError(message) {
@@ -465,7 +273,8 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
-        document.getElementById('bbNewBid').addEventListener('click', () => openEdit());
+        document.getElementById('bbCreateProject').addEventListener('click', openCreateProject);
+        document.querySelectorAll('[data-open-project-modal]').forEach(btn => btn.addEventListener('click', openCreateProject));
         document.getElementById('bbSearch').addEventListener('input', render);
         document.getElementById('bbSortBy').addEventListener('change', render);
         document.getElementById('bbSortDir').addEventListener('click', () => {
@@ -473,12 +282,11 @@
             render();
         });
         document.getElementById('bbFiltersBtn').addEventListener('click', () => {
-            showError('Advanced filters panel is ready for backend criteria and saved views.');
+            showError('Advanced filters are ready to connect to saved views and backend criteria.');
         });
         document.querySelectorAll('[data-close-modal]').forEach(btn => btn.addEventListener('click', closeModals));
         document.querySelectorAll('input[name="bbProjectMode"]').forEach(input => input.addEventListener('change', toggleProjectTemplate));
-        document.getElementById('bbBidForm').addEventListener('submit', saveBid);
-        document.getElementById('bbProjectForm').addEventListener('submit', createProject);
+        document.getElementById('bbProjectForm').addEventListener('submit', createProjectDraft);
         load();
     });
 })();

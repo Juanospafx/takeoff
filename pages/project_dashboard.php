@@ -2,6 +2,7 @@
 require_once __DIR__ . '/../core/db/connection.php';
 
 $projectId = (int)($_GET['id'] ?? $_GET['project_id'] ?? 0);
+$isDraftProject = $projectId <= 0 && isset($_GET['draft']);
 $activeTab = $_GET['tab'] ?? 'overview';
 $selectedDocumentId = (int)($_GET['file_id'] ?? $_GET['document_id'] ?? 0);
 
@@ -45,9 +46,46 @@ function money_fmt(float $value): string
     return '$' . number_format($value, 2);
 }
 
-$stmt = $pdo->prepare("SELECT * FROM projects WHERE id = ? AND deleted_at IS NULL");
-$stmt->execute([$projectId]);
-$project = $stmt->fetch(PDO::FETCH_ASSOC);
+$project = null;
+if ($projectId > 0) {
+    $stmt = $pdo->prepare("SELECT * FROM projects WHERE id = ? AND deleted_at IS NULL");
+    $stmt->execute([$projectId]);
+    $project = $stmt->fetch(PDO::FETCH_ASSOC);
+}
+
+if (!$project && $isDraftProject) {
+    $project = [
+        'id' => 0,
+        'project_template_id' => isset($_GET['template_id']) ? (int)$_GET['template_id'] : null,
+        'project_number' => '',
+        'name' => 'New Project',
+        'description' => '',
+        'status' => 'draft',
+        'client_name' => '',
+        'job_address' => '',
+        'city' => '',
+        'state' => '',
+        'postal_code' => '',
+        'country' => '',
+        'bid_due_at' => '',
+        'metadata_json' => json_encode([
+            'estimator' => 'Juan Estevez',
+            'measurement_system' => 'US',
+            'estimate_pricing' => 'Unlocked',
+            'office' => '',
+            'square_footage' => '',
+            'customer_company' => '',
+            'primary_contact' => '',
+            'customer_phone' => '',
+            'customer_email' => '',
+            'notes' => [],
+            'tasks' => [],
+            'unsaved_draft' => true,
+        ], JSON_UNESCAPED_SLASHES),
+        'created_at' => null,
+        'updated_at' => null,
+    ];
+}
 
 if (!$project) {
     http_response_code(404);
@@ -55,14 +93,14 @@ if (!$project) {
 }
 
 $folders = [];
-if (dash_table_exists($pdo, 'folders')) {
+if ($projectId > 0 && dash_table_exists($pdo, 'folders')) {
     $stmt = $pdo->prepare("SELECT id, name FROM folders WHERE project_id = ? AND deleted_at IS NULL ORDER BY name ASC");
     $stmt->execute([$projectId]);
     $folders = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
 $documents = [];
-if (dash_table_exists($pdo, 'files')) {
+if ($projectId > 0 && dash_table_exists($pdo, 'files')) {
     $stmt = $pdo->prepare("
         SELECT f.*, fo.name AS folder_name
         FROM files f
@@ -88,7 +126,7 @@ if (dash_table_exists($pdo, 'files')) {
     }
 }
 
-if (dash_table_exists($pdo, 'project_documents')) {
+if ($projectId > 0 && dash_table_exists($pdo, 'project_documents')) {
     $hasDocumentFolders = dash_table_exists($pdo, 'document_folders');
     $stmt = $pdo->prepare($hasDocumentFolders ? "
         SELECT pd.*, df.name AS folder_name
@@ -133,14 +171,14 @@ if ($selectedDocumentId === 0 && !empty($documents)) {
 }
 
 $drawings = [];
-if (dash_table_exists($pdo, 'drawings')) {
+if ($projectId > 0 && dash_table_exists($pdo, 'drawings')) {
     $stmt = $pdo->prepare("SELECT * FROM drawings WHERE project_id = ? AND deleted_at IS NULL ORDER BY drawing_number ASC, id DESC");
     $stmt->execute([$projectId]);
     $drawings = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
 $takeoffLayers = [];
-if (dash_table_exists($pdo, 'takeoff_layers')) {
+if ($projectId > 0 && dash_table_exists($pdo, 'takeoff_layers')) {
     $stmt = $pdo->prepare(dash_column_exists($pdo, 'takeoff_layers', 'project_id') ? "
         SELECT * FROM takeoff_layers
         WHERE project_id = ? AND deleted_at IS NULL
@@ -157,7 +195,7 @@ if (dash_table_exists($pdo, 'takeoff_layers')) {
 }
 
 $estimateItems = [];
-if (dash_table_exists($pdo, 'estimate_items') && dash_table_exists($pdo, 'estimates')) {
+if ($projectId > 0 && dash_table_exists($pdo, 'estimate_items') && dash_table_exists($pdo, 'estimates')) {
     $stmt = $pdo->prepare("
         SELECT ei.*, ci.name AS catalog_item_name
         FROM estimate_items ei
@@ -171,7 +209,7 @@ if (dash_table_exists($pdo, 'estimate_items') && dash_table_exists($pdo, 'estima
 }
 
 $proposals = [];
-if (dash_table_exists($pdo, 'proposals')) {
+if ($projectId > 0 && dash_table_exists($pdo, 'proposals')) {
     $stmt = $pdo->prepare("SELECT * FROM proposals WHERE project_id = ? AND deleted_at IS NULL ORDER BY created_at DESC");
     $stmt->execute([$projectId]);
     $proposals = $stmt->fetchAll(PDO::FETCH_ASSOC);
@@ -183,6 +221,25 @@ if (!empty($project['estimator_id']) && dash_table_exists($pdo, 'estimators')) {
     $stmt->execute([(int)$project['estimator_id']]);
     $estimatorName = $stmt->fetchColumn() ?: 'Unassigned';
 }
+
+$projectMeta = [];
+if (!empty($project['metadata_json'])) {
+    $decodedMeta = json_decode((string)$project['metadata_json'], true);
+    if (is_array($decodedMeta)) {
+        $projectMeta = $decodedMeta;
+    }
+}
+$estimatorName = $projectMeta['estimator'] ?? $estimatorName;
+$measurementSystem = $projectMeta['measurement_system'] ?? 'US';
+$estimatePricing = $projectMeta['estimate_pricing'] ?? 'Unlocked';
+$projectOffice = $projectMeta['office'] ?? '';
+$squareFootage = $projectMeta['square_footage'] ?? '';
+$customerCompany = $projectMeta['customer_company'] ?? ($project['client_name'] ?? '');
+$primaryContact = $projectMeta['primary_contact'] ?? '';
+$customerPhone = $projectMeta['customer_phone'] ?? '';
+$customerEmail = $projectMeta['customer_email'] ?? '';
+$projectNotes = is_array($projectMeta['notes'] ?? null) ? $projectMeta['notes'] : [];
+$projectTasks = is_array($projectMeta['tasks'] ?? null) ? $projectMeta['tasks'] : [];
 
 $materialSubtotal = 0.0;
 $laborSubtotal = 0.0;
@@ -218,8 +275,10 @@ if (!$selectedDoc) {
 
 $state = [
     'projectId' => $projectId,
+    'isDraftProject' => $isDraftProject,
     'activeTab' => $activeTab,
     'projectInfo' => $project,
+    'projectMeta' => $projectMeta,
     'documents' => $documents,
     'folders' => $folders,
     'selectedDocumentId' => $selectedDocumentId,
@@ -417,15 +476,39 @@ $state = [
             .totals-grid { grid-template-columns: 1fr; }
         }
     </style>
+    <link rel="stylesheet" href="../assets/project_overview.css">
 </head>
 <body>
 <div class="workspace-shell">
     <header class="project-header">
-        <div>
-            <h1><?= htmlspecialchars($project['name']) ?></h1>
-            <p><?= htmlspecialchars($project['description'] ?? $project['job_address'] ?? 'Project workspace') ?></p>
+        <div class="project-title-block">
+            <h1 id="projectHeaderName"><?= htmlspecialchars($project['name']) ?></h1>
+            <p><?= $isDraftProject ? 'Unsaved draft' : htmlspecialchars(($project['status'] ?? 'draft') . ' project workspace') ?></p>
         </div>
-        <a class="btn-ghost" href="projects.php"><i class="fas fa-arrow-left"></i> Projects</a>
+        <div class="project-header-actions">
+            <div class="dropdown-wrap">
+                <button class="btn-main orange" type="button" data-menu-toggle="uploadMenu"><i class="fas fa-upload"></i> Upload</button>
+                <div class="project-menu" id="uploadMenu">
+                    <button type="button" data-action-tab="documents"><i class="fas fa-file-pdf"></i> Upload Drawings</button>
+                    <button type="button" data-action-tab="documents"><i class="fas fa-paperclip"></i> Upload Attachments</button>
+                </div>
+            </div>
+            <button class="btn-main" type="button" id="saveProjectBtn"><i class="fas fa-floppy-disk"></i> Save Project</button>
+            <div class="dropdown-wrap">
+                <button class="btn-ghost icon-only" type="button" data-menu-toggle="projectActionsMenu" aria-label="Project actions"><i class="fas fa-ellipsis-vertical"></i></button>
+                <div class="project-menu align-right" id="projectActionsMenu">
+                    <button type="button"><i class="fas fa-briefcase"></i> Add to Portfolio</button>
+                    <button type="button"><i class="fas fa-copy"></i> Copy Project</button>
+                    <button type="button"><i class="fas fa-layer-group"></i> Convert to Template</button>
+                    <button type="button"><i class="fas fa-wand-magic-sparkles"></i> Apply Template</button>
+                    <button type="button"><i class="fas fa-box-archive"></i> Archive Project</button>
+                    <button type="button" class="danger"><i class="fas fa-trash"></i> Delete Project</button>
+                    <button type="button"><i class="fas fa-file-lines"></i> Support Documentation</button>
+                    <button type="button"><i class="fas fa-book-open"></i> User Guide</button>
+                </div>
+            </div>
+            <a class="btn-ghost" href="bid_board.php"><i class="fas fa-arrow-left"></i> Bid Board</a>
+        </div>
     </header>
 
     <nav class="top-tabs" aria-label="Project workspace tabs">
@@ -438,57 +521,127 @@ $state = [
 
     <main class="workspace-main">
         <section id="tab-overview" class="tab-panel">
-            <div class="grid overview-grid">
-                <div class="card-panel span-3"><div class="label">Documents</div><div class="metric-value"><?= count($documents) ?></div></div>
-                <div class="card-panel span-3"><div class="label">Takeoff Layers</div><div class="metric-value"><?= count($takeoffLayers) ?></div></div>
-                <div class="card-panel span-3"><div class="label">Estimate Items</div><div class="metric-value"><?= count($estimateItems) ?></div></div>
-                <div class="card-panel span-3"><div class="label">Proposal</div><div class="metric-value" style="font-size:1.15rem;"><?= htmlspecialchars($proposalStatus) ?></div></div>
-
-                <div class="card-panel span-6">
-                    <h2>Project Information</h2>
-                    <div class="info-list">
-                        <div class="info-row"><span class="label">Project Name</span><span class="value"><?= htmlspecialchars($project['name']) ?></span></div>
-                        <div class="info-row"><span class="label">Client / Requester</span><span class="value"><?= htmlspecialchars($project['client_name'] ?? 'N/A') ?></span></div>
-                        <div class="info-row"><span class="label">Project Status</span><span class="value"><?= htmlspecialchars($project['status'] ?? 'draft') ?></span></div>
-                        <div class="info-row"><span class="label">Estimator</span><span class="value"><?= htmlspecialchars($estimatorName) ?></span></div>
-                        <div class="info-row"><span class="label">Due Date</span><span class="value"><?= !empty($project['bid_due_at']) ? date('M d, Y', strtotime($project['bid_due_at'])) : 'N/A' ?></span></div>
-                    </div>
-                </div>
-
-                <div class="card-panel span-6">
-                    <h2>Estimate Totals</h2>
-                    <div class="info-list">
-                        <div class="info-row"><span class="label">Total Estimated Amount</span><span class="value"><?= money_fmt($estimateTotal) ?></span></div>
-                        <div class="info-row"><span class="label">Current Drawing / File</span><span class="value"><?= htmlspecialchars($selectedDoc['filename'] ?? 'No drawing selected') ?></span></div>
-                        <div class="info-row"><span class="label">Created Date</span><span class="value"><?= !empty($project['created_at']) ? date('M d, Y', strtotime($project['created_at'])) : 'N/A' ?></span></div>
-                        <div class="info-row"><span class="label">Last Updated</span><span class="value"><?= !empty($project['updated_at']) ? date('M d, Y', strtotime($project['updated_at'])) : 'N/A' ?></span></div>
-                    </div>
-                </div>
-
-                <div class="card-panel span-8">
-                    <h2>Recent Activity</h2>
-                    <?php if (empty($documents)): ?>
-                        <p class="text-secondary mb-0">No recent document activity.</p>
-                    <?php else: ?>
-                        <div class="info-list">
-                            <?php foreach (array_slice($documents, 0, 5) as $doc): ?>
-                                <div class="info-row">
-                                    <span class="value"><?= htmlspecialchars($doc['filename']) ?></span>
-                                    <span class="label"><?= $doc['uploaded_at'] ? date('M d, Y', strtotime($doc['uploaded_at'])) : '' ?></span>
-                                </div>
-                            <?php endforeach; ?>
+            <div class="project-overview-layout">
+                <div class="overview-column">
+                    <section class="overview-card">
+                        <div class="overview-card-head">
+                            <h2>Estimate Overview</h2>
                         </div>
-                    <?php endif; ?>
+                        <div class="overview-form-grid">
+                            <label class="overview-field full">Estimate Name
+                                <input id="poEstimateName" value="<?= htmlspecialchars($project['name'] ?? 'New Project') ?>">
+                            </label>
+                            <label class="overview-field full">Project Description
+                                <textarea id="poProjectDescription" rows="3"><?= htmlspecialchars($project['description'] ?? '') ?></textarea>
+                            </label>
+                            <label class="overview-field">Estimator
+                                <input id="poEstimator" value="<?= htmlspecialchars($estimatorName) ?>">
+                            </label>
+                            <label class="overview-field">Measurement System
+                                <select id="poMeasurementSystem">
+                                    <option value="US" <?= $measurementSystem === 'US' ? 'selected' : '' ?>>US</option>
+                                    <option value="Metric" <?= $measurementSystem === 'Metric' ? 'selected' : '' ?>>Metric</option>
+                                </select>
+                            </label>
+                            <label class="overview-field">Due Date
+                                <input id="poDueDate" type="date" value="<?= !empty($project['bid_due_at']) ? htmlspecialchars(date('Y-m-d', strtotime($project['bid_due_at']))) : '' ?>">
+                            </label>
+                            <label class="overview-field">Due Time
+                                <input id="poDueTime" type="time" value="<?= !empty($project['bid_due_at']) ? htmlspecialchars(date('H:i', strtotime($project['bid_due_at']))) : '' ?>">
+                            </label>
+                            <label class="overview-field">Estimate Pricing
+                                <select id="poEstimatePricing">
+                                    <option value="Unlocked" <?= $estimatePricing === 'Unlocked' ? 'selected' : '' ?>>Unlocked</option>
+                                    <option value="Locked" <?= $estimatePricing === 'Locked' ? 'selected' : '' ?>>Locked</option>
+                                </select>
+                            </label>
+                            <label class="overview-field">Project Number
+                                <input id="poProjectNumber" value="<?= htmlspecialchars($project['project_number'] ?? '') ?>">
+                            </label>
+                            <label class="overview-field">Office
+                                <input id="poOffice" value="<?= htmlspecialchars($projectOffice) ?>">
+                            </label>
+                            <label class="overview-field">Square Footage
+                                <input id="poSquareFootage" inputmode="numeric" value="<?= htmlspecialchars((string)$squareFootage) ?>">
+                            </label>
+                        </div>
+                    </section>
+
+                    <section class="overview-card">
+                        <div class="overview-card-head">
+                            <h2>Customer Information</h2>
+                        </div>
+                        <div id="customerEmpty" class="overview-empty" <?= $customerCompany || $primaryContact || $customerPhone || $customerEmail || $project['job_address'] ? 'hidden' : '' ?>>
+                            <button class="btn-outline-dark" type="button" id="addCustomerBtn"><i class="fas fa-plus"></i> Add Customer</button>
+                            <button class="btn-outline-dark" type="button" id="addProjectAddressBtn"><i class="fas fa-location-dot"></i> Add Project Address</button>
+                        </div>
+                        <div class="overview-form-grid" id="customerFields" <?= $customerCompany || $primaryContact || $customerPhone || $customerEmail || $project['job_address'] ? '' : 'hidden' ?>>
+                            <label class="overview-field">Customer Company
+                                <input id="poCustomerCompany" value="<?= htmlspecialchars($customerCompany) ?>">
+                            </label>
+                            <label class="overview-field">Primary Contact
+                                <input id="poPrimaryContact" value="<?= htmlspecialchars($primaryContact) ?>">
+                            </label>
+                            <label class="overview-field">Phone
+                                <input id="poCustomerPhone" value="<?= htmlspecialchars($customerPhone) ?>">
+                            </label>
+                            <label class="overview-field">Email
+                                <input id="poCustomerEmail" type="email" value="<?= htmlspecialchars($customerEmail) ?>">
+                            </label>
+                            <label class="overview-field full">Address
+                                <input id="poCustomerAddress" value="<?= htmlspecialchars($project['job_address'] ?? '') ?>">
+                            </label>
+                            <label class="overview-field full">Project Address
+                                <input id="poProjectAddress" value="<?= htmlspecialchars($project['job_address'] ?? '') ?>">
+                            </label>
+                        </div>
+                    </section>
                 </div>
 
-                <div class="card-panel span-4">
-                    <h2>Quick Actions</h2>
-                    <div class="quick-actions">
-                        <button class="btn-ghost" data-action-tab="documents"><i class="fas fa-folder-open"></i> Open Documents</button>
-                        <button class="btn-main" data-action-tab="takeoff"><i class="fas fa-ruler-combined"></i> Start Takeoff</button>
-                        <button class="btn-ghost" data-action-tab="estimating"><i class="fas fa-calculator"></i> Open Estimating</button>
-                        <button class="btn-ghost" disabled><i class="fas fa-file-invoice"></i> Generate Proposal</button>
-                    </div>
+                <div class="overview-column">
+                    <section class="overview-card">
+                        <div class="overview-card-head">
+                            <h2>Notes</h2>
+                        </div>
+                        <?php if (empty($projectNotes)): ?>
+                            <div class="overview-empty">
+                                <p>No notes yet</p>
+                                <button class="btn-outline-dark" type="button" id="addNoteBtn"><i class="fas fa-plus"></i> Add note</button>
+                            </div>
+                        <?php else: ?>
+                            <div class="overview-list">
+                                <?php foreach ($projectNotes as $note): ?>
+                                    <div class="overview-list-item">
+                                        <strong><?= htmlspecialchars($note['user'] ?? 'User') ?></strong>
+                                        <span><?= htmlspecialchars($note['timestamp'] ?? '') ?></span>
+                                        <p><?= htmlspecialchars($note['content'] ?? '') ?></p>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
+                    </section>
+
+                    <section class="overview-card">
+                        <div class="overview-card-head">
+                            <h2>Tasks</h2>
+                            <span class="overview-count"><?= count($projectTasks) ?></span>
+                        </div>
+                        <?php if (empty($projectTasks)): ?>
+                            <div class="overview-empty">
+                                <p>No tasks yet</p>
+                                <button class="btn-outline-dark" type="button" id="createTaskBtn"><i class="fas fa-plus"></i> Create first task</button>
+                            </div>
+                        <?php else: ?>
+                            <div class="overview-list">
+                                <?php foreach ($projectTasks as $task): ?>
+                                    <div class="overview-list-item">
+                                        <strong><?= htmlspecialchars($task['title'] ?? '') ?></strong>
+                                        <span><?= htmlspecialchars($task['responsible'] ?? '') ?> <?= htmlspecialchars($task['due_date'] ?? '') ?></span>
+                                    </div>
+                                <?php endforeach; ?>
+                            </div>
+                        <?php endif; ?>
+                    </section>
                 </div>
             </div>
         </section>
@@ -634,7 +787,7 @@ $state = [
                 <div class="d-flex justify-content-between gap-3 flex-wrap">
                     <div>
                         <h2><?= htmlspecialchars($project['name']) ?></h2>
-                        <div>Client: <?= htmlspecialchars($project['client_name'] ?? 'N/A') ?></div>
+                        <div>Client: <?= htmlspecialchars($project['client_name'] ?? '') ?></div>
                     </div>
                     <div class="text-end">
                         <div><strong>Quote Number:</strong> <?= htmlspecialchars($proposals[0]['proposal_number'] ?? 'Draft') ?></div>
@@ -774,11 +927,19 @@ $state = [
     });
 
     function openUploadModal() {
+        if (!ProjectState.projectId) {
+            alert('Save Project before uploading documents.');
+            return;
+        }
         const input = document.getElementById('projectUploadInput');
         if (input) input.click();
     }
 
     function openNewFolderModal() {
+        if (!ProjectState.projectId) {
+            alert('Save Project before creating folders.');
+            return;
+        }
         const name = prompt('Folder name');
         if (!name) return;
         const fd = new FormData();
@@ -811,5 +972,6 @@ $state = [
 
     setActiveTab(ProjectState.activeTab || 'overview', false);
 </script>
+<script src="../assets/project_overview.js"></script>
 </body>
 </html>
