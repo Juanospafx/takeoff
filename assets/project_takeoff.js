@@ -27,6 +27,13 @@
         return win && win.canvas ? win.canvas : null;
     }
 
+    function notifyEditorVisible() {
+        const frame = $('takeoffFrame');
+        try {
+            frame?.contentWindow?.postMessage({ type: 'takeoff-visible' }, '*');
+        } catch (e) {}
+    }
+
     function setZoom(percent) {
         const canvas = editorCanvas();
         const zoom = Math.max(0.05, Math.min(20, Number(percent || 100) / 100));
@@ -355,14 +362,14 @@
         if (layer.type === 'Linear') return '<i class="fas fa-minus"></i>';
         if (layer.type === 'Area') return '<i class="far fa-square"></i>';
         const map = {
-            'Solid Circle': '●',
-            'Hollow Circle': '○',
-            Square: '■',
-            Triangle: '▲',
-            Diamond: '◆',
-            Cross: '✕'
+            'Solid Circle': '<i class="fas fa-circle"></i>',
+            'Hollow Circle': '<i class="far fa-circle"></i>',
+            Square: '<i class="fas fa-square"></i>',
+            Triangle: '<i class="fas fa-play fa-rotate-270"></i>',
+            Diamond: '<i class="fas fa-diamond"></i>',
+            Cross: '<i class="fas fa-xmark"></i>'
         };
-        return map[layer.symbol] || '●';
+        return map[layer.symbol] || '<i class="fas fa-circle"></i>';
     }
 
     function renderTakeoffPanel() {
@@ -715,6 +722,9 @@
         if (layer.type === 'Linear') callEditor('setMode', 'measure');
         if (layer.type === 'Area') callEditor('setMode', 'draw');
         if (layer.type === 'Count') callEditor('setMode', 'smart');
+        if (layer.type === 'Linear') setActiveTool('linear');
+        if (layer.type === 'Area') setActiveTool('area');
+        if (layer.type === 'Count') setActiveTool('count');
     }
 
     function openTakeoffContextMenu(button, type, id) {
@@ -771,6 +781,8 @@
         const modeMap = {
             smart: 'smart',
             pan: 'smart',
+            count: 'smart',
+            linear: 'measure',
             area: 'draw',
             measure: 'measure',
             calibrate: 'cal'
@@ -779,7 +791,7 @@
             callEditor('setMode', modeMap[command]);
             setActiveTool(command);
             if (command === 'calibrate') openScalePanel('manual');
-            if (command === 'measure' && !hasScaleSet()) openScalePanel();
+            if ((command === 'measure' || command === 'linear' || command === 'area') && !hasScaleSet()) openScalePanel();
             return;
         }
         if (command === 'text') {
@@ -1019,12 +1031,7 @@
             box.innerHTML = `<div class="pro-drawing-empty">
                 <strong>No drawings uploaded yet</strong>
                 <span>Upload drawings in Documents to start takeoff.</span>
-                <button class="btn-main mt-2" type="button" data-action-tab="documents">Upload Drawings</button>
             </div>`;
-            box.querySelector('[data-action-tab]')?.addEventListener('click', () => {
-                closeDrawingDropdown();
-                document.querySelector('[data-tab="documents"]')?.click();
-            });
             return;
         }
         const docs = drawingState.documents.filter(doc => {
@@ -1249,6 +1256,7 @@
         });
         $('takeoffFrame')?.addEventListener('load', () => {
             setTimeout(syncEditorInfo, 250);
+            setTimeout(notifyEditorVisible, 120);
         });
     }
 
@@ -1308,6 +1316,10 @@
         initTakeoffState();
         bindDrawingDropdown();
         bindScalePanel();
+        $('takeoffFrame')?.addEventListener('load', () => setTimeout(notifyEditorVisible, 120));
+        if (document.getElementById('tab-takeoff')?.classList.contains('active')) {
+            setTimeout(notifyEditorVisible, 180);
+        }
 
         document.addEventListener('click', () => {
             document.querySelectorAll('.pro-menu, .pro-row-menu').forEach(menu => menu.classList.remove('open'));
@@ -1320,3 +1332,4 @@
         });
     });
 })();
+

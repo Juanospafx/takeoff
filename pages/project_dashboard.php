@@ -360,7 +360,7 @@ $state = [
         .workspace-main { flex: 1; min-height: 0; }
         .tab-panel { display: none; padding: 24px; }
         .tab-panel.active { display: block; }
-        .tab-panel.fullscreen { padding: 0; height: calc(100vh - 129px); }
+        .tab-panel.fullscreen { padding: 0; height: calc(100vh - 129px); min-height: 620px; overflow: hidden; }
         .grid { display: grid; gap: 16px; }
         .overview-grid { grid-template-columns: repeat(12, minmax(0, 1fr)); }
         .card-panel {
@@ -751,7 +751,7 @@ $state = [
                         <div>
                             <h2 id="takeoffPanelTitle">Takeoffs (0)</h2>
                         </div>
-                        <button class="pro-create-layer-btn" type="button" data-takeoff-action="create-layer"><i class="fas fa-plus"></i> Create New Takeoff Layer</button>
+                        <button class="pro-add-btn" type="button" data-takeoff-action="create-layer" title="Create New Takeoff Layer" aria-label="Create New Takeoff Layer"><i class="fas fa-plus"></i></button>
                         <button class="pro-icon-btn" type="button" id="toggleTakeoffItemsPanel" title="Collapse panel" aria-label="Collapse items panel">
                             <i class="fas fa-angles-left"></i>
                         </button>
@@ -761,6 +761,8 @@ $state = [
                             <input id="takeoffItemSearch" type="search" placeholder="Search Takeoffs">
                             <i class="fas fa-magnifying-glass"></i>
                         </div>
+                    </div>
+                    <div class="pro-takeoff-actions-row">
                         <div class="pro-menu-wrap">
                             <button class="pro-actions-btn" type="button" data-takeoff-menu-toggle="takeoffItemsActions" aria-label="Takeoff actions">
                                 Actions <i class="fas fa-chevron-down"></i>
@@ -780,7 +782,6 @@ $state = [
                             <strong id="takeoffActiveLayerLabel">None</strong>
                             <small><i class="fas fa-circle-check"></i> Ready for estimating</small>
                         </div>
-                        <button class="pro-add-btn" type="button" data-takeoff-action="create-layer" aria-label="Add takeoff layer"><i class="fas fa-plus"></i></button>
                     </div>
                 </aside>
 
@@ -826,7 +827,6 @@ $state = [
                             </div>
                         </div>
                         <div class="pro-toolbar-group center">
-                            <button type="button" class="pro-create-layer-btn" data-takeoff-action="create-layer"><i class="fas fa-plus"></i> Create New Takeoff Layer</button>
                             <button type="button" class="pro-toolbar-btn" data-viewer-command="compare"><i class="fas fa-code-compare"></i> Compare</button>
                             <button type="button" class="pro-toolbar-btn" data-viewer-command="popout"><i class="fas fa-up-right-from-square"></i> Pop out</button>
                             <button type="button" class="pro-toolbar-btn" data-viewer-command="download"><i class="fas fa-download"></i> Download</button>
@@ -874,7 +874,6 @@ $state = [
                                     <i class="fas fa-file-pdf fa-3x mb-3"></i>
                                     <h3>No drawing selected</h3>
                                     <p>Upload drawings in Documents to start takeoff.</p>
-                                    <button class="btn-main mt-2" data-action-tab="documents"><i class="fas fa-upload"></i> Upload Drawings</button>
                                 </div>
                             </div>
                             <iframe id="takeoffFrame" class="takeoff-frame pro-takeoff-frame" style="display:none;"></iframe>
@@ -902,14 +901,13 @@ $state = [
                 </section>
 
                 <aside class="pro-tools-bar" aria-label="Takeoff tools">
-                    <button class="pro-tool-btn active" type="button" data-tool-command="smart" title="Pointer"><i class="fas fa-mouse-pointer"></i></button>
+                    <button class="pro-tool-btn active" type="button" data-tool-command="smart" title="Select"><i class="fas fa-mouse-pointer"></i></button>
                     <button class="pro-tool-btn" type="button" data-tool-command="pan" title="Pan"><i class="fas fa-hand"></i></button>
                     <div class="pro-tool-separator"></div>
+                    <button class="pro-tool-btn" type="button" data-tool-command="count" title="Count"><i class="fas fa-circle-dot"></i></button>
+                    <button class="pro-tool-btn" type="button" data-tool-command="linear" title="Linear"><i class="fas fa-grip-lines"></i></button>
                     <button class="pro-tool-btn" type="button" data-tool-command="area" title="Area"><i class="fas fa-draw-polygon"></i></button>
-                    <button class="pro-tool-btn" type="button" data-tool-command="measure" title="Line"><i class="fas fa-ruler-horizontal"></i></button>
-                    <button class="pro-tool-btn" type="button" data-tool-command="calibrate" title="Calibrate scale"><i class="fas fa-ruler-combined"></i></button>
-                    <button class="pro-tool-btn" type="button" data-tool-command="stamp" title="Pin"><i class="fas fa-location-dot"></i></button>
-                    <button class="pro-tool-btn" type="button" data-tool-command="cloud" title="Shape"><i class="fas fa-vector-square"></i></button>
+                    <button class="pro-tool-btn" type="button" data-tool-command="measure" title="Measure"><i class="fas fa-ruler-horizontal"></i></button>
                     <button class="pro-tool-btn" type="button" data-tool-command="text" title="Text"><i class="fas fa-font"></i></button>
                     <div class="pro-tool-separator"></div>
                     <button class="pro-tool-btn" type="button" data-tool-command="undo" title="Undo"><i class="fas fa-rotate-left"></i></button>

@@ -2,7 +2,7 @@
     height: 100%;
     min-height: 0;
     display: grid;
-    grid-template-columns: 320px minmax(0, 1fr) 58px;
+    grid-template-columns: 350px minmax(0, 1fr) 58px;
     background: #e7ebf0;
     color: #18212f;
     overflow: hidden;
@@ -15,17 +15,17 @@
 .pro-takeoff-items {
     min-width: 0;
     display: grid;
-    grid-template-rows: auto auto minmax(0, 1fr) auto;
+    grid-template-rows: 54px auto auto minmax(0, 1fr) auto;
     background: #fff;
     border-right: 1px solid #d8dee6;
     overflow: hidden;
 }
 
 .pro-takeoff-workspace.items-collapsed .pro-takeoff-searchbar,
+.pro-takeoff-workspace.items-collapsed .pro-takeoff-actions-row,
 .pro-takeoff-workspace.items-collapsed .pro-takeoff-tree,
 .pro-takeoff-workspace.items-collapsed .pro-takeoff-footer div,
-.pro-takeoff-workspace.items-collapsed .pro-takeoff-panel-head h2,
-.pro-takeoff-workspace.items-collapsed .pro-takeoff-panel-head .pro-create-layer-btn {
+.pro-takeoff-workspace.items-collapsed .pro-takeoff-panel-head h2 {
     display: none;
 }
 
@@ -38,6 +38,7 @@
 
 .pro-takeoff-panel-head,
 .pro-takeoff-searchbar,
+.pro-takeoff-actions-row,
 .pro-takeoff-footer,
 .pro-viewer-toolbar {
     display: flex;
@@ -47,7 +48,6 @@
 
 .pro-takeoff-panel-head {
     justify-content: space-between;
-    height: 54px;
     padding: 0 12px 0 14px;
     border-bottom: 1px solid #e7ebf0;
 }
@@ -58,11 +58,10 @@
     font-weight: 900;
 }
 
-.pro-create-layer-btn,
 .pro-actions-btn {
-    border: 1px solid #ea8a2f;
-    background: #f97316;
-    color: #fff;
+    border: 1px solid #cfd7e2;
+    background: #fff;
+    color: #18212f;
     border-radius: 6px;
     min-height: 34px;
     padding: 0 11px;
@@ -75,10 +74,23 @@
     white-space: nowrap;
 }
 
-.pro-create-layer-btn:hover,
-.pro-actions-btn:hover {
-    background: #ea580c;
+.pro-create-layer-btn {
+    border: 1px solid #ea8a2f;
+    background: #f97316;
     color: #fff;
+    border-radius: 6px;
+    min-height: 36px;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    font-weight: 900;
+    cursor: pointer;
+}
+
+.pro-create-layer-btn:hover {
+    background: #ea580c;
 }
 
 .pro-create-layer-btn:disabled {
@@ -86,8 +98,9 @@
     cursor: not-allowed;
 }
 
-.pro-takeoff-panel-head .pro-create-layer-btn {
-    margin-left: auto;
+.pro-actions-btn:hover {
+    background: #f8fafc;
+    color: #18212f;
 }
 
 .pro-icon-btn,
@@ -115,8 +128,17 @@
 }
 
 .pro-takeoff-searchbar {
-    padding: 10px 12px;
+    padding: 10px 12px 6px;
+}
+
+.pro-takeoff-actions-row {
+    justify-content: flex-start;
+    padding: 6px 12px 10px;
     border-bottom: 1px solid #e7ebf0;
+}
+
+.pro-actions-btn {
+    min-width: 126px;
 }
 
 .pro-search-input {
@@ -209,17 +231,18 @@
     grid-template-columns: 26px 24px minmax(0, 1fr) 18px 44px 28px;
     align-items: center;
     gap: 6px;
-    min-height: 38px;
-    padding: 4px 8px 4px 10px;
+    min-height: 40px;
+    padding: 4px 10px;
     border-left: 3px solid transparent;
 }
 
 .pro-tree-folder {
-    grid-template-columns: 26px 22px minmax(0, 1fr) 38px 28px;
+    grid-template-columns: 24px 22px minmax(0, 1fr) 38px 28px;
 }
 
 .pro-tree-item {
-    grid-template-columns: 22px 24px minmax(0, 1fr) 62px 28px;
+    grid-template-columns: 22px 24px minmax(0, 1fr) 72px 28px;
+    margin-left: 22px;
 }
 
 .pro-tree-row:hover {
@@ -316,8 +339,8 @@
 
 .pro-add-btn {
     border-color: #d8dee6;
-    background: #fff;
-    color: #1f6fb2;
+    background: #f97316;
+    color: #fff;
 }
 
 .pro-modal-backdrop {
@@ -441,6 +464,8 @@
     background: #fff;
     border-bottom: 1px solid #d8dee6;
     min-width: 0;
+    height: 52px;
+    overflow: visible;
 }
 
 .pro-toolbar-group {
@@ -452,6 +477,7 @@
 
 .pro-toolbar-group.center {
     justify-content: center;
+    flex: 0 0 auto;
 }
 
 .pro-sheet-select {
@@ -715,10 +741,10 @@
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    color: #9a4b0d;
-    background: #fff7ed;
-    border: 1px solid #fed7aa;
-    border-radius: 999px;
+    color: #b42318;
+    background: #fff5f5;
+    border: 1px solid #f7b4ad;
+    border-radius: 6px;
     padding: 6px 10px;
     font-size: .78rem;
     font-weight: 900;
@@ -812,9 +838,11 @@
     min-height: 0;
     overflow: hidden;
     background: #dfe4ea;
+    display: block;
 }
 
 .pro-takeoff-frame {
+    display: block;
     width: 100%;
     height: 100%;
     border: 0;
@@ -874,6 +902,8 @@
     border-left: 1px solid #d8dee6;
     box-shadow: -10px 0 24px rgba(15,23,42,.04);
     z-index: 20;
+    min-height: 0;
+    overflow-y: auto;
 }
 
 .pro-tool-btn {
@@ -960,13 +990,6 @@
     .pro-layer-field-grid,
     .pro-input-action {
         grid-template-columns: 1fr;
-    }
-
-    .pro-takeoff-panel-head .pro-create-layer-btn,
-    .pro-toolbar-group.center .pro-create-layer-btn {
-        font-size: .78rem;
-        min-height: 32px;
-        padding: 0 8px;
     }
 
     .pro-drawing-selector {
