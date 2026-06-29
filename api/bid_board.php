@@ -159,15 +159,12 @@ function bid_board_ensure_schema(PDO $pdo): void
 
     $stmt = $pdo->prepare("INSERT INTO bid_statuses (code, name, sort_order, is_terminal) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), sort_order = VALUES(sort_order), is_terminal = VALUES(is_terminal)");
     $statuses = [
-        ['invitations', 'Invitations', 10, 0],
-        ['to_do', 'To Do', 20, 0],
-        ['estimating', 'Estimating', 30, 0],
-        ['bid_submitted', 'Bid Submitted', 40, 0],
-        ['accepted', 'Accepted', 50, 0],
-        ['in_progress', 'In Progress', 60, 0],
-        ['complete', 'Complete', 70, 1],
-        ['estimadores', 'Estimadores', 80, 0],
-        ['lost', 'Lost', 90, 1],
+        ['draft', 'Draft', 10, 0],
+        ['invited', 'Invited', 20, 0],
+        ['bidding', 'Bidding', 30, 0],
+        ['submitted', 'Submitted', 40, 0],
+        ['awarded', 'Awarded', 50, 0],
+        ['lost', 'Lost', 60, 1],
         ['archived', 'Archived', 100, 1],
     ];
     foreach ($statuses as $status) $stmt->execute($status);

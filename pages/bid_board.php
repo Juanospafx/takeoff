@@ -13,65 +13,86 @@
 </head>
 <body>
 <div class="bid-board-shell">
-    <aside class="bid-board-side">
-        <div class="bid-board-brand">
-            <div class="bid-board-brand-icon"><i class="fas fa-table-columns"></i></div>
-            <span>Bid Board</span>
+    <header class="bb-global-header">
+        <div class="bb-global-left">
+            <a class="bb-logo" href="/pages/index.php" aria-label="Brightronix home">
+                <span class="bb-logo-mark">B</span>
+                <span class="bb-logo-text">Brightronix</span>
+            </a>
+            <button class="bb-context-btn" type="button"><span>Brightronix Electric</span><i class="fas fa-chevron-down"></i></button>
+            <button class="bb-context-btn" type="button"><span>Preconstruction</span><i class="fas fa-chevron-down"></i></button>
         </div>
-        <nav class="bid-board-nav-list">
-            <a class="active" href="/pages/bid_board.php"><i class="fas fa-chart-line"></i><span>Pipeline</span></a>
-            <a href="/pages/project_module.php"><i class="fas fa-folder-tree"></i><span>Projects</span></a>
-            <a href="/pages/takeoff.php"><i class="fas fa-ruler-combined"></i><span>Takeoff</span></a>
-            <a href="/pages/estimate_module.php"><i class="fas fa-calculator"></i><span>Estimate</span></a>
-            <a href="/pages/cost_catalog.php"><i class="fas fa-book"></i><span>Cost Catalog</span></a>
-            <a href="/pages/company_settings.php"><i class="fas fa-gear"></i><span>Settings</span></a>
+        <nav class="bb-global-center" aria-label="Workspace shortcuts">
+            <a href="/pages/bid_board.php" class="active">Favorites</a>
+            <a href="/pages/project_module.php">Recent</a>
+            <a href="/pages/takeoff.php">Pinned</a>
         </nav>
-    </aside>
+        <div class="bb-global-right">
+            <button class="bb-icon-btn" type="button" title="Help" aria-label="Help"><i class="far fa-circle-question"></i></button>
+            <button class="bb-icon-btn" type="button" title="Notifications" aria-label="Notifications"><i class="far fa-bell"></i></button>
+            <div class="bb-user-avatar" title="Juan Pablo">JP</div>
+        </div>
+    </header>
 
     <main class="bid-board-main">
-        <div class="bid-board-topbar">
-            <div class="bid-board-title">
-                <h1>Bid Board</h1>
-                <p>Pipeline dashboard for bid invitations, estimating, submissions and outcomes.</p>
+        <section class="bb-page-head">
+            <div class="bb-title-wrap">
+                <div class="bb-module-icon"><i class="fas fa-gear"></i></div>
+                <div>
+                    <h1>Bid Board</h1>
+                    <p>Bid management pipeline for invitations, active bidding, submissions and outcomes.</p>
+                </div>
             </div>
-            <div class="bid-board-actions">
+            <div class="bb-page-actions">
                 <button class="bb-btn primary" id="bbNewBid"><i class="fas fa-plus"></i> New Bid</button>
-            </div>
-        </div>
-
-        <div class="alert" id="bbError" style="display:none;background:#7f1d1d;color:#fecaca;border:1px solid #991b1b;border-radius:8px;padding:12px;margin-bottom:16px;"></div>
-
-        <section class="bb-filters">
-            <div class="bb-field">
-                <label>Search</label>
-                <input id="bbSearch" placeholder="Search bids, requester, project">
-            </div>
-            <div class="bb-field">
-                <label>Status Filter</label>
-                <select id="bbStatusFilter"></select>
+                <button class="bb-icon-btn bordered" type="button" title="More actions" aria-label="More actions"><i class="fas fa-ellipsis-vertical"></i></button>
             </div>
         </section>
 
-        <section class="bb-dashboard" id="bbDashboard"></section>
+        <div class="bb-alert" id="bbError" hidden></div>
 
-        <section class="bb-pipeline" id="bbPipeline"></section>
+        <section class="bb-pipeline-tabs" id="bbPipelineTabs" aria-label="Bid status pipeline"></section>
 
-        <section class="bb-table-wrap">
-            <table class="bb-table">
-                <thead>
-                    <tr>
-                        <th>Name</th>
-                        <th>Requester Company</th>
-                        <th>Project</th>
-                        <th>Due Date</th>
-                        <th>Total Sales</th>
-                        <th>Estimator</th>
-                        <th>Status</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="bbTableBody"></tbody>
-            </table>
+        <section class="bb-table-controls" aria-label="Bid table controls">
+            <div class="bb-search-field">
+                <input id="bbSearch" type="search" placeholder="Search bids...">
+                <i class="fas fa-magnifying-glass"></i>
+            </div>
+            <label class="bb-select-field">
+                <span>Sort by</span>
+                <select id="bbSortBy">
+                    <option value="dueDate">Due Date</option>
+                    <option value="totalValue">Total Value</option>
+                    <option value="recordName">Record Name</option>
+                    <option value="requestingEntity">Requesting Entity</option>
+                    <option value="responsible">Responsible</option>
+                </select>
+            </label>
+            <button class="bb-icon-btn bordered" id="bbSortDir" type="button" title="Toggle sort direction" aria-label="Toggle sort direction">
+                <i class="fas fa-arrow-down-wide-short"></i>
+            </button>
+            <button class="bb-btn secondary" id="bbFiltersBtn" type="button"><i class="fas fa-filter"></i> Filters</button>
+        </section>
+
+        <section class="bb-table-shell" aria-label="Bid records">
+            <div class="bb-table-scroll">
+                <table class="bb-table">
+                    <thead>
+                        <tr>
+                            <th>Record Name <i class="fas fa-sort"></i></th>
+                            <th class="center">Metrics <i class="fas fa-sort"></i></th>
+                            <th>Requesting Entity <i class="fas fa-sort"></i></th>
+                            <th>ID / Project <i class="fas fa-sort"></i></th>
+                            <th>Due Date <i class="fas fa-sort"></i></th>
+                            <th>Total Value <i class="fas fa-sort"></i></th>
+                            <th>Responsible <i class="fas fa-sort"></i></th>
+                            <th>Status <i class="fas fa-sort"></i></th>
+                            <th>Actions</th>
+                        </tr>
+                    </thead>
+                    <tbody id="bbTableBody"></tbody>
+                </table>
+            </div>
         </section>
     </main>
 </div>
@@ -81,7 +102,7 @@
         <form id="bbBidForm">
             <div class="bb-modal-head">
                 <strong id="bbModalTitle">New Bid</strong>
-                <button class="bb-btn" type="button" data-close-modal><i class="fas fa-times"></i></button>
+                <button class="bb-icon-btn bordered" type="button" data-close-modal aria-label="Close"><i class="fas fa-times"></i></button>
             </div>
             <div class="bb-modal-body">
                 <div class="bb-form-grid">
@@ -102,7 +123,7 @@
                         <input id="bbDueDate" type="date">
                     </div>
                     <div class="bb-field">
-                        <label>Total Sales</label>
+                        <label>Total Value</label>
                         <input id="bbTotalSales" type="number" min="0" step="0.01">
                     </div>
                     <div class="bb-field">
@@ -110,7 +131,7 @@
                         <input id="bbCurrency" maxlength="3" value="USD">
                     </div>
                     <div class="bb-field">
-                        <label>Estimator</label>
+                        <label>Responsible</label>
                         <select id="bbEstimator"></select>
                     </div>
                     <div class="bb-field">
@@ -124,7 +145,7 @@
                 </div>
             </div>
             <div class="bb-modal-foot">
-                <button class="bb-btn" type="button" data-close-modal>Cancel</button>
+                <button class="bb-btn secondary" type="button" data-close-modal>Cancel</button>
                 <button class="bb-btn primary" type="submit">Save</button>
             </div>
         </form>
@@ -135,11 +156,11 @@
     <div class="bb-modal">
         <div class="bb-modal-head">
             <strong id="bbViewTitle">Bid</strong>
-            <button class="bb-btn" type="button" data-close-modal><i class="fas fa-times"></i></button>
+            <button class="bb-icon-btn bordered" type="button" data-close-modal aria-label="Close"><i class="fas fa-times"></i></button>
         </div>
         <div class="bb-modal-body" id="bbViewBody"></div>
         <div class="bb-modal-foot">
-            <button class="bb-btn" type="button" data-close-modal>Close</button>
+            <button class="bb-btn secondary" type="button" data-close-modal>Close</button>
         </div>
     </div>
 </div>
@@ -149,7 +170,7 @@
         <form id="bbProjectForm">
             <div class="bb-modal-head">
                 <strong>Create New Project</strong>
-                <button class="bb-btn" type="button" data-close-modal><i class="fas fa-times"></i></button>
+                <button class="bb-icon-btn bordered" type="button" data-close-modal aria-label="Close"><i class="fas fa-times"></i></button>
             </div>
             <div class="bb-modal-body">
                 <div class="bb-create-mode">
@@ -172,7 +193,7 @@
                 </div>
             </div>
             <div class="bb-modal-foot">
-                <button class="bb-btn" type="button" data-close-modal>Cancel</button>
+                <button class="bb-btn secondary" type="button" data-close-modal>Cancel</button>
                 <button class="bb-btn primary" type="submit">Create Project</button>
             </div>
         </form>
