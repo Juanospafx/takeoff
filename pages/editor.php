@@ -832,7 +832,10 @@ if ($filePath !== '') {
     let pdfFitZoom = 1;
     let currentPdfRenderZoom = 0;
     let renderToken = 0;
+    let activePdfRenderTask = null;
     let pdfRerenderTimer = null;
+    const pdfBitmapCache = new Map();
+    const PDF_BITMAP_CACHE_LIMIT = 8;
     const drawingLoading = document.getElementById('drawingLoading');
     
     // STATES
@@ -1191,7 +1194,11 @@ if ($filePath !== '') {
             schedulePdfRerender();
         }
     }
-    window.addEventListener('resize', resize);
+    let resizeTimer = null;
+    window.addEventListener('resize', () => {
+        clearTimeout(resizeTimer);
+        resizeTimer = setTimeout(resize, 120);
+    });
     setTimeout(resize, 100); 
     window.addEventListener('message', event => {
         if (!event.data || event.data.type !== 'takeoff-visible') return;
@@ -2238,14 +2245,16 @@ if ($filePath !== '') {
             pdfDoc = pdf;
             document.getElementById('p-total').textContent = pdf.numPages;
             renderPageList(pdf.numPages);
+            notifyTakeoffReady();
             renderPage(pageNum);
         }).catch(error => {
             console.error(error);
-            showDrawingLoading(false);
+            showDrawingError('Unable to load this sheet');
             showToast("Error loading PDF", "error");
         });
     } else if (fileExt === 'heic') {
         document.getElementById('p-total').textContent = '1'; renderPageList(1);
+        notifyTakeoffReady();
         fetch(fileUrl).then(res => res.blob()).then(blob => heic2any({ blob, toType: "image/jpeg" })).then(conversionResult => {
             const blob = Array.isArray(conversionResult) ? conversionResult[0] : conversionResult;
             const url = URL.createObjectURL(blob);
@@ -2253,6 +2262,7 @@ if ($filePath !== '') {
         }).catch(e => { console.error(e); showToast("Error loading HEIC", "error"); });
     } else {
         document.getElementById('p-total').textContent = '1'; renderPageList(1);
+        notifyTakeoffReady();
         fabric.Image.fromURL(fileUrl, img => { 
             if(!img) { showToast("Error loading image", "error"); return; }
             setBg(img); loadPageAnnotations(1); 
@@ -2276,7 +2286,20 @@ if ($filePath !== '') {
     }
 
     function showDrawingLoading(show) {
-        if (drawingLoading) drawingLoading.classList.toggle('hidden', !show);
+        if (!drawingLoading) return;
+        if (show) {
+            drawingLoading.innerHTML = '<span><i class="fas fa-spinner fa-spin me-2"></i>Loading drawing...</span>';
+        }
+        drawingLoading.classList.toggle('hidden', !show);
+    }
+
+    function showDrawingError(message = 'Unable to load this sheet') {
+        if (!drawingLoading) return;
+        drawingLoading.innerHTML = `<div class="text-center">
+            <div class="mb-2"><i class="fas fa-triangle-exclamation me-2"></i>${message}</div>
+            <button type="button" class="btn btn-sm btn-light" onclick="renderPage(pageNum)">Retry</button>
+        </div>`;
+        drawingLoading.classList.remove('hidden');
     }
 
     function getCanvasWrapper() {
@@ -2327,14 +2350,47 @@ if ($filePath !== '') {
         canvas.requestRenderAll();
     }
 
-    async function renderPageToBitmap(num, zoom) {
+    function pdfRenderScaleForZoom(zoom) {
+        return Math.min(MAX_PDF_RENDER_SCALE, Math.max(1, Math.round((Number(zoom) || 1) * 4) / 4));
+    }
+
+    function pdfBitmapCacheKey(num, zoom) {
+        return `${num}@${pdfRenderScaleForZoom(zoom)}`;
+    }
+
+    function touchPdfBitmapCache(key, bitmap) {
+        if (pdfBitmapCache.has(key)) pdfBitmapCache.delete(key);
+        pdfBitmapCache.set(key, bitmap);
+        while (pdfBitmapCache.size > PDF_BITMAP_CACHE_LIMIT) {
+            const firstKey = pdfBitmapCache.keys().next().value;
+            const old = pdfBitmapCache.get(firstKey);
+            if (old?.url) URL.revokeObjectURL(old.url);
+            pdfBitmapCache.delete(firstKey);
+        }
+    }
+
+    function cancelActivePdfRender() {
+        if (activePdfRenderTask && typeof activePdfRenderTask.cancel === 'function') {
+            try { activePdfRenderTask.cancel(); } catch (e) {}
+        }
+        activePdfRenderTask = null;
+    }
+
+    async function renderPageToBitmap(num, zoom, token) {
+        const cacheKey = pdfBitmapCacheKey(num, zoom);
+        const cached = pdfBitmapCache.get(cacheKey);
+        if (cached) {
+            touchPdfBitmapCache(cacheKey, cached);
+            return cached;
+        }
         const page = await pdfDoc.getPage(num);
+        if (token !== renderToken) return null;
         const baseViewport = page.getViewport({ scale: 1 });
         pdfWorldWidth = baseViewport.width;
         pdfWorldHeight = baseViewport.height;
 
         const outputScale = dpr;
-        const viewportScale = Math.min(MAX_PDF_RENDER_SCALE, Math.max(1, zoom));
+        const viewportScale = pdfRenderScaleForZoom(zoom);
         const viewport = page.getViewport({ scale: viewportScale });
         const renderCanvas = document.createElement('canvas');
         const renderCtx = renderCanvas.getContext('2d', { alpha: false });
@@ -2346,9 +2402,14 @@ if ($filePath !== '') {
         renderCtx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
         renderCtx.fillStyle = '#ffffff';
         renderCtx.fillRect(0, 0, viewport.width, viewport.height);
-        await page.render({ canvasContext: renderCtx, viewport }).promise;
+        cancelActivePdfRender();
+        const renderTask = page.render({ canvasContext: renderCtx, viewport });
+        activePdfRenderTask = renderTask;
+        await renderTask.promise;
+        if (activePdfRenderTask === renderTask) activePdfRenderTask = null;
+        if (token !== renderToken) return null;
 
-        return new Promise(resolve => {
+        const bitmap = await new Promise(resolve => {
             renderCanvas.toBlob(blob => {
                 if (!blob) {
                     resolve(null);
@@ -2363,11 +2424,12 @@ if ($filePath !== '') {
                 });
             }, 'image/png');
         });
+        if (bitmap) touchPdfBitmapCache(cacheKey, bitmap);
+        return bitmap;
     }
 
     function applyPdfBackground(bitmap, token, loadAnnotations) {
         fabric.Image.fromURL(bitmap.url, img => {
-            URL.revokeObjectURL(bitmap.url);
             if (token !== renderToken) return;
             setBg(img, bitmap.worldWidth, bitmap.worldHeight);
             currentPdfRenderZoom = canvas.getZoom();
@@ -2384,18 +2446,21 @@ if ($filePath !== '') {
             await waitForWrapperSize();
             renderToken++;
             const token = renderToken;
+            cancelActivePdfRender();
             const page = await pdfDoc.getPage(num);
+            if (token !== renderToken) return;
             const baseViewport = page.getViewport({ scale: 1 });
             pdfWorldWidth = baseViewport.width;
             pdfWorldHeight = baseViewport.height;
             fitPdfToView(loadAnnotations);
-            const bitmap = await renderPageToBitmap(num, canvas.getZoom());
+            const bitmap = await renderPageToBitmap(num, canvas.getZoom(), token);
+            if (token !== renderToken) return;
             if (!bitmap) throw new Error('PDF bitmap generation failed');
-            if(token !== renderToken) return;
             applyPdfBackground(bitmap, token, loadAnnotations);
         } catch (error) {
+            if (error?.name === 'RenderingCancelledException') return;
             console.error(error);
-            showDrawingLoading(false);
+            showDrawingError('Unable to load this sheet');
             showToast("Error rendering PDF page", "error");
         }
     }
@@ -2448,6 +2513,69 @@ if ($filePath !== '') {
         if(newPage < 1 || newPage > max) return;
         jumpToPage(newPage);
     }
+
+    function notifyTakeoffReady() {
+        try {
+            window.parent?.postMessage({
+                type: 'takeoff-editor-ready',
+                fileId,
+                pageCount: pdfDoc ? pdfDoc.numPages : 1,
+                pageNum
+            }, '*');
+        } catch (e) {}
+    }
+
+    const thumbnailCache = new Map();
+    const THUMBNAIL_CACHE_LIMIT = 24;
+
+    function touchThumbnailCache(key, dataUrl) {
+        if (thumbnailCache.has(key)) thumbnailCache.delete(key);
+        thumbnailCache.set(key, dataUrl);
+        while (thumbnailCache.size > THUMBNAIL_CACHE_LIMIT) {
+            thumbnailCache.delete(thumbnailCache.keys().next().value);
+        }
+    }
+
+    async function takeoffRenderThumbnail(targetPage = pageNum) {
+        if (!pdfDoc) return null;
+        const pg = Math.max(1, Math.min(pdfDoc.numPages, Number(targetPage) || 1));
+        const key = String(pg);
+        if (thumbnailCache.has(key)) return thumbnailCache.get(key);
+        const page = await pdfDoc.getPage(pg);
+        const viewport = page.getViewport({ scale: 0.18 });
+        const thumbCanvas = document.createElement('canvas');
+        const ctx = thumbCanvas.getContext('2d', { alpha: false });
+        thumbCanvas.width = Math.max(1, Math.floor(viewport.width));
+        thumbCanvas.height = Math.max(1, Math.floor(viewport.height));
+        ctx.fillStyle = '#ffffff';
+        ctx.fillRect(0, 0, thumbCanvas.width, thumbCanvas.height);
+        await page.render({ canvasContext: ctx, viewport }).promise;
+        const dataUrl = thumbCanvas.toDataURL('image/jpeg', 0.68);
+        touchThumbnailCache(key, dataUrl);
+        return dataUrl;
+    }
+
+    function takeoffGetDocumentInfo() {
+        return {
+            fileId,
+            pageCount: pdfDoc ? pdfDoc.numPages : 1,
+            pageNum,
+            fileUrl,
+            fileExt
+        };
+    }
+
+    function takeoffJumpToPage(targetPage) {
+        const max = pdfDoc ? pdfDoc.numPages : 1;
+        const pg = Math.max(1, Math.min(max, Number(targetPage) || 1));
+        jumpToPage(pg);
+        notifyTakeoffReady();
+        return takeoffGetDocumentInfo();
+    }
+
+    window.takeoffGetDocumentInfo = takeoffGetDocumentInfo;
+    window.takeoffJumpToPage = takeoffJumpToPage;
+    window.takeoffRenderThumbnail = takeoffRenderThumbnail;
 
     function loadPageAnnotations(pg) {
         historyProcessing = true;
@@ -3340,6 +3468,8 @@ if ($filePath !== '') {
 
     window.addEventListener('beforeunload', () => {
         saveCurrentPageAnnotations();
+        pdfBitmapCache.forEach(bitmap => { if (bitmap?.url) URL.revokeObjectURL(bitmap.url); });
+        pdfBitmapCache.clear();
     });
     window.addEventListener('pagehide', () => {
         saveCurrentPageAnnotations();

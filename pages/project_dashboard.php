@@ -823,13 +823,41 @@ $state = [
                         <div class="pro-toolbar-group">
                             <button class="pro-icon-btn" type="button" data-viewer-command="previous" title="Previous sheet"><i class="fas fa-chevron-left"></i></button>
                             <button class="pro-icon-btn" type="button" data-viewer-command="next" title="Next sheet"><i class="fas fa-chevron-right"></i></button>
-                            <select class="pro-sheet-select" id="takeoffSheetSelect" aria-label="Active sheet">
-                                <?php if ($selectedDoc): ?>
-                                    <option><?= htmlspecialchars($selectedDoc['filename'] ?? 'Active Drawing') ?></option>
-                                <?php else: ?>
-                                    <option>No drawing selected</option>
-                                <?php endif; ?>
-                            </select>
+                            <div class="pro-drawing-selector">
+                                <button class="pro-sheet-select pro-sheet-trigger" id="takeoffSheetSelect" type="button" aria-expanded="false">
+                                    <span id="takeoffSheetLabel"><?= htmlspecialchars($selectedDoc['filename'] ?? 'No drawing selected') ?></span>
+                                    <i class="fas fa-chevron-down"></i>
+                                </button>
+                                <div class="pro-drawing-dropdown" id="takeoffDrawingDropdown" aria-label="Drawing selector">
+                                    <div class="pro-drawing-dropdown-head">
+                                        <div>
+                                            <div class="pro-drawing-crumbs">Drawing Sources <i class="fas fa-chevron-right"></i> Estimating Tool</div>
+                                            <strong>Drawings</strong>
+                                        </div>
+                                        <button class="pro-icon-btn" type="button" data-drawing-close aria-label="Close drawing selector"><i class="fas fa-times"></i></button>
+                                    </div>
+                                    <div class="pro-drawing-search">
+                                        <input id="takeoffDrawingSearch" type="search" placeholder="Search drawing">
+                                        <i class="fas fa-magnifying-glass"></i>
+                                    </div>
+                                    <div class="pro-drawing-grid">
+                                        <div class="pro-drawing-col">
+                                            <div class="pro-drawing-col-title">Directory</div>
+                                            <div id="takeoffDocumentList" class="pro-drawing-list"></div>
+                                        </div>
+                                        <div class="pro-drawing-col">
+                                            <div class="pro-drawing-col-title">Sheets</div>
+                                            <div id="takeoffSheetList" class="pro-drawing-list"></div>
+                                        </div>
+                                        <div class="pro-drawing-preview">
+                                            <div class="pro-drawing-col-title">Preview</div>
+                                            <div id="takeoffSheetPreview" class="pro-preview-box">
+                                                <span>Select a sheet</span>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
                         </div>
                         <div class="pro-toolbar-group center">
                             <button type="button" class="pro-toolbar-btn" data-viewer-command="compare"><i class="fas fa-code-compare"></i> Compare</button>
