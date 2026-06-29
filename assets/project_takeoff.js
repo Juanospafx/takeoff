@@ -746,6 +746,7 @@
             item.addEventListener('click', () => {
                 const action = item.dataset.menuAct;
                 menu.classList.remove('open');
+                activeRowMenuAnchor = null;
                 if (action === 'group-create') openLayerModal(id);
                 if (action === 'group-rename') renameGroup(id);
                 if (action === 'group-copy') duplicateGroup(id);
@@ -849,13 +850,48 @@
         setTimeout(() => toast.remove(), 2400);
     }
 
-    function toggleRowMenu(button) {
+    let activeRowMenuAnchor = null;
+
+    function positionRowMenu(button) {
         const menu = $('takeoffRowMenu');
         if (!menu) return;
         const rect = button.getBoundingClientRect();
-        menu.style.left = `${Math.min(rect.left, window.innerWidth - 230)}px`;
-        menu.style.top = `${rect.bottom + 4}px`;
+        const margin = 8;
+        const gap = 6;
+        menu.style.left = '0px';
+        menu.style.top = '0px';
+        menu.style.visibility = 'hidden';
         menu.classList.add('open');
+        const menuRect = menu.getBoundingClientRect();
+        let left = rect.right - menuRect.width;
+        let top = rect.bottom + gap;
+        if (top + menuRect.height > window.innerHeight - margin) {
+            top = rect.top - menuRect.height - gap;
+        }
+        left = Math.max(margin, Math.min(left, window.innerWidth - menuRect.width - margin));
+        top = Math.max(margin, Math.min(top, window.innerHeight - menuRect.height - margin));
+        menu.style.left = `${Math.round(left)}px`;
+        menu.style.top = `${Math.round(top)}px`;
+        menu.style.visibility = 'visible';
+    }
+
+    function toggleRowMenu(button) {
+        const menu = $('takeoffRowMenu');
+        if (!menu) return;
+        const isSameOpen = menu.classList.contains('open') && activeRowMenuAnchor === button;
+        document.querySelectorAll('.pro-row-menu').forEach(item => item.classList.remove('open'));
+        if (isSameOpen) {
+            activeRowMenuAnchor = null;
+            return;
+        }
+        activeRowMenuAnchor = button;
+        positionRowMenu(button);
+    }
+
+    function refreshOpenRowMenu() {
+        const menu = $('takeoffRowMenu');
+        if (!menu?.classList.contains('open') || !activeRowMenuAnchor?.isConnected) return;
+        positionRowMenu(activeRowMenuAnchor);
     }
 
     function editorDocument() {
@@ -1323,9 +1359,12 @@
 
         document.addEventListener('click', () => {
             document.querySelectorAll('.pro-menu, .pro-row-menu').forEach(menu => menu.classList.remove('open'));
+            activeRowMenuAnchor = null;
             closeScalePanel();
             closeDrawingDropdown();
         });
+        window.addEventListener('resize', refreshOpenRowMenu);
+        document.addEventListener('scroll', refreshOpenRowMenu, true);
         $('takeoffScalePanel')?.addEventListener('click', event => event.stopPropagation());
         $('takeoffLayerModal')?.addEventListener('click', event => {
             if (event.target.id === 'takeoffLayerModal') closeLayerModal();
