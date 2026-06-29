@@ -8,6 +8,7 @@
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/global_tools.css">
     
     <style>
         /* --- 1. VARIABLES Y BASE --- */
@@ -27,8 +28,8 @@
             flex-direction: column; 
             border-right: 1px solid rgba(255,255,255,0.05); 
             position: fixed; 
-            top: 0; left: 0;
-            height: 100vh; 
+            top: 64px; left: 0;
+            height: calc(100vh - 64px); 
             z-index: 1050;
             overflow-y: auto; 
             transition: transform 0.3s ease, width 0.25s ease, padding 0.25s ease;
@@ -46,7 +47,7 @@
 
         .sidebar-toggle {
             position: fixed;
-            top: 14px;
+            top: 78px;
             left: 274px;
             z-index: 1200;
             width: 36px;
@@ -135,7 +136,7 @@
         .sidebar-overlay.show { display: block; }
 
         @media (max-width: 991.98px) {
-            .sidebar { transform: translateX(-100%); width: 280px; }
+            .sidebar { transform: translateX(-100%); width: 280px; top: 64px; height: calc(100vh - 64px); }
             .sidebar.show { transform: translateX(0); box-shadow: 10px 0 30px rgba(0,0,0,0.5); }
             .main-content { margin-left: 0 !important; width: 100% !important; padding: 20px; }
             .mobile-toggle { display: block; }
@@ -144,8 +145,9 @@
     </style>
 </head>
 <body>
+<?php include __DIR__ . '/global_tools_header.php'; ?>
 
-<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()"></div>
+<div class="sidebar-overlay" id="sidebarOverlay" onclick="toggleSidebar()" style="top:64px;height:calc(100% - 64px);"></div>
 <button id="sidebarCollapseBtn" class="sidebar-toggle" type="button" onclick="toggleSidebarDesktop()" aria-label="Toggle sidebar">
     <i class="fas fa-angle-left"></i>
 </button>

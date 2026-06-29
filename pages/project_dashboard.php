@@ -299,6 +299,7 @@ $state = [
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/global_tools.css">
     <style>
         :root {
             --bg: #0b1120;
@@ -360,7 +361,7 @@ $state = [
         .workspace-main { flex: 1; min-height: 0; }
         .tab-panel { display: none; padding: 24px; }
         .tab-panel.active { display: block; }
-        .tab-panel.fullscreen { padding: 0; height: calc(100vh - 129px); min-height: 620px; overflow: hidden; }
+        .tab-panel.fullscreen { padding: 0; height: calc(100vh - 193px); min-height: 620px; overflow: hidden; }
         .grid { display: grid; gap: 16px; }
         .overview-grid { grid-template-columns: repeat(12, minmax(0, 1fr)); }
         .card-panel {
@@ -480,6 +481,7 @@ $state = [
     <link rel="stylesheet" href="../assets/project_takeoff.css">
 </head>
 <body>
+<?php include __DIR__ . '/../views/global_tools_header.php'; ?>
 <div class="workspace-shell">
     <header class="project-header">
         <div class="project-title-block">
@@ -1169,5 +1171,6 @@ $state = [
 </script>
 <script src="../assets/project_overview.js"></script>
 <script src="../assets/project_takeoff.js"></script>
+<script src="../assets/global_tools.js"></script>
 </body>
 </html>

@@ -12,6 +12,7 @@ $isSettings  = ($currentScript === 'settings.php');
 $isProjects  = ($currentScript === 'projects.php' || ($currentScript === 'index.php' && $pId));
 $isDirectory = ($currentScript === 'directorio.php');
 $isFiles     = ($currentScript === 'archivos.php');
+$isTools     = ($currentScript === 'company_tools.php');
 // Dashboard solo se enciende si es index.php Y no hay proyecto Y no es papelera
 $isDashboard = ($currentScript === 'index.php' && !$pId && !$isTrash);
 
@@ -27,6 +28,10 @@ $isAdminSidebar = (strtolower($userRoleRawSidebar) === 'admin');
     </div>
     
     <div class="flex-grow-1">
+        <a href="../pages/company_tools.php" class="menu-item <?= $isTools ? 'active' : '' ?>">
+            <i class="fas fa-grip"></i><span class="menu-label">Company Tools</span>
+        </a>
+
         <a href="../pages/takeoff.php" class="menu-item <?= $isDashboard ? 'active' : '' ?>">
             <i class="fas fa-ruler-combined"></i><span class="menu-label">Takeoff</span>
         </a>
