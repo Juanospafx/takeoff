@@ -319,6 +319,11 @@
     background: #f8fafc;
 }
 
+.pro-scale-wrap {
+    position: relative;
+    flex: 0 0 auto;
+}
+
 .pro-scale-status {
     display: inline-flex;
     align-items: center;
@@ -331,6 +336,87 @@
     font-size: .78rem;
     font-weight: 900;
     white-space: nowrap;
+    cursor: pointer;
+}
+
+.pro-scale-status.is-set {
+    color: #147449;
+    background: #ecfdf3;
+    border-color: #b7e4ca;
+}
+
+.pro-scale-panel {
+    position: absolute;
+    top: calc(100% + 8px);
+    right: 0;
+    z-index: 90;
+    display: none;
+    width: min(340px, calc(100vw - 24px));
+    padding: 12px;
+    background: #fff;
+    border: 1px solid #d8dee6;
+    border-radius: 8px;
+    box-shadow: 0 18px 48px rgba(15, 23, 42, .18);
+}
+
+.pro-scale-panel.open {
+    display: grid;
+    gap: 10px;
+}
+
+.pro-scale-panel-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+}
+
+.pro-scale-panel-head strong {
+    font-size: .92rem;
+}
+
+.pro-scale-panel label {
+    display: block;
+    margin-bottom: -4px;
+    color: #526173;
+    font-size: .74rem;
+    font-weight: 900;
+}
+
+.pro-scale-panel select,
+.pro-scale-panel input {
+    width: 100%;
+    min-height: 36px;
+    border: 1px solid #cfd7e2;
+    border-radius: 6px;
+    background: #fff;
+    color: #18212f;
+    padding: 7px 9px;
+    font: inherit;
+}
+
+.pro-scale-manual {
+    display: grid;
+    gap: 8px;
+}
+
+.pro-scale-manual[hidden],
+#takeoffPresetWrap[hidden] {
+    display: none;
+}
+
+.pro-scale-manual p,
+.pro-scale-hint {
+    margin: 0;
+    color: #657386;
+    font-size: .78rem;
+    line-height: 1.35;
+}
+
+.pro-scale-manual-row {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
 }
 
 .pro-canvas-shell {
@@ -484,9 +570,18 @@
         flex-wrap: wrap;
     }
 
+    .pro-scale-wrap,
     .pro-scale-status {
         width: 100%;
+    }
+
+    .pro-scale-status {
         justify-content: center;
+    }
+
+    .pro-scale-panel {
+        right: auto;
+        left: 0;
     }
 
     .pro-floating-controls {

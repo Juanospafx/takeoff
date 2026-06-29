@@ -15,8 +15,7 @@
         const win = takeoffWindow();
         if (!win || typeof win[fnName] !== 'function') return false;
         try {
-            win[fnName](...args);
-            return true;
+            return win[fnName](...args);
         } catch (e) {
             console.warn(`Takeoff editor command failed: ${fnName}`, e);
             return false;
@@ -71,11 +70,14 @@
             smart: 'smart',
             pan: 'smart',
             area: 'draw',
-            measure: 'measure'
+            measure: 'measure',
+            calibrate: 'cal'
         };
         if (modeMap[command]) {
             callEditor('setMode', modeMap[command]);
             setActiveTool(command);
+            if (command === 'calibrate') openScalePanel('manual');
+            if (command === 'measure' && !hasScaleSet()) openScalePanel();
             return;
         }
         if (command === 'text') {
@@ -141,6 +143,128 @@
         menu.classList.toggle('open');
     }
 
+    function editorDocument() {
+        const win = takeoffWindow();
+        try {
+            return win?.document || null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function syncScaleStatus() {
+        const scaleText = (editorDocument()?.getElementById('scale-display')?.textContent || '').trim();
+        const button = $('takeoffScaleStatus');
+        if (!button) return;
+        const label = button.querySelector('span');
+        const icon = button.querySelector('i');
+        const hasScale = scaleText && scaleText !== '--';
+        button.classList.toggle('is-set', hasScale);
+        if (label) label.textContent = hasScale ? `Scale ${scaleText}` : 'Scale not set';
+        if (icon) icon.className = hasScale ? 'fas fa-ruler-combined' : 'fas fa-triangle-exclamation';
+    }
+
+    function hasScaleSet() {
+        const scaleText = (editorDocument()?.getElementById('scale-display')?.textContent || '').trim();
+        return Boolean(scaleText && scaleText !== '--');
+    }
+
+    function syncScaleHint() {
+        const hint = $('takeoffScaleHint');
+        if (!hint) return;
+        const editorHint = (editorDocument()?.getElementById('cal-hint')?.textContent || '').trim();
+        hint.textContent = editorHint || 'Choose a preset scale or calibrate manually.';
+    }
+
+    function syncScalePresets() {
+        const source = editorDocument()?.getElementById('cal-preset');
+        const target = $('takeoffScalePreset');
+        if (!source || !target) return false;
+        if (target.dataset.loaded === '1' && target.dataset.optionCount === String(source.options.length)) return true;
+        target.innerHTML = source.innerHTML || '<option value="">No presets available</option>';
+        target.value = source.value || '';
+        target.dataset.loaded = '1';
+        target.dataset.optionCount = String(source.options.length);
+        return true;
+    }
+
+    function setScaleMode(mode) {
+        const nextMode = mode === 'manual' ? 'manual' : 'preset';
+        const modeSelect = $('takeoffScaleMode');
+        if (modeSelect) modeSelect.value = nextMode;
+        $('takeoffPresetWrap')?.toggleAttribute('hidden', nextMode !== 'preset');
+        $('takeoffManualWrap')?.toggleAttribute('hidden', nextMode !== 'manual');
+        callEditor('setCalMode', nextMode);
+        if (nextMode === 'manual') callEditor('setMode', 'cal');
+        syncScaleHint();
+    }
+
+    function openScalePanel(mode) {
+        const panel = $('takeoffScalePanel');
+        const toggle = $('takeoffScaleStatus');
+        if (!panel) return;
+        syncScalePresets();
+        panel.classList.add('open');
+        toggle?.setAttribute('aria-expanded', 'true');
+        if (mode) setScaleMode(mode);
+    }
+
+    function closeScalePanel() {
+        $('takeoffScalePanel')?.classList.remove('open');
+        $('takeoffScaleStatus')?.setAttribute('aria-expanded', 'false');
+    }
+
+    function applyScalePreset(value) {
+        if (!value) return;
+        const editorSelect = editorDocument()?.getElementById('cal-preset');
+        if (editorSelect) editorSelect.value = value;
+        const result = callEditor('applyScalePreset', value);
+        Promise.resolve(result).finally(() => {
+            syncScaleStatus();
+            syncScaleHint();
+        });
+    }
+
+    function applyManualScale() {
+        const feet = $('takeoffManualFeet')?.value;
+        const editorInput = editorDocument()?.getElementById('cal-val');
+        if (editorInput) editorInput.value = feet || '';
+        const result = callEditor('finishCal', true);
+        Promise.resolve(result).finally(() => {
+            syncScaleStatus();
+            syncScaleHint();
+        });
+    }
+
+    function bindScalePanel() {
+        $('takeoffScaleStatus')?.addEventListener('click', event => {
+            event.stopPropagation();
+            const panel = $('takeoffScalePanel');
+            if (panel?.classList.contains('open')) closeScalePanel();
+            else openScalePanel();
+        });
+        document.querySelector('[data-scale-close]')?.addEventListener('click', closeScalePanel);
+        $('takeoffScaleMode')?.addEventListener('change', event => setScaleMode(event.target.value));
+        $('takeoffScalePreset')?.addEventListener('change', event => applyScalePreset(event.target.value));
+        document.querySelector('[data-scale-apply-manual]')?.addEventListener('click', applyManualScale);
+        document.querySelector('[data-scale-clear-line]')?.addEventListener('click', () => {
+            callEditor('clearCalLine');
+            syncScaleHint();
+        });
+        $('takeoffFrame')?.addEventListener('load', () => {
+            setTimeout(() => {
+                syncScalePresets();
+                syncScaleStatus();
+                syncScaleHint();
+            }, 250);
+        });
+        setInterval(() => {
+            syncScaleStatus();
+            syncScaleHint();
+            syncScalePresets();
+        }, 1200);
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
         $('toggleTakeoffItemsPanel')?.addEventListener('click', () => {
             const workspace = $('takeoffWorkspace');
@@ -196,9 +320,12 @@
         });
 
         $('takeoffZoomSlider')?.addEventListener('input', event => setZoom(event.target.value));
+        bindScalePanel();
 
         document.addEventListener('click', () => {
             document.querySelectorAll('.pro-menu, .pro-row-menu').forEach(menu => menu.classList.remove('open'));
+            closeScalePanel();
         });
+        $('takeoffScalePanel')?.addEventListener('click', event => event.stopPropagation());
     });
 })();

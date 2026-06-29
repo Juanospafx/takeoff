@@ -836,7 +836,38 @@ $state = [
                             <button type="button" class="pro-toolbar-btn" data-viewer-command="popout"><i class="fas fa-up-right-from-square"></i> Pop out</button>
                             <button type="button" class="pro-toolbar-btn" data-viewer-command="download"><i class="fas fa-download"></i> Download</button>
                         </div>
-                        <div class="pro-scale-status" id="takeoffScaleStatus"><i class="fas fa-triangle-exclamation"></i> Scale not set</div>
+                        <div class="pro-scale-wrap">
+                            <button class="pro-scale-status" id="takeoffScaleStatus" type="button" data-scale-toggle aria-expanded="false">
+                                <i class="fas fa-triangle-exclamation"></i>
+                                <span>Scale not set</span>
+                            </button>
+                            <div class="pro-scale-panel" id="takeoffScalePanel" aria-label="Takeoff scale calibration">
+                                <div class="pro-scale-panel-head">
+                                    <strong>Drawing Scale</strong>
+                                    <button class="pro-icon-btn" type="button" data-scale-close aria-label="Close scale panel"><i class="fas fa-times"></i></button>
+                                </div>
+                                <label for="takeoffScaleMode">Calibration mode</label>
+                                <select id="takeoffScaleMode">
+                                    <option value="preset">Preset scale</option>
+                                    <option value="manual">Manual rule</option>
+                                </select>
+                                <div id="takeoffPresetWrap">
+                                    <label for="takeoffScalePreset">Scale preset</label>
+                                    <select id="takeoffScalePreset">
+                                        <option value="">Loading scales...</option>
+                                    </select>
+                                </div>
+                                <div id="takeoffManualWrap" class="pro-scale-manual" hidden>
+                                    <p>Draw a known line on the plan, enter its real length in feet, then apply.</p>
+                                    <div class="pro-scale-manual-row">
+                                        <input id="takeoffManualFeet" type="number" min="0.1" step="0.1" placeholder="ft">
+                                        <button type="button" class="pro-toolbar-btn" data-scale-apply-manual>Apply</button>
+                                    </div>
+                                    <button type="button" class="pro-chip-btn" data-scale-clear-line><i class="fas fa-trash"></i> Clear line</button>
+                                </div>
+                                <div class="pro-scale-hint" id="takeoffScaleHint">Choose a preset scale or calibrate manually.</div>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="pro-canvas-shell">
@@ -881,6 +912,7 @@ $state = [
                     <div class="pro-tool-separator"></div>
                     <button class="pro-tool-btn" type="button" data-tool-command="area" title="Area"><i class="fas fa-draw-polygon"></i></button>
                     <button class="pro-tool-btn" type="button" data-tool-command="measure" title="Line"><i class="fas fa-ruler-horizontal"></i></button>
+                    <button class="pro-tool-btn" type="button" data-tool-command="calibrate" title="Calibrate scale"><i class="fas fa-ruler-combined"></i></button>
                     <button class="pro-tool-btn" type="button" data-tool-command="stamp" title="Pin"><i class="fas fa-location-dot"></i></button>
                     <button class="pro-tool-btn" type="button" data-tool-command="cloud" title="Shape"><i class="fas fa-vector-square"></i></button>
                     <button class="pro-tool-btn" type="button" data-tool-command="text" title="Text"><i class="fas fa-font"></i></button>
