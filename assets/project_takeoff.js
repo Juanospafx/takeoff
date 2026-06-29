@@ -202,6 +202,565 @@
         }
     }
 
+    const TAKEOFF_TYPES = ['Count', 'Linear', 'Area'];
+    const TAKEOFF_UOMS = ['ea', 'ft', 'lf', 'sq ft', 'yd', 'm'];
+    const TAKEOFF_SYMBOLS = ['Solid Circle', 'Hollow Circle', 'Square', 'Triangle', 'Diamond', 'Cross'];
+    const TAKEOFF_SIZES = ['Small', 'Medium', 'Large'];
+    const TAKEOFF_COLORS = [
+        { label: 'Black', value: '#111827' },
+        { label: 'Red', value: '#dc2626' },
+        { label: 'Blue', value: '#2563eb' },
+        { label: 'Green', value: '#16a34a' },
+        { label: 'Orange', value: '#f97316' },
+        { label: 'Purple', value: '#7c3aed' },
+        { label: 'Yellow', value: '#eab308' }
+    ];
+    const TAKEOFF_TYPE_HELP = {
+        Count: 'Use Count for fixtures, receptacles, luminaires, devices, or any item measured by quantity.',
+        Linear: 'Use Linear for conduits, cables, piping, or any item measured by length.',
+        Area: 'Use Area for surfaces, zones, slabs, rooms, or any item measured by square footage.'
+    };
+
+    const takeoffState = {
+        groups: [],
+        activeGroupId: 'default',
+        activeLayerId: null,
+        editingLayerId: null,
+        pendingLayerGroupId: 'default',
+        query: ''
+    };
+
+    function takeoffStoreKey() {
+        return `takeoff.quantification.${window.ProjectState?.projectId || 'draft'}`;
+    }
+
+    function typeToUom(type) {
+        if (type === 'Linear') return 'ft';
+        if (type === 'Area') return 'sq ft';
+        return 'ea';
+    }
+
+    function normalizeTakeoffType(value) {
+        const raw = String(value || '').toLowerCase();
+        if (raw === 'linear') return 'Linear';
+        if (raw === 'area') return 'Area';
+        return 'Count';
+    }
+
+    function makeId(prefix) {
+        return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    }
+
+    function defaultGroup() {
+        return { id: 'default', name: 'Default Group', isExpanded: true, isDefault: true, layers: [] };
+    }
+
+    function readSavedTakeoffs() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(takeoffStoreKey()) || 'null');
+            return parsed && Array.isArray(parsed.groups) ? parsed : null;
+        } catch (e) {
+            return null;
+        }
+    }
+
+    function seedGroupsFromProjectLayers() {
+        const groups = [defaultGroup()];
+        const byName = new Map([['Default Group', groups[0]]]);
+        (window.ProjectState?.takeoffLayers || []).forEach((layer, index) => {
+            const groupName = layer.group_name || 'Default Group';
+            let group = byName.get(groupName);
+            if (!group) {
+                group = { id: makeId('grp'), name: groupName, isExpanded: true, isDefault: false, layers: [] };
+                byName.set(groupName, group);
+                groups.push(group);
+            }
+            const type = normalizeTakeoffType(layer.takeoff_type || layer.type);
+            group.layers.push({
+                id: String(layer.id || makeId('layer')),
+                groupId: group.id,
+                name: layer.name || layer.title || `Takeoff Item ${index + 1}`,
+                type,
+                uom: layer.unit_of_measure || typeToUom(type),
+                symbol: layer.symbol || 'Solid Circle',
+                size: layer.symbol_size || 'Medium',
+                color: layer.color || '#111827',
+                quantity: Number(layer.quantity || layer.count || layer.measurement_count || 0)
+            });
+        });
+        return groups;
+    }
+
+    function normalizeSavedGroups(groups) {
+        const result = [defaultGroup()];
+        (groups || []).forEach(group => {
+            if (group.id === 'default') {
+                result[0] = { ...defaultGroup(), ...group, id: 'default', name: 'Default Group', isDefault: true, layers: group.layers || [] };
+            } else {
+                result.push({
+                    id: group.id || makeId('grp'),
+                    name: group.name || 'New Group',
+                    isExpanded: group.isExpanded !== false,
+                    isDefault: false,
+                    layers: group.layers || []
+                });
+            }
+        });
+        return result.map(group => ({
+            ...group,
+            layers: (group.layers || []).map(layer => ({
+                id: layer.id || makeId('layer'),
+                groupId: group.id,
+                name: layer.name || 'New Takeoff Layer',
+                type: normalizeTakeoffType(layer.type),
+                uom: layer.uom || typeToUom(normalizeTakeoffType(layer.type)),
+                symbol: layer.symbol || 'Solid Circle',
+                size: layer.size || 'Medium',
+                color: layer.color || '#111827',
+                quantity: Number(layer.quantity || 0)
+            }))
+        }));
+    }
+
+    function saveTakeoffState() {
+        try {
+            localStorage.setItem(takeoffStoreKey(), JSON.stringify({
+                groups: takeoffState.groups,
+                activeGroupId: takeoffState.activeGroupId,
+                activeLayerId: takeoffState.activeLayerId
+            }));
+        } catch (e) {
+            console.warn('Takeoff state could not be saved', e);
+        }
+    }
+
+    function allLayers() {
+        return takeoffState.groups.flatMap(group => group.layers || []);
+    }
+
+    function findGroup(groupId) {
+        return takeoffState.groups.find(group => group.id === groupId) || takeoffState.groups[0];
+    }
+
+    function findLayer(layerId) {
+        return allLayers().find(layer => layer.id === layerId) || null;
+    }
+
+    function quantityLabel(layer) {
+        const qty = Number(layer.quantity || 0);
+        return `${qty % 1 === 0 ? qty.toFixed(0) : qty.toFixed(2)} ${layer.uom}`;
+    }
+
+    function symbolGlyph(layer) {
+        if (layer.type === 'Linear') return '<i class="fas fa-minus"></i>';
+        if (layer.type === 'Area') return '<i class="far fa-square"></i>';
+        const map = {
+            'Solid Circle': '●',
+            'Hollow Circle': '○',
+            Square: '■',
+            Triangle: '▲',
+            Diamond: '◆',
+            Cross: '✕'
+        };
+        return map[layer.symbol] || '●';
+    }
+
+    function renderTakeoffPanel() {
+        const tree = $('takeoffItemsTree');
+        const title = $('takeoffPanelTitle');
+        const activeLabel = $('takeoffActiveLayerLabel');
+        if (!tree) return;
+        const q = takeoffState.query;
+        const layersCount = allLayers().length;
+        if (title) title.textContent = `Takeoffs (${layersCount})`;
+        const activeLayer = findLayer(takeoffState.activeLayerId);
+        if (activeLabel) activeLabel.textContent = activeLayer ? activeLayer.name : 'None';
+        tree.innerHTML = takeoffState.groups.map(group => {
+            const visibleLayers = (group.layers || []).filter(layer => {
+                if (!q) return true;
+                return group.name.toLowerCase().includes(q) || layer.name.toLowerCase().includes(q) || layer.type.toLowerCase().includes(q);
+            });
+            const groupVisible = !q || group.name.toLowerCase().includes(q) || visibleLayers.length > 0;
+            if (!groupVisible) return '';
+            const expanded = q ? true : group.isExpanded !== false;
+            return `<div class="pro-takeoff-group" data-group-id="${esc(group.id)}">
+                <div class="pro-tree-row pro-tree-folder ${takeoffState.activeGroupId === group.id ? 'active' : ''}" data-takeoff-group-row="${esc(group.id)}">
+                    <button class="pro-tree-toggle" type="button" data-group-toggle="${esc(group.id)}"><i class="fas ${expanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i></button>
+                    <input type="checkbox" checked aria-label="Group visibility">
+                    <span class="pro-tree-name"><i class="fas fa-folder${expanded ? '-open' : ''}"></i> ${esc(group.name)}</span>
+                    <span class="pro-tree-qty">${group.layers.length}</span>
+                    <button class="pro-row-menu-btn" type="button" data-group-menu="${esc(group.id)}"><i class="fas fa-ellipsis-vertical"></i></button>
+                </div>
+                <div class="pro-tree-children" ${expanded ? '' : 'hidden'}>
+                    ${visibleLayers.map(layer => `<div class="pro-tree-row pro-tree-item ${takeoffState.activeLayerId === layer.id ? 'active' : ''}" data-layer-row="${esc(layer.id)}">
+                        <input type="checkbox" checked aria-label="Layer visibility">
+                        <span class="pro-layer-symbol" style="color:${esc(layer.color)}">${symbolGlyph(layer)}</span>
+                        <span class="pro-tree-name">${esc(layer.name)}</span>
+                        <span class="pro-tree-qty">${esc(quantityLabel(layer))}</span>
+                        <button class="pro-row-menu-btn" type="button" data-layer-menu="${esc(layer.id)}"><i class="fas fa-ellipsis-vertical"></i></button>
+                    </div>`).join('')}
+                </div>
+            </div>`;
+        }).join('') || '<div class="pro-drawing-empty">No takeoffs match your search.</div>';
+        bindTakeoffTreeEvents();
+    }
+
+    function bindTakeoffTreeEvents() {
+        document.querySelectorAll('[data-takeoff-group-row]').forEach(row => {
+            row.addEventListener('click', event => {
+                if (event.target.closest('button')) return;
+                takeoffState.activeGroupId = row.dataset.takeoffGroupRow;
+                saveTakeoffState();
+                renderTakeoffPanel();
+            });
+        });
+        document.querySelectorAll('[data-group-toggle]').forEach(button => {
+            button.addEventListener('click', event => {
+                event.stopPropagation();
+                const group = findGroup(button.dataset.groupToggle);
+                group.isExpanded = group.isExpanded === false;
+                saveTakeoffState();
+                renderTakeoffPanel();
+            });
+        });
+        document.querySelectorAll('[data-layer-row]').forEach(row => {
+            row.addEventListener('click', event => {
+                if (event.target.closest('button')) return;
+                setActiveTakeoffLayer(row.dataset.layerRow);
+            });
+        });
+        document.querySelectorAll('[data-group-menu]').forEach(button => {
+            button.addEventListener('click', event => {
+                event.stopPropagation();
+                openTakeoffContextMenu(button, 'group', button.dataset.groupMenu);
+            });
+        });
+        document.querySelectorAll('[data-layer-menu]').forEach(button => {
+            button.addEventListener('click', event => {
+                event.stopPropagation();
+                openTakeoffContextMenu(button, 'layer', button.dataset.layerMenu);
+            });
+        });
+    }
+
+    function initTakeoffState() {
+        const saved = readSavedTakeoffs();
+        takeoffState.groups = normalizeSavedGroups(saved?.groups || seedGroupsFromProjectLayers());
+        takeoffState.activeGroupId = saved?.activeGroupId || 'default';
+        takeoffState.activeLayerId = saved?.activeLayerId || null;
+        if (!findGroup(takeoffState.activeGroupId)) takeoffState.activeGroupId = 'default';
+        if (takeoffState.activeLayerId && !findLayer(takeoffState.activeLayerId)) takeoffState.activeLayerId = null;
+        ensureTakeoffModal();
+        renderTakeoffPanel();
+    }
+
+    function ensureTakeoffModal() {
+        if ($('takeoffLayerModal')) return;
+        const modal = document.createElement('div');
+        modal.id = 'takeoffLayerModal';
+        modal.className = 'pro-modal-backdrop';
+        modal.hidden = true;
+        modal.innerHTML = `<div class="pro-layer-modal" role="dialog" aria-modal="true" aria-labelledby="takeoffLayerModalTitle">
+            <div class="pro-layer-modal-head">
+                <h3 id="takeoffLayerModalTitle">Create new takeoff layer</h3>
+                <button class="pro-icon-btn" type="button" data-layer-modal-close aria-label="Close"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="pro-layer-form">
+                <div class="pro-field pro-field-wide">
+                    <label for="layerNameInput">Catalog Item Name</label>
+                    <div class="pro-input-action">
+                        <input id="layerNameInput" type="text" placeholder="Enter item name">
+                        <button class="pro-create-layer-btn" type="button" data-takeoff-action="browse-catalog">Browse Catalog</button>
+                    </div>
+                </div>
+                <div class="pro-field pro-field-wide">
+                    <label for="layerTypeInput">Takeoff Type</label>
+                    <select id="layerTypeInput">${TAKEOFF_TYPES.map(type => `<option>${type}</option>`).join('')}</select>
+                    <p id="layerTypeHelp">${TAKEOFF_TYPE_HELP.Count}</p>
+                </div>
+                <div class="pro-layer-field-grid">
+                    <div class="pro-field"><label for="layerUomInput">UoM</label><select id="layerUomInput">${TAKEOFF_UOMS.map(uom => `<option>${uom}</option>`).join('')}</select></div>
+                    <div class="pro-field"><label for="layerSymbolInput">Symbol</label><select id="layerSymbolInput">${TAKEOFF_SYMBOLS.map(symbol => `<option>${symbol}</option>`).join('')}</select></div>
+                    <div class="pro-field"><label for="layerSizeInput">Size</label><select id="layerSizeInput">${TAKEOFF_SIZES.map(size => `<option>${size}</option>`).join('')}</select></div>
+                    <div class="pro-field">
+                        <label for="layerColorInput">Color</label>
+                        <div class="pro-color-select">
+                            <span id="layerColorSwatch"></span>
+                            <select id="layerColorInput">${TAKEOFF_COLORS.map(color => `<option value="${color.value}">${color.label}</option>`).join('')}</select>
+                        </div>
+                    </div>
+                </div>
+            </div>
+            <div class="pro-layer-modal-actions">
+                <button class="pro-toolbar-btn" type="button" data-layer-modal-close>Cancel</button>
+                <button class="pro-create-layer-btn" type="button" id="layerCreateSubmit" disabled>Create</button>
+            </div>
+        </div>`;
+        document.body.appendChild(modal);
+        modal.querySelectorAll('[data-layer-modal-close]').forEach(btn => btn.addEventListener('click', closeLayerModal));
+        $('layerNameInput').addEventListener('input', updateLayerSubmitState);
+        $('layerTypeInput').addEventListener('change', () => {
+            const type = $('layerTypeInput').value;
+            $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[type];
+            $('layerUomInput').value = typeToUom(type);
+            updateLayerSubmitState();
+        });
+        $('layerColorInput').addEventListener('change', updateLayerColorSwatch);
+        $('layerCreateSubmit').addEventListener('click', submitLayerModal);
+    }
+
+    function openLayerModal(groupId = takeoffState.activeGroupId, layerId = null) {
+        ensureTakeoffModal();
+        const layer = layerId ? findLayer(layerId) : null;
+        takeoffState.pendingLayerGroupId = groupId || layer?.groupId || takeoffState.activeGroupId || 'default';
+        takeoffState.editingLayerId = layerId;
+        $('takeoffLayerModalTitle').textContent = layer ? 'Edit takeoff layer' : 'Create new takeoff layer';
+        $('layerNameInput').value = layer?.name || '';
+        $('layerTypeInput').value = layer?.type || 'Count';
+        $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[$('layerTypeInput').value];
+        $('layerUomInput').value = layer?.uom || typeToUom($('layerTypeInput').value);
+        $('layerSymbolInput').value = layer?.symbol || 'Solid Circle';
+        $('layerSizeInput').value = layer?.size || 'Medium';
+        $('layerColorInput').value = layer?.color || '#111827';
+        $('layerCreateSubmit').textContent = layer ? 'Save' : 'Create';
+        updateLayerColorSwatch();
+        updateLayerSubmitState();
+        $('takeoffLayerModal').hidden = false;
+        setTimeout(() => $('layerNameInput')?.focus(), 40);
+    }
+
+    function closeLayerModal() {
+        const modal = $('takeoffLayerModal');
+        if (modal) modal.hidden = true;
+        takeoffState.editingLayerId = null;
+    }
+
+    function updateLayerColorSwatch() {
+        const swatch = $('layerColorSwatch');
+        if (swatch) swatch.style.background = $('layerColorInput')?.value || '#111827';
+    }
+
+    function updateLayerSubmitState() {
+        const submit = $('layerCreateSubmit');
+        if (submit) submit.disabled = !$('layerNameInput')?.value.trim();
+    }
+
+    function submitLayerModal() {
+        const name = $('layerNameInput')?.value.trim();
+        if (!name) return;
+        const type = $('layerTypeInput').value;
+        const payload = {
+            name,
+            type,
+            uom: $('layerUomInput').value || typeToUom(type),
+            symbol: $('layerSymbolInput').value || 'Solid Circle',
+            size: $('layerSizeInput').value || 'Medium',
+            color: $('layerColorInput').value || '#111827'
+        };
+        if (takeoffState.editingLayerId) {
+            const layer = findLayer(takeoffState.editingLayerId);
+            if (layer) Object.assign(layer, payload);
+            setActiveTakeoffLayer(takeoffState.editingLayerId, false);
+        } else {
+            const group = findGroup(takeoffState.pendingLayerGroupId);
+            const layer = {
+                id: makeId('layer'),
+                groupId: group.id,
+                quantity: 0,
+                ...payload
+            };
+            group.layers.push(layer);
+            group.isExpanded = true;
+            takeoffState.activeGroupId = group.id;
+            setActiveTakeoffLayer(layer.id, false);
+        }
+        closeLayerModal();
+        saveTakeoffState();
+        renderTakeoffPanel();
+    }
+
+    function createTakeoffGroup() {
+        const name = prompt('Group name', 'New Group');
+        if (!name || !name.trim()) return;
+        const group = { id: makeId('grp'), name: name.trim(), isExpanded: true, isDefault: false, layers: [] };
+        takeoffState.groups.push(group);
+        takeoffState.activeGroupId = group.id;
+        saveTakeoffState();
+        renderTakeoffPanel();
+    }
+
+    function collapseAllTakeoffGroups() {
+        takeoffState.groups.forEach(group => { group.isExpanded = false; });
+        saveTakeoffState();
+        renderTakeoffPanel();
+    }
+
+    function duplicateGroup(groupId) {
+        const group = findGroup(groupId);
+        const copy = {
+            id: makeId('grp'),
+            name: `${group.name} Copy`,
+            isExpanded: true,
+            isDefault: false,
+            layers: (group.layers || []).map(layer => ({ ...layer, id: makeId('layer'), groupId: null }))
+        };
+        copy.layers.forEach(layer => { layer.groupId = copy.id; });
+        takeoffState.groups.push(copy);
+        saveTakeoffState();
+        renderTakeoffPanel();
+    }
+
+    function deleteGroup(groupId) {
+        const group = findGroup(groupId);
+        if (!group || group.isDefault) return;
+        if (group.layers.length && !confirm('Delete this group and its takeoff layers?')) return;
+        takeoffState.groups = takeoffState.groups.filter(item => item.id !== group.id);
+        if (takeoffState.activeGroupId === group.id) takeoffState.activeGroupId = 'default';
+        if (group.layers.some(layer => layer.id === takeoffState.activeLayerId)) takeoffState.activeLayerId = null;
+        saveTakeoffState();
+        renderTakeoffPanel();
+    }
+
+    function renameGroup(groupId) {
+        const group = findGroup(groupId);
+        if (!group) return;
+        const name = prompt('Rename group', group.name);
+        if (!name || !name.trim()) return;
+        group.name = group.isDefault ? 'Default Group' : name.trim();
+        saveTakeoffState();
+        renderTakeoffPanel();
+    }
+
+    function deleteLayer(layerId) {
+        const layer = findLayer(layerId);
+        if (!layer) return;
+        if (!confirm('Delete this takeoff layer?')) return;
+        const group = findGroup(layer.groupId);
+        group.layers = group.layers.filter(item => item.id !== layerId);
+        if (takeoffState.activeLayerId === layerId) takeoffState.activeLayerId = null;
+        saveTakeoffState();
+        renderTakeoffPanel();
+    }
+
+    function duplicateLayer(layerId) {
+        const layer = findLayer(layerId);
+        if (!layer) return;
+        const group = findGroup(layer.groupId);
+        const copy = { ...layer, id: makeId('layer'), name: `${layer.name} Copy`, quantity: 0 };
+        group.layers.push(copy);
+        setActiveTakeoffLayer(copy.id, false);
+        saveTakeoffState();
+        renderTakeoffPanel();
+    }
+
+    function renameLayer(layerId) {
+        const layer = findLayer(layerId);
+        if (!layer) return;
+        const name = prompt('Rename layer', layer.name);
+        if (!name || !name.trim()) return;
+        layer.name = name.trim();
+        saveTakeoffState();
+        renderTakeoffPanel();
+    }
+
+    function changeLayerColor(layerId) {
+        const layer = findLayer(layerId);
+        if (!layer) return;
+        const color = prompt('Layer color hex', layer.color);
+        if (!color) return;
+        layer.color = color.trim();
+        saveTakeoffState();
+        renderTakeoffPanel();
+    }
+
+    function moveLayerToGroup(layerId) {
+        const layer = findLayer(layerId);
+        if (!layer) return;
+        const names = takeoffState.groups.map(group => group.name).join(', ');
+        const targetName = prompt(`Move to group (${names})`, findGroup(layer.groupId).name);
+        const target = takeoffState.groups.find(group => group.name.toLowerCase() === String(targetName || '').trim().toLowerCase());
+        if (!target || target.id === layer.groupId) return;
+        findGroup(layer.groupId).layers = findGroup(layer.groupId).layers.filter(item => item.id !== layerId);
+        layer.groupId = target.id;
+        target.layers.push(layer);
+        target.isExpanded = true;
+        saveTakeoffState();
+        renderTakeoffPanel();
+    }
+
+    function setActiveTakeoffLayer(layerId, rerender = true) {
+        const layer = findLayer(layerId);
+        if (!layer) return;
+        takeoffState.activeLayerId = layer.id;
+        takeoffState.activeGroupId = layer.groupId;
+        applyLayerToCanvas(layer);
+        saveTakeoffState();
+        if (rerender) renderTakeoffPanel();
+    }
+
+    function applyLayerToCanvas(layer) {
+        const win = takeoffWindow();
+        if (!win) return;
+        win.__projectActiveTakeoffLayer = {
+            id: layer.id,
+            name: layer.name,
+            takeoff_type: layer.type.toLowerCase(),
+            type: layer.type.toLowerCase(),
+            unit_of_measure: layer.uom,
+            symbol: layer.symbol,
+            symbol_size: layer.size,
+            color: layer.color,
+            quantity: layer.quantity
+        };
+        if (layer.type === 'Linear') callEditor('setMode', 'measure');
+        if (layer.type === 'Area') callEditor('setMode', 'draw');
+        if (layer.type === 'Count') callEditor('setMode', 'smart');
+    }
+
+    function openTakeoffContextMenu(button, type, id) {
+        const menu = $('takeoffRowMenu');
+        if (!menu) return;
+        const group = type === 'group' ? findGroup(id) : null;
+        menu.innerHTML = type === 'group'
+            ? `<button type="button" data-menu-act="group-create"><i class="fas fa-plus"></i> Create New Takeoff Layer</button>
+               <button type="button" data-menu-act="group-rename"><i class="fas fa-pen"></i> Rename</button>
+               <button type="button" data-menu-act="group-copy"><i class="fas fa-copy"></i> Copy</button>
+               ${group?.isDefault ? '' : '<button type="button" class="danger" data-menu-act="group-delete"><i class="fas fa-trash"></i> Delete</button>'}`
+            : `<button type="button" data-menu-act="layer-edit"><i class="fas fa-sliders"></i> Edit Layer</button>
+               <button type="button" data-menu-act="layer-rename"><i class="fas fa-pen"></i> Rename</button>
+               <button type="button" data-menu-act="layer-duplicate"><i class="fas fa-copy"></i> Duplicate</button>
+               <button type="button" data-menu-act="layer-color"><i class="fas fa-palette"></i> Change Color</button>
+               <button type="button" data-menu-act="layer-move"><i class="fas fa-folder-tree"></i> Move to Group</button>
+               <button type="button" class="danger" data-menu-act="layer-delete"><i class="fas fa-trash"></i> Delete</button>`;
+        menu.querySelectorAll('[data-menu-act]').forEach(item => {
+            item.addEventListener('click', () => {
+                const action = item.dataset.menuAct;
+                menu.classList.remove('open');
+                if (action === 'group-create') openLayerModal(id);
+                if (action === 'group-rename') renameGroup(id);
+                if (action === 'group-copy') duplicateGroup(id);
+                if (action === 'group-delete') deleteGroup(id);
+                if (action === 'layer-edit') openLayerModal(findLayer(id)?.groupId, id);
+                if (action === 'layer-rename') renameLayer(id);
+                if (action === 'layer-duplicate') duplicateLayer(id);
+                if (action === 'layer-color') changeLayerColor(id);
+                if (action === 'layer-move') moveLayerToGroup(id);
+                if (action === 'layer-delete') deleteLayer(id);
+            });
+        });
+        toggleRowMenu(button);
+    }
+
+    function handleTakeoffAction(action) {
+        document.querySelectorAll('.pro-menu').forEach(menu => menu.classList.remove('open'));
+        if (action === 'create-group') return createTakeoffGroup();
+        if (action === 'create-layer') return openLayerModal(takeoffState.activeGroupId);
+        if (action === 'collapse-all') return collapseAllTakeoffGroups();
+        if (action === 'export-excel') return showPrepared('Excel export is ready to be connected.');
+        if (action === 'browse-catalog') return showPrepared('Catalog browser is ready to be connected.');
+        showPrepared(action);
+    }
+
     function setActiveTool(command) {
         document.querySelectorAll('[data-tool-command]').forEach(button => {
             button.classList.toggle('active', button.dataset.toolCommand === command);
@@ -273,7 +832,7 @@
         if (old) old.remove();
         const toast = document.createElement('div');
         toast.className = 'toast-lite';
-        toast.textContent = `${command.replace('-', ' ')} is ready to connect.`;
+        toast.textContent = command.includes('.') ? command : `${command.replace('-', ' ')} is ready to connect.`;
         document.body.appendChild(toast);
         setTimeout(() => toast.remove(), 2400);
     }
@@ -284,7 +843,7 @@
         const rect = button.getBoundingClientRect();
         menu.style.left = `${Math.min(rect.left, window.innerWidth - 230)}px`;
         menu.style.top = `${rect.bottom + 4}px`;
-        menu.classList.toggle('open');
+        menu.classList.add('open');
     }
 
     function editorDocument() {
@@ -304,7 +863,7 @@
         const icon = button.querySelector('i');
         const hasScale = scaleText && scaleText !== '--';
         button.classList.toggle('is-set', hasScale);
-        if (label) label.textContent = hasScale ? `Scale ${scaleText}` : 'Scale not set';
+        if (label) label.textContent = hasScale ? `Drawing Scale: ${scaleText}` : 'Drawing Scale: not defined yet';
         if (icon) icon.className = hasScale ? 'fas fa-ruler-combined' : 'fas fa-triangle-exclamation';
     }
 
@@ -711,14 +1270,12 @@
         });
 
         document.querySelectorAll('[data-takeoff-action]').forEach(button => {
-            button.addEventListener('click', () => showPrepared(button.dataset.takeoffAction));
+            button.addEventListener('click', () => handleTakeoffAction(button.dataset.takeoffAction));
         });
 
         $('takeoffItemSearch')?.addEventListener('input', event => {
-            const q = event.target.value.trim().toLowerCase();
-            document.querySelectorAll('[data-search-text]').forEach(row => {
-                row.hidden = q && !row.dataset.searchText.includes(q);
-            });
+            takeoffState.query = event.target.value.trim().toLowerCase();
+            renderTakeoffPanel();
         });
 
         document.querySelectorAll('[data-tree-toggle]').forEach(button => {
@@ -748,6 +1305,7 @@
         });
 
         $('takeoffZoomSlider')?.addEventListener('input', event => setZoom(event.target.value));
+        initTakeoffState();
         bindDrawingDropdown();
         bindScalePanel();
 
@@ -757,5 +1315,8 @@
             closeDrawingDropdown();
         });
         $('takeoffScalePanel')?.addEventListener('click', event => event.stopPropagation());
+        $('takeoffLayerModal')?.addEventListener('click', event => {
+            if (event.target.id === 'takeoffLayerModal') closeLayerModal();
+        });
     });
 })();

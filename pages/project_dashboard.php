@@ -749,72 +749,38 @@ $state = [
                 <aside class="pro-takeoff-items" id="takeoffItemsPanel">
                     <div class="pro-takeoff-panel-head">
                         <div>
-                            <h2>Takeoff Items (<?= count($takeoffLayers) ?>)</h2>
+                            <h2 id="takeoffPanelTitle">Takeoffs (0)</h2>
                         </div>
+                        <button class="pro-create-layer-btn" type="button" data-takeoff-action="create-layer"><i class="fas fa-plus"></i> Create New Takeoff Layer</button>
                         <button class="pro-icon-btn" type="button" id="toggleTakeoffItemsPanel" title="Collapse panel" aria-label="Collapse items panel">
                             <i class="fas fa-angles-left"></i>
                         </button>
                     </div>
                     <div class="pro-takeoff-searchbar">
                         <div class="pro-search-input">
-                            <input id="takeoffItemSearch" type="search" placeholder="Search items...">
+                            <input id="takeoffItemSearch" type="search" placeholder="Search Takeoffs">
                             <i class="fas fa-magnifying-glass"></i>
                         </div>
                         <div class="pro-menu-wrap">
-                            <button class="pro-icon-btn" type="button" data-takeoff-menu-toggle="takeoffItemsActions" aria-label="Items actions">
-                                <i class="fas fa-ellipsis-vertical"></i>
+                            <button class="pro-actions-btn" type="button" data-takeoff-menu-toggle="takeoffItemsActions" aria-label="Takeoff actions">
+                                Actions <i class="fas fa-chevron-down"></i>
                             </button>
                             <div class="pro-menu" id="takeoffItemsActions">
-                                <button type="button" data-takeoff-action="new-folder"><i class="fas fa-folder-plus"></i> New Folder</button>
-                                <button type="button" data-takeoff-action="new-item"><i class="fas fa-plus"></i> New Item</button>
-                                <button type="button" data-takeoff-action="new-assembly"><i class="fas fa-layer-group"></i> New Assembly</button>
-                                <button type="button" data-takeoff-action="expand-all"><i class="fas fa-up-right-and-down-left-from-center"></i> Expand All</button>
+                                <button type="button" data-takeoff-action="create-group"><i class="fas fa-folder-plus"></i> Create New Group</button>
+                                <button type="button" data-takeoff-action="create-layer"><i class="fas fa-plus"></i> Create New Layer</button>
                                 <button type="button" data-takeoff-action="collapse-all"><i class="fas fa-down-left-and-up-right-to-center"></i> Collapse All</button>
+                                <button type="button" class="excel" data-takeoff-action="export-excel"><i class="fas fa-file-excel"></i> Takeoff Quantities to Excel</button>
                             </div>
                         </div>
                     </div>
-                    <div class="pro-takeoff-tree" id="takeoffItemsTree">
-                        <?php if (empty($takeoffLayers)): ?>
-                            <div class="pro-items-empty">
-                                <strong>No takeoff items yet</strong>
-                                <span>Create items from the takeoff tools or connect estimate items later.</span>
-                                <button type="button" class="btn-main mt-2" data-takeoff-action="new-item"><i class="fas fa-plus"></i> Add item</button>
-                            </div>
-                        <?php else: ?>
-                            <div class="pro-tree-row pro-tree-folder open" data-tree-row>
-                                <button class="pro-tree-toggle" type="button" data-tree-toggle><i class="fas fa-chevron-down"></i></button>
-                                <input type="checkbox" checked>
-                                <span class="pro-tree-name"><i class="fas fa-folder-open"></i> Project Takeoff</span>
-                                <span class="pro-color-dot" style="background:#1f6fb2"></span>
-                                <span class="pro-tree-qty"><?= count($takeoffLayers) ?></span>
-                                <button class="pro-row-menu-btn" type="button" data-row-menu><i class="fas fa-ellipsis-vertical"></i></button>
-                            </div>
-                            <div class="pro-tree-children">
-                                <?php foreach ($takeoffLayers as $index => $layer): ?>
-                                    <?php
-                                        $layerName = $layer['name'] ?? $layer['title'] ?? ('Takeoff Item ' . ($index + 1));
-                                        $layerColor = $layer['color'] ?? $layer['stroke_color'] ?? '#f97316';
-                                        $layerQty = $layer['quantity'] ?? $layer['count'] ?? $layer['measurement_count'] ?? 0;
-                                    ?>
-                                    <div class="pro-tree-row pro-tree-item" data-tree-row data-search-text="<?= htmlspecialchars(strtolower((string)$layerName)) ?>">
-                                        <button class="pro-tree-toggle muted" type="button" aria-hidden="true"><i class="fas fa-minus"></i></button>
-                                        <input type="checkbox" checked>
-                                        <span class="pro-tree-name"><?= htmlspecialchars((string)$layerName) ?></span>
-                                        <span class="pro-color-dot" style="background:<?= htmlspecialchars((string)$layerColor) ?>"></span>
-                                        <span class="pro-tree-qty"><?= htmlspecialchars((string)$layerQty) ?></span>
-                                        <button class="pro-row-menu-btn" type="button" data-row-menu><i class="fas fa-ellipsis-vertical"></i></button>
-                                    </div>
-                                <?php endforeach; ?>
-                            </div>
-                        <?php endif; ?>
-                    </div>
+                    <div class="pro-takeoff-tree" id="takeoffItemsTree"></div>
                     <div class="pro-takeoff-footer">
                         <div>
-                            <span>Estimate Total</span>
-                            <strong><?= money_fmt($estimateTotal) ?></strong>
-                            <small><i class="fas fa-circle-check"></i> Synced</small>
+                            <span>Active Layer</span>
+                            <strong id="takeoffActiveLayerLabel">None</strong>
+                            <small><i class="fas fa-circle-check"></i> Ready for estimating</small>
                         </div>
-                        <button class="pro-add-btn" type="button" data-takeoff-action="new-item" aria-label="Add takeoff item"><i class="fas fa-plus"></i></button>
+                        <button class="pro-add-btn" type="button" data-takeoff-action="create-layer" aria-label="Add takeoff layer"><i class="fas fa-plus"></i></button>
                     </div>
                 </aside>
 
@@ -860,6 +826,7 @@ $state = [
                             </div>
                         </div>
                         <div class="pro-toolbar-group center">
+                            <button type="button" class="pro-create-layer-btn" data-takeoff-action="create-layer"><i class="fas fa-plus"></i> Create New Takeoff Layer</button>
                             <button type="button" class="pro-toolbar-btn" data-viewer-command="compare"><i class="fas fa-code-compare"></i> Compare</button>
                             <button type="button" class="pro-toolbar-btn" data-viewer-command="popout"><i class="fas fa-up-right-from-square"></i> Pop out</button>
                             <button type="button" class="pro-toolbar-btn" data-viewer-command="download"><i class="fas fa-download"></i> Download</button>
@@ -867,7 +834,7 @@ $state = [
                         <div class="pro-scale-wrap">
                             <button class="pro-scale-status" id="takeoffScaleStatus" type="button" data-scale-toggle aria-expanded="false">
                                 <i class="fas fa-triangle-exclamation"></i>
-                                <span>Scale not set</span>
+                                <span>Drawing Scale: not defined yet</span>
                             </button>
                             <div class="pro-scale-panel" id="takeoffScalePanel" aria-label="Takeoff scale calibration">
                                 <div class="pro-scale-panel-head">

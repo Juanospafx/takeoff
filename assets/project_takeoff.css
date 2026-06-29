@@ -24,7 +24,8 @@
 .pro-takeoff-workspace.items-collapsed .pro-takeoff-searchbar,
 .pro-takeoff-workspace.items-collapsed .pro-takeoff-tree,
 .pro-takeoff-workspace.items-collapsed .pro-takeoff-footer div,
-.pro-takeoff-workspace.items-collapsed .pro-takeoff-panel-head h2 {
+.pro-takeoff-workspace.items-collapsed .pro-takeoff-panel-head h2,
+.pro-takeoff-workspace.items-collapsed .pro-takeoff-panel-head .pro-create-layer-btn {
     display: none;
 }
 
@@ -55,6 +56,38 @@
     margin: 0;
     font-size: .96rem;
     font-weight: 900;
+}
+
+.pro-create-layer-btn,
+.pro-actions-btn {
+    border: 1px solid #ea8a2f;
+    background: #f97316;
+    color: #fff;
+    border-radius: 6px;
+    min-height: 34px;
+    padding: 0 11px;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 7px;
+    font-weight: 900;
+    cursor: pointer;
+    white-space: nowrap;
+}
+
+.pro-create-layer-btn:hover,
+.pro-actions-btn:hover {
+    background: #ea580c;
+    color: #fff;
+}
+
+.pro-create-layer-btn:disabled {
+    opacity: .45;
+    cursor: not-allowed;
+}
+
+.pro-takeoff-panel-head .pro-create-layer-btn {
+    margin-left: auto;
 }
 
 .pro-icon-btn,
@@ -157,6 +190,10 @@
     background: #f8fafc;
 }
 
+.pro-menu button.excel {
+    color: #147449;
+}
+
 .pro-row-menu button.danger {
     color: #b42318;
 }
@@ -175,6 +212,14 @@
     min-height: 38px;
     padding: 4px 8px 4px 10px;
     border-left: 3px solid transparent;
+}
+
+.pro-tree-folder {
+    grid-template-columns: 26px 22px minmax(0, 1fr) 38px 28px;
+}
+
+.pro-tree-item {
+    grid-template-columns: 22px 24px minmax(0, 1fr) 62px 28px;
 }
 
 .pro-tree-row:hover {
@@ -211,6 +256,15 @@
     height: 10px;
     border-radius: 999px;
     box-shadow: inset 0 0 0 1px rgba(0,0,0,.12);
+}
+
+.pro-layer-symbol {
+    width: 20px;
+    height: 20px;
+    display: inline-grid;
+    place-items: center;
+    font-size: .95rem;
+    font-weight: 900;
 }
 
 .pro-tree-qty {
@@ -264,6 +318,113 @@
     border-color: #d8dee6;
     background: #fff;
     color: #1f6fb2;
+}
+
+.pro-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    z-index: 2500;
+    display: grid;
+    place-items: center;
+    background: rgba(15, 23, 42, .46);
+    padding: 20px;
+}
+
+.pro-modal-backdrop[hidden] {
+    display: none;
+}
+
+.pro-layer-modal {
+    width: min(640px, 100%);
+    background: #fff;
+    color: #18212f;
+    border: 1px solid #d8dee6;
+    border-radius: 8px;
+    box-shadow: 0 24px 70px rgba(15, 23, 42, .28);
+}
+
+.pro-layer-modal-head,
+.pro-layer-modal-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+    border-bottom: 1px solid #e7ebf0;
+}
+
+.pro-layer-modal-head h3 {
+    margin: 0;
+    font-size: 1.05rem;
+    font-weight: 900;
+}
+
+.pro-layer-form {
+    padding: 16px;
+    display: grid;
+    gap: 14px;
+}
+
+.pro-field {
+    display: grid;
+    gap: 6px;
+}
+
+.pro-field label {
+    color: #526173;
+    font-size: .78rem;
+    font-weight: 900;
+}
+
+.pro-field input,
+.pro-field select {
+    width: 100%;
+    min-height: 38px;
+    border: 1px solid #cfd7e2;
+    border-radius: 6px;
+    background: #fff;
+    color: #18212f;
+    padding: 8px 10px;
+    font: inherit;
+}
+
+.pro-field p {
+    margin: 0;
+    color: #657386;
+    font-size: .8rem;
+    line-height: 1.4;
+}
+
+.pro-input-action {
+    display: grid;
+    grid-template-columns: minmax(0, 1fr) auto;
+    gap: 8px;
+}
+
+.pro-layer-field-grid {
+    display: grid;
+    grid-template-columns: repeat(4, minmax(0, 1fr));
+    gap: 10px;
+}
+
+.pro-color-select {
+    display: grid;
+    grid-template-columns: 28px minmax(0, 1fr);
+    align-items: center;
+    gap: 8px;
+}
+
+.pro-color-select span {
+    width: 22px;
+    height: 22px;
+    border-radius: 999px;
+    box-shadow: inset 0 0 0 1px rgba(0,0,0,.18);
+}
+
+.pro-layer-modal-actions {
+    justify-content: flex-end;
+    border-bottom: 0;
+    border-top: 1px solid #e7ebf0;
 }
 
 .pro-takeoff-viewer {
@@ -794,6 +955,18 @@
         height: auto;
         padding: 8px;
         flex-wrap: wrap;
+    }
+
+    .pro-layer-field-grid,
+    .pro-input-action {
+        grid-template-columns: 1fr;
+    }
+
+    .pro-takeoff-panel-head .pro-create-layer-btn,
+    .pro-toolbar-group.center .pro-create-layer-btn {
+        font-size: .78rem;
+        min-height: 32px;
+        padding: 0 8px;
     }
 
     .pro-drawing-selector {
