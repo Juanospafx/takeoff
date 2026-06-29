@@ -60,7 +60,7 @@ if (!$project && $isDraftProject) {
         'project_number' => '',
         'name' => 'New Project',
         'description' => '',
-        'status' => 'draft',
+        'status' => 'to_do',
         'client_name' => '',
         'job_address' => '',
         'city' => '',
@@ -482,15 +482,24 @@ $state = [
 <div class="workspace-shell">
     <header class="project-header">
         <div class="project-title-block">
-            <h1 id="projectHeaderName"><?= htmlspecialchars($project['name']) ?></h1>
+            <div class="project-title-row">
+                <h1 id="projectHeaderName"><?= htmlspecialchars($project['name']) ?></h1>
+                <div class="project-status-wrap">
+                    <button class="project-status-badge" id="projectStatusButton" type="button" data-status="<?= htmlspecialchars($project['status'] ?? 'to_do') ?>">
+                        <span id="projectStatusLabel"><?= htmlspecialchars(strtoupper(str_replace('_', ' ', $project['status'] ?? 'to_do'))) ?></span>
+                        <i class="fas fa-chevron-down"></i>
+                    </button>
+                    <div class="project-status-menu" id="projectStatusMenu"></div>
+                </div>
+            </div>
             <p><?= $isDraftProject ? 'Unsaved draft' : htmlspecialchars(($project['status'] ?? 'draft') . ' project workspace') ?></p>
         </div>
         <div class="project-header-actions">
             <div class="dropdown-wrap">
                 <button class="btn-main orange" type="button" data-menu-toggle="uploadMenu"><i class="fas fa-upload"></i> Upload</button>
                 <div class="project-menu" id="uploadMenu">
-                    <button type="button" data-action-tab="documents"><i class="fas fa-file-pdf"></i> Upload Drawings</button>
-                    <button type="button" data-action-tab="documents"><i class="fas fa-paperclip"></i> Upload Attachments</button>
+                    <button type="button" data-upload-category="Drawings"><i class="fas fa-file-pdf"></i> Upload Drawings</button>
+                    <button type="button" data-upload-category="Attachments"><i class="fas fa-paperclip"></i> Upload Attachments</button>
                 </div>
             </div>
             <button class="btn-main" type="button" id="saveProjectBtn"><i class="fas fa-floppy-disk"></i> Save Project</button>
@@ -657,7 +666,7 @@ $state = [
                         <button class="folder-item" data-folder="<?= (int)$folder['id'] ?>"><i class="fas fa-folder text-warning"></i> <?= htmlspecialchars($folder['name']) ?></button>
                     <?php endforeach; ?>
                     <div class="quick-actions mt-3">
-                        <button class="btn-main" onclick="openUploadModal()"><i class="fas fa-upload"></i> Upload</button>
+                        <button class="btn-main" type="button" id="documentsSidebarUploadBtn"><i class="fas fa-upload"></i> Upload</button>
                         <button class="btn-ghost" onclick="openNewFolderModal()"><i class="fas fa-folder-plus"></i> Create Folder</button>
                     </div>
                 </aside>
@@ -694,7 +703,35 @@ $state = [
                             <button id="openTakeoffBtn" class="btn-main"><i class="fas fa-ruler-combined"></i> Open in Takeoff</button>
                         </div>
                     </div>
-                    <div style="height: calc(100% - 55px); min-height: 500px;">
+                    <div class="documents-dropzone" id="documentsDropzone">
+                        <div>
+                            <strong>Drag and drop files here</strong>
+                            <span>Upload drawings, attachments, specifications, or addenda for this project.</span>
+                        </div>
+                        <button class="btn-outline-dark" type="button" id="browseDocumentsBtn"><i class="fas fa-folder-open"></i> Browse files</button>
+                    </div>
+                    <div class="documents-local-list" id="documentsLocalList">
+                        <div class="documents-empty" id="documentsEmptyState">
+                            <strong>No documents uploaded yet</strong>
+                            <span>Drag and drop files here or use the Upload button to add drawings and attachments.</span>
+                        </div>
+                        <div class="documents-table-wrap" id="documentsTableWrap" hidden>
+                            <table class="documents-table">
+                                <thead>
+                                    <tr>
+                                        <th>Name</th>
+                                        <th>Category</th>
+                                        <th>Size</th>
+                                        <th>Uploaded</th>
+                                        <th>User</th>
+                                        <th>Actions</th>
+                                    </tr>
+                                </thead>
+                                <tbody id="documentsLocalBody"></tbody>
+                            </table>
+                        </div>
+                    </div>
+                    <div style="height: calc(100% - 260px); min-height: 360px;">
                         <?php if ($selectedDoc && !empty($selectedDoc['path'])): ?>
                             <iframe id="documentPreviewFrame" class="preview-frame" src="<?= htmlspecialchars($selectedDoc['path']) ?>"></iframe>
                         <?php else: ?>
@@ -805,6 +842,7 @@ $state = [
 </div>
 
 <input type="file" id="projectUploadInput" class="d-none">
+<input type="file" id="documentsBrowseInput" class="d-none" multiple>
 
 <script>
     window.ProjectState = <?= json_encode($state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;

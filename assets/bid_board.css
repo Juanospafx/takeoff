@@ -515,11 +515,13 @@ textarea {
     white-space: nowrap;
 }
 
-.bb-status-draft { color: #475569; background: #f1f5f9; border-color: #d7dee8; }
-.bb-status-invited { color: #1d4f91; background: #eaf2ff; border-color: #c8dcf5; }
-.bb-status-bidding { color: #7a4b00; background: #fff7df; border-color: #f1dfad; }
-.bb-status-submitted { color: #5b3f99; background: #f2edff; border-color: #ded2fa; }
-.bb-status-awarded { color: #176341; background: #e9f7ef; border-color: #c9ead8; }
+.bb-status-to-do { color: #1d4f91; background: #eaf2ff; border-color: #c8dcf5; }
+.bb-status-estimating { color: #7a4b00; background: #fff7df; border-color: #f1dfad; }
+.bb-status-bid-submitted { color: #9a4b0d; background: #fff2e4; border-color: #fed7aa; }
+.bb-status-accepted { color: #176341; background: #e9f7ef; border-color: #c9ead8; }
+.bb-status-in-progress { color: #2f6b3f; background: #effaf1; border-color: #d2efd8; }
+.bb-status-complete { color: #0f6b48; background: #e4f6ed; border-color: #bfe6d2; }
+.bb-status-estimators { color: #1d4f91; background: #e9f0ff; border-color: #c9d9f5; }
 .bb-status-lost { color: #9f1d1d; background: #fff0ef; border-color: #f0cecb; }
 
 .bb-row-actions {

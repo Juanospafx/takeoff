@@ -1,20 +1,27 @@
 (function () {
     const projectApiUrl = '../api/project_module.php';
-    const pipelineStatuses = ['Draft', 'Invited', 'Bidding', 'Submitted', 'Awarded', 'Lost'];
+    const pipelineStatuses = ['TO DO', 'ESTIMATING', 'BID SUBMITTED', 'ACCEPTED', 'IN PROGRESS', 'COMPLETE', 'ESTIMATORS', 'LOST'];
     const statusAliases = {
-        draft: 'Draft',
-        active: 'Bidding',
-        invited: 'Invited',
-        bidding: 'Bidding',
-        submitted: 'Submitted',
-        awarded: 'Awarded',
-        accepted: 'Awarded',
-        lost: 'Lost',
-        archived: 'Lost'
+        draft: 'TO DO',
+        to_do: 'TO DO',
+        active: 'ESTIMATING',
+        invited: 'TO DO',
+        bidding: 'ESTIMATING',
+        estimating: 'ESTIMATING',
+        submitted: 'BID SUBMITTED',
+        bid_submitted: 'BID SUBMITTED',
+        awarded: 'ACCEPTED',
+        accepted: 'ACCEPTED',
+        in_progress: 'IN PROGRESS',
+        complete: 'COMPLETE',
+        estimators: 'ESTIMATORS',
+        estimadores: 'ESTIMATORS',
+        lost: 'LOST',
+        archived: 'LOST'
     };
 
     let state = { templates: [], projects: [] };
-    let activeStatus = 'Draft';
+    let activeStatus = 'TO DO';
     let sortDirection = 'asc';
 
     const money = (value) => new Intl.NumberFormat('en-US', {
@@ -55,7 +62,7 @@
         return `Overdue by ${Math.abs(days)} day${days === -1 ? '' : 's'}`;
     };
 
-    const statusSlug = (status) => String(status || 'Draft').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const statusSlug = (status) => String(status || 'TO DO').toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
     function load() {
         return fetch(`${projectApiUrl}?action=list`)
@@ -70,7 +77,7 @@
 
     function canonicalStatus(project) {
         const status = String(project?.status || 'draft').toLowerCase();
-        return statusAliases[status] || 'Draft';
+        return statusAliases[status] || 'TO DO';
     }
 
     function normalizedProjects() {
@@ -253,6 +260,7 @@
             project_template_id: templateId,
             template_name: template?.name || '',
             name: 'New Project',
+            status: 'to_do',
             estimator: 'Juan Estevez',
             measurement_system: 'US',
             estimate_pricing: 'Unlocked',

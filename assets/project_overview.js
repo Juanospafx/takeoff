@@ -1,10 +1,28 @@
 (function () {
     const apiUrl = '../api/project_module.php';
+    const PROJECT_STATUSES = ['TO DO', 'ESTIMATING', 'BID SUBMITTED', 'ACCEPTED', 'IN PROGRESS', 'COMPLETE', 'ESTIMATORS', 'LOST'];
+    const STATUS_VALUES = {
+        'TO DO': 'to_do',
+        'ESTIMATING': 'estimating',
+        'BID SUBMITTED': 'bid_submitted',
+        'ACCEPTED': 'accepted',
+        'IN PROGRESS': 'in_progress',
+        'COMPLETE': 'complete',
+        'ESTIMATORS': 'estimators',
+        'LOST': 'lost'
+    };
+    const STATUS_LABELS = Object.fromEntries(Object.entries(STATUS_VALUES).map(([label, value]) => [value, label]));
+
     let isDirty = false;
     let notes = Array.isArray(window.ProjectState?.projectMeta?.notes) ? [...window.ProjectState.projectMeta.notes] : [];
     let tasks = Array.isArray(window.ProjectState?.projectMeta?.tasks) ? [...window.ProjectState.projectMeta.tasks] : [];
+    let currentStatus = normalizeStatus(window.ProjectState?.projectInfo?.status || 'to_do');
+    let uploadCategory = null;
+    let localDocuments = loadLocalDocuments();
+    const sessionFiles = new Map();
 
     const $ = (id) => document.getElementById(id);
+    const slug = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
     function markDirty() {
         isDirty = true;
@@ -44,7 +62,7 @@
             project_template_id: window.ProjectState?.projectInfo?.project_template_id || '',
             name: $('poEstimateName')?.value.trim() || 'New Project',
             description: $('poProjectDescription')?.value || '',
-            status: window.ProjectState?.projectInfo?.status || 'draft',
+            status: currentStatus,
             project_number: $('poProjectNumber')?.value || '',
             client_name: $('poCustomerCompany')?.value || '',
             job_address: $('poProjectAddress')?.value || $('poCustomerAddress')?.value || '',
@@ -66,12 +84,72 @@
                 localStorage.removeItem('takeoff.projectDraft');
                 showToast('Project saved.');
                 if (Number(window.ProjectState?.projectId || 0) === 0) {
+                    migrateDraftDocuments(data.id);
                     window.location.href = `project_dashboard.php?id=${encodeURIComponent(data.id)}&tab=overview`;
                 } else {
                     window.ProjectState.projectId = data.id;
                     window.ProjectState.projectInfo = data.data?.project || window.ProjectState.projectInfo;
                     $('projectHeaderName').textContent = payload.name;
                 }
+            })
+            .catch(err => showToast(err.message));
+    }
+
+    function normalizeStatus(value) {
+        const raw = String(value || 'to_do').trim();
+        const lower = raw.toLowerCase().replace(/[\s-]+/g, '_');
+        if (STATUS_LABELS[lower]) return lower;
+        const upper = raw.toUpperCase().replace(/[_-]+/g, ' ');
+        return STATUS_VALUES[upper] || 'to_do';
+    }
+
+    function statusLabel(value = currentStatus) {
+        return STATUS_LABELS[normalizeStatus(value)] || 'TO DO';
+    }
+
+    function renderStatusDropdown() {
+        const button = $('projectStatusButton');
+        const label = $('projectStatusLabel');
+        const menu = $('projectStatusMenu');
+        if (!button || !label || !menu) return;
+
+        const activeLabel = statusLabel();
+        button.className = `project-status-badge status-${slug(activeLabel)}`;
+        button.dataset.status = currentStatus;
+        label.textContent = activeLabel;
+        menu.innerHTML = PROJECT_STATUSES.map(status => `
+            <button class="project-status-option" type="button" data-project-status="${STATUS_VALUES[status]}">
+                <span class="status-pill status-${slug(status)}">${status}</span>
+            </button>
+        `).join('');
+
+        menu.querySelectorAll('[data-project-status]').forEach(option => {
+            option.addEventListener('click', event => {
+                event.stopPropagation();
+                changeProjectStatus(option.dataset.projectStatus);
+            });
+        });
+    }
+
+    function changeProjectStatus(status) {
+        currentStatus = normalizeStatus(status);
+        if (window.ProjectState?.projectInfo) {
+            window.ProjectState.projectInfo.status = currentStatus;
+        }
+        renderStatusDropdown();
+        $('projectStatusMenu')?.classList.remove('open');
+
+        if (Number(window.ProjectState?.projectId || 0) === 0) {
+            markDirty();
+            showToast(`Status set to ${statusLabel()}. Press Save Project to persist it.`);
+            return;
+        }
+
+        request('save', collectProjectPayload())
+            .then(data => {
+                isDirty = false;
+                window.ProjectState.projectInfo = data.data?.project || window.ProjectState.projectInfo;
+                showToast(`Project moved to ${statusLabel()}.`);
             })
             .catch(err => showToast(err.message));
     }
@@ -124,7 +202,169 @@
         setTimeout(() => toast.remove(), 3200);
     }
 
+    function documentsStorageKey() {
+        const id = Number(window.ProjectState?.projectId || 0);
+        return `takeoff.projectDocuments.${id || 'draft'}`;
+    }
+
+    function migrateDraftDocuments(projectId) {
+        const draftKey = 'takeoff.projectDocuments.draft';
+        const projectKey = `takeoff.projectDocuments.${projectId}`;
+        const draftDocs = localStorage.getItem(draftKey);
+        if (!draftDocs) return;
+        localStorage.setItem(projectKey, draftDocs);
+        localStorage.removeItem(draftKey);
+    }
+
+    function loadLocalDocuments() {
+        try {
+            const rows = JSON.parse(localStorage.getItem(documentsStorageKey()) || '[]');
+            return Array.isArray(rows) ? rows : [];
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function persistLocalDocuments() {
+        localStorage.setItem(documentsStorageKey(), JSON.stringify(localDocuments));
+    }
+
+    function inferCategory(file, forcedCategory = null) {
+        if (forcedCategory) return forcedCategory;
+        const ext = String(file.name.split('.').pop() || '').toLowerCase();
+        return ['pdf', 'dwg', 'dxf'].includes(ext) ? 'Drawings' : 'Attachments';
+    }
+
+    function formatBytes(bytes) {
+        const value = Number(bytes || 0);
+        if (value < 1024) return `${value} B`;
+        if (value < 1024 * 1024) return `${(value / 1024).toFixed(1)} KB`;
+        return `${(value / 1024 / 1024).toFixed(1)} MB`;
+    }
+
+    function addFiles(files, category = null) {
+        const incoming = Array.from(files || []);
+        if (!incoming.length) return;
+        const now = new Date().toLocaleString();
+        incoming.forEach(file => {
+            const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+            sessionFiles.set(id, file);
+            localDocuments.push({
+                id,
+                name: file.name,
+                category: inferCategory(file, category),
+                size: file.size,
+                uploadedAt: now,
+                uploadedBy: $('poEstimator')?.value || 'Juan Estevez',
+                type: file.type || '',
+                source: 'local'
+            });
+        });
+        persistLocalDocuments();
+        renderLocalDocuments();
+        showToast(`${incoming.length} file${incoming.length === 1 ? '' : 's'} added locally.`);
+    }
+
+    function existingDocumentRows() {
+        return (window.ProjectState?.documents || []).map(doc => ({
+            id: `existing-${doc.source}-${doc.id}`,
+            name: doc.filename || doc.title || 'Document',
+            category: inferCategory({ name: doc.filename || '' }, null),
+            size: '',
+            uploadedAt: doc.uploaded_at || '',
+            uploadedBy: 'System',
+            path: doc.path || '',
+            source: 'existing'
+        }));
+    }
+
+    function renderLocalDocuments() {
+        const body = $('documentsLocalBody');
+        const empty = $('documentsEmptyState');
+        const table = $('documentsTableWrap');
+        if (!body || !empty || !table) return;
+        const allDocuments = [...existingDocumentRows(), ...localDocuments];
+        empty.hidden = allDocuments.length > 0;
+        table.hidden = allDocuments.length === 0;
+        body.innerHTML = allDocuments.map(doc => `
+            <tr>
+                <td><strong>${escapeHtml(doc.name)}</strong></td>
+                <td><span class="doc-category-pill">${escapeHtml(doc.category)}</span></td>
+                <td>${doc.size === '' ? '-' : formatBytes(doc.size)}</td>
+                <td>${escapeHtml(doc.uploadedAt)}</td>
+                <td>${escapeHtml(doc.uploadedBy)}</td>
+                <td>
+                    <div class="doc-row-actions">
+                        <button type="button" data-doc-action="view" data-doc-id="${escapeHtml(doc.id)}">View</button>
+                        <button type="button" data-doc-action="download" data-doc-id="${escapeHtml(doc.id)}">Download</button>
+                        <button type="button" data-doc-action="delete" data-doc-id="${escapeHtml(doc.id)}">Delete</button>
+                    </div>
+                </td>
+            </tr>
+        `).join('');
+
+        body.querySelectorAll('[data-doc-action]').forEach(button => {
+            button.addEventListener('click', () => handleDocumentAction(button.dataset.docAction, button.dataset.docId));
+        });
+    }
+
+    function handleDocumentAction(action, id) {
+        const doc = [...existingDocumentRows(), ...localDocuments].find(row => row.id === id);
+        if (!doc) return;
+        if (doc.source === 'existing') {
+            if ((action === 'view' || action === 'download') && doc.path) {
+                const link = document.createElement('a');
+                link.href = doc.path;
+                if (action === 'download') link.download = doc.name;
+                link.target = '_blank';
+                link.click();
+                return;
+            }
+            showToast('This document action is ready for the backend document API.');
+            return;
+        }
+        if (action === 'delete') {
+            localDocuments = localDocuments.filter(row => row.id !== id);
+            sessionFiles.delete(id);
+            persistLocalDocuments();
+            renderLocalDocuments();
+            return;
+        }
+        if (action === 'view' || action === 'download') {
+            const file = sessionFiles.get(id);
+            if (!file) {
+                showToast('This local file metadata is stored. Re-select the file to view or download before backend storage is connected.');
+                return;
+            }
+            const url = URL.createObjectURL(file);
+            const link = document.createElement('a');
+            link.href = url;
+            if (action === 'download') link.download = doc.name;
+            link.target = '_blank';
+            link.click();
+            setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+    }
+
+    function escapeHtml(value) {
+        return String(value ?? '').replace(/[&<>"']/g, ch => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        }[ch]));
+    }
+
+    function openDocumentPicker(category = null) {
+        uploadCategory = category;
+        $('documentsBrowseInput')?.click();
+    }
+
     document.addEventListener('DOMContentLoaded', () => {
+        renderStatusDropdown();
+        renderLocalDocuments();
+
         document.querySelectorAll('[data-menu-toggle]').forEach(button => {
             button.addEventListener('click', event => {
                 event.stopPropagation();
@@ -133,6 +373,12 @@
         });
         document.addEventListener('click', () => {
             document.querySelectorAll('.project-menu').forEach(menu => menu.classList.remove('open'));
+            $('projectStatusMenu')?.classList.remove('open');
+        });
+
+        $('projectStatusButton')?.addEventListener('click', event => {
+            event.stopPropagation();
+            $('projectStatusMenu')?.classList.toggle('open');
         });
 
         $('saveProjectBtn')?.addEventListener('click', saveProject);
@@ -140,6 +386,40 @@
         $('addProjectAddressBtn')?.addEventListener('click', showCustomerFields);
         $('addNoteBtn')?.addEventListener('click', addNote);
         $('createTaskBtn')?.addEventListener('click', createTask);
+
+        document.querySelectorAll('[data-upload-category]').forEach(button => {
+            button.addEventListener('click', event => {
+                event.stopPropagation();
+                document.querySelectorAll('.project-menu').forEach(menu => menu.classList.remove('open'));
+                if (typeof window.setActiveTab === 'function') window.setActiveTab('documents');
+                openDocumentPicker(button.dataset.uploadCategory);
+            });
+        });
+
+        $('browseDocumentsBtn')?.addEventListener('click', () => openDocumentPicker(null));
+        $('documentsSidebarUploadBtn')?.addEventListener('click', () => openDocumentPicker(null));
+        $('documentsBrowseInput')?.addEventListener('change', function () {
+            addFiles(this.files, uploadCategory);
+            this.value = '';
+            uploadCategory = null;
+        });
+
+        const dropzone = $('documentsDropzone');
+        if (dropzone) {
+            ['dragenter', 'dragover'].forEach(eventName => {
+                dropzone.addEventListener(eventName, event => {
+                    event.preventDefault();
+                    dropzone.classList.add('is-dragover');
+                });
+            });
+            ['dragleave', 'drop'].forEach(eventName => {
+                dropzone.addEventListener(eventName, event => {
+                    event.preventDefault();
+                    dropzone.classList.remove('is-dragover');
+                });
+            });
+            dropzone.addEventListener('drop', event => addFiles(event.dataTransfer?.files, null));
+        }
 
         document.querySelectorAll('.overview-field input, .overview-field select, .overview-field textarea').forEach(input => {
             input.addEventListener('input', markDirty);

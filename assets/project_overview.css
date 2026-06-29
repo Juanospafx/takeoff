@@ -27,6 +27,13 @@ body {
     min-width: 0;
 }
 
+.project-title-row {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    flex-wrap: wrap;
+}
+
 .project-header h1 {
     color: var(--text);
 }
@@ -188,6 +195,69 @@ th {
     color: #b42318;
 }
 
+.project-status-wrap {
+    position: relative;
+}
+
+.project-status-badge,
+.status-pill {
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    border-radius: 999px;
+    border: 1px solid transparent;
+    padding: 5px 10px;
+    font-size: .75rem;
+    font-weight: 900;
+    line-height: 1;
+    white-space: nowrap;
+}
+
+.project-status-badge {
+    cursor: pointer;
+}
+
+.project-status-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    left: 0;
+    z-index: 1500;
+    display: none;
+    width: 220px;
+    background: #fff;
+    border: 1px solid var(--line);
+    border-radius: 8px;
+    box-shadow: 0 18px 48px rgba(15, 23, 42, .16);
+    padding: 8px;
+}
+
+.project-status-menu.open {
+    display: grid;
+    gap: 6px;
+}
+
+.project-status-option {
+    border: 0;
+    background: transparent;
+    text-align: left;
+    padding: 3px;
+    border-radius: 7px;
+    cursor: pointer;
+}
+
+.project-status-option:hover {
+    background: #f8fafc;
+}
+
+.status-to-do { color: #1d4f91; background: #eaf2ff; border-color: #c8dcf5; }
+.status-estimating { color: #7a4b00; background: #fff7df; border-color: #f1dfad; }
+.status-bid-submitted { color: #9a4b0d; background: #fff2e4; border-color: #fed7aa; }
+.status-accepted { color: #176341; background: #e9f7ef; border-color: #c9ead8; }
+.status-in-progress { color: #2f6b3f; background: #effaf1; border-color: #d2efd8; }
+.status-complete { color: #0f6b48; background: #e4f6ed; border-color: #bfe6d2; }
+.status-estimators { color: #1d4f91; background: #e9f0ff; border-color: #c9d9f5; }
+.status-lost { color: #9f1d1d; background: #fff0ef; border-color: #f0cecb; }
+
 .project-overview-layout {
     display: grid;
     grid-template-columns: minmax(0, 1.35fr) minmax(320px, .85fr);
@@ -310,6 +380,109 @@ th {
 
 .overview-list-item p {
     margin: 8px 0 0;
+}
+
+.documents-dropzone {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 14px;
+    border: 1px dashed #b7c2d1;
+    border-radius: 8px;
+    background: #fbfdff;
+    padding: 16px;
+    margin-bottom: 12px;
+}
+
+.documents-dropzone strong,
+.documents-dropzone span {
+    display: block;
+}
+
+.documents-dropzone span {
+    color: var(--muted);
+    margin-top: 3px;
+    font-size: .9rem;
+}
+
+.documents-dropzone.is-dragover {
+    border-color: var(--accent);
+    background: #fff7ed;
+}
+
+.documents-local-list {
+    margin-bottom: 12px;
+}
+
+.documents-empty {
+    display: grid;
+    gap: 3px;
+    color: var(--muted);
+    border: 1px solid #e7ebf0;
+    background: #fff;
+    border-radius: 8px;
+    padding: 12px;
+}
+
+.documents-empty strong {
+    color: var(--text);
+}
+
+.documents-empty[hidden],
+.documents-table-wrap[hidden] {
+    display: none;
+}
+
+.documents-table-wrap {
+    overflow-x: auto;
+    border: 1px solid #e7ebf0;
+    border-radius: 8px;
+}
+
+.documents-table {
+    width: 100%;
+    min-width: 760px;
+    border-collapse: collapse;
+}
+
+.documents-table th,
+.documents-table td {
+    padding: 10px 12px;
+    border-bottom: 1px solid #e7ebf0;
+    text-align: left;
+}
+
+.documents-table th {
+    color: #526173;
+    background: #f6f8fa;
+    font-size: .72rem;
+    text-transform: uppercase;
+}
+
+.doc-category-pill {
+    display: inline-flex;
+    border-radius: 999px;
+    padding: 4px 9px;
+    font-size: .74rem;
+    font-weight: 900;
+    color: #1d4f91;
+    background: #eaf2ff;
+    border: 1px solid #c8dcf5;
+}
+
+.doc-row-actions {
+    display: flex;
+    gap: 6px;
+}
+
+.doc-row-actions button {
+    border: 1px solid var(--line);
+    background: #fff;
+    color: var(--text);
+    border-radius: 6px;
+    min-height: 30px;
+    padding: 0 8px;
+    font-weight: 800;
 }
 
 .toast-lite {
