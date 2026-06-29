@@ -2,11 +2,12 @@
 require_once __DIR__ . '/company_tools_data.php';
 $companyToolsCategories = company_tools_existing_categories();
 $favoriteTools = company_tools_favorites();
+$bidBoardPath = company_tools_bid_board_path();
 $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
 ?>
 <header class="bt-global-header" data-global-tools-header>
     <div class="bt-global-left">
-        <a class="bt-brand" href="/pages/index.php" aria-label="Brightronix home">
+        <a class="bt-brand" href="<?= htmlspecialchars($bidBoardPath) ?>" aria-label="Open Bid Board">
             <span class="bt-brand-mark">B</span>
             <span>Brightronix</span>
         </a>

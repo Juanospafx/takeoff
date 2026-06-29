@@ -9,31 +9,12 @@
     <title>Bid Board | Brightronix</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="../assets/global_tools.css">
     <link rel="stylesheet" href="../assets/bid_board.css">
 </head>
 <body>
+<?php include __DIR__ . '/../views/global_tools_header.php'; ?>
 <div class="bid-board-shell">
-    <header class="bb-global-header">
-        <div class="bb-global-left">
-            <a class="bb-logo" href="/pages/index.php" aria-label="Brightronix home">
-                <span class="bb-logo-mark">B</span>
-                <span class="bb-logo-text">Brightronix</span>
-            </a>
-            <button class="bb-context-btn" type="button"><span>Brightronix Electric</span><i class="fas fa-chevron-down"></i></button>
-            <button class="bb-context-btn" type="button"><span>Preconstruction</span><i class="fas fa-chevron-down"></i></button>
-        </div>
-        <nav class="bb-global-center" aria-label="Workspace shortcuts">
-            <a href="/pages/bid_board.php" class="active">Favorites</a>
-            <a href="/pages/project_module.php">Recent</a>
-            <a href="/pages/takeoff.php">Pinned</a>
-        </nav>
-        <div class="bb-global-right">
-            <button class="bb-icon-btn" type="button" title="Help" aria-label="Help"><i class="far fa-circle-question"></i></button>
-            <button class="bb-icon-btn" type="button" title="Notifications" aria-label="Notifications"><i class="far fa-bell"></i></button>
-            <div class="bb-user-avatar" title="Juan Pablo">JP</div>
-        </div>
-    </header>
-
     <main class="bid-board-main">
         <section class="bb-page-head">
             <div class="bb-title-wrap">
@@ -144,6 +125,7 @@
     </div>
 </div>
 
+<script src="../assets/global_tools.js"></script>
 <script src="../assets/bid_board.js"></script>
 </body>
 </html>

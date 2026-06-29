@@ -1,7 +1,15 @@
 <?php
+if (!function_exists('company_tools_bid_board_path')) {
+    function company_tools_bid_board_path(): string
+    {
+        return '/pages/bid_board.php';
+    }
+}
+
 if (!function_exists('company_tools_categories')) {
     function company_tools_categories(): array
     {
+        $bidBoardPath = company_tools_bid_board_path();
         return [
             [
                 'title' => 'Core Tools',
@@ -28,7 +36,7 @@ if (!function_exists('company_tools_categories')) {
                 'title' => 'Preconstruction',
                 'links' => [
                     ['label' => 'Cost Catalog', 'path' => '/pages/cost_catalog.php', 'icon' => 'fas fa-book'],
-                    ['label' => 'Bid Board', 'path' => '/pages/bid_board.php', 'icon' => 'fas fa-table-columns'],
+                    ['label' => 'Bid Board', 'path' => $bidBoardPath, 'icon' => 'fas fa-table-columns'],
                     ['label' => 'Takeoff', 'path' => '/pages/takeoff.php', 'icon' => 'fas fa-ruler-combined'],
                     ['label' => 'Estimate', 'path' => '/pages/estimate_module.php', 'icon' => 'fas fa-calculator'],
                     ['label' => 'Project Create', 'path' => '/pages/project_create.php', 'icon' => 'fas fa-square-plus'],
