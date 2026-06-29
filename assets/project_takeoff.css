@@ -261,6 +261,10 @@
     border-left-color: #1f6fb2;
 }
 
+.pro-tree-row.is-hidden {
+    opacity: .52;
+}
+
 .pro-tree-folder {
     font-weight: 900;
 }

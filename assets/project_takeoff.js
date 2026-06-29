@@ -328,6 +328,7 @@
                 symbol: layer.symbol || 'Solid Circle',
                 size: layer.symbol_size || 'Medium',
                 color: layer.color || '#111827',
+                visible: layer.visible !== false,
                 quantity: Number(layer.quantity || layer.count || layer.measurement_count || 0),
                 catalogItemId: layer.catalog_item_id || layer.catalogItemId || null,
                 catalog_item_id: layer.catalog_item_id || layer.catalogItemId || null,
@@ -368,6 +369,7 @@
                 symbol: layer.symbol || 'Solid Circle',
                 size: layer.size || 'Medium',
                 color: layer.color || '#111827',
+                visible: layer.visible !== false,
                 quantity: Number(layer.quantity || 0),
                 catalogItemId: layer.catalogItemId || layer.catalog_item_id || null,
                 catalog_item_id: layer.catalog_item_id || layer.catalogItemId || null,
@@ -432,7 +434,7 @@
         const q = takeoffState.query;
         const layersCount = allLayers().length;
         if (title) title.textContent = `Takeoffs (${layersCount})`;
-        const activeLayer = findLayer(takeoffState.activeLayerId);
+            const activeLayer = findLayer(takeoffState.activeLayerId);
         if (activeLabel) activeLabel.textContent = activeLayer ? activeLayer.name : 'None';
         tree.innerHTML = takeoffState.groups.map(group => {
             const visibleLayers = (group.layers || []).filter(layer => {
@@ -451,8 +453,8 @@
                     <button class="pro-row-menu-btn" type="button" data-group-menu="${esc(group.id)}"><i class="fas fa-ellipsis-vertical"></i></button>
                 </div>
                 <div class="pro-tree-children" ${expanded ? '' : 'hidden'}>
-                    ${visibleLayers.map(layer => `<div class="pro-tree-row pro-tree-item ${takeoffState.activeLayerId === layer.id ? 'active' : ''}" data-layer-row="${esc(layer.id)}">
-                        <input type="checkbox" checked aria-label="Layer visibility">
+                    ${visibleLayers.map(layer => `<div class="pro-tree-row pro-tree-item ${takeoffState.activeLayerId === layer.id ? 'active' : ''} ${layer.visible === false ? 'is-hidden' : ''}" data-layer-row="${esc(layer.id)}">
+                        <input type="checkbox" ${layer.visible === false ? '' : 'checked'} aria-label="Layer visibility" data-layer-visible="${esc(layer.id)}">
                         <span class="pro-layer-symbol" style="color:${esc(layer.color)}">${symbolGlyph(layer)}</span>
                         <span class="pro-tree-name">${esc(layer.name)}${layer.catalogItemId ? '<small class="pro-catalog-linked">Linked to catalog</small>' : ''}</span>
                         <span class="pro-tree-qty">${esc(quantityLabel(layer))}</span>
@@ -484,9 +486,14 @@
         });
         document.querySelectorAll('[data-layer-row]').forEach(row => {
             row.addEventListener('click', event => {
-                if (event.target.closest('button')) return;
-                setActiveTakeoffLayer(row.dataset.layerRow);
+                if (event.target.closest('button') || event.target.closest('input')) return;
+                if (takeoffState.activeLayerId === row.dataset.layerRow) clearActiveTakeoffLayer();
+                else setActiveTakeoffLayer(row.dataset.layerRow);
             });
+        });
+        document.querySelectorAll('[data-layer-visible]').forEach(box => {
+            box.addEventListener('click', event => event.stopPropagation());
+            box.addEventListener('change', () => toggleLayerVisibility(box.dataset.layerVisible, box.checked));
         });
         document.querySelectorAll('[data-group-menu]').forEach(button => {
             button.addEventListener('click', event => {
@@ -970,6 +977,7 @@
         const layer = findLayer(layerId);
         if (!layer) return;
         if (!confirm('Delete this takeoff layer?')) return;
+        callEditor('projectTakeoffDeleteLayer', layer.id);
         const group = findGroup(layer.groupId);
         group.layers = group.layers.filter(item => item.id !== layerId);
         if (takeoffState.activeLayerId === layerId) takeoffState.activeLayerId = null;
@@ -1026,6 +1034,10 @@
     function setActiveTakeoffLayer(layerId, rerender = true) {
         const layer = findLayer(layerId);
         if (!layer) return;
+        if (layer.visible === false) {
+            showPrepared('Show this layer before drawing.');
+            return;
+        }
         takeoffState.activeLayerId = layer.id;
         takeoffState.activeGroupId = layer.groupId;
         applyLayerToCanvas(layer);
@@ -1033,31 +1045,70 @@
         if (rerender) renderTakeoffPanel();
     }
 
+    function clearActiveTakeoffLayer(rerender = true) {
+        takeoffState.activeLayerId = null;
+        callEditor('projectTakeoffClearActiveLayer');
+        saveTakeoffState();
+        if (rerender) renderTakeoffPanel();
+    }
+
+    function toggleLayerVisibility(layerId, visible) {
+        const layer = findLayer(layerId);
+        if (!layer) return;
+        layer.visible = Boolean(visible);
+        callEditor('projectTakeoffSetLayerVisibility', layer.id, layer.visible);
+        if (!layer.visible && takeoffState.activeLayerId === layer.id) {
+            takeoffState.activeLayerId = null;
+            callEditor('projectTakeoffClearActiveLayer');
+        }
+        saveTakeoffState();
+        renderTakeoffPanel();
+    }
+
     function applyLayerToCanvas(layer) {
         const win = takeoffWindow();
         if (!win) return;
-        win.__projectActiveTakeoffLayer = {
+        const payload = {
             id: layer.id,
             name: layer.name,
             takeoff_type: layer.type.toLowerCase(),
             type: layer.type.toLowerCase(),
             unit_of_measure: layer.uom,
+            uom: layer.uom,
             symbol: layer.symbol,
             symbol_size: layer.size,
+            size: layer.size,
             color: layer.color,
             quantity: layer.quantity,
             catalog_item_id: layer.catalogItemId || null,
             unit_cost: layer.unitCost || 0,
             labor_hours: layer.laborHours || 0,
             category: layer.category || '',
-            description: layer.description || ''
+            description: layer.description || '',
+            visible: layer.visible !== false
         };
-        if (layer.type === 'Linear') callEditor('setMode', 'measure');
-        if (layer.type === 'Area') callEditor('setMode', 'draw');
-        if (layer.type === 'Count') callEditor('setMode', 'smart');
+        win.__projectActiveTakeoffLayer = payload;
+        callEditor('projectTakeoffActivateLayer', payload);
         if (layer.type === 'Linear') setActiveTool('linear');
         if (layer.type === 'Area') setActiveTool('area');
         if (layer.type === 'Count') setActiveTool('count');
+    }
+
+    function syncTakeoffFromCanvasSnapshot(snapshot) {
+        if (!snapshot || !Array.isArray(snapshot.layers)) return;
+        snapshot.layers.forEach(remote => {
+            const layer = findLayer(remote.id || remote.layerId);
+            if (!layer) return;
+            layer.quantity = Number(remote.quantity || 0);
+            layer.shapes = remote.shapes || [];
+            layer.visible = remote.visible !== false;
+            if (remote.unit_of_measure || remote.uom) layer.uom = remote.unit_of_measure || remote.uom;
+        });
+        if (snapshot.activeLayerId && findLayer(snapshot.activeLayerId)) {
+            takeoffState.activeLayerId = snapshot.activeLayerId;
+        }
+        saveTakeoffState();
+        renderTakeoffPanel();
     }
 
     function openTakeoffContextMenu(button, type, id) {
@@ -1112,6 +1163,17 @@
     }
 
     function runTool(command) {
+        if (command === 'count' || command === 'linear' || command === 'area') {
+            const active = findLayer(takeoffState.activeLayerId);
+            if (!active) {
+                showPrepared('Select a takeoff layer before drawing.');
+                return;
+            }
+            callEditor('projectTakeoffSetTool', command);
+            setActiveTool(command);
+            if ((command === 'linear' || command === 'area') && !hasScaleSet()) openScalePanel();
+            return;
+        }
         const modeMap = {
             smart: 'smart',
             pan: 'smart',
@@ -1613,6 +1675,10 @@
             }, 120);
         });
         window.addEventListener('message', event => {
+            if (event.data?.type === 'project-takeoff-state') {
+                syncTakeoffFromCanvasSnapshot(event.data.payload);
+                return;
+            }
             if (event.data?.type !== 'takeoff-editor-ready') return;
             const doc = activeDrawingDoc();
             if (doc && Number(event.data.fileId) === Number(doc.id)) {
@@ -1626,6 +1692,12 @@
         $('takeoffFrame')?.addEventListener('load', () => {
             setTimeout(syncEditorInfo, 250);
             setTimeout(notifyEditorVisible, 120);
+            setTimeout(() => {
+                const active = findLayer(takeoffState.activeLayerId);
+                if (active) applyLayerToCanvas(active);
+                const snapshot = callEditor('projectTakeoffSnapshot');
+                if (snapshot) syncTakeoffFromCanvasSnapshot(snapshot);
+            }, 360);
         });
     }
 

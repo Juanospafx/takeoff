@@ -20,6 +20,8 @@
         createLayerGroup: 'Ungrouped',
         selectedElement: null,
         draftLine: null,
+        draftArea: null,
+        projectControlled: false,
         undo: [],
         redo: [],
         dirty: false,
@@ -118,7 +120,9 @@
     }
 
     function activeLayer() {
-        return state.layers.find(l => l.client_uid === state.selectedLayerUid) || createLayer();
+        const layer = state.layers.find(l => l.client_uid === state.selectedLayerUid) || null;
+        if (layer) return layer;
+        return state.projectControlled ? null : createLayer();
     }
 
     function calculateCountQuantity(marker) {
@@ -126,6 +130,7 @@
     }
 
     function calculateLinearLength(segment) {
+        if (String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area') return calculateAreaQuantity(segment);
         const points = segment.points_json || [];
         let px = 0;
         for (let index = 1; index < points.length; index++) {
@@ -140,6 +145,30 @@
         return segment.total_length;
     }
 
+    function calculateAreaQuantity(segment) {
+        const points = segment.points_json || [];
+        if (points.length < 3) {
+            segment.measured_area = 0;
+            segment.total_area = 0;
+            segment.total_length = 0;
+            segment.unit = segment.unit || 'sq ft';
+            return 0;
+        }
+        let pxArea = 0;
+        points.forEach((point, index) => {
+            const next = points[(index + 1) % points.length];
+            pxArea += point.x * next.y - next.x * point.y;
+        });
+        pxArea = Math.abs(pxArea) / 2;
+        const scale = getPlanScale();
+        const measured = scale > 0 ? pxArea / (scale * scale) : 0;
+        segment.measured_area = measured;
+        segment.total_area = measured * num(segment.multiplier || 1);
+        segment.total_length = segment.total_area;
+        segment.unit = segment.unit || 'sq ft';
+        return segment.total_area;
+    }
+
     function getPlanScale() {
         return (typeof pixelsPerFoot !== 'undefined' && Number(pixelsPerFoot) > 0) ? Number(pixelsPerFoot) : 0;
     }
@@ -151,6 +180,10 @@
     function formatFeetLabel(feet) {
         if (typeof formatFeetForDisplay === 'function') return formatFeetForDisplay(feet);
         return `${num(feet).toFixed(2)} ft`;
+    }
+
+    function formatAreaLabel(area) {
+        return `${num(area).toFixed(2)} sq ft`;
     }
 
     function calculateItemCost(item, quantity) {
@@ -253,23 +286,41 @@
         return { x: (pos.x - vpt[4]) / vpt[0], y: (pos.y - vpt[5]) / vpt[3] };
     }
 
-    function drawSymbol(group, symbol, color) {
+    function normalizeSymbol(symbol) {
+        const raw = String(symbol || '').toLowerCase();
+        if (raw.includes('square')) return 'square';
+        if (raw.includes('triangle')) return 'triangle';
+        if (raw.includes('diamond')) return 'diamond';
+        if (raw.includes('cross')) return 'cross';
+        return 'circle';
+    }
+
+    function symbolRadius(size) {
+        const raw = String(size || '').toLowerCase();
+        if (raw === 'small') return 7;
+        if (raw === 'large') return 12;
+        return 9;
+    }
+
+    function drawSymbol(group, symbol, color, size) {
+        symbol = normalizeSymbol(symbol);
+        const radius = symbolRadius(size);
         const common = { stroke: '#fff', strokeWidth: 1.5, fill: color };
-        if (symbol === 'square') group.add(new Konva.Rect({ x: -8, y: -8, width: 16, height: 16, ...common }));
-        else if (symbol === 'triangle') group.add(new Konva.RegularPolygon({ sides: 3, radius: 11, ...common }));
-        else if (symbol === 'diamond') group.add(new Konva.RegularPolygon({ sides: 4, radius: 11, rotation: 45, ...common }));
+        if (symbol === 'square') group.add(new Konva.Rect({ x: -radius, y: -radius, width: radius * 2, height: radius * 2, ...common }));
+        else if (symbol === 'triangle') group.add(new Konva.RegularPolygon({ sides: 3, radius: radius + 2, ...common }));
+        else if (symbol === 'diamond') group.add(new Konva.RegularPolygon({ sides: 4, radius: radius + 2, rotation: 45, ...common }));
         else if (symbol === 'cross') {
-            group.add(new Konva.Line({ points: [-9, 0, 9, 0], stroke: color, strokeWidth: 4 }));
-            group.add(new Konva.Line({ points: [0, -9, 0, 9], stroke: color, strokeWidth: 4 }));
+            group.add(new Konva.Line({ points: [-radius, 0, radius, 0], stroke: color, strokeWidth: Math.max(3, radius / 2) }));
+            group.add(new Konva.Line({ points: [0, -radius, 0, radius], stroke: color, strokeWidth: Math.max(3, radius / 2) }));
         } else {
-            group.add(new Konva.Circle({ radius: 9, ...common }));
+            group.add(new Konva.Circle({ radius, ...common }));
         }
     }
 
     function createMarkerNode(marker) {
         if (!ensureKonva()) return;
         const group = new Konva.Group({ x: num(marker.x), y: num(marker.y), draggable: true, visible: marker.page_number === pageNum });
-        drawSymbol(group, marker.symbol || 'circle', marker.color || '#2563eb');
+        drawSymbol(group, marker.symbol || 'circle', marker.color || '#2563eb', marker.symbol_size || marker.size);
         group.add(new Konva.Text({ x: 12, y: -10, text: marker.label || String(marker.quantity || ''), fill: marker.color || '#2563eb', fontSize: 14, fontStyle: 'bold' }));
         group.on('click tap', () => selectElement('marker', marker));
         group.on('dragend', () => {
@@ -285,14 +336,16 @@
 
     function refreshSegment(segment) {
         if (!segment.node) return;
+        const isArea = String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area';
         segment.node.points((segment.points_json || []).flatMap(p => [p.x, p.y]));
-        calculateLinearLength(segment);
+        if (isArea) calculateAreaQuantity(segment);
+        else calculateLinearLength(segment);
         const points = segment.points_json || [];
         const mid = points.length >= 2
             ? { x: (points[0].x + points[points.length - 1].x) / 2, y: (points[0].y + points[points.length - 1].y) / 2 }
             : (points[0] || { x: 0, y: 0 });
         segment.labelNode.position({ x: mid.x + 8, y: mid.y - 18 });
-        segment.labelNode.text(formatFeetLabel(segment.total_length));
+        segment.labelNode.text(isArea ? formatAreaLabel(segment.total_area) : formatFeetLabel(segment.total_length));
         (segment.handles || []).forEach((handle, index) => {
             if (segment.points_json[index]) handle.position(segment.points_json[index]);
         });
@@ -311,10 +364,14 @@
     function createSegmentNode(segment) {
         if (!ensureKonva()) return;
         const visible = segment.page_number === pageNum;
+        const isArea = String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area';
         const line = new Konva.Line({
             points: (segment.points_json || []).flatMap(p => [p.x, p.y]),
             stroke: segment.color || '#2563eb',
-            strokeWidth: num(segment.stroke_width || 4),
+            strokeWidth: num(segment.stroke_width || (isArea ? 3 : 4)),
+            closed: isArea,
+            fill: isArea ? segment.color || '#2563eb' : undefined,
+            opacity: isArea ? 0.28 : 1,
             hitStrokeWidth: 16,
             lineCap: 'round',
             lineJoin: 'round',
@@ -395,8 +452,12 @@
     }
 
     function addMarker(pos) {
-        snapshot();
         const layer = activeLayer();
+        if (!layer) {
+            showToast('Select a takeoff layer before drawing.', 'error');
+            return;
+        }
+        snapshot();
         if (Number(layer.locked)) {
             showToast('Layer is locked', 'error');
             return;
@@ -406,10 +467,14 @@
             layer_client_uid: layer.client_uid,
             catalog_item_id: layer.catalog_item_id || state.selectedItemId,
             assembly_id: layer.assembly_id || state.selectedAssemblyId,
+            takeoff_type: 'count',
+            type: 'count',
             page_number: pageNum,
             x: pos.x,
             y: pos.y,
             symbol: layer.symbol || 'circle',
+            symbol_size: layer.symbol_size || 'Medium',
+            size: layer.symbol_size || 'Medium',
             color: layer.color || '#2563eb',
             label: '',
             multiplier: 1,
@@ -425,13 +490,17 @@
     }
 
     function addLinearPoint(pos) {
-        if (!hasPlanScale()) {
-            showToast('Set the plan scale before drawing line items.', 'error');
-            if (typeof setMode === 'function') setMode('cal');
+        if (!hasPlanScale()) showToast('Drawing scale is not defined. Length will stay 0 until scale is set.', 'warning');
+        const layer = activeLayer();
+        if (!layer) {
+            showToast('Select a takeoff layer before drawing.', 'error');
+            return;
+        }
+        if (Number(layer.locked)) {
+            showToast('Layer is locked', 'error');
             return;
         }
         if (!state.draftLine) {
-            const layer = activeLayer();
             state.draftLine = {
                 points: [pos],
                 preview: new Konva.Line({
@@ -453,8 +522,12 @@
 
     function finishLinear() {
         if (!state.draftLine || state.draftLine.points.length < 2) return;
-        snapshot();
         const layer = activeLayer();
+        if (!layer) {
+            showToast('Select a takeoff layer before drawing.', 'error');
+            return;
+        }
+        snapshot();
         if (Number(layer.locked)) {
             showToast('Layer is locked', 'error');
             return;
@@ -464,6 +537,8 @@
             layer_client_uid: layer.client_uid,
             catalog_item_id: layer.catalog_item_id || state.selectedItemId,
             assembly_id: layer.assembly_id || state.selectedAssemblyId,
+            takeoff_type: 'linear',
+            type: 'linear',
             page_number: pageNum,
             points_json: state.draftLine.points,
             measured_length: 0,
@@ -482,6 +557,82 @@
         createSegmentNode(segment);
         selectElement('segment', segment);
         markDirty();
+    }
+
+    function addAreaPoint(pos) {
+        if (!hasPlanScale()) showToast('Drawing scale is not defined. Area will stay 0 until scale is set.', 'warning');
+        const layer = activeLayer();
+        if (!layer) {
+            showToast('Select a takeoff layer before drawing.', 'error');
+            return;
+        }
+        if (Number(layer.locked)) {
+            showToast('Layer is locked', 'error');
+            return;
+        }
+        if (!state.draftArea) {
+            state.draftArea = {
+                points: [pos],
+                preview: new Konva.Line({
+                    points: [pos.x, pos.y, pos.x, pos.y],
+                    stroke: layer.color || '#2563eb',
+                    strokeWidth: 3,
+                    fill: layer.color || '#2563eb',
+                    opacity: 0.28,
+                    closed: true,
+                    lineJoin: 'round'
+                }),
+            };
+            konvaLayer.add(state.draftArea.preview);
+            return;
+        }
+        state.draftArea.points.push(pos);
+        state.draftArea.preview.points(state.draftArea.points.flatMap(p => [p.x, p.y]));
+        konvaLayer.batchDraw();
+    }
+
+    function finishArea() {
+        if (!state.draftArea || state.draftArea.points.length < 3) return;
+        const layer = activeLayer();
+        if (!layer) {
+            showToast('Select a takeoff layer before drawing.', 'error');
+            return;
+        }
+        snapshot();
+        const segment = {
+            client_uid: uid(),
+            layer_client_uid: layer.client_uid,
+            catalog_item_id: layer.catalog_item_id || state.selectedItemId,
+            assembly_id: layer.assembly_id || state.selectedAssemblyId,
+            takeoff_type: 'area',
+            type: 'area',
+            page_number: pageNum,
+            points_json: state.draftArea.points,
+            measured_area: 0,
+            multiplier: 1,
+            total_area: 0,
+            total_length: 0,
+            unit: 'sq ft',
+            color: layer.color || '#2563eb',
+            stroke_width: 3,
+            label: '',
+            metadata_json: {},
+        };
+        calculateAreaQuantity(segment);
+        state.draftArea.preview.destroy();
+        state.draftArea = null;
+        state.segments.push(segment);
+        createSegmentNode(segment);
+        selectElement('segment', segment);
+        markDirty();
+    }
+
+    function clearDrafts() {
+        if (state.draftLine?.preview) state.draftLine.preview.destroy();
+        if (state.draftArea?.preview) state.draftArea.preview.destroy();
+        state.draftLine = null;
+        state.draftArea = null;
+        konvaLayer?.batchDraw();
     }
 
     function deleteSelected() {
@@ -504,6 +655,7 @@
         state.dirty = true;
         renderSummary();
         renderLayers();
+        emitProjectState();
     }
 
     function layerQuantity(layer) {
@@ -511,9 +663,12 @@
             .filter(marker => marker.layer_client_uid === layer.client_uid)
             .reduce((sum, marker) => sum + calculateCountQuantity(marker), 0);
         const linearQty = state.segments
-            .filter(segment => segment.layer_client_uid === layer.client_uid)
+            .filter(segment => segment.layer_client_uid === layer.client_uid && String(segment.takeoff_type || segment.type || '').toLowerCase() !== 'area')
             .reduce((sum, segment) => sum + calculateLinearLength(segment), 0);
-        const measured = countQty + linearQty;
+        const areaQty = state.segments
+            .filter(segment => segment.layer_client_uid === layer.client_uid && String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area')
+            .reduce((sum, segment) => sum + calculateAreaQuantity(segment), 0);
+        const measured = countQty + linearQty + areaQty;
         const base = num(layer.seed_quantity ?? layer.quantity ?? 0);
         return base + measured;
     }
@@ -531,7 +686,7 @@
     }
 
     function layerUnit(layer) {
-        return layer.unit_of_measure || (layerType(layer) === 'linear' ? 'ft' : 'ea');
+        return layer.unit_of_measure || (layerType(layer) === 'linear' ? 'ft' : (layerType(layer) === 'area' ? 'sq ft' : 'ea'));
     }
 
     function layerGroup(layer) {
@@ -572,6 +727,67 @@
     function layerTypeLabel(layer) {
         const type = layerType(layer);
         return String(type || 'mixed').replace('_', ' ').replace(/\b\w/g, letter => letter.toUpperCase());
+    }
+
+    function projectLayerPayload(layer) {
+        return {
+            id: layer.client_uid,
+            layerId: layer.client_uid,
+            name: layer.name,
+            type: layerTypeLabel(layer),
+            takeoff_type: layerType(layer),
+            uom: layerUnit(layer),
+            unit_of_measure: layerUnit(layer),
+            color: layer.color || '#2563eb',
+            symbol: layer.symbol || 'circle',
+            symbol_size: layer.symbol_size || 'Medium',
+            visible: Number(layer.visible ?? 1) !== 0,
+            quantity: layerQuantity(layer),
+            catalog_item_id: layer.catalog_item_id || null,
+            unit_cost: num(layer.unit_cost || 0),
+            labor_hours: num(layer.unit_labor_time || layer.labor_hours || 0),
+            shapes: [
+                ...state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).map(marker => ({
+                    id: marker.client_uid,
+                    layerId: layer.client_uid,
+                    type: 'Count',
+                    position: { x: marker.x, y: marker.y },
+                    color: marker.color,
+                    symbol: marker.symbol,
+                    quantityValue: calculateCountQuantity(marker),
+                    uom: layerUnit(layer),
+                    pageNumber: marker.page_number
+                })),
+                ...state.segments.filter(segment => segment.layer_client_uid === layer.client_uid).map(segment => {
+                    const isArea = String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area';
+                    return {
+                        id: segment.client_uid,
+                        layerId: layer.client_uid,
+                        type: isArea ? 'Area' : 'Linear',
+                        points: segment.points_json || [],
+                        color: segment.color,
+                        quantityValue: isArea ? calculateAreaQuantity(segment) : calculateLinearLength(segment),
+                        uom: layerUnit(layer),
+                        pageNumber: segment.page_number
+                    };
+                })
+            ]
+        };
+    }
+
+    function projectSnapshot() {
+        return {
+            activeLayerId: state.selectedLayerUid,
+            layers: state.layers.map(projectLayerPayload),
+            summary: calculateTakeoffSummary()
+        };
+    }
+
+    function emitProjectState() {
+        if (!state.projectControlled) return;
+        try {
+            window.parent?.postMessage({ type: 'project-takeoff-state', payload: projectSnapshot() }, '*');
+        } catch (e) {}
     }
 
     function filteredLayers() {
@@ -853,13 +1069,15 @@
 
     function setTool(tool) {
         state.tool = tool;
-        if (tool === 'takeoff_count' || tool === 'takeoff_linear') {
+        if (tool === 'takeoff_count' || tool === 'takeoff_linear' || tool === 'takeoff_area') {
             if (typeof setMode === 'function') setMode('smart');
             ensureKonva();
             bindKonva();
             if (konvaStage?.container()) konvaStage.container().style.cursor = 'crosshair';
-            showToast(tool === 'takeoff_count' ? 'Count tool active' : 'Linear tool active. Double-click to finish.', 'success');
+            const label = tool === 'takeoff_count' ? 'Count tool active' : (tool === 'takeoff_area' ? 'Area tool active. Double-click to finish.' : 'Linear tool active. Double-click to finish.');
+            showToast(label, 'success');
         } else if (konvaStage?.container()) {
+            clearDrafts();
             konvaStage.container().style.cursor = 'default';
         }
         document.querySelectorAll('[data-takeoff-tool]').forEach(btn => btn.classList.toggle('active', btn.dataset.takeoffTool === tool));
@@ -869,32 +1087,46 @@
         if (!ensureKonva() || konvaStage._takeoffBound) return;
         konvaStage._takeoffBound = true;
         konvaStage.on('click tap', evt => {
-            if (state.tool !== 'takeoff_count' && state.tool !== 'takeoff_linear') return;
+            if (state.tool !== 'takeoff_count' && state.tool !== 'takeoff_linear' && state.tool !== 'takeoff_area') return;
             if (evt.target !== konvaStage && evt.target.getParent() !== konvaLayer) return;
             const layer = activeLayer();
+            if (!layer) {
+                showToast('Select a takeoff layer before drawing.', 'error');
+                return;
+            }
             const activeType = layerType(layer);
             if (activeType === 'linear' && state.tool !== 'takeoff_linear') {
                 setTool('takeoff_linear');
             }
-            if (activeType !== 'linear' && state.tool !== 'takeoff_count') {
+            if (activeType === 'area' && state.tool !== 'takeoff_area') {
+                setTool('takeoff_area');
+            }
+            if (activeType !== 'linear' && activeType !== 'area' && state.tool !== 'takeoff_count') {
                 setTool('takeoff_count');
             }
             const pos = konvaStage.getPointerPosition();
             const world = screenToWorld(pos);
             if (layerType(layer) === 'linear') addLinearPoint(world);
+            else if (layerType(layer) === 'area') addAreaPoint(world);
             else addMarker(world);
         });
         konvaStage.on('dblclick dbltap', () => {
             if (state.tool === 'takeoff_linear') finishLinear();
+            if (state.tool === 'takeoff_area') finishArea();
         });
         konvaStage.on('mousemove touchmove', () => {
-            if (state.tool !== 'takeoff_linear' || !state.draftLine?.preview || state.draftLine.points.length !== 1) return;
             const pos = konvaStage.getPointerPosition();
             if (!pos) return;
             const world = screenToWorld(pos);
-            const start = state.draftLine.points[0];
-            state.draftLine.preview.points([start.x, start.y, world.x, world.y]);
-            konvaLayer.batchDraw();
+            if (state.tool === 'takeoff_linear' && state.draftLine?.preview && state.draftLine.points.length === 1) {
+                const start = state.draftLine.points[0];
+                state.draftLine.preview.points([start.x, start.y, world.x, world.y]);
+                konvaLayer.batchDraw();
+            }
+            if (state.tool === 'takeoff_area' && state.draftArea?.preview && state.draftArea.points.length) {
+                state.draftArea.preview.points([...state.draftArea.points, world].flatMap(p => [p.x, p.y]));
+                konvaLayer.batchDraw();
+            }
         });
     }
 
@@ -1400,16 +1632,13 @@
         state.selectedLayerUid = layer.client_uid;
         state.selectedLayerUids = new Set([layer.client_uid]);
         const type = layerType(layer);
-        if (type === 'linear' && !hasPlanScale()) {
-            setTool('select');
-            showToast('Set the plan scale before drawing line items.', 'error');
-            if (typeof setMode === 'function') setMode('cal');
-            renderLayers();
-            return;
+        if ((type === 'linear' || type === 'area') && !hasPlanScale()) {
+            showToast('Drawing scale is not defined. Quantities will stay 0 until scale is set.', 'warning');
         }
-        setTool(type === 'linear' ? 'takeoff_linear' : 'takeoff_count');
+        setTool(type === 'linear' ? 'takeoff_linear' : (type === 'area' ? 'takeoff_area' : 'takeoff_count'));
         showToast(`${layer.name} active`, 'success');
         renderLayers();
+        emitProjectState();
     }
 
     function openTakeoffMenu(anchor, items) {
@@ -1622,6 +1851,7 @@
         renderLayers();
         renderProperties();
         renderSummary();
+        emitProjectState();
     }
 
     function saveTakeoff() {
@@ -1740,6 +1970,86 @@
         calculateLaborHours,
         calculateTakeoffSummary,
     };
+
+    window.projectTakeoffActivateLayer = function (payload) {
+        if (!payload?.id) return null;
+        state.projectControlled = true;
+        const externalId = String(payload.id);
+        let layer = state.layers.find(row => row.client_uid === externalId || row.metadata_json?.project_layer_id === externalId);
+        const normalizedType = String(payload.takeoff_type || payload.type || 'count').toLowerCase();
+        const type = normalizedType === 'linear' ? 'linear' : (normalizedType === 'area' ? 'area' : 'count');
+        const data = {
+            client_uid: externalId,
+            page_number: pageNum || 1,
+            name: payload.name || 'Takeoff Layer',
+            type,
+            takeoff_type: type,
+            group_name: payload.group_name || payload.category || 'Project Takeoff',
+            unit_of_measure: payload.unit_of_measure || payload.uom || (type === 'linear' ? 'ft' : (type === 'area' ? 'sq ft' : 'ea')),
+            catalog_item_id: payload.catalog_item_id || payload.catalogItemId || null,
+            assembly_id: payload.assembly_id || null,
+            color: payload.color || '#2563eb',
+            symbol: normalizeSymbol(payload.symbol || 'circle'),
+            symbol_size: payload.symbol_size || payload.size || 'Medium',
+            unit_cost: num(payload.unit_cost || payload.unitCost || 0),
+            unit_labor_time: num(payload.labor_hours || payload.laborHours || payload.unit_labor_time || 0),
+            cost_code: payload.cost_code || payload.catalogNumber || '',
+            visible: payload.visible === false ? 0 : 1,
+            locked: payload.locked ? 1 : 0,
+            metadata_json: { ...(layer?.metadata_json || {}), project_layer_id: externalId },
+        };
+        if (layer) Object.assign(layer, data);
+        else {
+            layer = data;
+            state.layers.push(layer);
+        }
+        activateLayerForInsert(layer.client_uid);
+        renderAll();
+        return projectLayerPayload(layer);
+    };
+
+    window.projectTakeoffClearActiveLayer = function () {
+        state.projectControlled = true;
+        state.selectedLayerUid = null;
+        state.selectedLayerUids.clear();
+        setTool('select');
+        renderLayers();
+        emitProjectState();
+        showToast('Active layer cleared', 'success');
+    };
+
+    window.projectTakeoffSetLayerVisibility = function (layerId, visible) {
+        const layer = state.layers.find(row => row.client_uid === String(layerId) || row.metadata_json?.project_layer_id === String(layerId));
+        if (!layer) return false;
+        layer.visible = visible ? 1 : 0;
+        setTakeoffPage(pageNum);
+        renderLayers();
+        emitProjectState();
+        return true;
+    };
+
+    window.projectTakeoffDeleteLayer = function (layerId) {
+        const layer = state.layers.find(row => row.client_uid === String(layerId) || row.metadata_json?.project_layer_id === String(layerId));
+        if (!layer) return false;
+        deleteLayerWithoutConfirm(layer);
+        markDirty();
+        renderAll();
+        return true;
+    };
+
+    window.projectTakeoffSnapshot = function () {
+        return projectSnapshot();
+    };
+
+    window.projectTakeoffSetTool = function (tool) {
+        const normalized = String(tool || '').toLowerCase();
+        if (normalized === 'linear') return setTool('takeoff_linear');
+        if (normalized === 'area') return setTool('takeoff_area');
+        if (normalized === 'count') return setTool('takeoff_count');
+        return setTool('select');
+    };
+
+    window.deleteSelected = deleteSelected;
 
     function init() {
         renderShell();
