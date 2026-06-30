@@ -2049,6 +2049,36 @@
         return setTool('select');
     };
 
+    window.projectTakeoffSetZoom = function (percent) {
+        if (!canvas || typeof canvas.setViewportTransform !== 'function') return null;
+        const zoom = Math.max(0.25, Math.min(4, Number(percent || 100) / 100));
+        const center = typeof canvas.getVpCenter === 'function'
+            ? canvas.getVpCenter()
+            : { x: canvas.getWidth() / 2, y: canvas.getHeight() / 2 };
+        if (typeof canvas.zoomToPoint === 'function') canvas.zoomToPoint(center, zoom);
+        else canvas.setZoom(zoom);
+        if (typeof syncKonvaToFabric === 'function') syncKonvaToFabric();
+        if (typeof updateTextScales === 'function') updateTextScales(zoom);
+        canvas.requestRenderAll();
+        const zoomText = Math.round(zoom * 100) + '%';
+        const zoomEl = document.getElementById('zoom-disp');
+        if (zoomEl) zoomEl.innerText = zoomText;
+        if (typeof schedulePdfRerender === 'function') schedulePdfRerender();
+        return Math.round(zoom * 100);
+    };
+
+    window.projectTakeoffGetZoom = function () {
+        return canvas && typeof canvas.getZoom === 'function' ? Math.round(canvas.getZoom() * 100) : 100;
+    };
+
+    window.projectTakeoffFitToView = function () {
+        if (typeof fitPdfToView === 'function') {
+            fitPdfToView(true);
+            return window.projectTakeoffGetZoom();
+        }
+        return null;
+    };
+
     window.deleteSelected = deleteSelected;
 
     function init() {

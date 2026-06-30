@@ -983,6 +983,18 @@
     display: block;
 }
 
+.pro-canvas-shell.grid-visible::after {
+    content: "";
+    position: absolute;
+    inset: 0;
+    z-index: 5;
+    pointer-events: none;
+    background-image:
+        linear-gradient(rgba(31, 111, 178, .16) 1px, transparent 1px),
+        linear-gradient(90deg, rgba(31, 111, 178, .16) 1px, transparent 1px);
+    background-size: 24px 24px;
+}
+
 .pro-takeoff-frame {
     display: block;
     width: 100%;
@@ -1022,6 +1034,13 @@
     box-shadow: 0 18px 48px rgba(15, 23, 42, .16);
 }
 
+.pro-floating-controls .active,
+.pro-chip-btn.active {
+    color: #fff;
+    background: #1f6fb2;
+    border-color: #1f6fb2;
+}
+
 .pro-floating-controls input[type="range"] {
     width: 130px;
     accent-color: #1f6fb2;
@@ -1032,6 +1051,71 @@
     font-weight: 900;
     font-size: .82rem;
     text-align: center;
+}
+
+.pro-viewer-layers-popover {
+    position: absolute;
+    right: 74px;
+    bottom: 72px;
+    z-index: 65;
+    width: min(340px, calc(100% - 24px));
+    max-height: min(420px, calc(100% - 96px));
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr);
+    background: #fff;
+    color: #18212f;
+    border: 1px solid #d8dee6;
+    border-radius: 8px;
+    box-shadow: 0 22px 60px rgba(15, 23, 42, .22);
+}
+
+.pro-viewer-layers-popover[hidden] {
+    display: none;
+}
+
+.pro-viewer-layers-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 10px 12px;
+    border-bottom: 1px solid #e7ebf0;
+}
+
+.pro-viewer-layers-list {
+    min-height: 0;
+    overflow: auto;
+    padding: 8px;
+}
+
+.pro-viewer-layer-row {
+    display: grid;
+    grid-template-columns: 18px 14px minmax(0, 1fr) auto;
+    align-items: center;
+    gap: 8px;
+    min-height: 36px;
+    border-radius: 6px;
+    padding: 6px;
+    cursor: pointer;
+}
+
+.pro-viewer-layer-row:hover {
+    background: #f8fafc;
+}
+
+.pro-viewer-layer-row span:nth-child(3) {
+    min-width: 0;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    font-weight: 800;
+    font-size: .84rem;
+}
+
+.pro-viewer-layer-row small {
+    color: #526173;
+    font-weight: 900;
+    font-size: .76rem;
 }
 
 .pro-tools-bar {

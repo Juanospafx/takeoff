@@ -35,23 +35,18 @@
     }
 
     function setZoom(percent) {
-        const canvas = editorCanvas();
-        const zoom = Math.max(0.05, Math.min(20, Number(percent || 100) / 100));
-        if (canvas && typeof canvas.setZoom === 'function') {
-            const center = typeof canvas.getVpCenter === 'function'
-                ? canvas.getVpCenter()
-                : { x: canvas.getWidth() / 2, y: canvas.getHeight() / 2 };
-            if (typeof canvas.zoomToPoint === 'function') {
-                canvas.zoomToPoint(center, zoom);
-            } else {
-                canvas.setZoom(zoom);
-            }
-            if (typeof canvas.requestRenderAll === 'function') canvas.requestRenderAll();
-        }
-        const percentText = `${Math.round(zoom * 100)}%`;
+        const clamped = Math.max(25, Math.min(400, Number(percent || 100)));
+        const editorZoom = callEditor('projectTakeoffSetZoom', clamped);
+        const nextPercent = Number(editorZoom || clamped);
+        updateZoomUi(nextPercent);
+    }
+
+    function updateZoomUi(percent) {
+        const nextPercent = Math.max(25, Math.min(400, Number(percent || 100)));
+        const percentText = `${Math.round(nextPercent)}%`;
         const slider = $('takeoffZoomSlider');
         const label = $('takeoffZoomPercent');
-        if (slider) slider.value = String(Math.round(zoom * 100));
+        if (slider) slider.value = String(Math.round(nextPercent));
         if (label) label.textContent = percentText;
         const win = takeoffWindow();
         const embeddedZoom = win?.document?.getElementById('zoom-disp');
@@ -59,12 +54,16 @@
     }
 
     function currentZoomPercent() {
-        const canvas = editorCanvas();
-        if (canvas && typeof canvas.getZoom === 'function') {
-            return Math.round(canvas.getZoom() * 100);
-        }
+        const editorZoom = callEditor('projectTakeoffGetZoom');
+        if (editorZoom) return Number(editorZoom);
         return Number($('takeoffZoomSlider')?.value || 100);
     }
+
+    const viewerState = {
+        isGridVisible: false,
+        isLayersPopoverOpen: false,
+        isFullscreen: false
+    };
 
     const drawingState = {
         documents: [],
@@ -444,10 +443,11 @@
             const groupVisible = !q || group.name.toLowerCase().includes(q) || visibleLayers.length > 0;
             if (!groupVisible) return '';
             const expanded = q ? true : group.isExpanded !== false;
+            const groupCheckboxVisible = (group.layers || []).some(layer => layer.visible !== false) || !(group.layers || []).length;
             return `<div class="pro-takeoff-group" data-group-id="${esc(group.id)}">
                 <div class="pro-tree-row pro-tree-folder ${takeoffState.activeGroupId === group.id ? 'active' : ''}" data-takeoff-group-row="${esc(group.id)}">
                     <button class="pro-tree-toggle" type="button" data-group-toggle="${esc(group.id)}"><i class="fas ${expanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i></button>
-                    <input type="checkbox" checked aria-label="Group visibility">
+                    <input type="checkbox" ${groupCheckboxVisible ? 'checked' : ''} aria-label="Group visibility" data-group-visible="${esc(group.id)}">
                     <span class="pro-tree-name"><i class="fas fa-folder${expanded ? '-open' : ''}"></i> ${esc(group.name)}</span>
                     <span class="pro-tree-qty">${group.layers.length}</span>
                     <button class="pro-row-menu-btn" type="button" data-group-menu="${esc(group.id)}"><i class="fas fa-ellipsis-vertical"></i></button>
@@ -483,6 +483,10 @@
                 saveTakeoffState();
                 renderTakeoffPanel();
             });
+        });
+        document.querySelectorAll('[data-group-visible]').forEach(box => {
+            box.addEventListener('click', event => event.stopPropagation());
+            box.addEventListener('change', () => toggleGroupVisibility(box.dataset.groupVisible, box.checked));
         });
         document.querySelectorAll('[data-layer-row]').forEach(row => {
             row.addEventListener('click', event => {
@@ -1065,6 +1069,23 @@
         renderTakeoffPanel();
     }
 
+    function toggleGroupVisibility(groupId, visible) {
+        const group = findGroup(groupId);
+        if (!group) return;
+        let activeWasHidden = false;
+        (group.layers || []).forEach(layer => {
+            layer.visible = Boolean(visible);
+            callEditor('projectTakeoffSetLayerVisibility', layer.id, layer.visible);
+            if (!layer.visible && takeoffState.activeLayerId === layer.id) activeWasHidden = true;
+        });
+        if (activeWasHidden) {
+            takeoffState.activeLayerId = null;
+            callEditor('projectTakeoffClearActiveLayer');
+        }
+        saveTakeoffState();
+        renderTakeoffPanel();
+    }
+
     function applyLayerToCanvas(layer) {
         const win = takeoffWindow();
         if (!win) return;
@@ -1109,6 +1130,64 @@
         }
         saveTakeoffState();
         renderTakeoffPanel();
+        renderViewerLayersPopover();
+    }
+
+    function ensureViewerLayersPopover() {
+        if ($('takeoffViewerLayersPopover')) return;
+        const popover = document.createElement('div');
+        popover.id = 'takeoffViewerLayersPopover';
+        popover.className = 'pro-viewer-layers-popover';
+        popover.hidden = true;
+        document.querySelector('.pro-canvas-shell')?.appendChild(popover);
+    }
+
+    function renderViewerLayersPopover() {
+        const popover = $('takeoffViewerLayersPopover');
+        if (!popover) return;
+        const layers = allLayers();
+        popover.innerHTML = `<div class="pro-viewer-layers-head">
+                <strong>Layers</strong>
+                <button class="pro-icon-btn" type="button" data-viewer-layers-close aria-label="Close"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="pro-viewer-layers-list">
+                ${layers.map(layer => `<label class="pro-viewer-layer-row">
+                    <input type="checkbox" ${layer.visible === false ? '' : 'checked'} data-viewer-layer-visible="${esc(layer.id)}">
+                    <span class="pro-color-dot" style="background:${esc(layer.color)}"></span>
+                    <span>${esc(layer.name)}</span>
+                    <small>${esc(quantityLabel(layer))}</small>
+                </label>`).join('') || '<div class="pro-drawing-empty">No takeoff layers yet.</div>'}
+            </div>`;
+        popover.querySelector('[data-viewer-layers-close]')?.addEventListener('click', closeViewerLayersPopover);
+        popover.querySelectorAll('[data-viewer-layer-visible]').forEach(box => {
+            box.addEventListener('change', () => toggleLayerVisibility(box.dataset.viewerLayerVisible, box.checked));
+        });
+    }
+
+    function openViewerLayersPopover() {
+        ensureViewerLayersPopover();
+        viewerState.isLayersPopoverOpen = true;
+        renderViewerLayersPopover();
+        const popover = $('takeoffViewerLayersPopover');
+        if (popover) popover.hidden = false;
+        document.querySelector('[data-viewer-command="layers"]')?.classList.add('active');
+    }
+
+    function closeViewerLayersPopover() {
+        viewerState.isLayersPopoverOpen = false;
+        $('takeoffViewerLayersPopover')?.setAttribute('hidden', '');
+        document.querySelector('[data-viewer-command="layers"]')?.classList.remove('active');
+    }
+
+    function toggleViewerLayersPopover() {
+        if (viewerState.isLayersPopoverOpen) closeViewerLayersPopover();
+        else openViewerLayersPopover();
+    }
+
+    function toggleGrid() {
+        viewerState.isGridVisible = !viewerState.isGridVisible;
+        document.querySelector('.pro-canvas-shell')?.classList.toggle('grid-visible', viewerState.isGridVisible);
+        document.querySelector('[data-viewer-command="grid"]')?.classList.toggle('active', viewerState.isGridVisible);
     }
 
     function openTakeoffContextMenu(button, type, id) {
@@ -1213,11 +1292,19 @@
     function runViewerCommand(command) {
         if (command === 'zoom-out') return setZoom(currentZoomPercent() - 10);
         if (command === 'zoom-in') return setZoom(currentZoomPercent() + 10);
-        if (command === 'fit') return callEditor('fitPdfToView', true);
+        if (command === 'fit') {
+            const zoom = callEditor('projectTakeoffFitToView') || callEditor('fitPdfToView', true) || currentZoomPercent();
+            setTimeout(() => updateZoomUi(zoom || currentZoomPercent()), 40);
+            return;
+        }
         if (command === 'previous' || command === 'next') return changeActiveSheet(command === 'next' ? 1 : -1);
         if (command === 'fullscreen') {
             const shell = document.querySelector('.pro-canvas-shell');
-            if (shell?.requestFullscreen) shell.requestFullscreen();
+            if (!document.fullscreenElement && shell?.requestFullscreen) {
+                shell.requestFullscreen().catch(() => showPrepared('Fullscreen could not start.'));
+            } else if (document.fullscreenElement && document.exitFullscreen) {
+                document.exitFullscreen().catch(() => showPrepared('Fullscreen could not close.'));
+            }
             return;
         }
         if (command === 'popout') {
@@ -1230,9 +1317,9 @@
             if (link?.href && link.href !== '#') link.click();
             return;
         }
-        if (command === 'grid' || command === 'layers' || command === 'compare') {
-            showPrepared(command);
-        }
+        if (command === 'grid') return toggleGrid();
+        if (command === 'layers') return toggleViewerLayersPopover();
+        if (command === 'compare') showPrepared(command);
     }
 
     function showPrepared(command) {
@@ -1755,6 +1842,7 @@
 
         $('takeoffZoomSlider')?.addEventListener('input', event => setZoom(event.target.value));
         initTakeoffState();
+        ensureViewerLayersPopover();
         bindDrawingDropdown();
         bindScalePanel();
         $('takeoffFrame')?.addEventListener('load', () => setTimeout(notifyEditorVisible, 120));
@@ -1768,7 +1856,17 @@
             closeScalePanel();
             closeDrawingDropdown();
         });
+        document.addEventListener('click', event => {
+            if (!viewerState.isLayersPopoverOpen) return;
+            if (event.target.closest('#takeoffViewerLayersPopover') || event.target.closest('[data-viewer-command="layers"]')) return;
+            closeViewerLayersPopover();
+        });
         window.addEventListener('resize', refreshOpenRowMenu);
+        document.addEventListener('fullscreenchange', () => {
+            viewerState.isFullscreen = Boolean(document.fullscreenElement);
+            const icon = document.querySelector('[data-viewer-command="fullscreen"] i');
+            if (icon) icon.className = viewerState.isFullscreen ? 'fas fa-compress' : 'fas fa-expand';
+        });
         document.addEventListener('scroll', refreshOpenRowMenu, true);
         $('takeoffScalePanel')?.addEventListener('click', event => event.stopPropagation());
         $('takeoffLayerModal')?.addEventListener('click', event => {
