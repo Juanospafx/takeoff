@@ -30,6 +30,48 @@
     const uid = () => 'tf_' + Math.random().toString(16).slice(2) + '_' + Date.now().toString(16);
     const num = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
     const money = (v) => '$' + num(v).toFixed(2);
+    let takeoffAutosaveTimer = null;
+
+    function localTakeoffKey() {
+        const pid = typeof projectId !== 'undefined' ? projectId : 0;
+        const fid = typeof fileId !== 'undefined' ? fileId : 'drawing';
+        return `takeoff.editor.${pid}.${fid}`;
+    }
+
+    function serializeTakeoffState() {
+        return {
+            version: 2,
+            savedAt: Date.now(),
+            drawing_id: typeof fileId !== 'undefined' ? fileId : null,
+            project_id: typeof projectId !== 'undefined' ? projectId : 0,
+            layers: state.layers.map(stripNodes),
+            markers: state.markers.map(stripNodes),
+            segments: state.segments.map(stripNodes),
+            summary: calculateTakeoffSummary()
+        };
+    }
+
+    function persistLocalTakeoffState() {
+        try {
+            localStorage.setItem(localTakeoffKey(), JSON.stringify(serializeTakeoffState()));
+        } catch (e) {}
+    }
+
+    function scheduleTakeoffAutosave() {
+        clearTimeout(takeoffAutosaveTimer);
+        takeoffAutosaveTimer = setTimeout(() => {
+            saveTakeoff(true);
+        }, 900);
+    }
+
+    function readLocalTakeoffState() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(localTakeoffKey()) || 'null');
+            return parsed && Array.isArray(parsed.layers) ? parsed : null;
+        } catch (e) {
+            return null;
+        }
+    }
 
     function request(action, payload, method) {
         const url = method === 'GET'
@@ -114,6 +156,7 @@
             tag: null,
             metadata_json: {},
         };
+        layer.metadata_json.project_layer_id = layer.client_uid;
         state.layers.push(layer);
         state.selectedLayerUid = layer.client_uid;
         return layer;
@@ -655,6 +698,8 @@
         state.dirty = true;
         renderSummary();
         renderLayers();
+        persistLocalTakeoffState();
+        scheduleTakeoffAutosave();
         emitProjectState();
     }
 
@@ -777,6 +822,9 @@
 
     function projectSnapshot() {
         return {
+            drawingId: typeof fileId !== 'undefined' ? fileId : null,
+            drawing_id: typeof fileId !== 'undefined' ? fileId : null,
+            projectId: typeof projectId !== 'undefined' ? projectId : 0,
             activeLayerId: state.selectedLayerUid,
             layers: state.layers.map(projectLayerPayload),
             summary: calculateTakeoffSummary()
@@ -1854,7 +1902,11 @@
         emitProjectState();
     }
 
-    function saveTakeoff() {
+    function saveTakeoff(silent = false) {
+        state.layers.forEach(layer => {
+            layer.metadata_json = { ...(layer.metadata_json || {}), project_layer_id: layer.metadata_json?.project_layer_id || layer.client_uid };
+        });
+        persistLocalTakeoffState();
         return request('save_state', {
             drawing_id: fileId,
             project_id: typeof projectId !== 'undefined' ? projectId : 0,
@@ -1865,9 +1917,12 @@
         }).then(res => {
             if (res.status !== 'success') throw new Error(res.msg || 'Save failed');
             state.dirty = false;
-            showToast('Takeoff saved', 'success');
+            if (!silent) showToast('Takeoff saved', 'success');
             renderSummary();
-        }).catch(err => showToast(err.message, 'error'));
+        }).catch(err => {
+            if (!silent) showToast(err.message, 'error');
+            else console.warn('Takeoff autosave failed', err);
+        });
     }
 
     function loadTakeoff() {
@@ -1881,9 +1936,28 @@
             }
             if (loaded.status === 'success') {
                 const data = loaded.data || {};
-                state.layers = (data.layers || []).map(l => ({ ...l, client_uid: String(l.id), metadata_json: l.metadata_json || {} }));
-                state.markers = (data.markers || []).map(m => ({ ...m, client_uid: m.client_uid || String(m.id), layer_client_uid: String(m.layer_id), metadata_json: m.metadata_json || {} }));
-                state.segments = (data.segments || []).map(s => ({ ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: String(s.layer_id), points_json: s.points_json || [], metadata_json: s.metadata_json || {} }));
+                const dbLayerIdMap = new Map();
+                state.layers = (data.layers || []).map(l => {
+                    const metadata = l.metadata_json || {};
+                    const stableUid = String(metadata.project_layer_id || l.client_uid || l.id);
+                    dbLayerIdMap.set(String(l.id), stableUid);
+                    return { ...l, client_uid: stableUid, metadata_json: { ...metadata, project_layer_id: stableUid } };
+                });
+                state.markers = (data.markers || []).map(m => ({ ...m, client_uid: m.client_uid || String(m.id), layer_client_uid: dbLayerIdMap.get(String(m.layer_id)) || String(m.layer_id), metadata_json: m.metadata_json || {} }));
+                state.segments = (data.segments || []).map(s => ({ ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: dbLayerIdMap.get(String(s.layer_id)) || String(s.layer_id), points_json: s.points_json || [], metadata_json: s.metadata_json || {} }));
+            }
+            const local = readLocalTakeoffState();
+            if (local && ((local.markers || []).length || (local.segments || []).length || (local.layers || []).length)) {
+                state.layers = (local.layers || []).map(layer => {
+                    const stableUid = String(layer.client_uid || layer.metadata_json?.project_layer_id || layer.id || uid());
+                    return {
+                        ...layer,
+                        client_uid: stableUid,
+                        metadata_json: { ...(layer.metadata_json || {}), project_layer_id: stableUid }
+                    };
+                });
+                state.markers = (local.markers || []).map(marker => ({ ...marker, client_uid: marker.client_uid || uid(), layer_client_uid: String(marker.layer_client_uid || marker.layer_id || '') }));
+                state.segments = (local.segments || []).map(segment => ({ ...segment, client_uid: segment.client_uid || uid(), layer_client_uid: String(segment.layer_client_uid || segment.layer_id || ''), points_json: segment.points_json || [] }));
             }
             if (!state.selectedItemId && state.catalog.items[0]) state.selectedItemId = state.catalog.items[0].id;
             const onlyLegacyDefault = state.layers.length === 1
@@ -1941,6 +2015,7 @@
                 markDirty();
             }
         });
+        window.addEventListener('beforeunload', persistLocalTakeoffState);
     }
 
     window.setTakeoffInternalView = function(view) {

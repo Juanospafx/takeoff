@@ -234,6 +234,7 @@
         editingLayerId: null,
         pendingLayerGroupId: 'default',
         pendingCatalogItem: null,
+        canvasSnapshots: {},
         query: ''
     };
 
@@ -387,7 +388,8 @@
             localStorage.setItem(takeoffStoreKey(), JSON.stringify({
                 groups: takeoffState.groups,
                 activeGroupId: takeoffState.activeGroupId,
-                activeLayerId: takeoffState.activeLayerId
+                activeLayerId: takeoffState.activeLayerId,
+                canvasSnapshots: takeoffState.canvasSnapshots
             }));
         } catch (e) {
             console.warn('Takeoff state could not be saved', e);
@@ -518,6 +520,8 @@
         takeoffState.groups = normalizeSavedGroups(saved?.groups || seedGroupsFromProjectLayers());
         takeoffState.activeGroupId = saved?.activeGroupId || 'default';
         takeoffState.activeLayerId = saved?.activeLayerId || null;
+        takeoffState.canvasSnapshots = saved?.canvasSnapshots && typeof saved.canvasSnapshots === 'object' ? saved.canvasSnapshots : {};
+        applyAggregatedCanvasQuantities();
         if (!findGroup(takeoffState.activeGroupId)) takeoffState.activeGroupId = 'default';
         if (takeoffState.activeLayerId && !findLayer(takeoffState.activeLayerId)) takeoffState.activeLayerId = null;
         ensureTakeoffModal();
@@ -1117,20 +1121,41 @@
 
     function syncTakeoffFromCanvasSnapshot(snapshot) {
         if (!snapshot || !Array.isArray(snapshot.layers)) return;
+        const doc = activeDrawingDoc();
+        const documentId = String(snapshot.drawingId || snapshot.drawing_id || doc?.id || 'active');
+        takeoffState.canvasSnapshots[documentId] = {
+            ...snapshot,
+            documentId,
+            updatedAt: Date.now()
+        };
         snapshot.layers.forEach(remote => {
             const layer = findLayer(remote.id || remote.layerId);
             if (!layer) return;
-            layer.quantity = Number(remote.quantity || 0);
             layer.shapes = remote.shapes || [];
             layer.visible = remote.visible !== false;
             if (remote.unit_of_measure || remote.uom) layer.uom = remote.unit_of_measure || remote.uom;
         });
+        applyAggregatedCanvasQuantities();
         if (snapshot.activeLayerId && findLayer(snapshot.activeLayerId)) {
             takeoffState.activeLayerId = snapshot.activeLayerId;
         }
         saveTakeoffState();
         renderTakeoffPanel();
         renderViewerLayersPopover();
+    }
+
+    function applyAggregatedCanvasQuantities() {
+        const totals = new Map();
+        Object.values(takeoffState.canvasSnapshots || {}).forEach(snapshot => {
+            (snapshot.layers || []).forEach(remote => {
+                const id = String(remote.id || remote.layerId || '');
+                if (!id) return;
+                totals.set(id, (totals.get(id) || 0) + Number(remote.quantity || 0));
+            });
+        });
+        allLayers().forEach(layer => {
+            if (totals.has(String(layer.id))) layer.quantity = totals.get(String(layer.id));
+        });
     }
 
     function ensureViewerLayersPopover() {
