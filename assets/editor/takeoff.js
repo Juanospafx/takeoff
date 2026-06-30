@@ -884,7 +884,8 @@
     function duplicateLayer(layer) {
         if (!layer) return;
         snapshot();
-        const copy = { ...layer, client_uid: uid(), name: `${layer.name} Copy` };
+        const copyUid = uid();
+        const copy = { ...layer, client_uid: copyUid, name: `${layer.name} Copy`, metadata_json: { ...(layer.metadata_json || {}), project_layer_id: copyUid } };
         state.layers.push(copy);
         state.selectedLayerUid = copy.client_uid;
         markDirty();
@@ -1766,7 +1767,8 @@
     function copyGroup(group) {
         snapshot();
         state.layers.filter(layer => layerGroup(layer) === group).forEach(layer => {
-            const copy = { ...layer, client_uid: uid(), name: `${layer.name} Copy`, id: null };
+            const copyUid = uid();
+            const copy = { ...layer, client_uid: copyUid, name: `${layer.name} Copy`, id: null, metadata_json: { ...(layer.metadata_json || {}), project_layer_id: copyUid } };
             state.layers.push(copy);
         });
         markDirty();
@@ -1947,7 +1949,7 @@
                 state.segments = (data.segments || []).map(s => ({ ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: dbLayerIdMap.get(String(s.layer_id)) || String(s.layer_id), points_json: s.points_json || [], metadata_json: s.metadata_json || {} }));
             }
             const local = readLocalTakeoffState();
-            if (local && ((local.markers || []).length || (local.segments || []).length || (local.layers || []).length)) {
+            if (local && ((local.markers || []).length || (local.segments || []).length)) {
                 state.layers = (local.layers || []).map(layer => {
                     const stableUid = String(layer.client_uid || layer.metadata_json?.project_layer_id || layer.id || uid());
                     return {
@@ -2081,6 +2083,45 @@
         activateLayerForInsert(layer.client_uid);
         renderAll();
         return projectLayerPayload(layer);
+    };
+
+    window.projectTakeoffSyncLayers = function (layers) {
+        if (!Array.isArray(layers)) return projectSnapshot();
+        state.projectControlled = true;
+        layers.forEach(payload => {
+            if (!payload?.id) return;
+            const externalId = String(payload.id);
+            let layer = state.layers.find(row => row.client_uid === externalId || row.metadata_json?.project_layer_id === externalId);
+            const normalizedType = String(payload.takeoff_type || payload.type || 'count').toLowerCase();
+            const type = normalizedType === 'linear' ? 'linear' : (normalizedType === 'area' ? 'area' : 'count');
+            const data = {
+                client_uid: externalId,
+                page_number: pageNum || 1,
+                name: payload.name || 'Takeoff Layer',
+                type,
+                takeoff_type: type,
+                group_name: payload.group_name || payload.category || 'Project Takeoff',
+                unit_of_measure: payload.unit_of_measure || payload.uom || (type === 'linear' ? 'ft' : (type === 'area' ? 'sq ft' : 'ea')),
+                catalog_item_id: payload.catalog_item_id || payload.catalogItemId || null,
+                assembly_id: payload.assembly_id || null,
+                color: payload.color || '#2563eb',
+                symbol: normalizeSymbol(payload.symbol || 'circle'),
+                symbol_size: payload.symbol_size || payload.size || 'Medium',
+                unit_cost: num(payload.unit_cost || payload.unitCost || 0),
+                unit_labor_time: num(payload.labor_hours || payload.laborHours || payload.unit_labor_time || 0),
+                cost_code: payload.cost_code || payload.catalogNumber || '',
+                visible: payload.visible === false ? 0 : 1,
+                locked: payload.locked ? 1 : 0,
+                metadata_json: { ...(layer?.metadata_json || {}), project_layer_id: externalId },
+            };
+            if (layer) Object.assign(layer, data);
+            else state.layers.push(data);
+        });
+        setTakeoffPage(pageNum);
+        renderLayers();
+        emitProjectState();
+        persistLocalTakeoffState();
+        return projectSnapshot();
     };
 
     window.projectTakeoffClearActiveLayer = function () {

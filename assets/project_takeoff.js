@@ -408,6 +408,34 @@
         return allLayers().find(layer => layer.id === layerId) || null;
     }
 
+    function layerCanvasPayload(layer) {
+        return {
+            id: layer.id,
+            name: layer.name,
+            takeoff_type: layer.type.toLowerCase(),
+            type: layer.type.toLowerCase(),
+            unit_of_measure: layer.uom,
+            uom: layer.uom,
+            symbol: layer.symbol,
+            symbol_size: layer.size,
+            size: layer.size,
+            color: layer.color,
+            quantity: layer.quantity,
+            catalog_item_id: layer.catalogItemId || null,
+            unit_cost: layer.unitCost || 0,
+            labor_hours: layer.laborHours || 0,
+            category: layer.category || '',
+            description: layer.description || '',
+            visible: layer.visible !== false
+        };
+    }
+
+    function syncAllLayersToCanvas() {
+        const payload = allLayers().map(layerCanvasPayload);
+        const snapshot = callEditor('projectTakeoffSyncLayers', payload);
+        if (snapshot) syncTakeoffFromCanvasSnapshot(snapshot);
+    }
+
     function quantityLabel(layer) {
         const qty = Number(layer.quantity || 0);
         return `${qty % 1 === 0 ? qty.toFixed(0) : qty.toFixed(2)} ${layer.uom}`;
@@ -1071,6 +1099,7 @@
         }
         saveTakeoffState();
         renderTakeoffPanel();
+        syncAllLayersToCanvas();
     }
 
     function toggleGroupVisibility(groupId, visible) {
@@ -1088,30 +1117,14 @@
         }
         saveTakeoffState();
         renderTakeoffPanel();
+        syncAllLayersToCanvas();
     }
 
     function applyLayerToCanvas(layer) {
         const win = takeoffWindow();
         if (!win) return;
-        const payload = {
-            id: layer.id,
-            name: layer.name,
-            takeoff_type: layer.type.toLowerCase(),
-            type: layer.type.toLowerCase(),
-            unit_of_measure: layer.uom,
-            uom: layer.uom,
-            symbol: layer.symbol,
-            symbol_size: layer.size,
-            size: layer.size,
-            color: layer.color,
-            quantity: layer.quantity,
-            catalog_item_id: layer.catalogItemId || null,
-            unit_cost: layer.unitCost || 0,
-            labor_hours: layer.laborHours || 0,
-            category: layer.category || '',
-            description: layer.description || '',
-            visible: layer.visible !== false
-        };
+        syncAllLayersToCanvas();
+        const payload = layerCanvasPayload(layer);
         win.__projectActiveTakeoffLayer = payload;
         callEditor('projectTakeoffActivateLayer', payload);
         if (layer.type === 'Linear') setActiveTool('linear');
@@ -1277,6 +1290,11 @@
             setActiveTool(command);
             if ((command === 'linear' || command === 'area') && !hasScaleSet()) openScalePanel();
             return;
+        }
+        if (command === 'smart' || command === 'pan') {
+            callEditor('projectTakeoffSetTool', 'select');
+            setActiveTool(command);
+            return callEditor('setMode', 'smart');
         }
         const modeMap = {
             smart: 'smart',
@@ -1805,8 +1823,10 @@
             setTimeout(syncEditorInfo, 250);
             setTimeout(notifyEditorVisible, 120);
             setTimeout(() => {
+                syncAllLayersToCanvas();
                 const active = findLayer(takeoffState.activeLayerId);
                 if (active) applyLayerToCanvas(active);
+                else callEditor('projectTakeoffClearActiveLayer');
                 const snapshot = callEditor('projectTakeoffSnapshot');
                 if (snapshot) syncTakeoffFromCanvasSnapshot(snapshot);
             }, 360);
