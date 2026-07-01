@@ -569,14 +569,13 @@ $state = [
                     <div class="project-status-menu" id="projectStatusMenu"></div>
                 </div>
             </div>
-            <p id="projectHeaderSubtitle"><?= $isDraftProject ? 'Unsaved draft' : htmlspecialchars('Project Workspace · ' . $statusLabel) ?></p>
+            <p id="projectHeaderSubtitle"><?= $isDraftProject ? 'Unsaved draft' : htmlspecialchars('Project Workspace - ' . $statusLabel) ?></p>
             <div class="project-meta-line" id="projectMetaLine">
                 <span><?= htmlspecialchars($completionLabel) ?></span>
                 <span>Due: <?= htmlspecialchars($dueLabel) ?></span>
                 <span>Estimator: <?= htmlspecialchars($estimatorName ?: 'Unassigned') ?></span>
                 <span>Project #: <?= htmlspecialchars($projectNumberLabel) ?></span>
             </div>
-            <div class="project-status-stepper" id="projectStatusStepper" aria-label="Project status progress"></div>
         </div>
         <div class="project-header-actions">
             <div class="dropdown-wrap">

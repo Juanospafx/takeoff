@@ -27,21 +27,25 @@
 }
 
 [data-theme="dark"] {
-    --bg-primary: #ffffff;
-    --bg-secondary: #f6f8fb;
-    --bg-card: #ffffff;
-    --text-primary: #111827;
-    --text-secondary: #4b5563;
-    --text-muted: #6b7280;
-    --text-disabled: #9ca3af;
-    --border-color: #d1d5db;
-    --bg: #f6f8fb;
-    --panel: #ffffff;
-    --card: #ffffff;
-    --card-2: #f8fafc;
-    --line: #d1d5db;
-    --text: #111827;
-    --muted: #4b5563;
+    --bg-primary: #0f172a;
+    --bg-secondary: #111827;
+    --bg-card: #1e293b;
+    --text-primary: #f8fafc;
+    --text-secondary: #cbd5e1;
+    --text-muted: #94a3b8;
+    --text-disabled: #64748b;
+    --border-color: #334155;
+    --bg: #111827;
+    --panel: #0f172a;
+    --card: #1e293b;
+    --card-2: #162033;
+    --line: #334155;
+    --text: #f8fafc;
+    --muted: #cbd5e1;
+    --primary: #60a5fa;
+    --accent: #fb923c;
+    --success: #22c55e;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.35);
 }
 
 body {
@@ -98,48 +102,6 @@ body {
     height: 3px;
     border-radius: 999px;
     background: var(--text-muted);
-}
-
-.project-status-stepper {
-    display: flex;
-    flex-wrap: nowrap;
-    gap: 4px;
-    margin-top: 8px;
-    max-width: min(980px, 100%);
-    overflow-x: auto;
-    scrollbar-width: none;
-    -ms-overflow-style: none;
-}
-
-.project-status-stepper::-webkit-scrollbar {
-    display: none;
-}
-
-.project-step {
-    min-height: 24px;
-    display: inline-flex;
-    align-items: center;
-    border: 1px solid var(--line);
-    border-radius: 999px;
-    padding: 2px 8px;
-    color: var(--text-secondary);
-    background: var(--card-2);
-    font-size: .68rem;
-    font-weight: 900;
-    white-space: nowrap;
-    flex: 0 0 auto;
-}
-
-.project-step.done {
-    color: #176341;
-    background: #e9f7ef;
-    border-color: #c9ead8;
-}
-
-.project-step.active {
-    color: #fff;
-    background: var(--primary);
-    border-color: var(--primary);
 }
 
 .project-header-actions {
@@ -673,6 +635,76 @@ th {
     border-radius: 8px;
     padding: 10px 12px;
     box-shadow: 0 18px 48px rgba(15, 23, 42, .24);
+}
+
+[data-theme="dark"] .project-header,
+[data-theme="dark"] .top-tabs,
+[data-theme="dark"] .overview-card,
+[data-theme="dark"] .card-panel,
+[data-theme="dark"] .table-wrap,
+[data-theme="dark"] .project-menu,
+[data-theme="dark"] .project-status-menu,
+[data-theme="dark"] .documents-empty,
+[data-theme="dark"] .doc-row-actions button,
+[data-theme="dark"] .btn-ghost,
+[data-theme="dark"] .btn-outline-dark,
+[data-theme="dark"] .overview-field input,
+[data-theme="dark"] .overview-field select,
+[data-theme="dark"] .overview-field textarea {
+    background: var(--bg-card);
+    color: var(--text-primary);
+    border-color: var(--border-color);
+}
+
+[data-theme="dark"] .top-tabs button:hover,
+[data-theme="dark"] .project-menu button:hover,
+[data-theme="dark"] .project-status-option:hover,
+[data-theme="dark"] .folder-item:hover,
+[data-theme="dark"] .doc-item:hover {
+    background: #273449;
+}
+
+[data-theme="dark"] .top-tabs button.active {
+    background: rgba(96, 165, 250, .16);
+    color: var(--primary);
+}
+
+[data-theme="dark"] .overview-empty,
+[data-theme="dark"] .documents-dropzone {
+    background: #162033;
+    border-color: var(--border-color);
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .documents-dropzone.is-dragover {
+    background: #2d2418;
+    border-color: var(--accent);
+}
+
+[data-theme="dark"] .overview-empty::before,
+[data-theme="dark"] .overview-count {
+    background: #24324a;
+    color: var(--primary);
+}
+
+[data-theme="dark"] th,
+[data-theme="dark"] .documents-table th {
+    background: #162033;
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] td,
+[data-theme="dark"] th,
+[data-theme="dark"] .documents-table td,
+[data-theme="dark"] .documents-table th,
+[data-theme="dark"] .documents-table-wrap {
+    border-color: var(--border-color);
+}
+
+[data-theme="dark"] .status-pill,
+[data-theme="dark"] .project-status-badge,
+[data-theme="dark"] .doc-category-pill {
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
 }
 
 @media (max-width: 980px) {

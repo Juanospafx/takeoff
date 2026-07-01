@@ -95,7 +95,6 @@
                     window.ProjectState.projectInfo = data.data?.project || window.ProjectState.projectInfo;
                     $('projectHeaderName').textContent = payload.name;
                     renderProjectHeaderMeta();
-                    renderStatusStepper();
                 }
             })
             .catch(err => showToast(err.message));
@@ -139,7 +138,6 @@
         button.dataset.status = currentStatus;
         label.textContent = activeLabel;
         renderProjectHeaderMeta();
-        renderStatusStepper();
         menu.innerHTML = PROJECT_STATUSES.map(status => `
             <button class="project-status-option" type="button" data-project-status="${STATUS_VALUES[status]}">
                 <span class="status-pill status-${slug(status)}">${status}</span>
@@ -174,30 +172,19 @@
                 window.ProjectState.projectInfo = data.data?.project || window.ProjectState.projectInfo;
                 showToast(`Project moved to ${statusLabel()}.`);
                 renderProjectHeaderMeta();
-                renderStatusStepper();
             })
             .catch(err => showToast(err.message));
     }
 
     function renderProjectHeaderMeta() {
         const subtitle = $('projectHeaderSubtitle');
-        if (subtitle) subtitle.textContent = `Project Workspace · ${statusLabel()}`;
+        if (subtitle) subtitle.textContent = `Project Workspace - ${statusLabel()}`;
         const metaLine = $('projectMetaLine');
         if (!metaLine) return;
         const projectNumber = $('poProjectNumber')?.value || window.ProjectState?.projectInfo?.project_number || '--';
         const estimator = $('poEstimator')?.value || 'Unassigned';
         const completion = window.ProjectState?.projectMeta?.completion_percent ? `${String(window.ProjectState.projectMeta.completion_percent).replace('%', '')}% complete` : '0% complete';
         metaLine.innerHTML = `<span>${escapeHtml(completion)}</span><span>Due: ${escapeHtml(dueLabel())}</span><span>Estimator: ${escapeHtml(estimator || 'Unassigned')}</span><span>Project #: ${escapeHtml(projectNumber || '--')}</span>`;
-    }
-
-    function renderStatusStepper() {
-        const stepper = $('projectStatusStepper');
-        if (!stepper) return;
-        const currentIndex = PROJECT_STATUSES.findIndex(label => STATUS_VALUES[label] === normalizeStatus(currentStatus));
-        stepper.innerHTML = PROJECT_STATUSES.map((label, index) => {
-            const stateClass = index < currentIndex ? 'done' : index === currentIndex ? 'active' : 'next';
-            return `<span class="project-step ${stateClass}">${escapeHtml(label)}</span>`;
-        }).join('');
     }
 
     function toggleMenu(id) {

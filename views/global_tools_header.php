@@ -153,22 +153,30 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
 <script>
 (function () {
     var key = 'takeoff.theme';
-    document.documentElement.setAttribute('data-theme', 'light');
-    if (localStorage.getItem(key) === 'dark') localStorage.setItem(key, 'light');
+    var saved = localStorage.getItem(key);
+    var theme = saved === 'dark' || saved === 'light' ? saved : 'light';
+    document.documentElement.setAttribute('data-theme', theme);
+
     function syncThemeButton() {
         document.querySelectorAll('[data-theme-toggle]').forEach(function (button) {
-            button.querySelector('span').textContent = 'Dark Mode paused';
+            var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            var label = button.querySelector('span');
+            if (label) label.textContent = isDark ? 'Light Mode' : 'Dark Mode';
             var icon = button.querySelector('i');
-            if (icon) icon.className = 'fas fa-moon';
+            if (icon) icon.className = isDark ? 'fas fa-sun' : 'fas fa-moon';
         });
     }
+
     document.addEventListener('click', function (event) {
         var button = event.target.closest('[data-theme-toggle]');
         if (!button) return;
-        document.documentElement.setAttribute('data-theme', 'light');
-        localStorage.setItem(key, 'light');
+        var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem(key, next);
         syncThemeButton();
     });
+
     document.addEventListener('DOMContentLoaded', syncThemeButton);
+    syncThemeButton();
 })();
 </script>
