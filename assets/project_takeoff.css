@@ -277,7 +277,7 @@
 }
 
 .pro-tree-item {
-    grid-template-columns: 18px 16px minmax(0, 1fr) max-content 24px;
+    grid-template-columns: 18px 14px 16px minmax(0, 1fr) max-content 24px;
     grid-template-rows: 20px 14px;
     column-gap: 6px;
     row-gap: 0;
@@ -321,7 +321,7 @@
 }
 
 .pro-layer-meta {
-    grid-column: 3 / 5;
+    grid-column: 4 / 6;
     min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -340,6 +340,16 @@
     height: 10px;
     border-radius: 999px;
     box-shadow: inset 0 0 0 1px rgba(0,0,0,.12);
+}
+
+
+.pro-layer-active-check {
+    width: 13px;
+    height: 13px;
+    margin: 0;
+    justify-self: center;
+    accent-color: #1f6fb2;
+    cursor: pointer;
 }
 
 .pro-layer-symbol {

@@ -488,6 +488,7 @@
                         const metadata = layer.catalogItemId ? 'Linked to catalog' : (layer.category || layer.description || '');
                         return `<div class="pro-tree-row pro-tree-item ${takeoffState.activeLayerId === layer.id ? 'active' : ''} ${isVisible ? '' : 'is-hidden'}" data-layer-row="${esc(layer.id)}">
                             <button class="pro-visibility-btn ${isVisible ? '' : 'is-off'}" type="button" data-layer-visibility="${esc(layer.id)}" title="${isVisible ? 'Hide item' : 'Show item'}" aria-label="${isVisible ? 'Hide item' : 'Show item'}"><i class="fas ${isVisible ? 'fa-eye' : 'fa-eye-slash'}"></i></button>
+                            <input class="pro-layer-active-check" type="checkbox" ${takeoffState.activeLayerId === layer.id ? 'checked' : ''} aria-label="Set active layer" data-layer-active="${esc(layer.id)}">
                             <span class="pro-layer-symbol" style="color:${esc(layer.color)}">${symbolGlyph(layer)}</span>
                             <span class="pro-tree-name" title="${esc(layer.name)}">${esc(layer.name)}</span>
                             <span class="pro-tree-qty">${esc(quantityLabel(layer))}</span>
@@ -535,6 +536,14 @@
                 event.stopPropagation();
                 const layer = findLayer(button.dataset.layerVisibility);
                 if (layer) toggleLayerVisibility(layer.id, layer.visible === false);
+            });
+        });
+        document.querySelectorAll('[data-layer-active]').forEach(box => {
+            box.addEventListener('click', event => event.stopPropagation());
+            box.addEventListener('change', () => {
+                if (box.checked) setActiveTakeoffLayer(box.dataset.layerActive);
+                else if (takeoffState.activeLayerId === box.dataset.layerActive) clearActiveTakeoffLayer();
+                else renderTakeoffPanel();
             });
         });
         document.querySelectorAll('[data-group-menu]').forEach(button => {
@@ -1078,10 +1087,7 @@
     function setActiveTakeoffLayer(layerId, rerender = true) {
         const layer = findLayer(layerId);
         if (!layer) return;
-        if (layer.visible === false) {
-            showPrepared('Show this layer before drawing.');
-            return;
-        }
+
         takeoffState.activeLayerId = layer.id;
         takeoffState.activeGroupId = layer.groupId;
         applyLayerToCanvas(layer);
@@ -1101,10 +1107,7 @@
         if (!layer) return;
         layer.visible = Boolean(visible);
         callEditor('projectTakeoffSetLayerVisibility', layer.id, layer.visible);
-        if (!layer.visible && takeoffState.activeLayerId === layer.id) {
-            takeoffState.activeLayerId = null;
-            callEditor('projectTakeoffClearActiveLayer');
-        }
+
         saveTakeoffState();
         renderTakeoffPanel();
         syncAllLayersToCanvas();
@@ -1113,16 +1116,10 @@
     function toggleGroupVisibility(groupId, visible) {
         const group = findGroup(groupId);
         if (!group) return;
-        let activeWasHidden = false;
         (group.layers || []).forEach(layer => {
             layer.visible = Boolean(visible);
             callEditor('projectTakeoffSetLayerVisibility', layer.id, layer.visible);
-            if (!layer.visible && takeoffState.activeLayerId === layer.id) activeWasHidden = true;
         });
-        if (activeWasHidden) {
-            takeoffState.activeLayerId = null;
-            callEditor('projectTakeoffClearActiveLayer');
-        }
         saveTakeoffState();
         renderTakeoffPanel();
         syncAllLayersToCanvas();
