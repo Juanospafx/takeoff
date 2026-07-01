@@ -6,6 +6,7 @@ header('Content-Type: application/json; charset=utf-8');
 $input = json_decode(file_get_contents('php://input'), true);
 if (!is_array($input)) $input = array();
 $action = isset($_GET['action']) ? $_GET['action'] : (isset($_POST['action']) ? $_POST['action'] : (isset($input['action']) ? $input['action'] : 'list'));
+$requestedProjectId = tl_int(isset($_GET['project_id']) ? $_GET['project_id'] : (isset($_POST['project_id']) ? $_POST['project_id'] : (isset($input['project_id']) ? $input['project_id'] : 0)));
 
 function tl_json($payload, $status = 200)
 {
@@ -52,6 +53,72 @@ function tl_table_exists($pdo, $table)
     $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
     $stmt->execute(array($table));
     return (bool)$stmt->fetchColumn();
+}
+
+function tl_first_project_id($pdo)
+{
+    try {
+        return (int)$pdo->query("SELECT id FROM projects WHERE deleted_at IS NULL ORDER BY id LIMIT 1")->fetchColumn();
+    } catch (Throwable $e) {
+        return 0;
+    }
+}
+
+function tl_ensure_project($pdo, $requestedProjectId)
+{
+    if ($requestedProjectId > 0) {
+        $stmt = $pdo->prepare("SELECT id FROM projects WHERE id = ? AND deleted_at IS NULL LIMIT 1");
+        $stmt->execute(array($requestedProjectId));
+        $id = (int)$stmt->fetchColumn();
+        if ($id > 0) return $id;
+    }
+
+    $id = tl_first_project_id($pdo);
+    if ($id > 0) return $id;
+
+    $pdo->exec("INSERT INTO projects (name, description, status) VALUES ('Uploads Test Project', 'Temporary project for takeoff module testing', 'active')");
+    return (int)$pdo->lastInsertId();
+}
+
+function tl_ensure_takeoff($pdo, $projectId)
+{
+    $stmt = $pdo->prepare("SELECT id FROM takeoffs WHERE project_id = ? AND deleted_at IS NULL ORDER BY id LIMIT 1");
+    $stmt->execute(array($projectId));
+    $id = (int)$stmt->fetchColumn();
+    if ($id > 0) return $id;
+
+    $stmt = $pdo->prepare("INSERT INTO takeoffs (project_id, name, status) VALUES (?, 'Default Takeoff', 'draft')");
+    $stmt->execute(array($projectId));
+    return (int)$pdo->lastInsertId();
+}
+
+function tl_ensure_estimate($pdo, $projectId)
+{
+    $stmt = $pdo->prepare("SELECT id FROM estimates WHERE project_id = ? AND deleted_at IS NULL ORDER BY id LIMIT 1");
+    $stmt->execute(array($projectId));
+    $id = (int)$stmt->fetchColumn();
+    if ($id > 0) return $id;
+
+    $stmt = $pdo->prepare("INSERT INTO estimates (project_id, name, status, currency_code) VALUES (?, 'Default Estimate', 'draft', 'USD')");
+    $stmt->execute(array($projectId));
+    return (int)$pdo->lastInsertId();
+}
+
+function tl_project_name($pdo, $projectId)
+{
+    $stmt = $pdo->prepare("SELECT name FROM projects WHERE id = ? LIMIT 1");
+    $stmt->execute(array($projectId));
+    return (string)($stmt->fetchColumn() ?: 'Project');
+}
+
+function tl_refresh_estimate_totals($pdo, $estimateId)
+{
+    $stmt = $pdo->prepare("UPDATE estimates SET
+        subtotal_cost = (SELECT COALESCE(SUM(subtotal_cost), 0) FROM estimate_items WHERE estimate_id = ? AND deleted_at IS NULL),
+        total_cost = (SELECT COALESCE(SUM(total_cost), 0) FROM estimate_items WHERE estimate_id = ? AND deleted_at IS NULL),
+        updated_at = CURRENT_TIMESTAMP
+        WHERE id = ?");
+    $stmt->execute(array($estimateId, $estimateId, $estimateId));
 }
 
 function tl_item_type_for_db($pdo, $value)
@@ -210,6 +277,7 @@ function tl_ensure_schema($pdo)
         name VARCHAR(191) NOT NULL,
         status VARCHAR(50) NOT NULL DEFAULT 'draft',
         currency_code CHAR(3) NOT NULL DEFAULT 'USD',
+        subtotal_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
         total_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
         created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
@@ -236,6 +304,7 @@ function tl_ensure_schema($pdo)
         unit_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
         unit_labor_time DECIMAL(18,4) NOT NULL DEFAULT 0,
         labor_hours DECIMAL(18,4) NOT NULL DEFAULT 0,
+        material_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
         waste_percentage DECIMAL(9,4) NOT NULL DEFAULT 0,
         margin_percentage DECIMAL(9,4) NOT NULL DEFAULT 0,
         taxable TINYINT(1) NOT NULL DEFAULT 1,
@@ -261,6 +330,7 @@ function tl_ensure_schema($pdo)
         'budget_code' => "ALTER TABLE estimate_items ADD COLUMN budget_code VARCHAR(100) NULL",
         'cost_type' => "ALTER TABLE estimate_items ADD COLUMN cost_type VARCHAR(100) NULL",
         'unit_labor_time' => "ALTER TABLE estimate_items ADD COLUMN unit_labor_time DECIMAL(18,4) NOT NULL DEFAULT 0",
+        'material_cost' => "ALTER TABLE estimate_items ADD COLUMN material_cost DECIMAL(18,4) NOT NULL DEFAULT 0",
         'waste_percentage' => "ALTER TABLE estimate_items ADD COLUMN waste_percentage DECIMAL(9,4) NOT NULL DEFAULT 0",
         'margin_percentage' => "ALTER TABLE estimate_items ADD COLUMN margin_percentage DECIMAL(9,4) NOT NULL DEFAULT 0",
         'taxable' => "ALTER TABLE estimate_items ADD COLUMN taxable TINYINT(1) NOT NULL DEFAULT 1",
@@ -268,16 +338,7 @@ function tl_ensure_schema($pdo)
         'labor_cost' => "ALTER TABLE estimate_items ADD COLUMN labor_cost DECIMAL(18,4) NOT NULL DEFAULT 0"
     );
     foreach ($estimateColumns as $column => $sql) tl_add_column($pdo, 'estimate_items', $column, $sql);
-
-    $pdo->exec("INSERT INTO projects (id, name, description, status)
-        VALUES (1, 'Uploads Test Project', 'Temporary project for takeoff module testing', 'active')
-        ON DUPLICATE KEY UPDATE name = VALUES(name)");
-    $pdo->exec("INSERT INTO takeoffs (id, project_id, name, status)
-        VALUES (1, 1, 'Default Takeoff', 'draft')
-        ON DUPLICATE KEY UPDATE name = VALUES(name)");
-    $pdo->exec("INSERT INTO estimates (id, project_id, name, status, currency_code)
-        VALUES (1, 1, 'Default Estimate', 'draft', 'USD')
-        ON DUPLICATE KEY UPDATE name = VALUES(name)");
+    tl_add_column($pdo, 'estimates', 'subtotal_cost', "ALTER TABLE estimates ADD COLUMN subtotal_cost DECIMAL(18,4) NOT NULL DEFAULT 0");
 
     tl_seed_catalog($pdo);
 }
@@ -322,34 +383,41 @@ function tl_catalog_items($pdo)
     return $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
 }
 
-function tl_layers($pdo)
+function tl_layers($pdo, $projectId)
 {
     $sql = "SELECT tl.*, ci.name AS catalog_item_name, ci.unit_cost AS catalog_unit_cost, ci.labor_hours AS catalog_labor_hours
         FROM takeoff_layers tl
+        LEFT JOIN takeoffs t ON t.id = tl.takeoff_id
         LEFT JOIN catalog_items ci ON ci.id = tl.catalog_item_id
-        WHERE tl.deleted_at IS NULL
+        WHERE tl.deleted_at IS NULL AND (tl.project_id = ? OR t.project_id = ?)
         ORDER BY COALESCE(tl.group_name, 'Ungrouped'), tl.sort_order, tl.name";
-    return $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute(array($projectId, $projectId));
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-function tl_estimate_items($pdo)
+function tl_estimate_items($pdo, $estimateId)
 {
     $sql = "SELECT ei.*, tl.name AS takeoff_layer_name, ci.name AS catalog_item_name
         FROM estimate_items ei
         LEFT JOIN takeoff_layers tl ON tl.id = ei.takeoff_layer_id
         LEFT JOIN catalog_items ci ON ci.id = ei.catalog_item_id
-        WHERE ei.deleted_at IS NULL
+        WHERE ei.estimate_id = ? AND ei.deleted_at IS NULL
         ORDER BY ei.sort_order, ei.id";
-    return $pdo->query($sql)->fetchAll(PDO::FETCH_ASSOC);
+    $stmt = $pdo->prepare($sql);
+    $stmt->execute(array($estimateId));
+    return $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
-function tl_list_payload($pdo)
+function tl_list_payload($pdo, $workspace)
 {
     return array(
-        'layers' => tl_layers($pdo),
+        'layers' => tl_layers($pdo, $workspace['project_id']),
         'catalogItems' => tl_catalog_items($pdo),
-        'estimateItems' => tl_estimate_items($pdo),
-        'project' => array('id' => 1, 'name' => 'Uploads Test Project')
+        'estimateItems' => tl_estimate_items($pdo, $workspace['estimate_id']),
+        'project' => array('id' => $workspace['project_id'], 'name' => tl_project_name($pdo, $workspace['project_id'])),
+        'estimate' => array('id' => $workspace['estimate_id']),
+        'takeoff' => array('id' => $workspace['takeoff_id'])
     );
 }
 
@@ -363,7 +431,7 @@ function tl_calc_estimate_values($quantity, $unitCost, $unitLaborTime, $waste, $
     return array($subtotal, $laborHours, $total);
 }
 
-function tl_sync_layer_estimate($pdo, $layerId)
+function tl_sync_layer_estimate($pdo, $layerId, $estimateId)
 {
     $stmt = $pdo->prepare("SELECT tl.*, ci.unit_cost, ci.labor_hours, ci.description, ci.cost_code, ci.item_type
         FROM takeoff_layers tl
@@ -377,40 +445,47 @@ function tl_sync_layer_estimate($pdo, $layerId)
     $unitCost = tl_float($layer['unit_cost']);
     $unitLabor = tl_float($layer['labor_hours']);
     $values = tl_calc_estimate_values($quantity, $unitCost, $unitLabor, 0, 0);
-    $existing = $pdo->prepare("SELECT id FROM estimate_items WHERE takeoff_layer_id = ? AND source_type = 'takeoff' AND deleted_at IS NULL LIMIT 1");
-    $existing->execute(array($layerId));
+    $existing = $pdo->prepare("SELECT id FROM estimate_items WHERE estimate_id = ? AND takeoff_layer_id = ? AND source_type = 'takeoff' AND deleted_at IS NULL LIMIT 1");
+    $existing->execute(array($estimateId, $layerId));
     $estimateItemId = (int)$existing->fetchColumn();
 
     if ($estimateItemId > 0) {
         $stmt = $pdo->prepare("UPDATE estimate_items SET
             catalog_item_id = ?, name = ?, description = ?, quantity = ?, unit_of_measure = ?, unit_cost = ?,
-            unit_labor_time = ?, labor_hours = ?, subtotal_cost = ?, total_cost = ?, group_name = ?,
+            unit_labor_time = ?, labor_hours = ?, material_cost = ?, subtotal_cost = ?, total_cost = ?, group_name = ?,
             budget_code = ?, cost_type = ?, is_quantity_locked_from_takeoff = 1, updated_at = CURRENT_TIMESTAMP
             WHERE id = ?");
         $stmt->execute(array(
             $layer['catalog_item_id'], $layer['name'], $layer['description'], $quantity, $layer['unit_of_measure'],
-            $unitCost, $unitLabor, $values[1], $values[0], $values[2], $layer['group_name'],
+            $unitCost, $unitLabor, $values[1], $values[0], $values[0], $values[2], $layer['group_name'],
             $layer['cost_code'], $layer['item_type'], $estimateItemId
         ));
     } else {
         $stmt = $pdo->prepare("INSERT INTO estimate_items
             (estimate_id, takeoff_layer_id, catalog_item_id, source_type, is_manual, is_quantity_locked_from_takeoff,
              group_name, budget_code, cost_type, name, description, quantity, unit_of_measure, unit_cost,
-             unit_labor_time, labor_hours, subtotal_cost, total_cost, taxable)
-            VALUES (1, ?, ?, 'takeoff', 0, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
+             unit_labor_time, labor_hours, material_cost, subtotal_cost, total_cost, taxable)
+            VALUES (?, ?, ?, 'takeoff', 0, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
         $stmt->execute(array(
-            $layerId, $layer['catalog_item_id'], $layer['group_name'], $layer['cost_code'], $layer['item_type'],
+            $estimateId, $layerId, $layer['catalog_item_id'], $layer['group_name'], $layer['cost_code'], $layer['item_type'],
             $layer['name'], $layer['description'], $quantity, $layer['unit_of_measure'], $unitCost,
-            $unitLabor, $values[1], $values[0], $values[2]
+            $unitLabor, $values[1], $values[0], $values[0], $values[2]
         ));
     }
+    tl_refresh_estimate_totals($pdo, $estimateId);
 }
 
 try {
     tl_ensure_schema($pdo);
+    $projectId = tl_ensure_project($pdo, $requestedProjectId);
+    $workspace = array(
+        'project_id' => $projectId,
+        'takeoff_id' => tl_ensure_takeoff($pdo, $projectId),
+        'estimate_id' => tl_ensure_estimate($pdo, $projectId)
+    );
 
     if ($action === 'list') {
-        tl_json(array('status' => 'success', 'data' => tl_list_payload($pdo)));
+        tl_json(array('status' => 'success', 'data' => tl_list_payload($pdo, $workspace)));
     }
 
     if ($action === 'save_layer') {
@@ -431,17 +506,17 @@ try {
             $stmt = $pdo->prepare("UPDATE takeoff_layers SET
                 catalog_item_id = ?, group_name = ?, name = ?, takeoff_type = ?, unit_of_measure = ?,
                 color = ?, symbol = ?, symbol_size = ?, quantity = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?");
-            $stmt->execute(array($catalogItemId ?: null, $groupName, $name, $type, $uom, $color, $symbol, $symbolSize, $quantity, $id));
+                WHERE id = ? AND (project_id = ? OR takeoff_id = ?)");
+            $stmt->execute(array($catalogItemId ?: null, $groupName, $name, $type, $uom, $color, $symbol, $symbolSize, $quantity, $id, $workspace['project_id'], $workspace['takeoff_id']));
         } else {
             $stmt = $pdo->prepare("INSERT INTO takeoff_layers
                 (takeoff_id, project_id, catalog_item_id, group_name, name, takeoff_type, unit_of_measure, color, symbol, symbol_size, quantity, visible, locked)
-                VALUES (1, 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)");
-            $stmt->execute(array($catalogItemId ?: null, $groupName, $name, $type, $uom, $color, $symbol, $symbolSize, $quantity));
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1, 0)");
+            $stmt->execute(array($workspace['takeoff_id'], $workspace['project_id'], $catalogItemId ?: null, $groupName, $name, $type, $uom, $color, $symbol, $symbolSize, $quantity));
             $id = (int)$pdo->lastInsertId();
         }
-        tl_sync_layer_estimate($pdo, $id);
-        tl_json(array('status' => 'success', 'data' => tl_list_payload($pdo)));
+        tl_sync_layer_estimate($pdo, $id, $workspace['estimate_id']);
+        tl_json(array('status' => 'success', 'data' => tl_list_payload($pdo, $workspace)));
     }
 
     if ($action === 'duplicate_layer') {
@@ -449,18 +524,19 @@ try {
         $stmt = $pdo->prepare("INSERT INTO takeoff_layers
             (takeoff_id, project_id, catalog_item_id, group_name, name, takeoff_type, unit_of_measure, color, symbol, symbol_size, quantity, visible, locked, sort_order)
             SELECT takeoff_id, project_id, catalog_item_id, group_name, CONCAT(name, ' Copy'), takeoff_type, unit_of_measure, color, symbol, symbol_size, quantity, visible, locked, sort_order + 1
-            FROM takeoff_layers WHERE id = ? AND deleted_at IS NULL");
-        $stmt->execute(array($id));
+            FROM takeoff_layers WHERE id = ? AND deleted_at IS NULL AND (project_id = ? OR takeoff_id = ?)");
+        $stmt->execute(array($id, $workspace['project_id'], $workspace['takeoff_id']));
         $newId = (int)$pdo->lastInsertId();
-        if ($newId > 0) tl_sync_layer_estimate($pdo, $newId);
-        tl_json(array('status' => 'success', 'data' => tl_list_payload($pdo)));
+        if ($newId > 0) tl_sync_layer_estimate($pdo, $newId, $workspace['estimate_id']);
+        tl_json(array('status' => 'success', 'data' => tl_list_payload($pdo, $workspace)));
     }
 
     if ($action === 'delete_layer') {
         $id = tl_int($input['id']);
-        $pdo->prepare("UPDATE takeoff_layers SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?")->execute(array($id));
-        $pdo->prepare("UPDATE estimate_items SET deleted_at = CURRENT_TIMESTAMP WHERE takeoff_layer_id = ? AND source_type = 'takeoff'")->execute(array($id));
-        tl_json(array('status' => 'success', 'data' => tl_list_payload($pdo)));
+        $pdo->prepare("UPDATE takeoff_layers SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND (project_id = ? OR takeoff_id = ?)")->execute(array($id, $workspace['project_id'], $workspace['takeoff_id']));
+        $pdo->prepare("UPDATE estimate_items SET deleted_at = CURRENT_TIMESTAMP WHERE estimate_id = ? AND takeoff_layer_id = ? AND source_type = 'takeoff'")->execute(array($workspace['estimate_id'], $id));
+        tl_refresh_estimate_totals($pdo, $workspace['estimate_id']);
+        tl_json(array('status' => 'success', 'data' => tl_list_payload($pdo, $workspace)));
     }
 
     if ($action === 'update_layer') {
@@ -469,15 +545,15 @@ try {
         $allowed = array('visible', 'locked', 'group_name', 'color', 'symbol', 'quantity');
         if (!in_array($field, $allowed, true)) tl_json(array('status' => 'error', 'msg' => 'Unsupported layer update'), 422);
         $value = isset($input['value']) ? $input['value'] : null;
-        $stmt = $pdo->prepare("UPDATE takeoff_layers SET `$field` = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ?");
-        $stmt->execute(array($value, $id));
-        if ($field === 'quantity') tl_sync_layer_estimate($pdo, $id);
-        tl_json(array('status' => 'success', 'data' => tl_list_payload($pdo)));
+        $stmt = $pdo->prepare("UPDATE takeoff_layers SET `$field` = ?, updated_at = CURRENT_TIMESTAMP WHERE id = ? AND (project_id = ? OR takeoff_id = ?)");
+        $stmt->execute(array($value, $id, $workspace['project_id'], $workspace['takeoff_id']));
+        if ($field === 'quantity') tl_sync_layer_estimate($pdo, $id, $workspace['estimate_id']);
+        tl_json(array('status' => 'success', 'data' => tl_list_payload($pdo, $workspace)));
     }
 
     if ($action === 'sync_layer_estimate') {
-        tl_sync_layer_estimate($pdo, tl_int($input['id']));
-        tl_json(array('status' => 'success', 'data' => tl_list_payload($pdo)));
+        tl_sync_layer_estimate($pdo, tl_int($input['id']), $workspace['estimate_id']);
+        tl_json(array('status' => 'success', 'data' => tl_list_payload($pdo, $workspace)));
     }
 
     if ($action === 'save_estimate_item') {
@@ -490,8 +566,8 @@ try {
 
         $quantity = tl_float(isset($input['quantity']) ? $input['quantity'] : 0);
         if ($sourceType === 'takeoff' && $takeoffLayerId > 0) {
-            $q = $pdo->prepare("SELECT quantity FROM takeoff_layers WHERE id = ? AND deleted_at IS NULL");
-            $q->execute(array($takeoffLayerId));
+            $q = $pdo->prepare("SELECT quantity FROM takeoff_layers WHERE id = ? AND deleted_at IS NULL AND (project_id = ? OR takeoff_id = ?)");
+            $q->execute(array($takeoffLayerId, $workspace['project_id'], $workspace['takeoff_id']));
             $quantity = tl_float($q->fetchColumn());
         }
         $unitCost = tl_float(isset($input['unit_cost']) ? $input['unit_cost'] : 0);
@@ -520,32 +596,36 @@ try {
             $margin,
             tl_int(isset($input['taxable']) ? $input['taxable'] : 1),
             $values[0],
+            $values[0],
             $values[2]
         );
         if ($id > 0) {
             $params[] = $id;
+            $params[] = $workspace['estimate_id'];
             $stmt = $pdo->prepare("UPDATE estimate_items SET
                 takeoff_layer_id = ?, catalog_item_id = ?, source_type = ?, is_manual = ?, is_quantity_locked_from_takeoff = ?,
                 group_name = ?, budget_code = ?, cost_type = ?, name = ?, description = ?, quantity = ?, unit_of_measure = ?,
                 unit_cost = ?, unit_labor_time = ?, labor_hours = ?, waste_percentage = ?, margin_percentage = ?,
-                taxable = ?, subtotal_cost = ?, total_cost = ?, updated_at = CURRENT_TIMESTAMP
-                WHERE id = ?");
+                taxable = ?, material_cost = ?, subtotal_cost = ?, total_cost = ?, updated_at = CURRENT_TIMESTAMP
+                WHERE id = ? AND estimate_id = ?");
             $stmt->execute($params);
         } else {
             $stmt = $pdo->prepare("INSERT INTO estimate_items
                 (estimate_id, takeoff_layer_id, catalog_item_id, source_type, is_manual, is_quantity_locked_from_takeoff,
                  group_name, budget_code, cost_type, name, description, quantity, unit_of_measure, unit_cost,
-                 unit_labor_time, labor_hours, waste_percentage, margin_percentage, taxable, subtotal_cost, total_cost)
-                VALUES (1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute($params);
+                 unit_labor_time, labor_hours, waste_percentage, margin_percentage, taxable, material_cost, subtotal_cost, total_cost)
+                VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)");
+            $stmt->execute(array_merge(array($workspace['estimate_id']), $params));
         }
-        tl_json(array('status' => 'success', 'data' => tl_list_payload($pdo)));
+        tl_refresh_estimate_totals($pdo, $workspace['estimate_id']);
+        tl_json(array('status' => 'success', 'data' => tl_list_payload($pdo, $workspace)));
     }
 
     if ($action === 'delete_estimate_item') {
         $id = tl_int($input['id']);
-        $pdo->prepare("UPDATE estimate_items SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?")->execute(array($id));
-        tl_json(array('status' => 'success', 'data' => tl_list_payload($pdo)));
+        $pdo->prepare("UPDATE estimate_items SET deleted_at = CURRENT_TIMESTAMP WHERE id = ? AND estimate_id = ?")->execute(array($id, $workspace['estimate_id']));
+        tl_refresh_estimate_totals($pdo, $workspace['estimate_id']);
+        tl_json(array('status' => 'success', 'data' => tl_list_payload($pdo, $workspace)));
     }
 
     tl_json(array('status' => 'error', 'msg' => 'Unknown action'), 404);

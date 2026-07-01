@@ -1,5 +1,6 @@
 (function () {
     const apiUrl = '../api/takeoff_layers.php';
+    const projectId = Number(window.EstimateProjectId || new URLSearchParams(window.location.search).get('project_id') || new URLSearchParams(window.location.search).get('id') || 0);
     let state = { layers: [], catalogItems: [], estimateItems: [] };
     let editingId = null;
 
@@ -21,7 +22,7 @@
         return fetch(apiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action, ...payload })
+            body: JSON.stringify({ action, project_id: projectId, ...payload })
         }).then(r => r.json()).then(data => {
             if (data.status !== 'success') throw new Error(data.msg || 'Request failed');
             state = data.data || state;
@@ -34,7 +35,7 @@
     }
 
     function load() {
-        fetch(`${apiUrl}?action=list`)
+        fetch(`${apiUrl}?action=list&project_id=${encodeURIComponent(projectId)}`)
             .then(r => r.json())
             .then(data => {
                 if (data.status !== 'success') throw new Error(data.msg || 'Could not load estimate');

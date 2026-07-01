@@ -923,11 +923,11 @@ $state = [
             <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-3">
                 <h2 class="mb-0 fw-bold">Estimating</h2>
                 <div class="quick-actions">
-                    <button class="btn-main"><i class="fas fa-plus"></i> Add Item</button>
-                    <button class="btn-ghost"><i class="fas fa-link"></i> Link Takeoff Layer</button>
-                    <button class="btn-ghost"><i class="fas fa-wand-magic-sparkles"></i> Create From Takeoff</button>
-                    <button class="btn-ghost"><i class="fas fa-rotate"></i> Refresh Totals</button>
-                    <button class="btn-ghost"><i class="fas fa-file-export"></i> Export</button>
+                    <a class="btn-main" href="estimate_module.php?project_id=<?= (int)$projectId ?>"><i class="fas fa-plus"></i> Add Item</a>
+                    <a class="btn-ghost" href="estimate_module.php?project_id=<?= (int)$projectId ?>"><i class="fas fa-link"></i> Link Takeoff Layer</a>
+                    <a class="btn-ghost" href="estimate_module.php?project_id=<?= (int)$projectId ?>"><i class="fas fa-wand-magic-sparkles"></i> Create From Takeoff</a>
+                    <a class="btn-ghost" href="project_dashboard.php?id=<?= (int)$projectId ?>&tab=estimating"><i class="fas fa-rotate"></i> Refresh Totals</a>
+                    <a class="btn-ghost" href="estimate_module.php?project_id=<?= (int)$projectId ?>"><i class="fas fa-file-export"></i> Export</a>
                 </div>
             </div>
             <div class="estimating-toolbar">
