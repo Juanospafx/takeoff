@@ -30,8 +30,14 @@ function bid_board_date_or_null($value): ?string
 {
     $value = trim((string)($value ?? ''));
     if ($value === '') return null;
-    $ts = strtotime($value);
-    return $ts ? date('Y-m-d H:i:s', $ts) : null;
+    try {
+        $date = new DateTimeImmutable($value);
+    } catch (Throwable $e) {
+        return null;
+    }
+    $year = (int)$date->format('Y');
+    if ($year < 2000 || $year > 2100) return null;
+    return $date->format('Y-m-d H:i:s');
 }
 
 function bid_board_ensure_schema(PDO $pdo): void

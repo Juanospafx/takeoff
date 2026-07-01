@@ -1,17 +1,21 @@
 (function () {
     const apiUrl = '../api/project_module.php';
-    const PROJECT_STATUSES = ['TO DO', 'ESTIMATING', 'BID SUBMITTED', 'ACCEPTED', 'IN PROGRESS', 'COMPLETE', 'ESTIMATORS', 'LOST'];
+    const PROJECT_STATUSES = ['Invitations', 'To Do', 'Estimating', 'Bid Submitted', 'Accepted', 'In Progress', 'Complete', 'Estimadores', 'Lost', 'Archived'];
     const STATUS_VALUES = {
-        'TO DO': 'to_do',
-        'ESTIMATING': 'estimating',
-        'BID SUBMITTED': 'bid_submitted',
-        'ACCEPTED': 'accepted',
-        'IN PROGRESS': 'in_progress',
-        'COMPLETE': 'complete',
-        'ESTIMATORS': 'estimators',
-        'LOST': 'lost'
+        'Invitations': 'invitations',
+        'To Do': 'to_do',
+        'Estimating': 'estimating',
+        'Bid Submitted': 'bid_submitted',
+        'Accepted': 'accepted',
+        'In Progress': 'in_progress',
+        'Complete': 'complete',
+        'Estimadores': 'estimadores',
+        'Lost': 'lost',
+        'Archived': 'archived'
     };
     const STATUS_LABELS = Object.fromEntries(Object.entries(STATUS_VALUES).map(([label, value]) => [value, label]));
+    STATUS_LABELS.draft = 'To Do';
+    STATUS_LABELS.estimators = 'Estimadores';
 
     let isDirty = false;
     let notes = Array.isArray(window.ProjectState?.projectMeta?.notes) ? [...window.ProjectState.projectMeta.notes] : [];
@@ -40,7 +44,7 @@
     }
 
     function collectProjectPayload() {
-        const dueDate = $('poDueDate')?.value || '';
+        const dueDate = dateInputValue($('poDueDate')?.value || '');
         const dueTime = $('poDueTime')?.value || '';
         const bidDueAt = dueDate ? `${dueDate} ${dueTime || '00:00'}:00` : '';
         const metadata = {
@@ -90,6 +94,8 @@
                     window.ProjectState.projectId = data.id;
                     window.ProjectState.projectInfo = data.data?.project || window.ProjectState.projectInfo;
                     $('projectHeaderName').textContent = payload.name;
+                    renderProjectHeaderMeta();
+                    renderStatusStepper();
                 }
             })
             .catch(err => showToast(err.message));
@@ -104,7 +110,22 @@
     }
 
     function statusLabel(value = currentStatus) {
-        return STATUS_LABELS[normalizeStatus(value)] || 'TO DO';
+        return STATUS_LABELS[normalizeStatus(value)] || 'To Do';
+    }
+
+    function dateInputValue(value) {
+        const text = String(value || '').trim();
+        if (!/^\d{4}-\d{2}-\d{2}$/.test(text)) return '';
+        const year = Number(text.slice(0, 4));
+        if (year < 2000 || year > 2100) return '';
+        return text;
+    }
+
+    function dueLabel(value = $('poDueDate')?.value || '') {
+        const text = dateInputValue(value);
+        if (!text) return 'To be determined';
+        const [year, month, day] = text.split('-');
+        return `${month}/${day}/${year}`;
     }
 
     function renderStatusDropdown() {
@@ -117,6 +138,8 @@
         button.className = `project-status-badge status-${slug(activeLabel)}`;
         button.dataset.status = currentStatus;
         label.textContent = activeLabel;
+        renderProjectHeaderMeta();
+        renderStatusStepper();
         menu.innerHTML = PROJECT_STATUSES.map(status => `
             <button class="project-status-option" type="button" data-project-status="${STATUS_VALUES[status]}">
                 <span class="status-pill status-${slug(status)}">${status}</span>
@@ -150,8 +173,31 @@
                 isDirty = false;
                 window.ProjectState.projectInfo = data.data?.project || window.ProjectState.projectInfo;
                 showToast(`Project moved to ${statusLabel()}.`);
+                renderProjectHeaderMeta();
+                renderStatusStepper();
             })
             .catch(err => showToast(err.message));
+    }
+
+    function renderProjectHeaderMeta() {
+        const subtitle = $('projectHeaderSubtitle');
+        if (subtitle) subtitle.textContent = `Project Workspace · ${statusLabel()}`;
+        const metaLine = $('projectMetaLine');
+        if (!metaLine) return;
+        const projectNumber = $('poProjectNumber')?.value || window.ProjectState?.projectInfo?.project_number || '--';
+        const estimator = $('poEstimator')?.value || 'Unassigned';
+        const completion = window.ProjectState?.projectMeta?.completion_percent ? `${String(window.ProjectState.projectMeta.completion_percent).replace('%', '')}% complete` : '0% complete';
+        metaLine.innerHTML = `<span>${escapeHtml(completion)}</span><span>Due: ${escapeHtml(dueLabel())}</span><span>Estimator: ${escapeHtml(estimator || 'Unassigned')}</span><span>Project #: ${escapeHtml(projectNumber || '--')}</span>`;
+    }
+
+    function renderStatusStepper() {
+        const stepper = $('projectStatusStepper');
+        if (!stepper) return;
+        const currentIndex = PROJECT_STATUSES.findIndex(label => STATUS_VALUES[label] === normalizeStatus(currentStatus));
+        stepper.innerHTML = PROJECT_STATUSES.map((label, index) => {
+            const stateClass = index < currentIndex ? 'done' : index === currentIndex ? 'active' : 'next';
+            return `<span class="project-step ${stateClass}">${escapeHtml(label)}</span>`;
+        }).join('');
     }
 
     function toggleMenu(id) {
@@ -423,7 +469,10 @@
 
         document.querySelectorAll('.overview-field input, .overview-field select, .overview-field textarea').forEach(input => {
             input.addEventListener('input', markDirty);
-            input.addEventListener('change', markDirty);
+            input.addEventListener('change', () => {
+                markDirty();
+                renderProjectHeaderMeta();
+            });
         });
 
         window.addEventListener('beforeunload', event => {

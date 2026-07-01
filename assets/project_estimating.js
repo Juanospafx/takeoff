@@ -108,7 +108,10 @@
     }
 
     function persist() {
+        state.estimateSummary = publicEstimateSummary();
         localStorage.setItem(storageKey, JSON.stringify(state));
+        if (window.ProjectState) window.ProjectState.estimateSummary = state.estimateSummary;
+        window.dispatchEvent(new CustomEvent('takeoff:estimate-summary-updated', { detail: state.estimateSummary }));
     }
 
     function allItems() {
@@ -170,6 +173,24 @@
         const postBase = taxableBase + tax;
         const post = state.postTaxMarkups.reduce((sum, m) => sum + postBase * Number(m.percent || 0) / 100, 0);
         return { subtotal, pre, tax, post, total: subtotal + pre + tax + post };
+    }
+
+    function publicEstimateSummary() {
+        const byType = summaryByType();
+        const t = totals();
+        return {
+            subtotal: t.subtotal,
+            preTaxMarkup: t.pre,
+            taxes: t.tax,
+            postTaxMarkup: t.post,
+            total: t.total,
+            material: byType.Materials.subtotalSales,
+            labor: byType.Labor.laborSales + byType.Labor.subtotalSales,
+            equipment: byType.Equipment.subtotalSales,
+            profit: Object.values(byType).reduce((sum, row) => sum + row.profit + row.laborSales - row.laborCost, 0),
+            activeEstimateId: state.activeEstimateId,
+            updatedAt: new Date().toISOString()
+        };
     }
 
     function render() {

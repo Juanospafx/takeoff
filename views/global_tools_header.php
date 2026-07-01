@@ -134,6 +134,10 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
                     <i class="fas fa-user"></i>
                     <span>Profile</span>
                 </button>
+                <button class="bt-menu-action" type="button" data-theme-toggle>
+                    <i class="fas fa-moon"></i>
+                    <span>Dark Mode</span>
+                </button>
                 <a href="/pages/company_settings.php">
                     <i class="fas fa-sliders"></i>
                     <span>Settings</span>
@@ -146,3 +150,29 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
         </div>
     </div>
 </header>
+<script>
+(function () {
+    var key = 'takeoff.theme';
+    var saved = localStorage.getItem(key);
+    var preferred = window.matchMedia && window.matchMedia('(prefers-color-scheme: dark)').matches ? 'dark' : 'light';
+    var theme = saved || preferred;
+    document.documentElement.setAttribute('data-theme', theme);
+    function syncThemeButton() {
+        document.querySelectorAll('[data-theme-toggle]').forEach(function (button) {
+            var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            button.querySelector('span').textContent = isDark ? 'Light Mode' : 'Dark Mode';
+            var icon = button.querySelector('i');
+            if (icon) icon.className = isDark ? 'fas fa-sun' : 'fas fa-moon';
+        });
+    }
+    document.addEventListener('click', function (event) {
+        var button = event.target.closest('[data-theme-toggle]');
+        if (!button) return;
+        var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        document.documentElement.setAttribute('data-theme', next);
+        localStorage.setItem(key, next);
+        syncThemeButton();
+    });
+    document.addEventListener('DOMContentLoaded', syncThemeButton);
+})();
+</script>

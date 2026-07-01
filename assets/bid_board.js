@@ -70,7 +70,11 @@
 
     const toDate = (value) => {
         if (!value) return null;
-        const date = new Date(String(value).replace(' ', 'T'));
+        const text = String(value).trim();
+        const match = text.match(/^(\d{4})-(\d{2})-(\d{2})(?:[ T](\d{2}):(\d{2})(?::(\d{2}))?)?/);
+        const date = match
+            ? new Date(Number(match[1]), Number(match[2]) - 1, Number(match[3]), Number(match[4] || 0), Number(match[5] || 0), Number(match[6] || 0))
+            : new Date(text.replace(' ', 'T'));
         if (Number.isNaN(date.getTime())) return null;
         const year = date.getFullYear();
         if (year < 2000 || year > 2100) return null;

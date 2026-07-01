@@ -118,6 +118,15 @@
         }
     }
 
+    function readEstimatingModule() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(estimatingKey) || 'null');
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (error) {
+            return {};
+        }
+    }
+
     function getCustomer() {
         const project = state.projectInfo || {};
         const meta = state.projectMeta || {};
@@ -174,12 +183,22 @@
     }
 
     function totals(items) {
+        const estimating = readEstimatingModule();
+        const liveSummary = state.estimateSummary || estimating.estimateSummary || {};
         const estimateTotals = state.estimateTotals || {};
         const itemTotal = items.reduce((sum, item) => sum + num(item.total), 0);
-        const material = num(estimateTotals.material) || items.reduce((sum, item) => sum + num(item.material), 0);
-        const labor = num(estimateTotals.labor) || items.reduce((sum, item) => sum + num(item.labor), 0);
-        const equipment = num(estimateTotals.equipment) || items.reduce((sum, item) => sum + num(item.equipment), 0);
-        return { material, labor, equipment, markup: num(estimateTotals.markup), taxes: 0, profit: 0, total: num(estimateTotals.total) || itemTotal };
+        const material = num(liveSummary.material) || num(estimateTotals.material) || items.reduce((sum, item) => sum + num(item.material), 0);
+        const labor = num(liveSummary.labor) || num(estimateTotals.labor) || items.reduce((sum, item) => sum + num(item.labor), 0);
+        const equipment = num(liveSummary.equipment) || num(estimateTotals.equipment) || items.reduce((sum, item) => sum + num(item.equipment), 0);
+        return {
+            material,
+            labor,
+            equipment,
+            markup: num(liveSummary.preTaxMarkup) || num(estimateTotals.markup),
+            taxes: num(liveSummary.taxes),
+            profit: num(liveSummary.profit),
+            total: num(liveSummary.total) || num(estimateTotals.total) || itemTotal
+        };
     }
 
     function groupKey(item) {
@@ -372,6 +391,10 @@
 
     window.addEventListener('storage', (event) => {
         if (event.key === estimatingKey) renderPreview();
+    });
+    window.addEventListener('takeoff:estimate-summary-updated', (event) => {
+        if (window.ProjectState) window.ProjectState.estimateSummary = event.detail || {};
+        renderPreview();
     });
     document.querySelector('[data-tab="proposal"]')?.addEventListener('click', () => window.setTimeout(renderPreview, 0));
     renderAll();

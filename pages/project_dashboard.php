@@ -46,6 +46,60 @@ function money_fmt(float $value): string
     return '$' . number_format($value, 2);
 }
 
+function dash_valid_datetime(?string $value): ?DateTimeImmutable
+{
+    $value = trim((string)$value);
+    if ($value === '') return null;
+    try {
+        $date = new DateTimeImmutable($value);
+    } catch (Throwable $e) {
+        return null;
+    }
+    $year = (int)$date->format('Y');
+    if ($year < 2000 || $year > 2100) return null;
+    return $date;
+}
+
+function dash_date_input_value(?string $value): string
+{
+    $date = dash_valid_datetime($value);
+    return $date ? $date->format('Y-m-d') : '';
+}
+
+function dash_time_input_value(?string $value): string
+{
+    $date = dash_valid_datetime($value);
+    return $date ? $date->format('H:i') : '';
+}
+
+function dash_due_label(?string $value): string
+{
+    $date = dash_valid_datetime($value);
+    return $date ? $date->format('m/d/Y') : 'To be determined';
+}
+
+function dash_status_label(?string $status): string
+{
+    $labels = [
+        'invitations' => 'Invitations',
+        'to_do' => 'To Do',
+        'draft' => 'To Do',
+        'estimating' => 'Estimating',
+        'bid_submitted' => 'Bid Submitted',
+        'accepted' => 'Accepted',
+        'in_progress' => 'In Progress',
+        'complete' => 'Complete',
+        'completed' => 'Complete',
+        'estimators' => 'Estimadores',
+        'estimadores' => 'Estimadores',
+        'lost' => 'Lost',
+        'archived' => 'Archived',
+    ];
+    $key = strtolower(trim((string)$status));
+    $key = preg_replace('/[\s-]+/', '_', $key);
+    return $labels[$key] ?? ucwords(str_replace('_', ' ', $key ?: 'to_do'));
+}
+
 $project = null;
 if ($projectId > 0) {
     $stmt = $pdo->prepare("SELECT * FROM projects WHERE id = ? AND deleted_at IS NULL");
@@ -256,6 +310,16 @@ foreach ($estimateItems as $item) {
     $markupTotal += ((float)($item['subtotal_cost'] ?? 0)) * ((float)($item['markup_percent'] ?? $item['margin_percentage'] ?? 0) / 100);
 }
 
+$displayFolders = array_values(array_filter($folders, function ($folder) {
+    $name = strtolower(trim((string)($folder['name'] ?? '')));
+    return !in_array($name, ['drawings', 'attachments'], true);
+}));
+$statusLabel = dash_status_label($project['status'] ?? 'to_do');
+$dueDateInput = dash_date_input_value($project['bid_due_at'] ?? null);
+$dueTimeInput = dash_time_input_value($project['bid_due_at'] ?? null);
+$dueLabel = dash_due_label($project['bid_due_at'] ?? null);
+$projectNumberLabel = trim((string)($project['project_number'] ?? '')) !== '' ? (string)$project['project_number'] : '--';
+$completionLabel = trim((string)($projectMeta['completion_percent'] ?? '')) !== '' ? rtrim((string)$projectMeta['completion_percent'], '%') . '% complete' : '0% complete';
 $proposalStatus = $proposals[0]['status'] ?? 'Not started';
 $selectedDoc = null;
 foreach ($documents as $doc) {
@@ -280,7 +344,7 @@ $state = [
     'projectInfo' => $project,
     'projectMeta' => $projectMeta,
     'documents' => $documents,
-    'folders' => $folders,
+    'folders' => $displayFolders,
     'selectedDocumentId' => $selectedDocumentId,
     'selectedDrawingId' => $selectedDocumentId,
     'takeoffGroups' => [],
@@ -499,13 +563,20 @@ $state = [
                 <h1 id="projectHeaderName"><?= htmlspecialchars($project['name']) ?></h1>
                 <div class="project-status-wrap">
                     <button class="project-status-badge" id="projectStatusButton" type="button" data-status="<?= htmlspecialchars($project['status'] ?? 'to_do') ?>">
-                        <span id="projectStatusLabel"><?= htmlspecialchars(strtoupper(str_replace('_', ' ', $project['status'] ?? 'to_do'))) ?></span>
+                        <span id="projectStatusLabel"><?= htmlspecialchars($statusLabel) ?></span>
                         <i class="fas fa-chevron-down"></i>
                     </button>
                     <div class="project-status-menu" id="projectStatusMenu"></div>
                 </div>
             </div>
-            <p><?= $isDraftProject ? 'Unsaved draft' : htmlspecialchars(($project['status'] ?? 'draft') . ' project workspace') ?></p>
+            <p id="projectHeaderSubtitle"><?= $isDraftProject ? 'Unsaved draft' : htmlspecialchars('Project Workspace · ' . $statusLabel) ?></p>
+            <div class="project-meta-line" id="projectMetaLine">
+                <span><?= htmlspecialchars($completionLabel) ?></span>
+                <span>Due: <?= htmlspecialchars($dueLabel) ?></span>
+                <span>Estimator: <?= htmlspecialchars($estimatorName ?: 'Unassigned') ?></span>
+                <span>Project #: <?= htmlspecialchars($projectNumberLabel) ?></span>
+            </div>
+            <div class="project-status-stepper" id="projectStatusStepper" aria-label="Project status progress"></div>
         </div>
         <div class="project-header-actions">
             <div class="dropdown-wrap">
@@ -566,10 +637,10 @@ $state = [
                                 </select>
                             </label>
                             <label class="overview-field">Due Date
-                                <input id="poDueDate" type="date" value="<?= !empty($project['bid_due_at']) ? htmlspecialchars(date('Y-m-d', strtotime($project['bid_due_at']))) : '' ?>">
+                                <input id="poDueDate" type="date" value="<?= htmlspecialchars($dueDateInput) ?>">
                             </label>
                             <label class="overview-field">Due Time
-                                <input id="poDueTime" type="time" value="<?= !empty($project['bid_due_at']) ? htmlspecialchars(date('H:i', strtotime($project['bid_due_at']))) : '' ?>">
+                                <input id="poDueTime" type="time" value="<?= htmlspecialchars($dueTimeInput) ?>">
                             </label>
                             <label class="overview-field">Estimate Pricing
                                 <select id="poEstimatePricing">
@@ -675,7 +746,7 @@ $state = [
                     <button class="folder-item active" data-folder="all"><i class="fas fa-layer-group text-info"></i> All Documents</button>
                     <button class="folder-item" data-folder="drawings"><i class="fas fa-file-pdf text-danger"></i> Drawings</button>
                     <button class="folder-item" data-folder="attachments"><i class="fas fa-paperclip text-warning"></i> Attachments</button>
-                    <?php foreach ($folders as $folder): ?>
+                    <?php foreach ($displayFolders as $folder): ?>
                         <button class="folder-item" data-folder="<?= (int)$folder['id'] ?>"><i class="fas fa-folder text-warning"></i> <?= htmlspecialchars($folder['name']) ?></button>
                     <?php endforeach; ?>
                     <div class="quick-actions mt-3">
@@ -1002,12 +1073,12 @@ $state = [
                 </aside>
                 <main class="proposal-preview-area" aria-label="Proposal preview">
                     <div class="proposal-builder-note" id="proposalBuilderNote" hidden>Proposal Builder is ready to be connected.</div>
-                    <div class="proposal-document" id="proposalDocument"></div>
                     <div class="proposal-feature-banner" id="proposalFeatureBanner">
                         <span>Enhanced Itemization in Proposal tab - Easily update proposals with: itemized alternates &amp; assembly items, new customer/contact selection, and new toggles to setup proposal.</span>
                         <button type="button" data-proposal-learn>Learn More</button>
                         <button type="button" data-proposal-dismiss-banner aria-label="Dismiss">x</button>
                     </div>
+                    <div class="proposal-document" id="proposalDocument"></div>
                 </main>
             </div>
         </section>
@@ -1042,6 +1113,7 @@ $state = [
             requestAnimationFrame(() => {
                 const frame = document.getElementById('takeoffFrame');
                 frame?.contentWindow?.postMessage({ type: 'takeoff-visible' }, '*');
+                setTimeout(() => window.projectTakeoffFitToScreen?.(), 220);
             });
         }
     }

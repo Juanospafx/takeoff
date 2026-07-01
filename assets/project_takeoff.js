@@ -59,6 +59,30 @@
         return Number($('takeoffZoomSlider')?.value || 100);
     }
 
+    function fitTakeoffToScreen() {
+        const commands = ['projectTakeoffFitToScreen', 'takeoffFitToScreen', 'fitToScreen', 'fitPage'];
+        for (const command of commands) {
+            const result = callEditor(command);
+            if (result) {
+                updateZoomUi(Number(result) || currentZoomPercent());
+                return true;
+            }
+        }
+        notifyEditorVisible();
+        return false;
+    }
+
+    function bindTooltips() {
+        document.querySelectorAll('.pro-tool-btn, .pro-toolbar-btn, .pro-chip-btn').forEach(button => {
+            const label = button.getAttribute('aria-label') || button.getAttribute('title') || button.dataset.toolCommand || button.dataset.viewerCommand || '';
+            if (!label) return;
+            button.dataset.proTooltip = label.replace(/[-_]+/g, ' ');
+            button.removeAttribute('title');
+        });
+    }
+
+    window.projectTakeoffFitToScreen = fitTakeoffToScreen;
+
     const viewerState = {
         isGridVisible: false,
         isLayersPopoverOpen: false,
@@ -1834,6 +1858,7 @@
         $('takeoffFrame')?.addEventListener('load', () => {
             setTimeout(syncEditorInfo, 250);
             setTimeout(notifyEditorVisible, 120);
+            setTimeout(fitTakeoffToScreen, 520);
             setTimeout(() => {
                 syncAllLayersToCanvas();
                 const active = findLayer(takeoffState.activeLayerId);
@@ -1892,6 +1917,7 @@
         document.querySelectorAll('[data-tool-command]').forEach(button => {
             button.addEventListener('click', () => runTool(button.dataset.toolCommand));
         });
+        bindTooltips();
 
         document.querySelectorAll('[data-viewer-command]').forEach(button => {
             button.addEventListener('click', () => runViewerCommand(button.dataset.viewerCommand));

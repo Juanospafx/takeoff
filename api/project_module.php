@@ -25,8 +25,28 @@ function project_date_or_null($value): ?string
 {
     $value = trim((string)($value ?? ''));
     if ($value === '') return null;
-    $ts = strtotime($value);
-    return $ts ? date('Y-m-d', $ts) : null;
+    try {
+        $date = new DateTimeImmutable($value);
+    } catch (Throwable $e) {
+        return null;
+    }
+    $year = (int)$date->format('Y');
+    if ($year < 2000 || $year > 2100) return null;
+    return $date->format('Y-m-d');
+}
+
+function project_datetime_or_null($value): ?string
+{
+    $value = trim((string)($value ?? ''));
+    if ($value === '') return null;
+    try {
+        $date = new DateTimeImmutable($value);
+    } catch (Throwable $e) {
+        return null;
+    }
+    $year = (int)$date->format('Y');
+    if ($year < 2000 || $year > 2100) return null;
+    return $date->format('Y-m-d H:i:s');
 }
 
 function project_json_value($value): ?string
@@ -152,7 +172,7 @@ function project_input_data(array $input): array
         'state' => trim((string)($input['state'] ?? '')) ?: null,
         'postal_code' => trim((string)($input['postal_code'] ?? '')) ?: null,
         'country' => trim((string)($input['country'] ?? '')) ?: null,
-        'bid_due_at' => !empty($input['bid_due_at']) ? date('Y-m-d H:i:s', strtotime((string)$input['bid_due_at'])) : null,
+        'bid_due_at' => project_datetime_or_null($input['bid_due_at'] ?? null),
         'start_date' => project_date_or_null($input['start_date'] ?? null),
         'end_date' => project_date_or_null($input['end_date'] ?? null),
         'metadata_json' => project_json_value($input['metadata_json'] ?? null),

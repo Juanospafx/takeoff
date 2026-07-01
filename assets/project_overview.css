@@ -1,4 +1,18 @@
 :root {
+    --bg-primary: #ffffff;
+    --bg-secondary: #f8f9fa;
+    --bg-card: #ffffff;
+    --text-primary: #111827;
+    --text-secondary: #6b7280;
+    --text-muted: #9ca3af;
+    --border-color: #e5e7eb;
+    --accent-blue: #2563eb;
+    --accent-orange: #f97316;
+    --accent-green: #16a34a;
+    --accent-red: #dc2626;
+    --radius-sm: 6px;
+    --radius-md: 8px;
+    --shadow-sm: 0 1px 3px rgba(0,0,0,0.08);
     --bg: #f3f5f7;
     --panel: #ffffff;
     --card: #ffffff;
@@ -9,6 +23,23 @@
     --primary: #1f6fb2;
     --accent: #f97316;
     --success: #147449;
+}
+
+[data-theme="dark"] {
+    --bg-primary: #0f172a;
+    --bg-secondary: #1e293b;
+    --bg-card: #1e293b;
+    --text-primary: #f1f5f9;
+    --text-secondary: #94a3b8;
+    --text-muted: #64748b;
+    --border-color: #334155;
+    --bg: #0f172a;
+    --panel: #1e293b;
+    --card: #1e293b;
+    --card-2: #111827;
+    --line: #334155;
+    --text: #f1f5f9;
+    --muted: #94a3b8;
 }
 
 body {
@@ -40,6 +71,65 @@ body {
 
 .project-header p {
     color: var(--muted);
+}
+
+.project-meta-line {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px 14px;
+    margin-top: 7px;
+    color: var(--muted);
+    font-size: .82rem;
+    font-weight: 700;
+}
+
+.project-meta-line span {
+    position: relative;
+}
+
+.project-meta-line span + span::before {
+    content: "";
+    position: absolute;
+    left: -8px;
+    top: 50%;
+    width: 3px;
+    height: 3px;
+    border-radius: 999px;
+    background: var(--muted);
+}
+
+.project-status-stepper {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    margin-top: 10px;
+    max-width: 980px;
+}
+
+.project-step {
+    min-height: 24px;
+    display: inline-flex;
+    align-items: center;
+    border: 1px solid var(--line);
+    border-radius: 999px;
+    padding: 3px 9px;
+    color: var(--muted);
+    background: var(--card-2);
+    font-size: .72rem;
+    font-weight: 900;
+    white-space: nowrap;
+}
+
+.project-step.done {
+    color: #176341;
+    background: #e9f7ef;
+    border-color: #c9ead8;
+}
+
+.project-step.active {
+    color: #fff;
+    background: var(--primary);
+    border-color: var(--primary);
 }
 
 .project-header-actions {
@@ -250,13 +340,16 @@ th {
 }
 
 .status-to-do { color: #1d4f91; background: #eaf2ff; border-color: #c8dcf5; }
+.status-invitations { color: #684b00; background: #fff8df; border-color: #ead99c; }
 .status-estimating { color: #7a4b00; background: #fff7df; border-color: #f1dfad; }
 .status-bid-submitted { color: #9a4b0d; background: #fff2e4; border-color: #fed7aa; }
 .status-accepted { color: #176341; background: #e9f7ef; border-color: #c9ead8; }
 .status-in-progress { color: #2f6b3f; background: #effaf1; border-color: #d2efd8; }
 .status-complete { color: #0f6b48; background: #e4f6ed; border-color: #bfe6d2; }
 .status-estimators { color: #1d4f91; background: #e9f0ff; border-color: #c9d9f5; }
+.status-estimadores { color: #1d4f91; background: #e9f0ff; border-color: #c9d9f5; }
 .status-lost { color: #9f1d1d; background: #fff0ef; border-color: #f0cecb; }
+.status-archived { color: #475569; background: #f1f5f9; border-color: #cbd5e1; }
 
 .project-overview-layout {
     display: grid;
@@ -313,8 +406,8 @@ th {
     display: grid;
     gap: 5px;
     color: var(--muted);
-    font-size: .74rem;
-    text-transform: uppercase;
+    font-size: .78rem;
+    text-transform: none;
     font-weight: 800;
 }
 
@@ -349,6 +442,19 @@ th {
     border-radius: 8px;
     padding: 18px;
     background: #fbfdff;
+}
+
+.overview-empty::before {
+    content: "\\f044";
+    font-family: "Font Awesome 6 Free";
+    font-weight: 900;
+    display: grid;
+    place-items: center;
+    width: 34px;
+    height: 34px;
+    border-radius: 999px;
+    color: var(--primary);
+    background: #eef5fb;
 }
 
 .overview-empty[hidden],
@@ -508,6 +614,12 @@ th {
         justify-content: flex-start;
     }
 
+    .project-overview-layout {
+        grid-template-columns: 1fr;
+    }
+}
+
+@media (max-width: 1024px) {
     .project-overview-layout {
         grid-template-columns: 1fr;
     }
