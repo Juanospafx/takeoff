@@ -145,9 +145,9 @@ textarea {
 }
 
 .bid-board-main {
-    width: min(1480px, 100%);
+    width: min(1540px, 100%);
     margin: 0 auto;
-    padding: 22px 24px 28px;
+    padding: 18px 22px 28px;
 }
 
 .bb-page-head {
@@ -155,25 +155,25 @@ textarea {
     justify-content: space-between;
     align-items: center;
     gap: 18px;
-    margin-bottom: 18px;
+    margin-bottom: 14px;
 }
 
 .bb-title-wrap { gap: 12px; min-width: 0; }
 
 .bb-module-icon {
-    width: 42px;
-    height: 42px;
+    width: 40px;
+    height: 40px;
     display: grid;
     place-items: center;
-    border-radius: 8px;
-    background: #e7eef7;
-    color: var(--bb-primary);
-    border: 1px solid #cfdae8;
+    border-radius: 6px;
+    background: #fff3e8;
+    color: #f97316;
+    border: 1px solid #fed7aa;
 }
 
 .bb-page-head h1 {
     margin: 0;
-    font-size: 1.48rem;
+    font-size: 1.42rem;
     line-height: 1.1;
     font-weight: 800;
 }
@@ -190,7 +190,7 @@ textarea {
 .bb-icon-btn {
     border: 1px solid var(--bb-line);
     border-radius: 6px;
-    min-height: 36px;
+    min-height: 34px;
     background: var(--bb-surface);
     color: var(--bb-text);
     font-weight: 700;
@@ -306,12 +306,12 @@ textarea {
     gap: 0;
     background: var(--bb-surface);
     border: 1px solid var(--bb-line);
-    border-radius: 8px 8px 0 0;
+    border-radius: 6px 6px 0 0;
     margin-bottom: 0;
 }
 
 .bb-pipeline-tab {
-    min-width: 190px;
+    min-width: 154px;
     flex: 0 0 auto;
     border: 0;
     border-right: 1px solid var(--bb-line-soft);
@@ -319,14 +319,14 @@ textarea {
     background: var(--bb-surface);
     color: var(--bb-muted);
     text-align: left;
-    padding: 12px 14px 10px;
+    padding: 10px 12px 8px;
     cursor: pointer;
 }
 
 .bb-pipeline-tab:hover { background: var(--bb-surface-2); }
 
 .bb-pipeline-tab.active {
-    background: #eef5fb;
+    background: #fff;
     color: var(--bb-text);
     border-bottom-color: var(--bb-primary);
 }
@@ -334,31 +334,31 @@ textarea {
 .bb-tab-label {
     display: block;
     font-weight: 800;
-    font-size: .92rem;
-    margin-bottom: 5px;
+    font-size: .82rem;
+    margin-bottom: 4px;
 }
 
 .bb-tab-total {
     display: block;
     color: var(--bb-muted);
-    font-size: .82rem;
+    font-size: .76rem;
     font-weight: 700;
 }
 
 .bb-table-controls {
-    gap: 10px;
-    flex-wrap: wrap;
+    gap: 8px;
+    flex-wrap: nowrap;
     background: var(--bb-surface);
     border-left: 1px solid var(--bb-line);
     border-right: 1px solid var(--bb-line);
     border-bottom: 1px solid var(--bb-line);
-    padding: 12px;
+    padding: 9px 10px;
 }
 
 .bb-search-field {
     position: relative;
-    flex: 1 1 300px;
-    max-width: 520px;
+    flex: 1 1 320px;
+    max-width: 460px;
 }
 
 .bb-search-field input,
@@ -367,12 +367,13 @@ textarea {
 .bb-field select,
 .bb-field textarea {
     width: 100%;
-    min-height: 38px;
+    min-height: 32px;
     border: 1px solid var(--bb-line);
     border-radius: 6px;
     background: #fff;
     color: var(--bb-text);
-    padding: 8px 10px;
+    padding: 6px 9px;
+    font-size: .86rem;
 }
 
 .bb-search-field input { padding-right: 36px; }
@@ -399,40 +400,56 @@ textarea {
 }
 
 .bb-select-field select {
-    min-width: 190px;
+    min-width: 132px;
 }
 
 .bb-table-shell {
     background: var(--bb-surface);
     border: 1px solid var(--bb-line);
     border-top: 0;
-    border-radius: 0 0 8px 8px;
+    border-radius: 0 0 6px 6px;
 }
 
 .bb-table-scroll {
     overflow-x: auto;
-    overflow-y: hidden;
+    overflow-y: visible;
+    scrollbar-color: #9aa6b5 #eef2f6;
+    scrollbar-width: thin;
+}
+
+.bb-table-scroll::-webkit-scrollbar {
+    height: 12px;
+}
+
+.bb-table-scroll::-webkit-scrollbar-track {
+    background: #eef2f6;
+}
+
+.bb-table-scroll::-webkit-scrollbar-thumb {
+    background: #9aa6b5;
+    border: 3px solid #eef2f6;
+    border-radius: 999px;
 }
 
 .bb-table {
     width: 100%;
-    min-width: 1180px;
+    min-width: 1320px;
     border-collapse: collapse;
 }
 
 .bb-table th,
 .bb-table td {
-    padding: 12px 14px;
+    padding: 9px 12px;
     border-bottom: 1px solid var(--bb-line-soft);
     vertical-align: middle;
     text-align: left;
 }
 
 .bb-table th {
-    height: 42px;
+    height: 34px;
     color: #526173;
-    background: #f6f8fa;
-    font-size: .74rem;
+    background: #f8fafc;
+    font-size: .7rem;
     text-transform: uppercase;
     font-weight: 800;
     white-space: nowrap;
@@ -444,7 +461,7 @@ textarea {
 }
 
 .bb-table td {
-    font-size: .9rem;
+    font-size: .84rem;
     color: #243244;
 }
 
@@ -461,6 +478,7 @@ textarea {
     color: var(--bb-primary);
     font-weight: 800;
     text-decoration: none;
+    line-height: 1.25;
 }
 
 .bb-record-name:hover {
@@ -469,60 +487,68 @@ textarea {
 
 .bb-subtext {
     display: block;
-    margin-top: 3px;
+    margin-top: 2px;
     color: var(--bb-muted);
     font-size: .78rem;
     font-weight: 500;
 }
 
 .bb-metrics-btn {
-    width: 32px;
-    height: 32px;
+    width: 30px;
+    height: 30px;
     display: inline-grid;
     place-items: center;
     color: var(--bb-primary);
-    background: #eef5fb;
-    border: 1px solid #d1e3f4;
+    background: #fff;
+    border: 1px solid #cbd5e1;
     border-radius: 6px;
+    cursor: pointer;
 }
 
 .bb-money {
     font-weight: 800;
     white-space: nowrap;
+    cursor: help;
 }
 
 .bb-responsible {
     gap: 8px;
     white-space: nowrap;
+    cursor: help;
 }
 
 .bb-avatar {
-    width: 30px;
-    height: 30px;
-    background: #e2e8f0;
+    width: 28px;
+    height: 28px;
+    background: #edf2f7;
     color: #243244;
-    font-size: .72rem;
+    font-size: .7rem;
+    border: 1px solid #d8dee6;
 }
 
-.bb-status-badge {
-    display: inline-flex;
-    align-items: center;
-    border-radius: 999px;
-    padding: 4px 10px;
-    font-weight: 800;
+.bb-status-select {
+    width: 150px;
+    min-height: 30px;
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    background: #fff;
+    color: #243244;
     font-size: .78rem;
-    border: 1px solid transparent;
-    white-space: nowrap;
+    font-weight: 800;
+    padding: 4px 28px 4px 8px;
+    cursor: pointer;
 }
 
-.bb-status-to-do { color: #1d4f91; background: #eaf2ff; border-color: #c8dcf5; }
-.bb-status-estimating { color: #7a4b00; background: #fff7df; border-color: #f1dfad; }
-.bb-status-bid-submitted { color: #9a4b0d; background: #fff2e4; border-color: #fed7aa; }
-.bb-status-accepted { color: #176341; background: #e9f7ef; border-color: #c9ead8; }
-.bb-status-in-progress { color: #2f6b3f; background: #effaf1; border-color: #d2efd8; }
-.bb-status-complete { color: #0f6b48; background: #e4f6ed; border-color: #bfe6d2; }
-.bb-status-estimators { color: #1d4f91; background: #e9f0ff; border-color: #c9d9f5; }
-.bb-status-lost { color: #9f1d1d; background: #fff0ef; border-color: #f0cecb; }
+.bb-status-invitations { color: #684b00; background-color: #fff8df; border-color: #ead99c; }
+.bb-status-to-do { color: #1d4f91; background-color: #eaf2ff; border-color: #c8dcf5; }
+.bb-status-estimating { color: #7a4b00; background-color: #fff7df; border-color: #f1dfad; }
+.bb-status-bid-submitted { color: #9a4b0d; background-color: #fff2e4; border-color: #fed7aa; }
+.bb-status-accepted { color: #176341; background-color: #e9f7ef; border-color: #c9ead8; }
+.bb-status-in-progress { color: #2f6b3f; background-color: #effaf1; border-color: #d2efd8; }
+.bb-status-complete { color: #0f6b48; background-color: #e4f6ed; border-color: #bfe6d2; }
+.bb-status-estimadores { color: #1d4f91; background-color: #e9f0ff; border-color: #c9d9f5; }
+.bb-status-lost { color: #9f1d1d; background-color: #fff0ef; border-color: #f0cecb; }
+.bb-status-archived { color: #475569; background-color: #f1f5f9; border-color: #cbd5e1; }
 
 .bb-row-actions {
     gap: 6px;
@@ -539,6 +565,105 @@ textarea {
     text-align: center;
     color: var(--bb-muted);
     padding: 28px 14px;
+}
+
+.bb-name-cell {
+    min-width: 280px;
+}
+
+.bb-project-code {
+    font-weight: 700;
+    white-space: nowrap;
+}
+
+.bb-hover-text {
+    display: inline-block;
+    cursor: help;
+}
+
+.bb-actions-cell {
+    width: 54px;
+    text-align: right;
+}
+
+.bb-row-menu {
+    position: relative;
+    display: inline-flex;
+    justify-content: flex-end;
+}
+
+.bb-row-menu-toggle {
+    width: 30px;
+    min-height: 30px;
+    color: #475569;
+}
+
+.bb-row-menu-panel {
+    position: absolute;
+    top: calc(100% + 4px);
+    right: 0;
+    z-index: 80;
+    display: none;
+    min-width: 148px;
+    padding: 5px;
+    background: #fff;
+    border: 1px solid var(--bb-line);
+    border-radius: 6px;
+    box-shadow: 0 14px 38px rgba(15, 23, 42, .18);
+}
+
+.bb-row-menu.open .bb-row-menu-panel {
+    display: grid;
+}
+
+.bb-row-menu-panel a,
+.bb-row-menu-panel button {
+    display: flex;
+    align-items: center;
+    width: 100%;
+    min-height: 30px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #243244;
+    text-align: left;
+    text-decoration: none;
+    font-size: .82rem;
+    font-weight: 700;
+    padding: 0 9px;
+    cursor: pointer;
+}
+
+.bb-row-menu-panel a:hover,
+.bb-row-menu-panel button:hover {
+    background: #f1f5f9;
+}
+
+.bb-row-menu-panel .danger {
+    color: var(--bb-danger);
+}
+
+.bb-tooltip {
+    position: fixed;
+    z-index: 5000;
+    max-width: 280px;
+    padding: 9px 10px;
+    border-radius: 5px;
+    background: #111827;
+    color: #fff;
+    box-shadow: 0 12px 34px rgba(15, 23, 42, .28);
+    font-size: .75rem;
+    line-height: 1.45;
+    white-space: pre-line;
+    pointer-events: none;
+    opacity: 0;
+    transform: translateY(2px);
+    transition: opacity .12s ease, transform .12s ease;
+}
+
+.bb-tooltip.show {
+    opacity: 1;
+    transform: translateY(0);
 }
 
 .bb-modal-backdrop {
@@ -653,7 +778,7 @@ a:focus-visible {
     .bb-page-head { align-items: flex-start; flex-direction: column; }
     .bb-page-actions { width: 100%; justify-content: space-between; }
     .bb-logo-text { display: none; }
-    .bb-table-controls { align-items: stretch; }
+    .bb-table-controls { align-items: stretch; flex-wrap: wrap; }
     .bb-search-field,
     .bb-select-field,
     .bb-select-field select,

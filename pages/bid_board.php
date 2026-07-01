@@ -25,7 +25,7 @@
                 </div>
             </div>
             <div class="bb-page-actions">
-                <button class="bb-btn primary" id="bbCreateProject"><i class="fas fa-plus"></i> Create Project</button>
+                <button class="bb-btn primary" id="bbCreateProject"><i class="fas fa-plus"></i> Create New Project</button>
                 <button class="bb-icon-btn bordered" type="button" title="More actions" aria-label="More actions"><i class="fas fa-ellipsis-vertical"></i></button>
             </div>
         </section>
@@ -43,17 +43,17 @@
 
         <section class="bb-table-controls" id="bbTableControls" aria-label="Bid table controls">
             <div class="bb-search-field">
-                <input id="bbSearch" type="search" placeholder="Search bids...">
+                <input id="bbSearch" type="search" placeholder="Search projects">
                 <i class="fas fa-magnifying-glass"></i>
             </div>
             <label class="bb-select-field">
                 <span>Sort by</span>
                 <select id="bbSortBy">
+                    <option value="recordName">Name</option>
                     <option value="dueDate">Due Date</option>
-                    <option value="totalValue">Total Value</option>
-                    <option value="recordName">Record Name</option>
-                    <option value="requestingEntity">Requesting Entity</option>
-                    <option value="responsible">Responsible</option>
+                    <option value="totalValue">Total Sales</option>
+                    <option value="requestingEntity">Requester Company</option>
+                    <option value="responsible">Estimator</option>
                 </select>
             </label>
             <button class="bb-icon-btn bordered" id="bbSortDir" type="button" title="Toggle sort direction" aria-label="Toggle sort direction">
@@ -67,15 +67,15 @@
                 <table class="bb-table">
                     <thead>
                         <tr>
-                            <th>Record Name <i class="fas fa-sort"></i></th>
-                            <th class="center">Metrics <i class="fas fa-sort"></i></th>
-                            <th>Requesting Entity <i class="fas fa-sort"></i></th>
-                            <th>ID / Project <i class="fas fa-sort"></i></th>
+                            <th>Name <i class="fas fa-sort"></i></th>
+                            <th class="center">Info <i class="fas fa-sort"></i></th>
+                            <th>Requester Company <i class="fas fa-sort"></i></th>
+                            <th>Project <i class="fas fa-sort"></i></th>
                             <th>Due Date <i class="fas fa-sort"></i></th>
-                            <th>Total Value <i class="fas fa-sort"></i></th>
-                            <th>Responsible <i class="fas fa-sort"></i></th>
+                            <th>Total Sales <i class="fas fa-sort"></i></th>
+                            <th>Estimator <i class="fas fa-sort"></i></th>
                             <th>Status <i class="fas fa-sort"></i></th>
-                            <th>Actions</th>
+                            <th></th>
                         </tr>
                     </thead>
                     <tbody id="bbTableBody"></tbody>
