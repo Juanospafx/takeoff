@@ -1,0 +1,458 @@
+.proposal-page {
+    height: 100%;
+    min-height: 0;
+    padding: 0;
+    overflow: hidden;
+    background: #e7edf4;
+}
+
+.tab-panel.proposal-page.active {
+    display: block;
+}
+
+.proposal-shell {
+    height: 100%;
+    min-height: 0;
+    display: grid;
+    grid-template-columns: minmax(300px, 340px) minmax(0, 1fr);
+    background: #e7edf4;
+    color: #172033;
+}
+
+.proposal-settings {
+    min-height: 0;
+    display: flex;
+    flex-direction: column;
+    background: #fff;
+    border-right: 1px solid #ccd6e2;
+}
+
+.proposal-settings-head {
+    min-height: 68px;
+    padding: 14px 16px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    border-bottom: 1px solid #d8e0ea;
+    background: #fff;
+}
+
+.proposal-settings-head h2 {
+    margin: 0;
+    font-size: 16px;
+    font-weight: 800;
+    color: #172033;
+}
+
+.proposal-settings-head span {
+    display: block;
+    margin-top: 2px;
+    color: #667085;
+    font-size: 12px;
+    font-weight: 700;
+}
+
+.proposal-settings-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow: auto;
+    padding: 10px 0 18px;
+}
+
+.proposal-export-wrap {
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.proposal-export-btn {
+    height: 36px;
+    border: 0;
+    border-radius: 6px;
+    padding: 0 12px;
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+    background: #f97316;
+    color: #fff;
+    font-weight: 800;
+    box-shadow: 0 1px 2px rgba(15, 23, 42, .12);
+}
+
+.proposal-export-btn:hover { background: #ea580c; }
+
+.proposal-export-menu {
+    position: absolute;
+    top: calc(100% + 6px);
+    right: 0;
+    z-index: 20;
+    width: 172px;
+    padding: 6px;
+    display: none;
+    background: #fff;
+    border: 1px solid #d8e0ea;
+    border-radius: 6px;
+    box-shadow: 0 12px 28px rgba(15, 23, 42, .18);
+}
+
+.proposal-export-menu.open { display: grid; gap: 2px; }
+
+.proposal-export-menu button {
+    width: 100%;
+    border: 0;
+    border-radius: 5px;
+    padding: 9px 10px;
+    text-align: left;
+    background: transparent;
+    color: #172033;
+    font-weight: 700;
+}
+
+.proposal-export-menu button:hover { background: #f2f5f9; }
+
+.proposal-section {
+    border-bottom: 1px solid #e4e9f0;
+    padding: 14px 16px;
+}
+
+.proposal-section h3 {
+    margin: 0 0 10px;
+    font-size: 12px;
+    color: #344054;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+
+.proposal-control-list { display: grid; gap: 10px; }
+
+.proposal-toggle-row,
+.proposal-select-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    color: #1f2937;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.proposal-switch {
+    width: 38px;
+    height: 22px;
+    position: relative;
+    flex: 0 0 auto;
+}
+
+.proposal-switch input {
+    position: absolute;
+    opacity: 0;
+    inset: 0;
+}
+
+.proposal-slider {
+    position: absolute;
+    inset: 0;
+    border-radius: 999px;
+    background: #cbd5e1;
+    transition: background .18s ease;
+}
+
+.proposal-slider::after {
+    content: "";
+    position: absolute;
+    top: 3px;
+    left: 3px;
+    width: 16px;
+    height: 16px;
+    border-radius: 50%;
+    background: #fff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, .28);
+    transition: transform .18s ease;
+}
+
+.proposal-switch input:checked + .proposal-slider { background: #1677c7; }
+.proposal-switch input:checked + .proposal-slider::after { transform: translateX(16px); }
+
+.proposal-select-row select {
+    min-width: 150px;
+    height: 34px;
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    padding: 0 10px;
+    background: #fff;
+    color: #172033;
+    font-weight: 700;
+}
+
+.proposal-customer-box {
+    display: grid;
+    gap: 7px;
+    color: #475467;
+    font-size: 13px;
+    line-height: 1.35;
+}
+
+.proposal-customer-title {
+    color: #172033;
+    font-weight: 800;
+}
+
+.proposal-customer-actions {
+    display: flex;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.proposal-small-btn,
+.proposal-dot-btn {
+    border: 1px solid #cbd5e1;
+    border-radius: 6px;
+    min-height: 32px;
+    padding: 0 10px;
+    background: #fff;
+    color: #172033;
+    font-weight: 800;
+}
+
+.proposal-dot-btn {
+    width: 32px;
+    padding: 0;
+}
+
+.proposal-preview-area {
+    min-width: 0;
+    min-height: 0;
+    position: relative;
+    overflow: auto;
+    padding: 28px 24px 88px;
+    background: #e7edf4;
+}
+
+.proposal-builder-note {
+    max-width: 860px;
+    margin: 0 auto 12px;
+    padding: 10px 14px;
+    border: 1px solid #bfdbfe;
+    border-radius: 6px;
+    background: #eff6ff;
+    color: #1d4ed8;
+    font-weight: 800;
+}
+
+.proposal-document {
+    width: min(8.5in, calc(100% - 16px));
+    min-height: 11in;
+    margin: 0 auto;
+    padding: .58in .62in;
+    background: #fff;
+    color: #111827;
+    box-shadow: 0 18px 42px rgba(15, 23, 42, .18);
+    font-family: Arial, Helvetica, sans-serif;
+    font-size: 12px;
+    line-height: 1.42;
+}
+
+.proposal-doc-header {
+    display: grid;
+    grid-template-columns: 1fr auto;
+    gap: 24px;
+    align-items: start;
+    padding-bottom: 18px;
+    border-bottom: 2px solid #111827;
+}
+
+.proposal-brand {
+    display: flex;
+    gap: 14px;
+    align-items: flex-start;
+}
+
+.proposal-logo {
+    width: 46px;
+    height: 46px;
+    border-radius: 6px;
+    display: grid;
+    place-items: center;
+    background: #0f172a;
+    color: #f97316;
+    font-weight: 900;
+    font-size: 20px;
+}
+
+.proposal-company-name {
+    font-size: 18px;
+    font-weight: 900;
+    color: #111827;
+}
+
+.proposal-muted { color: #667085; }
+.proposal-quote-meta { text-align: right; display: grid; gap: 5px; font-size: 12px; }
+.proposal-quote-meta strong { color: #111827; }
+
+.proposal-doc-title {
+    margin: 22px 0 14px;
+    font-size: 20px;
+    font-weight: 900;
+    color: #111827;
+}
+
+.proposal-customer-block {
+    padding: 14px;
+    margin: 14px 0 18px;
+    border: 1px solid #d7dee8;
+    background: #f3f6fa;
+}
+
+.proposal-customer-block h4,
+.proposal-doc-section h4 {
+    margin: 0 0 8px;
+    font-size: 12px;
+    color: #344054;
+    font-weight: 900;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+
+.proposal-doc-section {
+    margin-top: 18px;
+}
+
+.proposal-doc-section p { margin: 0; }
+.proposal-doc-section ol { margin: 0; padding-left: 18px; }
+.proposal-doc-section li + li { margin-top: 4px; }
+
+.proposal-item-table,
+.proposal-summary-table {
+    width: 100%;
+    min-width: 0;
+    border-collapse: collapse;
+    margin-top: 8px;
+}
+
+.proposal-item-table th,
+.proposal-item-table td,
+.proposal-summary-table td {
+    padding: 8px 9px;
+    border-bottom: 1px solid #e5e7eb;
+    color: #111827;
+    vertical-align: top;
+}
+
+.proposal-item-table th {
+    background: #f3f6fa;
+    color: #344054;
+    font-size: 10px;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+}
+
+.proposal-item-table .amount,
+.proposal-summary-table .amount { text-align: right; white-space: nowrap; }
+.proposal-group-row td { background: #f8fafc; font-weight: 900; }
+.proposal-empty-state { padding: 12px; border: 1px dashed #cbd5e1; background: #f8fafc; color: #667085; }
+
+.proposal-total-box {
+    margin-top: 18px;
+    padding: 16px 18px;
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    gap: 18px;
+    background: #111827;
+    color: #fff;
+}
+
+.proposal-total-box .label { color: #d1d5db; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
+.proposal-total-box .value { color: #fff; font-size: 28px; font-weight: 900; }
+
+.proposal-acceptance {
+    margin-top: 28px;
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 18px;
+}
+
+.proposal-sign-line {
+    border-top: 1px solid #111827;
+    padding-top: 8px;
+    color: #344054;
+    font-weight: 800;
+}
+
+.proposal-toast {
+    position: fixed;
+    right: 24px;
+    bottom: 24px;
+    z-index: 1200;
+    max-width: 340px;
+    padding: 12px 14px;
+    border-radius: 6px;
+    background: #111827;
+    color: #fff;
+    font-weight: 800;
+    box-shadow: 0 16px 36px rgba(15, 23, 42, .24);
+}
+
+.proposal-feature-banner {
+    position: sticky;
+    bottom: 18px;
+    max-width: 980px;
+    margin: 22px auto 0;
+    padding: 12px 14px;
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    border: 1px solid #d7dee8;
+    border-radius: 6px;
+    background: #fff;
+    box-shadow: 0 10px 28px rgba(15, 23, 42, .14);
+    color: #344054;
+    font-size: 13px;
+    font-weight: 700;
+}
+
+.proposal-feature-banner span { flex: 1; min-width: 0; }
+.proposal-feature-banner button {
+    border: 1px solid #cbd5e1;
+    border-radius: 5px;
+    min-height: 30px;
+    padding: 0 10px;
+    background: #fff;
+    color: #172033;
+    font-weight: 800;
+}
+
+.proposal-feature-banner [data-proposal-learn] {
+    color: #0f5d9d;
+    border-color: #b7d4ee;
+    background: #f3f8fd;
+}
+
+@media (max-width: 980px) {
+    .proposal-shell { grid-template-columns: 1fr; }
+    .proposal-settings { max-height: 44vh; border-right: 0; border-bottom: 1px solid #ccd6e2; }
+    .proposal-preview-area { padding: 18px 12px 80px; }
+    .proposal-document { width: 100%; padding: 28px 22px; }
+}
+
+@media (max-width: 640px) {
+    .proposal-settings-head { align-items: flex-start; flex-direction: column; }
+    .proposal-export-wrap, .proposal-export-btn { width: 100%; }
+    .proposal-export-btn { justify-content: center; }
+    .proposal-doc-header, .proposal-acceptance { grid-template-columns: 1fr; }
+    .proposal-quote-meta { text-align: left; }
+    .proposal-feature-banner { align-items: stretch; flex-direction: column; }
+}
+
+@media print {
+    body { background: #fff; }
+    .global-tools-header,
+    .project-header,
+    .top-tabs,
+    .proposal-settings,
+    .proposal-builder-note,
+    .proposal-feature-banner { display: none !important; }
+    .workspace-shell, .workspace-main, .proposal-page, .proposal-shell, .proposal-preview-area { height: auto; overflow: visible; display: block; background: #fff; padding: 0; }
+    .proposal-document { width: 100%; min-height: 0; margin: 0; padding: .45in; box-shadow: none; }
+}

@@ -287,6 +287,14 @@ $state = [
     'takeoffLayers' => $takeoffLayers,
     'takeoffMeasurements' => [],
     'estimateItems' => $estimateItems,
+    'estimateTotals' => [
+        'material' => $materialSubtotal,
+        'labor' => $laborSubtotal,
+        'equipment' => $equipmentSubtotal,
+        'waste' => $wasteTotal,
+        'markup' => $markupTotal,
+        'total' => $estimateTotal,
+    ],
     'proposalDraft' => $proposals[0] ?? null,
 ];
 ?>
@@ -480,6 +488,7 @@ $state = [
     <link rel="stylesheet" href="../assets/project_overview.css">
     <link rel="stylesheet" href="../assets/project_takeoff.css">
     <link rel="stylesheet" href="../assets/project_estimating.css">
+    <link rel="stylesheet" href="../assets/project_proposal.css">
 </head>
 <body>
 <?php include __DIR__ . '/../views/global_tools_header.php'; ?>
@@ -968,23 +977,38 @@ $state = [
                 <div class="est-version-bar" id="versionBar"></div>
             </div>
         </section>
-        <section id="tab-proposal" class="tab-panel">
-            <div class="proposal-sheet">
-                <div class="d-flex justify-content-between gap-3 flex-wrap">
-                    <div>
-                        <h2><?= htmlspecialchars($project['name']) ?></h2>
-                        <div>Client: <?= htmlspecialchars($project['client_name'] ?? '') ?></div>
+        <section id="tab-proposal" class="tab-panel proposal-page">
+            <div id="proposalModule" class="proposal-shell" data-project-id="<?= (int)$projectId ?>">
+                <aside class="proposal-settings" aria-label="Proposal detail settings">
+                    <div class="proposal-settings-head">
+                        <div>
+                            <h2>Detail Settings</h2>
+                            <span>Proposal</span>
+                        </div>
+                        <div class="proposal-export-wrap">
+                            <button class="proposal-export-btn" type="button" data-proposal-export-toggle>
+                                <i class="fas fa-file-export"></i><span>Export</span><i class="fas fa-chevron-down"></i>
+                            </button>
+                            <div class="proposal-export-menu" id="proposalExportMenu">
+                                <button type="button" data-proposal-export="pdf">Export PDF</button>
+                                <button type="button" data-proposal-export="docx">Export DOCX</button>
+                                <button type="button" data-proposal-export="preview">Export Preview</button>
+                            </div>
+                        </div>
                     </div>
-                    <div class="text-end">
-                        <div><strong>Quote Number:</strong> <?= htmlspecialchars($proposals[0]['proposal_number'] ?? 'Draft') ?></div>
-                        <div><strong>Date:</strong> <?= date('M d, Y') ?></div>
+                    <div class="proposal-settings-scroll">
+                        <div id="proposalSettingsPanel"></div>
                     </div>
-                </div>
-                <div class="proposal-line mt-4"><strong>Scope of Work</strong><br>Placeholder for proposal scope.</div>
-                <div class="proposal-line"><strong>Included</strong><br>Placeholder for included work and materials.</div>
-                <div class="proposal-line"><strong>Excluded</strong><br>Placeholder for exclusions and assumptions.</div>
-                <div class="proposal-line"><strong>Total Quoted Amount</strong><br><span style="font-size:1.6rem;font-weight:800;"><?= money_fmt($estimateTotal) ?></span></div>
-                <div class="proposal-line"><strong>Acceptance / Signature</strong><br><br>Signature: ______________________________ Date: _______________</div>
+                </aside>
+                <main class="proposal-preview-area" aria-label="Proposal preview">
+                    <div class="proposal-builder-note" id="proposalBuilderNote" hidden>Proposal Builder is ready to be connected.</div>
+                    <div class="proposal-document" id="proposalDocument"></div>
+                    <div class="proposal-feature-banner" id="proposalFeatureBanner">
+                        <span>Enhanced Itemization in Proposal tab - Easily update proposals with: itemized alternates &amp; assembly items, new customer/contact selection, and new toggles to setup proposal.</span>
+                        <button type="button" data-proposal-learn>Learn More</button>
+                        <button type="button" data-proposal-dismiss-banner aria-label="Dismiss">x</button>
+                    </div>
+                </main>
             </div>
         </section>
     </main>
@@ -1162,6 +1186,7 @@ $state = [
 <script src="../assets/project_overview.js"></script>
 <script src="../assets/project_takeoff.js"></script>
 <script src="../assets/project_estimating.js"></script>
+<script src="../assets/project_proposal.js"></script>
 <script src="../assets/global_tools.js"></script>
 </body>
 </html>
