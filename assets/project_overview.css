@@ -53,6 +53,20 @@ body {
     color: var(--text);
 }
 
+.workspace-shell.workspace-scroll-mode {
+    height: auto;
+    min-height: calc(100dvh - 64px);
+    overflow: visible;
+}
+
+.workspace-shell.workspace-scroll-mode .workspace-main {
+    overflow: visible;
+}
+
+.workspace-shell.workspace-scroll-mode .tab-panel.active {
+    overflow: visible;
+}
+
 .project-header {
     background: var(--bg-primary);
     color: var(--text-primary);
@@ -511,6 +525,25 @@ th {
 
 .documents-layout {
     grid-template-columns: 240px minmax(260px, 380px) minmax(300px, 1fr);
+}
+
+.workspace-shell.workspace-scroll-mode .documents-layout {
+    height: auto;
+    min-height: 0;
+    align-items: start;
+}
+
+.workspace-shell.workspace-scroll-mode .documents-layout .card-panel {
+    min-height: 0;
+}
+
+.workspace-shell.workspace-scroll-mode .preview-card {
+    min-height: 560px;
+}
+
+.workspace-shell.workspace-scroll-mode .preview-card > div[style*="height"] {
+    height: clamp(420px, calc(100dvh - 360px), 760px) !important;
+    min-height: 420px !important;
 }
 
 .preview-card .quick-actions {

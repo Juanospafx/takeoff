@@ -1110,6 +1110,8 @@ $state = [
 
     function setActiveTab(tab, push = true) {
         ProjectState.activeTab = tab;
+        const scrollTabs = ['overview', 'documents'];
+        document.querySelector('.workspace-shell')?.classList.toggle('workspace-scroll-mode', scrollTabs.includes(tab));
         tabs.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
         panels.forEach(panel => panel.classList.toggle('active', panel.id === 'tab-' + tab));
         if (push) {

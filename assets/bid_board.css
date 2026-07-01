@@ -869,3 +869,160 @@ a:focus-visible {
     }
     .bb-form-grid { grid-template-columns: 1fr; }
 }
+
+[data-theme="dark"] {
+    --bb-bg: #111827;
+    --bb-surface: #1e293b;
+    --bb-surface-2: #162033;
+    --bb-line: #334155;
+    --bb-line-soft: #29384d;
+    --bb-text: #f8fafc;
+    --bb-muted: #94a3b8;
+    --bb-primary: #60a5fa;
+    --bb-primary-dark: #3b82f6;
+    --bb-focus: rgba(96, 165, 250, .28);
+    --bb-danger: #fca5a5;
+    --bb-warning: #fdba74;
+    --bb-success: #86efac;
+    --bb-shadow-soft: 0 10px 30px rgba(0, 0, 0, .32);
+}
+
+[data-theme="dark"] body,
+[data-theme="dark"] .bid-board-shell {
+    background: var(--bb-bg);
+    color: var(--bb-text);
+}
+
+[data-theme="dark"] .bb-page-head p,
+[data-theme="dark"] .bb-tab-total,
+[data-theme="dark"] .bb-select-field span,
+[data-theme="dark"] .bb-subtext,
+[data-theme="dark"] .bb-empty-state p,
+[data-theme="dark"] .bb-field label {
+    color: var(--bb-muted);
+}
+
+[data-theme="dark"] .bb-module-icon,
+[data-theme="dark"] .bb-pipeline-tabs,
+[data-theme="dark"] .bb-pipeline-tab,
+[data-theme="dark"] .bb-table-controls,
+[data-theme="dark"] .bb-table-shell,
+[data-theme="dark"] .bb-empty-state,
+[data-theme="dark"] .bb-modal,
+[data-theme="dark"] .bb-row-menu-panel,
+[data-theme="dark"] .bb-btn,
+[data-theme="dark"] .bb-btn.secondary,
+[data-theme="dark"] .bb-icon-btn.bordered,
+[data-theme="dark"] .bb-search-field input,
+[data-theme="dark"] .bb-select-field select,
+[data-theme="dark"] .bb-field input,
+[data-theme="dark"] .bb-field select,
+[data-theme="dark"] .bb-field textarea,
+[data-theme="dark"] .bb-create-mode label,
+[data-theme="dark"] .bb-status-select {
+    background: var(--bb-surface);
+    color: var(--bb-text);
+    border-color: var(--bb-line);
+}
+
+[data-theme="dark"] .bb-module-icon,
+[data-theme="dark"] .bb-empty-icon {
+    background: rgba(249, 115, 22, .14);
+    color: #fdba74;
+    border-color: rgba(249, 115, 22, .36);
+}
+
+[data-theme="dark"] .bb-pipeline-tab:hover,
+[data-theme="dark"] .bb-pipeline-tab.active,
+[data-theme="dark"] .bb-table tr:hover td,
+[data-theme="dark"] .bb-row-menu-toggle:hover,
+[data-theme="dark"] .bb-row-menu-panel a:hover,
+[data-theme="dark"] .bb-row-menu-panel button:hover,
+[data-theme="dark"] .bb-metrics-btn:hover,
+[data-theme="dark"] .bb-create-mode label:hover {
+    background: #273449;
+}
+
+[data-theme="dark"] .bb-pipeline-tab.active {
+    color: var(--bb-text);
+    border-bottom-color: var(--bb-primary);
+}
+
+[data-theme="dark"] .bb-table th {
+    background: #162033;
+    color: #cbd5e1;
+}
+
+[data-theme="dark"] .bb-table td,
+[data-theme="dark"] .bb-row-menu-panel a,
+[data-theme="dark"] .bb-row-menu-panel button,
+[data-theme="dark"] .bb-project-code,
+[data-theme="dark"] .bb-hover-text {
+    color: var(--bb-text);
+}
+
+[data-theme="dark"] .bb-table th,
+[data-theme="dark"] .bb-table td {
+    border-bottom-color: var(--bb-line-soft);
+}
+
+[data-theme="dark"] .bb-table-scroll,
+[data-theme="dark"] .bb-pipeline-tabs {
+    scrollbar-color: #475569 #162033;
+}
+
+[data-theme="dark"] .bb-table-scroll::-webkit-scrollbar-track,
+[data-theme="dark"] .bb-pipeline-tabs::-webkit-scrollbar-track {
+    background: #162033;
+}
+
+[data-theme="dark"] .bb-table-scroll::-webkit-scrollbar-thumb,
+[data-theme="dark"] .bb-pipeline-tabs::-webkit-scrollbar-thumb {
+    background: #475569;
+    border-color: #162033;
+}
+
+[data-theme="dark"] .bb-record-name,
+[data-theme="dark"] .bb-metrics-btn {
+    color: var(--bb-primary);
+}
+
+[data-theme="dark"] .bb-metrics-btn,
+[data-theme="dark"] .bb-avatar {
+    background: #162033;
+    border-color: var(--bb-line);
+}
+
+[data-theme="dark"] .bb-alert {
+    background: rgba(248, 113, 113, .12);
+    border-color: rgba(248, 113, 113, .34);
+    color: #fecaca;
+}
+
+[data-theme="dark"] .bb-status-invitations,
+[data-theme="dark"] .bb-status-to-do,
+[data-theme="dark"] .bb-status-estimating,
+[data-theme="dark"] .bb-status-bid-submitted,
+[data-theme="dark"] .bb-status-accepted,
+[data-theme="dark"] .bb-status-in-progress,
+[data-theme="dark"] .bb-status-complete,
+[data-theme="dark"] .bb-status-estimadores,
+[data-theme="dark"] .bb-status-lost,
+[data-theme="dark"] .bb-status-archived {
+    box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
+}
+
+[data-theme="dark"] .bb-row-menu-panel .danger,
+[data-theme="dark"] .bb-btn.danger {
+    color: #fca5a5;
+    border-color: rgba(248, 113, 113, .36);
+}
+
+[data-theme="dark"] .bb-modal-head,
+[data-theme="dark"] .bb-modal-foot {
+    border-color: var(--bb-line);
+}
+
+[data-theme="dark"] ::placeholder {
+    color: #64748b;
+}
