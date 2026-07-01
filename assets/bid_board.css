@@ -466,20 +466,20 @@ textarea {
 
 .bb-table {
     width: 100%;
-    min-width: 1280px;
+    min-width: 1180px;
     border-collapse: collapse;
     table-layout: fixed;
 }
 
-.bb-col-name { width: 24%; }
-.bb-col-info { width: 64px; }
-.bb-col-requester { width: 17%; }
-.bb-col-project { width: 10%; }
-.bb-col-due { width: 13%; }
-.bb-col-sales { width: 10%; }
-.bb-col-estimator { width: 13%; }
-.bb-col-status { width: 150px; }
-.bb-col-actions { width: 58px; }
+.bb-col-name { width: 16%; }
+.bb-col-info { width: 58px; }
+.bb-col-requester { width: 19%; }
+.bb-col-project { width: 11%; }
+.bb-col-due { width: 14%; }
+.bb-col-sales { width: 11%; }
+.bb-col-estimator { width: 15%; }
+.bb-col-status { width: 142px; }
+.bb-col-actions { width: 54px; }
 
 .bb-table tbody tr:last-child td {
     border-bottom: 0;
@@ -487,7 +487,7 @@ textarea {
 
 .bb-table th,
 .bb-table td {
-    padding: 11px 14px;
+    padding: 10px 12px;
     border-bottom: 1px solid var(--bb-line-soft);
     vertical-align: middle;
     text-align: left;
@@ -534,6 +534,11 @@ textarea {
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
+}
+
+.bb-name-cell .bb-record-name,
+.bb-name-cell .bb-subtext {
+    max-width: 100%;
 }
 
 .bb-record-name:hover {
@@ -636,6 +641,7 @@ textarea {
 
 .bb-name-cell {
     min-width: 0;
+    max-width: 230px;
 }
 
 .bb-project-code {
