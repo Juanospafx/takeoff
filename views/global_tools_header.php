@@ -153,7 +153,10 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
 <script>
 (function () {
     var key = 'takeoff.theme';
-    var saved = localStorage.getItem(key);
+    var saved = null;
+    try {
+        saved = localStorage.getItem(key);
+    } catch (error) {}
     var theme = saved === 'dark' || saved === 'light' ? saved : 'light';
     document.documentElement.setAttribute('data-theme', theme);
 
@@ -172,7 +175,9 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
         if (!button) return;
         var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
         document.documentElement.setAttribute('data-theme', next);
-        localStorage.setItem(key, next);
+        try {
+            localStorage.setItem(key, next);
+        } catch (error) {}
         syncThemeButton();
     });
 

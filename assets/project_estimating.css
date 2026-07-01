@@ -586,3 +586,120 @@
     }
     .est-left { border-right: 0; border-bottom: 1px solid #d8dee7; }
 }
+
+[data-theme="dark"] .estimating-page,
+[data-theme="dark"] .est-shell {
+    background: #111827;
+    color: #f8fafc;
+}
+
+[data-theme="dark"] .est-left,
+[data-theme="dark"] .est-right,
+[data-theme="dark"] .est-toolbar,
+[data-theme="dark"] .est-bottom-create,
+[data-theme="dark"] .est-version-bar,
+[data-theme="dark"] .est-card,
+[data-theme="dark"] .est-card-head,
+[data-theme="dark"] .est-card-header,
+[data-theme="dark"] .est-menu,
+[data-theme="dark"] .est-editor-tools,
+[data-theme="dark"] .est-editor-toolbar,
+[data-theme="dark"] .est-summary-total td,
+[data-theme="dark"] .est-version-tab,
+[data-theme="dark"] .est-rich-editor {
+    background: #1e293b;
+    color: #f8fafc;
+    border-color: #334155;
+}
+
+[data-theme="dark"] .est-right-scroll,
+[data-theme="dark"] .est-table th,
+[data-theme="dark"] .est-table th:nth-child(1),
+[data-theme="dark"] .est-table th:nth-child(2),
+[data-theme="dark"] .est-row-group td,
+[data-theme="dark"] .est-row-group td:nth-child(1),
+[data-theme="dark"] .est-row-group td:nth-child(2) {
+    background: #162033;
+    color: #cbd5e1;
+}
+
+[data-theme="dark"] .est-table td,
+[data-theme="dark"] .est-table td:nth-child(1),
+[data-theme="dark"] .est-table td:nth-child(2) {
+    background: #1e293b;
+    color: #f8fafc;
+    border-color: #334155;
+}
+
+[data-theme="dark"] .est-table tr:hover td,
+[data-theme="dark"] .est-table tr:hover td:nth-child(1),
+[data-theme="dark"] .est-table tr:hover td:nth-child(2),
+[data-theme="dark"] .est-menu button:hover,
+[data-theme="dark"] .est-menu label:hover,
+[data-theme="dark"] .est-btn:hover,
+[data-theme="dark"] .est-icon-btn:hover,
+[data-theme="dark"] .est-chip-btn:hover {
+    background: #273449;
+}
+
+[data-theme="dark"] .est-search input,
+[data-theme="dark"] .est-cell-input,
+[data-theme="dark"] .est-cell-select,
+[data-theme="dark"] .est-note-input,
+[data-theme="dark"] .est-markup-input,
+[data-theme="dark"] .est-tax-input,
+[data-theme="dark"] .est-global-input,
+[data-theme="dark"] .est-editor-tools button,
+[data-theme="dark"] .est-editor-tools select,
+[data-theme="dark"] .est-editor-toolbar button,
+[data-theme="dark"] .est-editor-toolbar select,
+[data-theme="dark"] .est-rate-grid input {
+    background: #0f172a;
+    color: #f8fafc;
+    border-color: #334155;
+}
+
+[data-theme="dark"] .est-btn,
+[data-theme="dark"] .est-icon-btn,
+[data-theme="dark"] .est-chip-btn,
+[data-theme="dark"] .est-small-btn,
+[data-theme="dark"] .est-create-bottom,
+[data-theme="dark"] .est-toggle {
+    background: #162033;
+    color: #f8fafc;
+    border-color: #334155;
+}
+
+[data-theme="dark"] .est-card-head h3,
+[data-theme="dark"] .est-card-header,
+[data-theme="dark"] .est-menu button,
+[data-theme="dark"] .est-menu label,
+[data-theme="dark"] .est-name-main,
+[data-theme="dark"] .est-version-tab strong {
+    color: #f8fafc;
+}
+
+[data-theme="dark"] .est-search i,
+[data-theme="dark"] .est-item-desc,
+[data-theme="dark"] .est-muted,
+[data-theme="dark"] .est-section-title,
+[data-theme="dark"] .est-summary-table th,
+[data-theme="dark"] .est-mini-table th,
+[data-theme="dark"] .est-global-rates label,
+[data-theme="dark"] .est-version-tab span {
+    color: #94a3b8;
+}
+
+[data-theme="dark"] .est-toggle.on,
+[data-theme="dark"] .est-global-input.editable {
+    background: rgba(34, 197, 94, .14);
+    border-color: rgba(34, 197, 94, .45);
+    color: #86efac;
+}
+
+[data-theme="dark"] .est-pill,
+[data-theme="dark"] .est-version-tab.active {
+    background: rgba(96, 165, 250, .16);
+    border-color: rgba(96, 165, 250, .42);
+    color: #bfdbfe;
+}

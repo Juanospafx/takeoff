@@ -455,3 +455,68 @@
     .workspace-shell, .workspace-main, .proposal-page, .proposal-shell, .proposal-preview-area { height: auto; overflow: visible; display: block; background: #fff; padding: 0; }
     .proposal-document { width: 100%; min-height: 0; margin: 0; padding: .45in; box-shadow: none; }
 }
+
+@media screen {
+[data-theme="dark"] .proposal-page,
+[data-theme="dark"] .proposal-shell,
+[data-theme="dark"] .proposal-preview-area {
+    background: #111827;
+    color: #f8fafc;
+}
+
+[data-theme="dark"] .proposal-settings,
+[data-theme="dark"] .proposal-settings-head,
+[data-theme="dark"] .proposal-section,
+[data-theme="dark"] .proposal-export-menu,
+[data-theme="dark"] .proposal-feature-banner,
+[data-theme="dark"] .proposal-builder-note,
+[data-theme="dark"] .proposal-small-btn,
+[data-theme="dark"] .proposal-dot-btn,
+[data-theme="dark"] .proposal-select-row select {
+    background: #1e293b;
+    color: #f8fafc;
+    border-color: #334155;
+}
+
+[data-theme="dark"] .proposal-settings-head h2,
+[data-theme="dark"] .proposal-toggle-row,
+[data-theme="dark"] .proposal-select-row,
+[data-theme="dark"] .proposal-customer-title,
+[data-theme="dark"] .proposal-export-menu button,
+[data-theme="dark"] .proposal-feature-banner button {
+    color: #f8fafc;
+}
+
+[data-theme="dark"] .proposal-settings-head span,
+[data-theme="dark"] .proposal-section h3,
+[data-theme="dark"] .proposal-customer-box,
+[data-theme="dark"] .proposal-feature-banner,
+[data-theme="dark"] .proposal-builder-note {
+    color: #cbd5e1;
+}
+
+[data-theme="dark"] .proposal-export-menu button:hover,
+[data-theme="dark"] .proposal-feature-banner button:hover,
+[data-theme="dark"] .proposal-small-btn:hover,
+[data-theme="dark"] .proposal-dot-btn:hover {
+    background: #273449;
+}
+
+[data-theme="dark"] .proposal-slider {
+    background: #475569;
+}
+
+[data-theme="dark"] .proposal-switch input:checked + .proposal-slider {
+    background: #2563eb;
+}
+
+[data-theme="dark"] .proposal-document {
+    box-shadow: 0 24px 70px rgba(0, 0, 0, .48);
+}
+
+[data-theme="dark"] .proposal-feature-banner [data-proposal-learn] {
+    background: rgba(96, 165, 250, .16);
+    border-color: rgba(96, 165, 250, .42);
+    color: #bfdbfe;
+}
+}

@@ -639,15 +639,21 @@ th {
 
 [data-theme="dark"] .project-header,
 [data-theme="dark"] .top-tabs,
+[data-theme="dark"] .workspace-shell,
+[data-theme="dark"] .workspace-main,
+[data-theme="dark"] .tab-panel,
 [data-theme="dark"] .overview-card,
 [data-theme="dark"] .card-panel,
 [data-theme="dark"] .table-wrap,
+[data-theme="dark"] .documents-table-wrap,
 [data-theme="dark"] .project-menu,
 [data-theme="dark"] .project-status-menu,
 [data-theme="dark"] .documents-empty,
 [data-theme="dark"] .doc-row-actions button,
 [data-theme="dark"] .btn-ghost,
 [data-theme="dark"] .btn-outline-dark,
+[data-theme="dark"] .form-control,
+[data-theme="dark"] .form-select,
 [data-theme="dark"] .overview-field input,
 [data-theme="dark"] .overview-field select,
 [data-theme="dark"] .overview-field textarea {
@@ -687,6 +693,35 @@ th {
     color: var(--primary);
 }
 
+[data-theme="dark"] .label,
+[data-theme="dark"] .doc-meta,
+[data-theme="dark"] .project-muted,
+[data-theme="dark"] .documents-dropzone span,
+[data-theme="dark"] .overview-field,
+[data-theme="dark"] .overview-list-item span {
+    color: var(--text-secondary);
+}
+
+[data-theme="dark"] .card-panel h2,
+[data-theme="dark"] .card-panel h3,
+[data-theme="dark"] .overview-card h2,
+[data-theme="dark"] .value,
+[data-theme="dark"] .folder-item,
+[data-theme="dark"] .doc-item,
+[data-theme="dark"] .documents-empty strong,
+[data-theme="dark"] .documents-dropzone strong,
+[data-theme="dark"] .overview-empty strong,
+[data-theme="dark"] .overview-empty h3,
+[data-theme="dark"] .overview-list-item,
+[data-theme="dark"] td {
+    color: var(--text-primary);
+}
+
+[data-theme="dark"] .overview-list-item {
+    background: #162033;
+    border-color: var(--border-color);
+}
+
 [data-theme="dark"] th,
 [data-theme="dark"] .documents-table th {
     background: #162033;
@@ -705,6 +740,10 @@ th {
 [data-theme="dark"] .project-status-badge,
 [data-theme="dark"] .doc-category-pill {
     box-shadow: inset 0 0 0 1px rgba(255,255,255,.08);
+}
+
+[data-theme="dark"] ::placeholder {
+    color: #64748b;
 }
 
 @media (max-width: 980px) {
