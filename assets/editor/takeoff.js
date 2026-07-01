@@ -38,6 +38,21 @@
         return `takeoff.editor.${pid}.${fid}`;
     }
 
+    function currentProjectId() {
+        return typeof projectId !== 'undefined' ? String(projectId) : '0';
+    }
+
+    function currentDocumentId() {
+        return typeof fileId !== 'undefined' ? String(fileId) : 'drawing';
+    }
+
+    function sheetIdFor(page = pageNum) {
+        return `${currentDocumentId()}:${Number(page || 1)}`;
+    }
+
+    function timestamp() {
+        return new Date().toISOString();
+    }
     function serializeTakeoffState() {
         return {
             version: 2,
@@ -370,6 +385,8 @@
             snapshot();
             marker.x = group.x();
             marker.y = group.y();
+            marker.updatedAt = timestamp();
+            marker.updated_at = marker.updatedAt;
             markDirty();
         });
         konvaLayer.add(group);
@@ -450,6 +467,8 @@
             const dx = line.x();
             const dy = line.y();
             segment.points_json = segment.points_json.map(p => ({ x: p.x + dx, y: p.y + dy }));
+            segment.updatedAt = timestamp();
+            segment.updated_at = segment.updatedAt;
             line.position({ x: 0, y: 0 });
             refreshSegment(segment);
             markDirty();
@@ -482,7 +501,7 @@
             const isVisible = s.page_number === pg && Number(layer?.visible ?? 1);
             if (s.node) s.node.visible(isVisible);
             if (s.labelNode) s.labelNode.visible(isVisible);
-            (s.handles || []).forEach(h => h.visible(s.page_number === pg && state.selectedElement?.ref === s));
+            (s.handles || []).forEach(h => h.visible(isVisible && state.selectedElement?.ref === s));
         });
         if (konvaLayer) konvaLayer.batchDraw();
     }
@@ -523,8 +542,15 @@
             multiplier: 1,
             quantity: 1,
             notes: '',
+            project_id: currentProjectId(),
+            document_id: currentDocumentId(),
+            sheet_id: sheetIdFor(pageNum),
+            createdAt: timestamp(),
+            updatedAt: timestamp(),
             metadata_json: {},
         };
+        marker.created_at = marker.createdAt;
+        marker.updated_at = marker.updatedAt;
         marker.quantity = calculateCountQuantity(marker);
         state.markers.push(marker);
         createMarkerNode(marker);
@@ -591,8 +617,15 @@
             color: layer.color || '#2563eb',
             stroke_width: 4,
             label: '',
+            project_id: currentProjectId(),
+            document_id: currentDocumentId(),
+            sheet_id: sheetIdFor(pageNum),
+            createdAt: timestamp(),
+            updatedAt: timestamp(),
             metadata_json: {},
         };
+        segment.created_at = segment.createdAt;
+        segment.updated_at = segment.updatedAt;
         calculateLinearLength(segment);
         state.draftLine.preview.destroy();
         state.draftLine = null;
@@ -659,8 +692,15 @@
             color: layer.color || '#2563eb',
             stroke_width: 3,
             label: '',
+            project_id: currentProjectId(),
+            document_id: currentDocumentId(),
+            sheet_id: sheetIdFor(pageNum),
+            createdAt: timestamp(),
+            updatedAt: timestamp(),
             metadata_json: {},
         };
+        segment.created_at = segment.createdAt;
+        segment.updated_at = segment.updatedAt;
         calculateAreaQuantity(segment);
         state.draftArea.preview.destroy();
         state.draftArea = null;
@@ -794,26 +834,38 @@
             shapes: [
                 ...state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).map(marker => ({
                     id: marker.client_uid,
+                    projectId: String(marker.project_id || currentProjectId()),
                     layerId: layer.client_uid,
+                    documentId: String(marker.document_id || currentDocumentId()),
+                    sheetId: marker.sheet_id || sheetIdFor(marker.page_number),
+                    pageNumber: marker.page_number,
                     type: 'Count',
                     position: { x: marker.x, y: marker.y },
                     color: marker.color,
                     symbol: marker.symbol,
+                    size: marker.symbol_size || marker.size || layer.symbol_size || 'Medium',
                     quantityValue: calculateCountQuantity(marker),
                     uom: layerUnit(layer),
-                    pageNumber: marker.page_number
+                    createdAt: marker.createdAt || marker.created_at || null,
+                    updatedAt: marker.updatedAt || marker.updated_at || null
                 })),
                 ...state.segments.filter(segment => segment.layer_client_uid === layer.client_uid).map(segment => {
                     const isArea = String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area';
                     return {
                         id: segment.client_uid,
+                        projectId: String(segment.project_id || currentProjectId()),
                         layerId: layer.client_uid,
+                        documentId: String(segment.document_id || currentDocumentId()),
+                        sheetId: segment.sheet_id || sheetIdFor(segment.page_number),
+                        pageNumber: segment.page_number,
                         type: isArea ? 'Area' : 'Linear',
                         points: segment.points_json || [],
                         color: segment.color,
+                        size: segment.symbol_size || segment.size || layer.symbol_size || 'Medium',
                         quantityValue: isArea ? calculateAreaQuantity(segment) : calculateLinearLength(segment),
                         uom: layerUnit(layer),
-                        pageNumber: segment.page_number
+                        createdAt: segment.createdAt || segment.created_at || null,
+                        updatedAt: segment.updatedAt || segment.updated_at || null
                     };
                 })
             ]
@@ -1874,7 +1926,7 @@
         const rows = calculateTakeoffSummary();
         const el = document.getElementById('takeoffSummary');
         if (!el) return;
-        el.innerHTML = `<div class="takeoff-summary-head"><div class="takeoff-title">Summary</div><div class="takeoff-list-meta">${rows.length} rows${state.dirty ? ' · unsaved' : ''}</div></div>
+        el.innerHTML = `<div class="takeoff-summary-head"><div class="takeoff-title">Summary</div><div class="takeoff-list-meta">${rows.length} rows${state.dirty ? ' - unsaved' : ''}</div></div>
             <div class="takeoff-summary-table-wrap"><table>
             <thead><tr><th>Item</th><th>Assembly</th><th>Type</th><th>Unit</th><th>Qty</th><th>Unit Cost</th><th>Labor Hours</th><th>Material</th><th>Labor</th><th>Total</th><th>Waste</th><th>Markup</th></tr></thead>
             <tbody>${rows.map(r => `<tr><td>${escapeHtml(r.item)}</td><td>${escapeHtml(r.assembly)}</td><td>${r.type}</td><td>${escapeHtml(r.unit)}</td><td>${r.quantity.toFixed(2)}</td><td>${money(r.unitCost)}</td><td>${r.laborHours.toFixed(2)}</td><td>${money(r.material)}</td><td>${money(r.labor)}</td><td>${money(r.total)}</td><td>${num(r.waste).toFixed(2)}</td><td>${money(r.markup)}</td></tr>`).join('')}</tbody>
@@ -2139,8 +2191,10 @@
         if (!layer) return false;
         layer.visible = visible ? 1 : 0;
         setTakeoffPage(pageNum);
+        persistLocalTakeoffState();
         renderLayers();
         emitProjectState();
+        scheduleTakeoffAutosave();
         return true;
     };
 

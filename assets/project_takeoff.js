@@ -330,6 +330,7 @@
                 color: layer.color || '#111827',
                 visible: layer.visible !== false,
                 quantity: Number(layer.quantity || layer.count || layer.measurement_count || 0),
+                baseQuantity: Number(layer.baseQuantity ?? layer.quantity ?? layer.count ?? layer.measurement_count ?? 0),
                 catalogItemId: layer.catalog_item_id || layer.catalogItemId || null,
                 catalog_item_id: layer.catalog_item_id || layer.catalogItemId || null,
                 unitCost: Number(layer.unit_cost || layer.unitCost || 0),
@@ -371,6 +372,7 @@
                 color: layer.color || '#111827',
                 visible: layer.visible !== false,
                 quantity: Number(layer.quantity || 0),
+                baseQuantity: Number(layer.baseQuantity ?? layer.seedQuantity ?? 0),
                 catalogItemId: layer.catalogItemId || layer.catalog_item_id || null,
                 catalog_item_id: layer.catalog_item_id || layer.catalogItemId || null,
                 unitCost: Number(layer.unitCost || layer.unit_cost || 0),
@@ -421,6 +423,7 @@
             size: layer.size,
             color: layer.color,
             quantity: layer.quantity,
+            baseQuantity: layer.baseQuantity || 0,
             catalog_item_id: layer.catalogItemId || null,
             unit_cost: layer.unitCost || 0,
             labor_hours: layer.laborHours || 0,
@@ -463,7 +466,7 @@
         const q = takeoffState.query;
         const layersCount = allLayers().length;
         if (title) title.textContent = `Takeoffs (${layersCount})`;
-            const activeLayer = findLayer(takeoffState.activeLayerId);
+        const activeLayer = findLayer(takeoffState.activeLayerId);
         if (activeLabel) activeLabel.textContent = activeLayer ? activeLayer.name : 'None';
         tree.innerHTML = takeoffState.groups.map(group => {
             const visibleLayers = (group.layers || []).filter(layer => {
@@ -1150,6 +1153,7 @@
             const layer = findLayer(remote.id || remote.layerId);
             if (!layer) return;
             layer.shapes = remote.shapes || [];
+            layer.takeoffObjects = remote.shapes || [];
             layer.visible = remote.visible !== false;
             if (remote.unit_of_measure || remote.uom) layer.uom = remote.unit_of_measure || remote.uom;
         });
@@ -1168,11 +1172,14 @@
             (snapshot.layers || []).forEach(remote => {
                 const id = String(remote.id || remote.layerId || '');
                 if (!id) return;
-                totals.set(id, (totals.get(id) || 0) + Number(remote.quantity || 0));
+                const objectTotal = (remote.shapes || remote.takeoffObjects || [])
+                    .reduce((sum, obj) => sum + Number(obj.quantityValue || obj.quantity || 0), 0);
+                totals.set(id, (totals.get(id) || 0) + objectTotal);
             });
         });
         allLayers().forEach(layer => {
-            if (totals.has(String(layer.id))) layer.quantity = totals.get(String(layer.id));
+            const base = Number(layer.baseQuantity || 0);
+            layer.quantity = base + (totals.get(String(layer.id)) || 0);
         });
     }
 
