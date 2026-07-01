@@ -359,6 +359,15 @@
     display: none;
 }
 
+.est-card.collapsed .est-editor-toolbar,
+.est-card.collapsed .est-editor-tools,
+.est-card.collapsed .rte-toolbar,
+.est-card[data-collapsed="true"] .est-editor-toolbar,
+.est-card[data-collapsed="true"] .est-editor-tools,
+.est-card[data-collapsed="true"] .rte-toolbar {
+    display: none !important;
+}
+
 .est-editor-tools {
     display: flex;
     flex-wrap: wrap;

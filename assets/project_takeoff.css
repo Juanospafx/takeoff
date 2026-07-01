@@ -1280,7 +1280,7 @@
     margin: 2px 0;
 }
 
-@media (max-width: 1100px) {
+@media (max-width: 1200px) {
     .pro-takeoff-workspace {
         grid-template-columns: 280px minmax(0, 1fr) 54px;
     }

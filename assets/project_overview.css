@@ -100,10 +100,17 @@ body {
 
 .project-status-stepper {
     display: flex;
-    flex-wrap: wrap;
-    gap: 6px;
+    flex-wrap: nowrap;
+    gap: 4px;
     margin-top: 10px;
     max-width: 980px;
+    overflow-x: auto;
+    scrollbar-width: none;
+    -ms-overflow-style: none;
+}
+
+.project-status-stepper::-webkit-scrollbar {
+    display: none;
 }
 
 .project-step {
@@ -112,12 +119,13 @@ body {
     align-items: center;
     border: 1px solid var(--line);
     border-radius: 999px;
-    padding: 3px 9px;
+    padding: 2px 8px;
     color: var(--muted);
     background: var(--card-2);
-    font-size: .72rem;
+    font-size: .68rem;
     font-weight: 900;
     white-space: nowrap;
+    flex: 0 0 auto;
 }
 
 .project-step.done {
@@ -445,7 +453,7 @@ th {
 }
 
 .overview-empty::before {
-    content: "\\f044";
+    content: "\f044";
     font-family: "Font Awesome 6 Free";
     font-weight: 900;
     display: grid;
@@ -514,6 +522,47 @@ th {
 .documents-dropzone.is-dragover {
     border-color: var(--accent);
     background: #fff7ed;
+}
+
+.documents-layout {
+    grid-template-columns: 240px minmax(260px, 380px) minmax(300px, 1fr);
+}
+
+.preview-card .quick-actions {
+    display: flex;
+    flex-wrap: nowrap;
+    gap: 6px;
+}
+
+.preview-card .quick-actions button,
+.preview-card .quick-actions a,
+.preview-card .quick-actions .btn-ghost,
+.preview-card .quick-actions .btn-main {
+    width: 36px;
+    min-width: 36px;
+    height: 36px;
+    justify-content: center;
+    padding: 0;
+    font-size: 0;
+}
+
+.preview-card .quick-actions button i,
+.preview-card .quick-actions a i,
+.preview-card .quick-actions .btn-ghost i,
+.preview-card .quick-actions .btn-main i {
+    font-size: .9rem;
+}
+
+.preview-card .quick-actions button span,
+.preview-card .quick-actions a span,
+.preview-card .quick-actions .btn-ghost span,
+.preview-card .quick-actions .btn-main span {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip: rect(0 0 0 0);
+    white-space: nowrap;
 }
 
 .documents-local-list {
