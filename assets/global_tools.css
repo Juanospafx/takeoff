@@ -21,10 +21,10 @@
 }
 
 [data-theme="dark"] {
-    --global-header-bg: #020617;
+    --global-header-bg: #101820;
     --global-header-text: #f8fafc;
-    --global-menu-bg: #0f172a;
-    --global-menu-border: #334155;
+    --global-menu-bg: #151f2b;
+    --global-menu-border: rgba(255,255,255,.11);
 }
 
 .bt-global-left,
