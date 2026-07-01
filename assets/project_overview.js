@@ -23,7 +23,14 @@
     let currentStatus = normalizeStatus(window.ProjectState?.projectInfo?.status || 'to_do');
     let uploadCategory = null;
     let localDocuments = loadLocalDocuments();
+    let customFolders = loadDocumentFolders();
+    let selectedDocumentsFolder = 'drawings';
+    let selectedDocumentsId = null;
+    let documentSortBy = 'custom';
+    let documentSortDir = 'asc';
+    let documentDensity = 'comfortable';
     const sessionFiles = new Map();
+    const sessionFileUrls = new Map();
 
     const $ = (id) => document.getElementById(id);
     const slug = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -240,18 +247,41 @@
         return `takeoff.projectDocuments.${id || 'draft'}`;
     }
 
+    function documentsFolderStorageKey() {
+        const id = Number(window.ProjectState?.projectId || 0);
+        return `takeoff.projectDocumentFolders.${id || 'draft'}`;
+    }
+
     function migrateDraftDocuments(projectId) {
         const draftKey = 'takeoff.projectDocuments.draft';
         const projectKey = `takeoff.projectDocuments.${projectId}`;
         const draftDocs = localStorage.getItem(draftKey);
-        if (!draftDocs) return;
-        localStorage.setItem(projectKey, draftDocs);
-        localStorage.removeItem(draftKey);
+        if (draftDocs) {
+            localStorage.setItem(projectKey, draftDocs);
+            localStorage.removeItem(draftKey);
+        }
+        const draftFolderKey = 'takeoff.projectDocumentFolders.draft';
+        const projectFolderKey = `takeoff.projectDocumentFolders.${projectId}`;
+        const draftFolders = localStorage.getItem(draftFolderKey);
+        if (draftFolders) {
+            localStorage.setItem(projectFolderKey, draftFolders);
+            localStorage.removeItem(draftFolderKey);
+        }
     }
 
     function loadLocalDocuments() {
         try {
-            const rows = JSON.parse(localStorage.getItem(documentsStorageKey()) || '[]');
+            const stored = JSON.parse(localStorage.getItem(documentsStorageKey()) || '[]');
+            const rows = Array.isArray(stored) ? stored : Array.isArray(stored.documents) ? stored.documents : [];
+            return rows.map(normalizeStoredDocument).filter(Boolean);
+        } catch (e) {
+            return [];
+        }
+    }
+
+    function loadDocumentFolders() {
+        try {
+            const rows = JSON.parse(localStorage.getItem(documentsFolderStorageKey()) || '[]');
             return Array.isArray(rows) ? rows : [];
         } catch (e) {
             return [];
@@ -260,6 +290,33 @@
 
     function persistLocalDocuments() {
         localStorage.setItem(documentsStorageKey(), JSON.stringify(localDocuments));
+    }
+
+    function persistDocumentFolders() {
+        localStorage.setItem(documentsFolderStorageKey(), JSON.stringify(customFolders));
+    }
+
+    function normalizeStoredDocument(doc) {
+        if (!doc || !doc.id) return null;
+        const name = doc.name || doc.filename || 'Document';
+        const category = doc.category || inferCategory({ name }, null);
+        return {
+            id: String(doc.id),
+            name,
+            filename: name,
+            category,
+            folderId: doc.folderId || '',
+            size: Number(doc.size || 0),
+            uploadedAt: doc.uploadedAt || '',
+            uploadedBy: doc.uploadedBy || $('poEstimator')?.value || 'Juan Estevez',
+            type: doc.type || '',
+            extension: String(doc.extension || name.split('.').pop() || '').toLowerCase(),
+            source: 'local',
+            path: '',
+            pageCount: Number(doc.pageCount || 0) || null,
+            pages: Array.isArray(doc.pages) ? doc.pages : [],
+            order: Number(doc.order || 0)
+        };
     }
 
     function inferCategory(file, forcedCategory = null) {
@@ -279,71 +336,280 @@
         const incoming = Array.from(files || []);
         if (!incoming.length) return;
         const now = new Date().toLocaleString();
-        incoming.forEach(file => {
-            const id = `${Date.now()}-${Math.random().toString(16).slice(2)}`;
+        incoming.forEach((file, index) => {
+            const id = String(Date.now() + index);
+            const ext = String(file.name.split('.').pop() || '').toLowerCase();
+            const inferredCategory = inferCategory(file, category);
             sessionFiles.set(id, file);
+            sessionFileUrls.set(id, URL.createObjectURL(file));
             localDocuments.push({
                 id,
                 name: file.name,
-                category: inferCategory(file, category),
+                filename: file.name,
+                category: inferredCategory,
+                folderId: selectedDocumentsFolder.startsWith('custom:') ? selectedDocumentsFolder.replace('custom:', '') : '',
                 size: file.size,
                 uploadedAt: now,
                 uploadedBy: $('poEstimator')?.value || 'Juan Estevez',
                 type: file.type || '',
-                source: 'local'
+                extension: ext,
+                source: 'local',
+                pageCount: null,
+                pages: [],
+                order: Date.now()
             });
         });
         persistLocalDocuments();
-        renderLocalDocuments();
+        syncDocumentsToProjectState();
+        renderDocumentsPage();
         showToast(`${incoming.length} file${incoming.length === 1 ? '' : 's'} added locally.`);
     }
 
     function existingDocumentRows() {
         return (window.ProjectState?.documents || []).map(doc => ({
             id: `existing-${doc.source}-${doc.id}`,
+            backendId: doc.id,
             name: doc.filename || doc.title || 'Document',
-            category: inferCategory({ name: doc.filename || '' }, null),
+            filename: doc.filename || doc.title || 'Document',
+            category: inferCategory({ name: doc.filename || doc.title || '' }, null),
             size: '',
             uploadedAt: doc.uploaded_at || '',
             uploadedBy: 'System',
             path: doc.path || '',
-            source: 'existing'
+            source: 'existing',
+            originalSource: doc.source || '',
+            folderId: doc.folder_id ? String(doc.folder_id) : '',
+            extension: doc.extension || String(doc.filename || '').split('.').pop().toLowerCase(),
+            type: doc.mime_type || '',
+            pageCount: Number(doc.page_count || 0) || null,
+            pages: Array.isArray(doc.pages) ? doc.pages : [],
+            order: Number(doc.id || 0)
         }));
     }
 
-    function renderLocalDocuments() {
-        const body = $('documentsLocalBody');
-        const empty = $('documentsEmptyState');
-        const table = $('documentsTableWrap');
-        if (!body || !empty || !table) return;
-        const allDocuments = [...existingDocumentRows(), ...localDocuments];
-        empty.hidden = allDocuments.length > 0;
-        table.hidden = allDocuments.length === 0;
-        body.innerHTML = allDocuments.map(doc => `
-            <tr>
-                <td><strong>${escapeHtml(doc.name)}</strong></td>
-                <td><span class="doc-category-pill">${escapeHtml(doc.category)}</span></td>
-                <td>${doc.size === '' ? '-' : formatBytes(doc.size)}</td>
-                <td>${escapeHtml(doc.uploadedAt)}</td>
-                <td>${escapeHtml(doc.uploadedBy)}</td>
-                <td>
-                    <div class="doc-row-actions">
-                        <button type="button" data-doc-action="view" data-doc-id="${escapeHtml(doc.id)}">View</button>
-                        <button type="button" data-doc-action="download" data-doc-id="${escapeHtml(doc.id)}">Download</button>
-                        <button type="button" data-doc-action="delete" data-doc-id="${escapeHtml(doc.id)}">Delete</button>
-                    </div>
-                </td>
-            </tr>
-        `).join('');
+    function allDocumentRows() {
+        return [...existingDocumentRows(), ...localDocuments.map(doc => ({ ...doc, path: sessionFileUrls.get(doc.id) || '' }))];
+    }
 
-        body.querySelectorAll('[data-doc-action]').forEach(button => {
-            button.addEventListener('click', () => handleDocumentAction(button.dataset.docAction, button.dataset.docId));
+    function syncDocumentsToProjectState() {
+        if (!window.ProjectState) return;
+        const backendRows = window.ProjectState.documents || [];
+        const localRows = localDocuments.map(doc => ({
+            id: doc.id,
+            source: 'local_metadata',
+            folder_id: doc.folderId || null,
+            folder_name: doc.category,
+            title: doc.name,
+            filename: doc.name,
+            path: sessionFileUrls.get(doc.id) || '',
+            mime_type: doc.type || '',
+            extension: doc.extension || '',
+            uploaded_at: doc.uploadedAt || null,
+            pageCount: doc.pageCount || null
+        }));
+        const backendOnly = backendRows.filter(doc => doc.source !== 'local_metadata');
+        window.ProjectState.documents = [...backendOnly, ...localRows];
+    }
+
+    function drawingDocuments() {
+        return allDocumentRows().filter(doc => doc.category === 'Drawings');
+    }
+
+    function attachmentDocuments() {
+        return allDocumentRows().filter(doc => doc.category !== 'Drawings');
+    }
+
+    function categoryForSelectedFolder() {
+        if (selectedDocumentsFolder === 'attachments') return 'Attachments';
+        return 'Drawings';
+    }
+
+    function documentsForSelectedFolder() {
+        const all = allDocumentRows();
+        if (selectedDocumentsFolder === 'attachments') return all.filter(doc => doc.category !== 'Drawings');
+        if (selectedDocumentsFolder.startsWith('custom:')) {
+            const folderId = selectedDocumentsFolder.replace('custom:', '');
+            return all.filter(doc => String(doc.folderId || '') === folderId);
+        }
+        if (selectedDocumentsFolder.startsWith('document:')) {
+            const docId = selectedDocumentsFolder.replace('document:', '');
+            const doc = all.find(row => row.id === docId);
+            if (!doc) return [];
+            return doc.pages.length ? doc.pages.map(page => ({ ...page, parentId: doc.id, category: 'Drawings', source: 'sheet' })) : [doc];
+        }
+        return all.filter(doc => doc.category === 'Drawings');
+    }
+
+    function folderCounts() {
+        const drawings = drawingDocuments();
+        const attachments = attachmentDocuments();
+        return { drawings: drawings.length, attachments: attachments.length };
+    }
+
+    function renderDocumentsPage() {
+        if (!$('documentsPage')) return;
+        renderDocumentFolderTree();
+        renderDocumentsContent();
+    }
+
+    function renderDocumentFolderTree() {
+        const tree = $('documentsFolderTree');
+        if (!tree) return;
+        const counts = folderCounts();
+        const drawings = drawingDocuments();
+        const customRows = customFolders.map(folder => {
+            const count = allDocumentRows().filter(doc => String(doc.folderId || '') === String(folder.id)).length;
+            return `<button class="documents-folder-row ${selectedDocumentsFolder === `custom:${folder.id}` ? 'active' : ''}" type="button" data-doc-folder="custom:${escapeHtml(folder.id)}">
+                <i class="fas fa-folder"></i><span>${escapeHtml(folder.name)}</span><strong>${count}</strong>
+            </button>`;
+        }).join('');
+
+        tree.innerHTML = `
+            <button class="documents-folder-row parent ${selectedDocumentsFolder === 'drawings' ? 'active' : ''}" type="button" data-doc-folder="drawings">
+                <i class="fas fa-layer-group"></i><span>Drawings</span><strong>${counts.drawings}</strong>
+            </button>
+            <div class="documents-folder-children">
+                ${drawings.map(doc => `
+                    <button class="documents-folder-row child ${selectedDocumentsFolder === `document:${doc.id}` ? 'active' : ''}" type="button" data-doc-folder="document:${escapeHtml(doc.id)}">
+                        <i class="fas ${doc.extension === 'pdf' ? 'fa-file-pdf' : 'fa-file'}"></i>
+                        <span>${escapeHtml(doc.name)}</span>
+                        <strong>${doc.pageCount || doc.pages.length || '-'}</strong>
+                    </button>
+                `).join('')}
+            </div>
+            <button class="documents-folder-row parent ${selectedDocumentsFolder === 'attachments' ? 'active' : ''}" type="button" data-doc-folder="attachments">
+                <i class="fas fa-paperclip"></i><span>Attachments</span><strong>${counts.attachments}</strong>
+            </button>
+            ${customRows}
+        `;
+
+        tree.querySelectorAll('[data-doc-folder]').forEach(button => {
+            button.addEventListener('click', () => {
+                selectedDocumentsFolder = button.dataset.docFolder;
+                renderDocumentsPage();
+            });
         });
     }
 
+    function renderDocumentsContent() {
+        const list = $('documentsList');
+        if (!list) return;
+        const title = $('documentsContentTitle');
+        const subtitle = $('documentsContentSubtitle');
+        const docs = sortedDocuments(filteredDocuments(documentsForSelectedFolder()));
+        const allCount = allDocumentRows().length;
+        const isDrawings = selectedDocumentsFolder === 'drawings' || selectedDocumentsFolder.startsWith('document:');
+        const isAttachments = selectedDocumentsFolder === 'attachments';
+
+        if (title) title.textContent = selectedDocumentsFolder === 'attachments' ? 'Attachments' : selectedDocumentsFolder.startsWith('document:') ? selectedFolderDocumentName() : 'Custom Drawings';
+        if (subtitle) subtitle.textContent = `${docs.length} item${docs.length === 1 ? '' : 's'} shown`;
+
+        if (!allCount) {
+            list.innerHTML = emptyDocumentsState('No documents uploaded yet', 'Upload drawings and attachments to start managing project files.', true);
+            bindDocumentListActions(list);
+            return;
+        }
+        if (!docs.length) {
+            const message = isAttachments ? 'No attachments uploaded yet' : isDrawings ? 'No drawings uploaded yet' : 'No documents in this folder yet';
+            list.innerHTML = emptyDocumentsState(message, 'Use Upload or drag and drop files here.', false);
+            bindDocumentListActions(list);
+            return;
+        }
+
+        list.className = `documents-list density-${documentDensity}`;
+        list.innerHTML = docs.map(doc => renderDocumentRow(doc)).join('');
+        bindDocumentListActions(list);
+    }
+
+    function selectedFolderDocumentName() {
+        const docId = selectedDocumentsFolder.replace('document:', '');
+        return allDocumentRows().find(doc => doc.id === docId)?.name || 'Drawing package';
+    }
+
+    function filteredDocuments(rows) {
+        const query = String($('documentsSearch')?.value || '').trim().toLowerCase();
+        if (!query) return rows;
+        return rows.filter(doc => `${doc.name || ''} ${doc.filename || ''} ${doc.extension || ''}`.toLowerCase().includes(query));
+    }
+
+    function sortedDocuments(rows) {
+        const copy = [...rows];
+        const direction = documentSortDir === 'desc' ? -1 : 1;
+        if (documentSortBy === 'custom') return copy.sort((a, b) => ((a.order || 0) - (b.order || 0)) * direction);
+        return copy.sort((a, b) => {
+            const av = documentSortBy === 'pageCount' ? (a.pageCount || 0) : documentSortBy === 'type' ? (a.extension || '') : documentSortBy === 'uploadedAt' ? (a.uploadedAt || '') : (a.name || '');
+            const bv = documentSortBy === 'pageCount' ? (b.pageCount || 0) : documentSortBy === 'type' ? (b.extension || '') : documentSortBy === 'uploadedAt' ? (b.uploadedAt || '') : (b.name || '');
+            return String(av).localeCompare(String(bv), undefined, { numeric: true, sensitivity: 'base' }) * direction;
+        });
+    }
+
+    function emptyDocumentsState(title, subtitle, showButtons) {
+        return `<div class="documents-empty-state">
+            <i class="fas fa-folder-open"></i>
+            <strong>${escapeHtml(title)}</strong>
+            <span>${escapeHtml(subtitle)}</span>
+            ${showButtons ? '<div><button class="btn-main" type="button" data-doc-upload="Drawings"><i class="fas fa-file-pdf"></i> Upload Drawings</button><button class="btn-ghost" type="button" data-doc-upload="Attachments"><i class="fas fa-paperclip"></i> Upload Attachments</button></div>' : ''}
+        </div>`;
+    }
+
+    function renderDocumentRow(doc) {
+        const isSheet = doc.source === 'sheet';
+        const meta = isSheet
+            ? `Sheet ${escapeHtml(doc.pageNumber || '')}`
+            : `${escapeHtml(doc.category || 'Document')} · ${doc.pageCount ? `${doc.pageCount} pages · ` : ''}${doc.size ? `${formatBytes(doc.size)} · ` : ''}${escapeHtml(doc.uploadedAt || 'Not uploaded')}`;
+        return `<div class="documents-row ${selectedDocumentsId === doc.id ? 'active' : ''}" data-doc-id="${escapeHtml(doc.id)}">
+            <button class="documents-row-main" type="button" data-doc-action="select" data-doc-id="${escapeHtml(doc.id)}">
+                <i class="fas ${doc.category === 'Drawings' ? (doc.extension === 'pdf' ? 'fa-file-pdf' : 'fa-drafting-compass') : 'fa-paperclip'}"></i>
+                <span><strong>${escapeHtml(doc.name || doc.title || 'Document')}</strong><small>${meta}</small></span>
+            </button>
+            <div class="documents-row-actions">
+                <button class="documents-icon-btn" type="button" data-doc-action="view" data-doc-id="${escapeHtml(doc.id)}" title="View"><i class="fas fa-eye"></i></button>
+                <button class="documents-icon-btn" type="button" data-doc-action="menu" data-doc-id="${escapeHtml(doc.id)}" title="Options"><i class="fas fa-ellipsis-vertical"></i></button>
+                <div class="documents-menu row-menu" data-doc-menu="${escapeHtml(doc.id)}">
+                    <button type="button" data-doc-action="view" data-doc-id="${escapeHtml(doc.id)}">View</button>
+                    <button type="button" data-doc-action="rename" data-doc-id="${escapeHtml(doc.id)}">Rename</button>
+                    <button type="button" data-doc-action="move" data-doc-id="${escapeHtml(doc.id)}">Move</button>
+                    <button type="button" data-doc-action="download" data-doc-id="${escapeHtml(doc.id)}">Download</button>
+                    <button type="button" data-doc-action="delete" data-doc-id="${escapeHtml(doc.id)}">Delete</button>
+                </div>
+            </div>
+        </div>`;
+    }
+
+    function bindDocumentListActions(root) {
+        root.querySelectorAll('[data-doc-upload]').forEach(button => {
+            button.addEventListener('click', () => openDocumentPicker(button.dataset.docUpload));
+        });
+        root.querySelectorAll('[data-doc-action]').forEach(button => {
+            button.addEventListener('click', event => {
+                event.stopPropagation();
+                handleDocumentAction(button.dataset.docAction, button.dataset.docId);
+            });
+        });
+    }
+
+    function findDocumentById(id) {
+        return allDocumentRows().find(row => row.id === id);
+    }
+
     function handleDocumentAction(action, id) {
-        const doc = [...existingDocumentRows(), ...localDocuments].find(row => row.id === id);
+        if (action === 'menu') {
+            document.querySelectorAll('.documents-menu.row-menu').forEach(menu => {
+                menu.classList.toggle('open', menu.dataset.docMenu === id && !menu.classList.contains('open'));
+            });
+            return;
+        }
+        const doc = findDocumentById(id);
         if (!doc) return;
+        if (action === 'select') {
+            selectedDocumentsId = doc.id;
+            if (doc.category === 'Drawings') {
+                window.ProjectState.selectedDocumentId = doc.backendId || doc.id;
+                window.ProjectState.selectedDrawingId = doc.backendId || doc.id;
+            }
+            renderDocumentsContent();
+            return;
+        }
         if (doc.source === 'existing') {
             if ((action === 'view' || action === 'download') && doc.path) {
                 const link = document.createElement('a');
@@ -353,14 +619,31 @@
                 link.click();
                 return;
             }
-            showToast('This document action is ready for the backend document API.');
+            if (action === 'rename' || action === 'move' || action === 'delete') showToast('This document action is ready for the backend document API.');
             return;
         }
-        if (action === 'delete') {
+        if (action === 'rename') {
+            const nextName = prompt('Rename document', doc.name);
+            if (!nextName || nextName === doc.name) return;
+            localDocuments = localDocuments.map(row => row.id === id ? { ...row, name: nextName, filename: nextName, extension: String(nextName.split('.').pop() || row.extension || '').toLowerCase() } : row);
+            persistLocalDocuments();
+            renderDocumentsPage();
+            return;
+        }
+        if (action === 'move') {
+            const next = prompt('Move to folder/category: Drawings, Attachments, or custom folder name', doc.category);
+            if (!next) return;
+            const normalized = next.toLowerCase().startsWith('attach') ? 'Attachments' : 'Drawings';
+            localDocuments = localDocuments.map(row => row.id === id ? { ...row, category: normalized } : row);
+            persistLocalDocuments();
+            renderDocumentsPage();
+            return;
+        }
+        if (action === 'delete' && confirm('Delete this local document metadata?')) {
             localDocuments = localDocuments.filter(row => row.id !== id);
             sessionFiles.delete(id);
             persistLocalDocuments();
-            renderLocalDocuments();
+            renderDocumentsPage();
             return;
         }
         if (action === 'view' || action === 'download') {
@@ -376,6 +659,75 @@
             link.target = '_blank';
             link.click();
             setTimeout(() => URL.revokeObjectURL(url), 1000);
+        }
+    }
+
+    function createDocumentFolder() {
+        const name = prompt('Folder name');
+        if (!name) return;
+        customFolders.push({ id: `folder-${Date.now()}-${Math.random().toString(16).slice(2)}`, name, order: Date.now() });
+        persistDocumentFolders();
+        renderDocumentsPage();
+    }
+
+    function renameDocumentFolder() {
+        if (!selectedDocumentsFolder.startsWith('custom:')) {
+            showToast('Select a custom folder first.');
+            return;
+        }
+        const id = selectedDocumentsFolder.replace('custom:', '');
+        const folder = customFolders.find(row => row.id === id);
+        if (!folder) return;
+        const name = prompt('Rename folder', folder.name);
+        if (!name || name === folder.name) return;
+        folder.name = name;
+        persistDocumentFolders();
+        renderDocumentsPage();
+    }
+
+    function deleteDocumentFolder() {
+        if (!selectedDocumentsFolder.startsWith('custom:')) {
+            showToast('Base folders cannot be deleted.');
+            return;
+        }
+        const id = selectedDocumentsFolder.replace('custom:', '');
+        const hasDocs = allDocumentRows().some(doc => String(doc.folderId || '') === id);
+        if (hasDocs) {
+            showToast('Folder must be empty before deleting it.');
+            return;
+        }
+        customFolders = customFolders.filter(row => row.id !== id);
+        selectedDocumentsFolder = 'drawings';
+        persistDocumentFolders();
+        renderDocumentsPage();
+    }
+
+    function sortDocumentFolders() {
+        customFolders.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' }));
+        persistDocumentFolders();
+        renderDocumentsPage();
+    }
+
+    function startDocumentsTakeoff() {
+        const drawings = drawingDocuments();
+        if (!drawings.length) {
+            showToast('Upload drawings before starting takeoff.');
+            return;
+        }
+        const doc = findDocumentById(selectedDocumentsId) || drawings[0];
+        selectedDocumentsId = doc.id;
+        window.ProjectState.selectedDocumentId = doc.backendId || doc.id;
+        window.ProjectState.selectedDrawingId = doc.backendId || doc.id;
+        if (typeof window.setActiveTab === 'function') window.setActiveTab('takeoff');
+        if (typeof window.projectTakeoffRefreshDrawings === 'function') window.projectTakeoffRefreshDrawings();
+        if (doc.path && doc.originalSource === 'legacy_file') {
+            const frame = $('takeoffFrame');
+            const empty = $('takeoffEmpty');
+            if (frame) {
+                frame.src = `editor.php?id=${encodeURIComponent(doc.backendId)}&embedded=1`;
+                frame.style.display = 'block';
+            }
+            if (empty) empty.style.display = 'none';
         }
     }
 
@@ -396,7 +748,8 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         renderStatusDropdown();
-        renderLocalDocuments();
+        syncDocumentsToProjectState();
+        renderDocumentsPage();
 
         document.querySelectorAll('[data-menu-toggle]').forEach(button => {
             button.addEventListener('click', event => {
@@ -406,6 +759,7 @@
         });
         document.addEventListener('click', () => {
             document.querySelectorAll('.project-menu').forEach(menu => menu.classList.remove('open'));
+            document.querySelectorAll('.documents-menu').forEach(menu => menu.classList.remove('open'));
             $('projectStatusMenu')?.classList.remove('open');
         });
 
@@ -430,7 +784,51 @@
         });
 
         $('browseDocumentsBtn')?.addEventListener('click', () => openDocumentPicker(null));
-        $('documentsSidebarUploadBtn')?.addEventListener('click', () => openDocumentPicker(null));
+        $('browseDrawingsBtn')?.addEventListener('click', () => openDocumentPicker('Drawings'));
+        $('browseAttachmentsBtn')?.addEventListener('click', () => openDocumentPicker('Attachments'));
+        $('documentsUploadBtn')?.addEventListener('click', () => openDocumentPicker(categoryForSelectedFolder()));
+        $('documentsAutoRenameBtn')?.addEventListener('click', () => showToast('Auto-rename is ready to be connected.'));
+        $('documentsStartTakeoffBtn')?.addEventListener('click', startDocumentsTakeoff);
+        $('documentsSearch')?.addEventListener('input', renderDocumentsContent);
+        $('documentsSortBy')?.addEventListener('change', event => {
+            documentSortBy = event.target.value;
+            renderDocumentsContent();
+        });
+        $('documentsSortDir')?.addEventListener('click', () => {
+            documentSortDir = documentSortDir === 'asc' ? 'desc' : 'asc';
+            $('documentsSortDir').querySelector('i').className = documentSortDir === 'asc' ? 'fas fa-arrow-down-a-z' : 'fas fa-arrow-up-z-a';
+            renderDocumentsContent();
+        });
+        $('documentsZoom')?.addEventListener('input', event => {
+            documentDensity = event.target.value === '0' ? 'compact' : event.target.value === '2' ? 'large' : 'comfortable';
+            renderDocumentsContent();
+        });
+        document.querySelector('[data-doc-folder-menu-toggle]')?.addEventListener('click', event => {
+            event.stopPropagation();
+            $('documentsFolderMenu')?.classList.toggle('open');
+        });
+        document.querySelector('[data-doc-view-menu-toggle]')?.addEventListener('click', event => {
+            event.stopPropagation();
+            $('documentsViewMenu')?.classList.toggle('open');
+        });
+        document.querySelectorAll('[data-doc-folder-action]').forEach(button => {
+            button.addEventListener('click', () => {
+                const action = button.dataset.docFolderAction;
+                if (action === 'create') createDocumentFolder();
+                if (action === 'rename') renameDocumentFolder();
+                if (action === 'delete') deleteDocumentFolder();
+                if (action === 'sort') sortDocumentFolders();
+                $('documentsFolderMenu')?.classList.remove('open');
+            });
+        });
+        document.querySelectorAll('[data-doc-view-action]').forEach(button => {
+            button.addEventListener('click', () => {
+                documentDensity = button.dataset.docViewAction === 'compact' ? 'compact' : 'comfortable';
+                $('documentsZoom').value = documentDensity === 'compact' ? '0' : '1';
+                $('documentsViewMenu')?.classList.remove('open');
+                renderDocumentsContent();
+            });
+        });
         $('documentsBrowseInput')?.addEventListener('change', function () {
             addFiles(this.files, uploadCategory);
             this.value = '';

@@ -748,90 +748,80 @@ $state = [
             </div>
         </section>
 
-        <section id="tab-documents" class="tab-panel">
-            <div class="documents-layout">
-                <aside class="card-panel folder-list">
-                    <h2>Folders</h2>
-                    <button class="folder-item active" data-folder="all"><i class="fas fa-layer-group text-info"></i> All Documents</button>
-                    <button class="folder-item" data-folder="drawings"><i class="fas fa-file-pdf text-danger"></i> Drawings</button>
-                    <button class="folder-item" data-folder="attachments"><i class="fas fa-paperclip text-warning"></i> Attachments</button>
-                    <?php foreach ($displayFolders as $folder): ?>
-                        <button class="folder-item" data-folder="<?= (int)$folder['id'] ?>"><i class="fas fa-folder text-warning"></i> <?= htmlspecialchars($folder['name']) ?></button>
-                    <?php endforeach; ?>
-                    <div class="quick-actions mt-3">
-                        <button class="btn-main" type="button" id="documentsSidebarUploadBtn"><i class="fas fa-upload"></i> Upload</button>
-                        <button class="btn-ghost" onclick="openNewFolderModal()"><i class="fas fa-folder-plus"></i> Create Folder</button>
-                    </div>
-                </aside>
-
-                <aside class="card-panel document-list">
-                    <h2>Documents</h2>
-                    <?php if (empty($documents)): ?>
-                        <p class="text-secondary">No documents uploaded yet.</p>
-                    <?php endif; ?>
-                    <?php foreach ($documents as $doc): ?>
-                        <button class="doc-item <?= (int)$doc['id'] === $selectedDocumentId ? 'active' : '' ?>"
-                                data-doc-id="<?= (int)$doc['id'] ?>"
-                                data-source="<?= htmlspecialchars($doc['source']) ?>"
-                                data-folder-id="<?= htmlspecialchars((string)($doc['folder_id'] ?? '')) ?>"
-                                data-extension="<?= htmlspecialchars($doc['extension']) ?>"
-                                data-path="<?= htmlspecialchars($doc['path']) ?>">
-                            <i class="fas <?= $doc['extension'] === 'pdf' ? 'fa-file-pdf text-danger' : 'fa-file text-info' ?>"></i>
-                            <span style="min-width:0;">
-                                <span class="doc-title"><?= htmlspecialchars($doc['filename']) ?></span>
-                                <span class="doc-meta d-block"><?= htmlspecialchars($doc['folder_name']) ?></span>
-                            </span>
-                        </button>
-                    <?php endforeach; ?>
-                </aside>
-
-                <section class="card-panel preview-card">
-                    <div class="d-flex justify-content-between align-items-center gap-2 mb-3">
-                        <h2 class="mb-0">Preview</h2>
-                        <div class="quick-actions">
-                            <a id="downloadDocBtn" class="btn-ghost" href="<?= htmlspecialchars($selectedDoc['path'] ?? '#') ?>" download><i class="fas fa-download"></i> Download</a>
-                            <button id="setActiveDrawingBtn" class="btn-ghost"><i class="fas fa-thumbtack"></i> Set Active</button>
-                            <button id="renameDocBtn" class="btn-ghost"><i class="fas fa-pen"></i> Rename</button>
-                            <button id="deleteDocBtn" class="btn-ghost"><i class="fas fa-trash"></i> Delete</button>
-                            <button id="openTakeoffBtn" class="btn-main"><i class="fas fa-ruler-combined"></i> Open in Takeoff</button>
+        <section id="tab-documents" class="tab-panel documents-page">
+            <div class="documents-layout pro-documents" id="documentsPage">
+                <aside class="documents-sidebar" aria-label="Document folders">
+                    <div class="documents-sidebar-head">
+                        <h2>Folders</h2>
+                        <div class="documents-menu-wrap">
+                            <button class="documents-icon-btn" type="button" data-doc-folder-menu-toggle title="Folder options"><i class="fas fa-ellipsis-vertical"></i></button>
+                            <div class="documents-menu" id="documentsFolderMenu">
+                                <button type="button" data-doc-folder-action="create"><i class="fas fa-folder-plus"></i> Create folder</button>
+                                <button type="button" data-doc-folder-action="rename"><i class="fas fa-pen"></i> Rename folder</button>
+                                <button type="button" data-doc-folder-action="delete"><i class="fas fa-trash"></i> Delete folder</button>
+                                <button type="button" data-doc-folder-action="sort"><i class="fas fa-arrow-down-a-z"></i> Sort folders</button>
+                            </div>
                         </div>
                     </div>
+                    <div class="documents-folder-tree" id="documentsFolderTree"></div>
+                </aside>
+
+                <section class="documents-content-panel" aria-label="Documents content">
+                    <div class="documents-content-head">
+                        <div>
+                            <h2 id="documentsContentTitle">Custom Drawings</h2>
+                            <span id="documentsContentSubtitle">Manage drawings and project attachments.</span>
+                        </div>
+                        <div class="documents-head-actions">
+                            <button class="btn-ghost" type="button" id="documentsAutoRenameBtn"><i class="fas fa-grip"></i><span>Auto-rename</span></button>
+                            <button class="btn-main" type="button" id="documentsStartTakeoffBtn"><i class="fas fa-ruler-combined"></i><span>Start Takeoff</span></button>
+                            <button class="btn-main orange" type="button" id="documentsUploadBtn"><i class="fas fa-upload"></i><span>Upload</span></button>
+                        </div>
+                    </div>
+
                     <div class="documents-dropzone" id="documentsDropzone">
                         <div>
                             <strong>Drag and drop files here</strong>
                             <span>Upload drawings, attachments, specifications, or addenda for this project.</span>
                         </div>
-                        <button class="btn-outline-dark" type="button" id="browseDocumentsBtn"><i class="fas fa-folder-open"></i> Browse files</button>
-                    </div>
-                    <div class="documents-local-list" id="documentsLocalList">
-                        <div class="documents-empty" id="documentsEmptyState">
-                            <strong>No documents uploaded yet</strong>
-                            <span>Drag and drop files here or use the Upload button to add drawings and attachments.</span>
-                        </div>
-                        <div class="documents-table-wrap" id="documentsTableWrap" hidden>
-                            <table class="documents-table">
-                                <thead>
-                                    <tr>
-                                        <th>Name</th>
-                                        <th>Category</th>
-                                        <th>Size</th>
-                                        <th>Uploaded</th>
-                                        <th>User</th>
-                                        <th>Actions</th>
-                                    </tr>
-                                </thead>
-                                <tbody id="documentsLocalBody"></tbody>
-                            </table>
+                        <div class="documents-drop-actions">
+                            <button class="btn-outline-dark" type="button" id="browseDrawingsBtn"><i class="fas fa-file-pdf"></i> Upload Drawings</button>
+                            <button class="btn-outline-dark" type="button" id="browseAttachmentsBtn"><i class="fas fa-paperclip"></i> Upload Attachments</button>
+                            <button class="btn-outline-dark" type="button" id="browseDocumentsBtn"><i class="fas fa-folder-open"></i> Browse files</button>
                         </div>
                     </div>
-                    <div style="height: calc(100% - 260px); min-height: 360px;">
-                        <?php if ($selectedDoc && !empty($selectedDoc['path'])): ?>
-                            <iframe id="documentPreviewFrame" class="preview-frame" src="<?= htmlspecialchars($selectedDoc['path']) ?>"></iframe>
-                        <?php else: ?>
-                            <div id="documentPreviewEmpty" class="preview-empty">Select a PDF or document to preview it here.</div>
-                            <iframe id="documentPreviewFrame" class="preview-frame" style="display:none;"></iframe>
-                        <?php endif; ?>
+
+                    <div class="documents-toolbar">
+                        <label class="documents-sort">
+                            <span>Sort</span>
+                            <select id="documentsSortBy">
+                                <option value="custom">Custom</option>
+                                <option value="name">Name</option>
+                                <option value="uploadedAt">Upload Date</option>
+                                <option value="pageCount">Page Count</option>
+                                <option value="type">Type</option>
+                            </select>
+                        </label>
+                        <button class="documents-icon-btn bordered" type="button" id="documentsSortDir" title="Toggle direction"><i class="fas fa-arrow-down-a-z"></i></button>
+                        <div class="documents-search">
+                            <input id="documentsSearch" type="search" placeholder="Search drawing">
+                            <i class="fas fa-magnifying-glass"></i>
+                        </div>
+                        <label class="documents-zoom">
+                            <i class="fas fa-magnifying-glass-minus"></i>
+                            <input id="documentsZoom" type="range" min="0" max="2" step="1" value="1" aria-label="Document row density">
+                            <i class="fas fa-magnifying-glass-plus"></i>
+                        </label>
+                        <div class="documents-menu-wrap">
+                            <button class="documents-icon-btn bordered" type="button" data-doc-view-menu-toggle title="View options"><i class="fas fa-ellipsis-vertical"></i></button>
+                            <div class="documents-menu align-right" id="documentsViewMenu">
+                                <button type="button" data-doc-view-action="compact"><i class="fas fa-list"></i> Compact rows</button>
+                                <button type="button" data-doc-view-action="comfortable"><i class="fas fa-table-cells-large"></i> Comfortable rows</button>
+                            </div>
+                        </div>
                     </div>
+
+                    <div class="documents-list" id="documentsList"></div>
                 </section>
             </div>
         </section>
@@ -1110,7 +1100,7 @@ $state = [
 
     function setActiveTab(tab, push = true) {
         ProjectState.activeTab = tab;
-        const scrollTabs = ['overview', 'documents'];
+        const scrollTabs = ['overview'];
         document.querySelector('.workspace-shell')?.classList.toggle('workspace-scroll-mode', scrollTabs.includes(tab));
         tabs.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
         panels.forEach(panel => panel.classList.toggle('active', panel.id === 'tab-' + tab));

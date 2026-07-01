@@ -115,7 +115,7 @@
 
     function drawingDocs() {
         return (window.ProjectState?.documents || [])
-            .filter(doc => doc?.path && doc.source === 'legacy_file' && drawingExtensions().includes(String(doc.extension || '').toLowerCase()))
+            .filter(doc => doc?.path && drawingExtensions().includes(String(doc.extension || '').toLowerCase()))
             .map(doc => ({
                 id: Number(doc.id),
                 name: doc.filename || doc.title || 'Untitled drawing',
@@ -1869,6 +1869,17 @@
             }, 360);
         });
     }
+
+    window.projectTakeoffRefreshDrawings = function () {
+        drawingState.documents = drawingDocs();
+        if (!drawingState.documents.some(doc => Number(doc.id) === Number(drawingState.selectedDocumentId)) && drawingState.documents[0]) {
+            drawingState.selectedDocumentId = drawingState.documents[0].id;
+            drawingState.browseDocumentId = drawingState.documents[0].id;
+        }
+        setDrawingLabel();
+        renderDrawingDocumentList();
+        renderDrawingSheetList();
+    };
 
     document.addEventListener('DOMContentLoaded', () => {
         $('toggleTakeoffItemsPanel')?.addEventListener('click', () => {
