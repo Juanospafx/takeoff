@@ -483,13 +483,16 @@
                     <button class="pro-row-menu-btn" type="button" data-group-menu="${esc(group.id)}"><i class="fas fa-ellipsis-vertical"></i></button>
                 </div>
                 <div class="pro-tree-children" ${expanded ? '' : 'hidden'}>
-                    ${visibleLayers.map(layer => `<div class="pro-tree-row pro-tree-item ${takeoffState.activeLayerId === layer.id ? 'active' : ''} ${layer.visible === false ? 'is-hidden' : ''}" data-layer-row="${esc(layer.id)}">
-                        <input type="checkbox" ${layer.visible === false ? '' : 'checked'} aria-label="Layer visibility" data-layer-visible="${esc(layer.id)}">
-                        <span class="pro-layer-symbol" style="color:${esc(layer.color)}">${symbolGlyph(layer)}</span>
-                        <span class="pro-tree-name">${esc(layer.name)}${layer.catalogItemId ? '<small class="pro-catalog-linked">Linked to catalog</small>' : ''}</span>
-                        <span class="pro-tree-qty">${esc(quantityLabel(layer))}</span>
-                        <button class="pro-row-menu-btn" type="button" data-layer-menu="${esc(layer.id)}"><i class="fas fa-ellipsis-vertical"></i></button>
-                    </div>`).join('')}
+                    ${visibleLayers.map(layer => {
+                        const isVisible = layer.visible !== false;
+                        return `<div class="pro-tree-row pro-tree-item ${takeoffState.activeLayerId === layer.id ? 'active' : ''} ${isVisible ? '' : 'is-hidden'}" data-layer-row="${esc(layer.id)}">
+                            <button class="pro-visibility-btn ${isVisible ? '' : 'is-off'}" type="button" data-layer-visibility="${esc(layer.id)}" title="${isVisible ? 'Hide item' : 'Show item'}" aria-label="${isVisible ? 'Hide item' : 'Show item'}"><i class="fas ${isVisible ? 'fa-eye' : 'fa-eye-slash'}"></i></button>
+                            <span class="pro-layer-symbol" style="color:${esc(layer.color)}">${symbolGlyph(layer)}</span>
+                            <span class="pro-tree-name">${esc(layer.name)}${layer.catalogItemId ? '<small class="pro-catalog-linked">Linked to catalog</small>' : ''}</span>
+                            <span class="pro-tree-qty">${esc(quantityLabel(layer))}</span>
+                            <button class="pro-row-menu-btn" type="button" data-layer-menu="${esc(layer.id)}"><i class="fas fa-ellipsis-vertical"></i></button>
+                        </div>`;
+                    }).join('')}
                 </div>
             </div>`;
         }).join('') || '<div class="pro-drawing-empty">No takeoffs match your search.</div>';
@@ -525,9 +528,12 @@
                 else setActiveTakeoffLayer(row.dataset.layerRow);
             });
         });
-        document.querySelectorAll('[data-layer-visible]').forEach(box => {
-            box.addEventListener('click', event => event.stopPropagation());
-            box.addEventListener('change', () => toggleLayerVisibility(box.dataset.layerVisible, box.checked));
+        document.querySelectorAll('[data-layer-visibility]').forEach(button => {
+            button.addEventListener('click', event => {
+                event.stopPropagation();
+                const layer = findLayer(button.dataset.layerVisibility);
+                if (layer) toggleLayerVisibility(layer.id, layer.visible === false);
+            });
         });
         document.querySelectorAll('[data-group-menu]').forEach(button => {
             button.addEventListener('click', event => {

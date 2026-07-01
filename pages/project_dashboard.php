@@ -322,7 +322,7 @@ $state = [
             font-family: Outfit, system-ui, sans-serif;
         }
         a { color: inherit; }
-        .workspace-shell { min-height: 100vh; display: flex; flex-direction: column; }
+        .workspace-shell { height: calc(100dvh - 64px); min-height: 0; display: flex; flex-direction: column; overflow: hidden; }
         .project-header {
             padding: 18px 24px;
             border-bottom: 1px solid var(--line);
@@ -358,10 +358,10 @@ $state = [
             border-bottom-color: var(--primary);
             background: rgba(37, 99, 235, .14);
         }
-        .workspace-main { flex: 1; min-height: 0; }
+        .workspace-main { flex: 1; min-height: 0; overflow: hidden; }
         .tab-panel { display: none; padding: 24px; }
         .tab-panel.active { display: block; }
-        .tab-panel.fullscreen { padding: 0; height: calc(100vh - 193px); min-height: 620px; overflow: hidden; }
+        .tab-panel.fullscreen { padding: 0; height: 100%; min-height: 0; overflow: hidden; }
         .grid { display: grid; gap: 16px; }
         .overview-grid { grid-template-columns: repeat(12, minmax(0, 1fr)); }
         .card-panel {

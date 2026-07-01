@@ -107,6 +107,7 @@
 .pro-tool-btn,
 .pro-row-menu-btn,
 .pro-tree-toggle,
+.pro-visibility-btn,
 .pro-add-btn {
     border: 1px solid transparent;
     background: transparent;
@@ -122,11 +123,23 @@
 .pro-icon-btn:hover,
 .pro-row-menu-btn:hover,
 .pro-tree-toggle:hover,
+.pro-visibility-btn:hover,
 .pro-tool-btn:hover {
     background: #f3f5f7;
     color: #18212f;
 }
 
+
+.pro-visibility-btn {
+    border-color: #d8dee6;
+    background: #fff;
+    color: #1f6fb2;
+}
+
+.pro-visibility-btn.is-off {
+    color: #8a97a8;
+    background: #f3f5f7;
+}
 .pro-takeoff-searchbar {
     padding: 10px 12px 6px;
 }
