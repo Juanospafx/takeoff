@@ -479,6 +479,7 @@ $state = [
     </style>
     <link rel="stylesheet" href="../assets/project_overview.css">
     <link rel="stylesheet" href="../assets/project_takeoff.css">
+    <link rel="stylesheet" href="../assets/project_estimating.css">
 </head>
 <body>
 <?php include __DIR__ . '/../views/global_tools_header.php'; ?>
@@ -919,65 +920,54 @@ $state = [
             </div>
         </section>
 
-        <section id="tab-estimating" class="tab-panel">
-            <div class="d-flex justify-content-between align-items-center gap-2 flex-wrap mb-3">
-                <h2 class="mb-0 fw-bold">Estimating</h2>
-                <div class="quick-actions">
-                    <a class="btn-main" href="estimate_module.php?project_id=<?= (int)$projectId ?>"><i class="fas fa-plus"></i> Add Item</a>
-                    <a class="btn-ghost" href="estimate_module.php?project_id=<?= (int)$projectId ?>"><i class="fas fa-link"></i> Link Takeoff Layer</a>
-                    <a class="btn-ghost" href="estimate_module.php?project_id=<?= (int)$projectId ?>"><i class="fas fa-wand-magic-sparkles"></i> Create From Takeoff</a>
-                    <a class="btn-ghost" href="project_dashboard.php?id=<?= (int)$projectId ?>&tab=estimating"><i class="fas fa-rotate"></i> Refresh Totals</a>
-                    <a class="btn-ghost" href="estimate_module.php?project_id=<?= (int)$projectId ?>"><i class="fas fa-file-export"></i> Export</a>
-                </div>
-            </div>
-            <div class="estimating-toolbar">
-                <input type="search" placeholder="Search item" id="estimateSearch">
-                <select><option>Group</option></select>
-                <select><option>Source Type</option><option>takeoff</option><option>manual</option><option>catalog</option><option>assembly</option></select>
-                <select><option>Cost Type</option></select>
-            </div>
-            <div class="table-wrap">
-                <table>
-                    <thead>
-                        <tr>
-                            <th>Item</th><th>Assembly</th><th>Type</th><th>Unit</th><th>Qty</th><th>Unit Cost</th><th>Labor Hours</th><th>Material</th><th>Labor</th><th>Total</th><th>Waste</th><th>Markup</th><th>Source</th>
-                        </tr>
-                    </thead>
-                    <tbody>
-                    <?php if (empty($estimateItems)): ?>
-                        <tr><td colspan="13" class="text-center text-secondary">No estimate items yet. Create estimate items from takeoff layers or add a manual item.</td></tr>
-                    <?php else: ?>
-                        <?php foreach ($estimateItems as $item): ?>
-                            <tr>
-                                <td><?= htmlspecialchars($item['name'] ?? '') ?></td>
-                                <td><?= htmlspecialchars($item['catalog_item_name'] ?? $item['assembly_catalog_item_id'] ?? '') ?></td>
-                                <td><?= htmlspecialchars($item['item_type'] ?? '') ?></td>
-                                <td><?= htmlspecialchars($item['unit_of_measure'] ?? '') ?></td>
-                                <td><?= number_format((float)($item['quantity'] ?? 0), 2) ?><?= ($item['source_type'] ?? '') === 'takeoff' ? ' locked' : '' ?></td>
-                                <td><?= money_fmt((float)($item['unit_cost'] ?? 0)) ?></td>
-                                <td><?= number_format((float)($item['labor_hours'] ?? 0), 2) ?></td>
-                                <td><?= money_fmt((float)($item['material_cost'] ?? 0)) ?></td>
-                                <td><?= money_fmt((float)($item['labor_cost'] ?? 0)) ?></td>
-                                <td><strong><?= money_fmt((float)($item['total_cost'] ?? 0)) ?></strong></td>
-                                <td><?= number_format((float)($item['waste_factor_percent'] ?? $item['waste_percentage'] ?? 0), 2) ?>%</td>
-                                <td><?= number_format((float)($item['markup_percent'] ?? $item['margin_percentage'] ?? 0), 2) ?>%</td>
-                                <td><?= htmlspecialchars($item['source_type'] ?? 'manual') ?></td>
-                            </tr>
-                        <?php endforeach; ?>
-                    <?php endif; ?>
-                    </tbody>
-                </table>
-            </div>
-            <div class="grid totals-grid">
-                <div class="card-panel"><div class="label">Material subtotal</div><div class="metric-value"><?= money_fmt($materialSubtotal) ?></div></div>
-                <div class="card-panel"><div class="label">Labor subtotal</div><div class="metric-value"><?= money_fmt($laborSubtotal) ?></div></div>
-                <div class="card-panel"><div class="label">Equipment subtotal</div><div class="metric-value"><?= money_fmt($equipmentSubtotal) ?></div></div>
-                <div class="card-panel"><div class="label">Waste total</div><div class="metric-value"><?= money_fmt($wasteTotal) ?></div></div>
-                <div class="card-panel"><div class="label">Markup total</div><div class="metric-value"><?= money_fmt($markupTotal) ?></div></div>
-                <div class="card-panel"><div class="label">Estimate total</div><div class="metric-value"><?= money_fmt($estimateTotal) ?></div></div>
+        <section id="tab-estimating" class="tab-panel estimating-page">
+            <div id="estimatingModule" class="est-shell" data-project-id="<?= (int)$projectId ?>">
+                <section class="est-left" aria-label="Estimate cost items">
+                    <div class="est-toolbar">
+                        <label class="est-search" for="estSearch">
+                            <i class="fas fa-search"></i>
+                            <input id="estSearch" type="search" placeholder="Search cost item">
+                        </label>
+                        <button class="est-btn est-btn-primary" type="button" data-est-action="create-group" title="Create group"><i class="fas fa-folder-plus"></i><span>Create group</span></button>
+                        <div class="est-menu-wrap">
+                            <button class="est-icon-btn" type="button" data-est-action="columns" title="Adjust columns"><i class="fas fa-sliders"></i></button>
+                            <div class="est-menu" id="columnMenu"></div>
+                        </div>
+                        <button class="est-icon-btn" type="button" data-est-action="fullscreen" title="Full screen"><i class="fas fa-expand"></i></button>
+                        <div class="est-menu-wrap">
+                            <button class="est-icon-btn" type="button" data-est-action="options" title="Options"><i class="fas fa-ellipsis-vertical"></i></button>
+                            <div class="est-menu" id="optionsMenu">
+                                <button type="button" data-est-option="save"><i class="fas fa-floppy-disk"></i> Save estimate</button>
+                                <button type="button" data-est-option="copy"><i class="fas fa-copy"></i> Copy estimate</button>
+                                <button type="button" data-est-option="status"><i class="fas fa-circle-check"></i> Change project status</button>
+                                <button type="button" data-est-option="import"><i class="fas fa-file-import"></i> Import</button>
+                                <button type="button" data-est-option="export"><i class="fas fa-file-export"></i> Export</button>
+                            </div>
+                        </div>
+                        <button class="est-btn" type="button" data-est-action="reset-quantities" title="Reset quantities"><i class="fas fa-rotate-left"></i><span>Reset Quantities</span></button>
+                        <button class="est-btn est-btn-danger" type="button" data-est-action="delete-selected" disabled><i class="fas fa-trash"></i><span>Delete</span></button>
+                    </div>
+                    <div class="est-table-wrap"><table class="est-table" aria-label="Estimate items table"><thead id="estTableHead"></thead><tbody id="estTableBody"></tbody></table></div>
+                    <button class="est-create-bottom" type="button" data-est-action="create-group"><i class="fas fa-folder-plus"></i> Create new group</button>
+                </section>
+                <aside class="est-right" aria-label="Estimate notes and summary">
+                    <div class="est-right-scroll">
+                        <section class="est-card" id="notesCard">
+                            <button class="est-card-header" type="button" data-collapse-card="notesCollapsed"><span><i class="fas fa-chevron-down"></i> Notes</span></button>
+                            <div class="est-card-body">
+                                <div class="est-field-block"><div class="est-label">Scope of Work</div><div class="est-editor-toolbar" data-toolbar="scope"><button type="button" data-editor-cmd="undo" title="Undo"><i class="fas fa-rotate-left"></i></button><button type="button" data-editor-cmd="redo" title="Redo"><i class="fas fa-rotate-right"></i></button><select data-editor-format="formatBlock" aria-label="Text style"><option value="P">Paragraph</option><option value="H3">Heading</option></select><button type="button" data-editor-cmd="bold" title="Bold"><i class="fas fa-bold"></i></button><button type="button" data-editor-cmd="italic" title="Italic"><i class="fas fa-italic"></i></button><button type="button" data-editor-cmd="insertHorizontalRule" title="Line"><i class="fas fa-minus"></i></button><button type="button" data-editor-cmd="backColor" data-editor-value="#dbeafe" title="Highlight"><i class="fas fa-fill-drip"></i></button><button type="button" data-editor-cmd="justifyLeft" title="Align left"><i class="fas fa-align-left"></i></button><button type="button" data-editor-cmd="justifyCenter" title="Align center"><i class="fas fa-align-center"></i></button><button type="button" data-editor-cmd="justifyRight" title="Align right"><i class="fas fa-align-right"></i></button><button type="button" data-editor-cmd="justifyFull" title="Justify"><i class="fas fa-align-justify"></i></button><button type="button" data-editor-cmd="insertUnorderedList" title="Bullets"><i class="fas fa-list-ul"></i></button><button type="button" data-editor-cmd="insertOrderedList" title="Numbers"><i class="fas fa-list-ol"></i></button><button type="button" data-editor-cmd="outdent" title="Outdent"><i class="fas fa-outdent"></i></button><button type="button" data-editor-cmd="indent" title="Indent"><i class="fas fa-indent"></i></button><button type="button" data-editor-cmd="removeFormat" title="Clear"><i class="fas fa-eraser"></i></button></div><div id="scopeEditor" class="est-rich-editor" contenteditable="true" data-editor="scope"></div></div>
+                                <div class="est-field-block"><div class="est-list-head"><div class="est-label">Included</div><div><button class="est-small-btn" type="button" data-est-action="browse-library">Browse library</button><button class="est-small-btn" type="button" data-est-action="add-included"><i class="fas fa-plus"></i></button></div></div><div id="includedList" class="est-free-list"></div></div>
+                                <div class="est-field-block"><div class="est-list-head"><div class="est-label">Excluded</div><div><button class="est-small-btn" type="button" data-est-action="browse-library">Browse library</button><button class="est-small-btn" type="button" data-est-action="add-excluded"><i class="fas fa-plus"></i></button></div></div><div id="excludedList" class="est-free-list"></div></div>
+                                <div class="est-field-block"><div class="est-label">Project Notes</div><div class="est-editor-toolbar" data-toolbar="projectNotes"><button type="button" data-editor-cmd="undo" title="Undo"><i class="fas fa-rotate-left"></i></button><button type="button" data-editor-cmd="redo" title="Redo"><i class="fas fa-rotate-right"></i></button><select data-editor-format="formatBlock" aria-label="Text style"><option value="P">Paragraph</option><option value="H3">Heading</option></select><button type="button" data-editor-cmd="bold" title="Bold"><i class="fas fa-bold"></i></button><button type="button" data-editor-cmd="italic" title="Italic"><i class="fas fa-italic"></i></button><button type="button" data-editor-cmd="insertHorizontalRule" title="Line"><i class="fas fa-minus"></i></button><button type="button" data-editor-cmd="backColor" data-editor-value="#dbeafe" title="Highlight"><i class="fas fa-fill-drip"></i></button><button type="button" data-editor-cmd="justifyLeft" title="Align left"><i class="fas fa-align-left"></i></button><button type="button" data-editor-cmd="justifyCenter" title="Align center"><i class="fas fa-align-center"></i></button><button type="button" data-editor-cmd="justifyRight" title="Align right"><i class="fas fa-align-right"></i></button><button type="button" data-editor-cmd="justifyFull" title="Justify"><i class="fas fa-align-justify"></i></button><button type="button" data-editor-cmd="insertUnorderedList" title="Bullets"><i class="fas fa-list-ul"></i></button><button type="button" data-editor-cmd="insertOrderedList" title="Numbers"><i class="fas fa-list-ol"></i></button><button type="button" data-editor-cmd="outdent" title="Outdent"><i class="fas fa-outdent"></i></button><button type="button" data-editor-cmd="indent" title="Indent"><i class="fas fa-indent"></i></button><button type="button" data-editor-cmd="removeFormat" title="Clear"><i class="fas fa-eraser"></i></button></div><div id="projectNotesEditor" class="est-rich-editor" contenteditable="true" data-editor="projectNotes"></div></div>
+                            </div>
+                        </section>
+                        <section class="est-card" id="summaryCard"><button class="est-card-header" type="button" data-collapse-card="summaryCollapsed"><span><i class="fas fa-chevron-down"></i> Summary</span></button><div class="est-card-body"><div class="est-rate-grid"><label>Global labor cost <input id="globalLaborCost" type="number" min="0" step="0.01"></label><label>Global labor sales rate <input id="globalLaborSales" type="number" min="0" step="0.01"></label><button class="est-small-btn" type="button" data-labor-unit>mins</button></div><div class="est-summary-table-wrap"><table class="est-summary-table"><thead><tr><th>Catalog Item Type</th><th>Total Labor</th><th>Difficulty</th><th>Waste</th><th>Total Cost</th><th>Margin</th><th>Total Sales</th><th>Profit</th></tr></thead><tbody id="summaryTypes"></tbody></table></div><div class="est-summary-section"><div class="est-summary-title"><span>Pre-Tax Markups</span><button type="button" data-est-action="add-pre-markup"><i class="fas fa-plus"></i></button></div><div id="preMarkupRows" class="est-markup-list"></div></div><div class="est-summary-section"><div class="est-summary-title"><span>Taxes</span><button type="button" data-est-option="taxes"><i class="fas fa-pen"></i></button></div><div id="taxRows" class="est-markup-list"></div></div><div class="est-summary-section"><div class="est-summary-title"><span>Post-Tax Markups</span><button type="button" data-est-action="add-post-markup"><i class="fas fa-plus"></i></button></div><div id="postMarkupRows" class="est-markup-list"></div></div></div></section>
+                    </div>
+                    <div class="est-total-box"><div class="est-total-label">Estimate Total</div><div id="estimateTotal" class="est-total-value">$0.00</div><div id="estimateSqft" class="est-total-sub">--/sq ft</div></div>
+                </aside>
+                <div class="est-version-bar" id="versionBar"></div>
             </div>
         </section>
-
         <section id="tab-proposal" class="tab-panel">
             <div class="proposal-sheet">
                 <div class="d-flex justify-content-between gap-3 flex-wrap">
@@ -1171,6 +1161,7 @@ $state = [
 </script>
 <script src="../assets/project_overview.js"></script>
 <script src="../assets/project_takeoff.js"></script>
+<script src="../assets/project_estimating.js"></script>
 <script src="../assets/global_tools.js"></script>
 </body>
 </html>
