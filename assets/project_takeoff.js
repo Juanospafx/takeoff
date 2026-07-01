@@ -485,12 +485,14 @@
                 <div class="pro-tree-children" ${expanded ? '' : 'hidden'}>
                     ${visibleLayers.map(layer => {
                         const isVisible = layer.visible !== false;
+                        const metadata = layer.catalogItemId ? 'Linked to catalog' : (layer.category || layer.description || '');
                         return `<div class="pro-tree-row pro-tree-item ${takeoffState.activeLayerId === layer.id ? 'active' : ''} ${isVisible ? '' : 'is-hidden'}" data-layer-row="${esc(layer.id)}">
                             <button class="pro-visibility-btn ${isVisible ? '' : 'is-off'}" type="button" data-layer-visibility="${esc(layer.id)}" title="${isVisible ? 'Hide item' : 'Show item'}" aria-label="${isVisible ? 'Hide item' : 'Show item'}"><i class="fas ${isVisible ? 'fa-eye' : 'fa-eye-slash'}"></i></button>
                             <span class="pro-layer-symbol" style="color:${esc(layer.color)}">${symbolGlyph(layer)}</span>
-                            <span class="pro-tree-name">${esc(layer.name)}${layer.catalogItemId ? '<small class="pro-catalog-linked">Linked to catalog</small>' : ''}</span>
+                            <span class="pro-tree-name" title="${esc(layer.name)}">${esc(layer.name)}</span>
                             <span class="pro-tree-qty">${esc(quantityLabel(layer))}</span>
                             <button class="pro-row-menu-btn" type="button" data-layer-menu="${esc(layer.id)}"><i class="fas fa-ellipsis-vertical"></i></button>
+                            <small class="pro-layer-meta ${layer.catalogItemId ? 'pro-catalog-linked' : ''}">${esc(metadata)}</small>
                         </div>`;
                     }).join('')}
                 </div>
@@ -1925,4 +1927,3 @@
         });
     });
 })();
-

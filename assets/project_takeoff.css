@@ -131,14 +131,24 @@
 
 
 .pro-visibility-btn {
-    border-color: #d8dee6;
-    background: #fff;
+    width: 18px;
+    min-width: 18px;
+    height: 18px;
+    border: 0;
+    border-radius: 4px;
+    background: transparent;
+    color: #4f6f8f;
+    font-size: .72rem;
+}
+
+.pro-visibility-btn:hover {
+    background: #eef2f7;
     color: #1f6fb2;
 }
 
 .pro-visibility-btn.is-off {
     color: #8a97a8;
-    background: #f3f5f7;
+    background: transparent;
 }
 .pro-takeoff-searchbar {
     padding: 10px 12px 6px;
@@ -243,26 +253,37 @@
 .pro-takeoff-tree {
     min-height: 0;
     overflow: auto;
-    padding: 8px 0;
+    padding: 4px 0;
 }
 
 .pro-tree-row {
     display: grid;
-    grid-template-columns: 26px 24px minmax(0, 1fr) 18px 44px 28px;
     align-items: center;
-    gap: 6px;
-    min-height: 40px;
-    padding: 4px 10px;
     border-left: 3px solid transparent;
 }
 
 .pro-tree-folder {
-    grid-template-columns: 24px 22px minmax(0, 1fr) 38px 28px;
+    grid-template-columns: 20px 18px minmax(0, 1fr) 34px 24px;
+    gap: 6px;
+    min-height: 38px;
+    padding: 3px 8px 3px 10px;
+    font-weight: 900;
+}
+
+.pro-tree-folder input[type="checkbox"] {
+    width: 13px;
+    height: 13px;
+    margin: 0;
 }
 
 .pro-tree-item {
-    grid-template-columns: 22px 24px minmax(0, 1fr) 72px 28px;
-    margin-left: 22px;
+    grid-template-columns: 18px 16px minmax(0, 1fr) max-content 24px;
+    grid-template-rows: 20px 14px;
+    column-gap: 6px;
+    row-gap: 0;
+    min-height: 46px;
+    margin-left: 0;
+    padding: 5px 8px 5px 34px;
 }
 
 .pro-tree-row:hover {
@@ -275,15 +296,11 @@
 }
 
 .pro-tree-row.is-hidden {
-    opacity: .52;
-}
-
-.pro-tree-folder {
-    font-weight: 900;
+    opacity: .58;
 }
 
 .pro-tree-children .pro-tree-row {
-    padding-left: 24px;
+    padding-left: 34px;
 }
 
 .pro-tree-toggle.muted {
@@ -295,22 +312,29 @@
     overflow: hidden;
     text-overflow: ellipsis;
     white-space: nowrap;
-    font-size: .86rem;
+    font-size: .82rem;
+    line-height: 1.15;
 }
 
-.pro-tree-name small {
-    display: block;
+.pro-tree-folder .pro-tree-name {
+    font-size: .85rem;
+}
+
+.pro-layer-meta {
+    grid-column: 3 / 5;
+    min-width: 0;
     overflow: hidden;
     text-overflow: ellipsis;
+    white-space: nowrap;
+    color: #6b7787;
+    font-size: .66rem;
+    font-weight: 800;
+    line-height: 1.1;
 }
 
 .pro-catalog-linked {
-    margin-top: 2px;
     color: #147449;
-    font-size: .68rem;
-    font-weight: 900;
 }
-
 .pro-color-dot {
     width: 10px;
     height: 10px;
@@ -327,11 +351,45 @@
     font-weight: 900;
 }
 
+.pro-layer-symbol {
+    width: 14px;
+    height: 14px;
+    font-size: .58rem;
+    line-height: 1;
+}
+
+.pro-tree-item .pro-layer-symbol {
+    align-self: center;
+}
+
+.pro-tree-folder .pro-tree-toggle,
+.pro-tree-folder .pro-row-menu-btn {
+    width: 22px;
+    min-width: 22px;
+    height: 22px;
+    font-size: .76rem;
+}
+
+.pro-tree-item .pro-row-menu-btn {
+    width: 22px;
+    min-width: 22px;
+    height: 22px;
+    font-size: .76rem;
+}
+
 .pro-tree-qty {
     justify-self: end;
+    color: #405064;
+    font-weight: 800;
+    font-size: .76rem;
+    line-height: 1.1;
+    white-space: nowrap;
+}
+
+.pro-tree-folder .pro-tree-qty {
     color: #526173;
+    font-size: .78rem;
     font-weight: 900;
-    font-size: .82rem;
 }
 
 .pro-items-empty {
