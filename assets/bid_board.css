@@ -1,5 +1,5 @@
 :root {
-    --bb-bg: #f3f5f7;
+    --bb-bg: #eef2f6;
     --bb-surface: #ffffff;
     --bb-surface-2: #f8fafc;
     --bb-line: #d8dee6;
@@ -12,6 +12,7 @@
     --bb-danger: #b42318;
     --bb-warning: #a15c07;
     --bb-success: #147449;
+    --bb-shadow-soft: 0 10px 30px rgba(15, 23, 42, .07);
 }
 
 * { box-sizing: border-box; }
@@ -35,6 +36,7 @@ textarea {
     min-height: calc(100vh - 64px);
     display: flex;
     flex-direction: column;
+    padding: 0 18px 30px;
 }
 
 .bb-global-header {
@@ -145,20 +147,21 @@ textarea {
 }
 
 .bid-board-main {
-    width: min(1540px, 100%);
+    width: min(1420px, 100%);
     margin: 0 auto;
-    padding: 18px 22px 28px;
+    padding: 22px 0 30px;
 }
 
 .bb-page-head {
     display: flex;
     justify-content: space-between;
     align-items: center;
-    gap: 18px;
-    margin-bottom: 14px;
+    gap: 28px;
+    margin-bottom: 18px;
+    min-height: 58px;
 }
 
-.bb-title-wrap { gap: 12px; min-width: 0; }
+.bb-title-wrap { gap: 14px; min-width: 0; }
 
 .bb-module-icon {
     width: 40px;
@@ -169,28 +172,33 @@ textarea {
     background: #fff3e8;
     color: #f97316;
     border: 1px solid #fed7aa;
+    box-shadow: 0 1px 2px rgba(180, 83, 9, .08);
 }
 
 .bb-page-head h1 {
     margin: 0;
-    font-size: 1.42rem;
+    font-size: 1.5rem;
     line-height: 1.1;
     font-weight: 800;
 }
 
 .bb-page-head p {
-    margin: 4px 0 0;
+    margin: 5px 0 0;
     color: var(--bb-muted);
-    font-size: .92rem;
+    font-size: .93rem;
 }
 
-.bb-page-actions { gap: 8px; }
+.bb-page-actions {
+    gap: 8px;
+    align-self: center;
+    flex: 0 0 auto;
+}
 
 .bb-btn,
 .bb-icon-btn {
     border: 1px solid var(--bb-line);
     border-radius: 6px;
-    min-height: 34px;
+    min-height: 36px;
     background: var(--bb-surface);
     color: var(--bb-text);
     font-weight: 700;
@@ -202,7 +210,7 @@ textarea {
     align-items: center;
     justify-content: center;
     gap: 8px;
-    padding: 0 12px;
+    padding: 0 14px;
     white-space: nowrap;
 }
 
@@ -308,25 +316,43 @@ textarea {
     border: 1px solid var(--bb-line);
     border-radius: 6px 6px 0 0;
     margin-bottom: 0;
+    box-shadow: var(--bb-shadow-soft);
+    scrollbar-color: #b5bfcc #f6f8fb;
+    scrollbar-width: thin;
+}
+
+.bb-pipeline-tabs::-webkit-scrollbar {
+    height: 8px;
+}
+
+.bb-pipeline-tabs::-webkit-scrollbar-track {
+    background: #f6f8fb;
+}
+
+.bb-pipeline-tabs::-webkit-scrollbar-thumb {
+    background: #b5bfcc;
+    border: 2px solid #f6f8fb;
+    border-radius: 999px;
 }
 
 .bb-pipeline-tab {
-    min-width: 154px;
-    flex: 0 0 auto;
+    min-width: 138px;
+    flex: 1 0 138px;
     border: 0;
     border-right: 1px solid var(--bb-line-soft);
     border-bottom: 3px solid transparent;
     background: var(--bb-surface);
     color: var(--bb-muted);
     text-align: left;
-    padding: 10px 12px 8px;
+    padding: 12px 14px 10px;
     cursor: pointer;
+    min-height: 64px;
 }
 
-.bb-pipeline-tab:hover { background: var(--bb-surface-2); }
+.bb-pipeline-tab:hover { background: #fbfcfe; }
 
 .bb-pipeline-tab.active {
-    background: #fff;
+    background: #f9fbfd;
     color: var(--bb-text);
     border-bottom-color: var(--bb-primary);
 }
@@ -334,31 +360,35 @@ textarea {
 .bb-tab-label {
     display: block;
     font-weight: 800;
-    font-size: .82rem;
-    margin-bottom: 4px;
+    font-size: .83rem;
+    margin-bottom: 6px;
+    line-height: 1.2;
 }
 
 .bb-tab-total {
     display: block;
     color: var(--bb-muted);
-    font-size: .76rem;
+    font-size: .77rem;
     font-weight: 700;
 }
 
 .bb-table-controls {
-    gap: 8px;
+    gap: 9px;
     flex-wrap: nowrap;
     background: var(--bb-surface);
     border-left: 1px solid var(--bb-line);
     border-right: 1px solid var(--bb-line);
     border-bottom: 1px solid var(--bb-line);
-    padding: 9px 10px;
+    padding: 10px 12px;
+    min-height: 54px;
+    box-shadow: 0 8px 22px rgba(15, 23, 42, .045);
 }
 
 .bb-search-field {
     position: relative;
-    flex: 1 1 320px;
-    max-width: 460px;
+    flex: 0 1 390px;
+    max-width: 430px;
+    min-width: 260px;
 }
 
 .bb-search-field input,
@@ -367,7 +397,7 @@ textarea {
 .bb-field select,
 .bb-field textarea {
     width: 100%;
-    min-height: 32px;
+    min-height: 34px;
     border: 1px solid var(--bb-line);
     border-radius: 6px;
     background: #fff;
@@ -390,6 +420,7 @@ textarea {
     display: flex;
     align-items: center;
     gap: 8px;
+    flex: 0 0 auto;
 }
 
 .bb-select-field span {
@@ -400,7 +431,7 @@ textarea {
 }
 
 .bb-select-field select {
-    min-width: 132px;
+    min-width: 146px;
 }
 
 .bb-table-shell {
@@ -408,51 +439,69 @@ textarea {
     border: 1px solid var(--bb-line);
     border-top: 0;
     border-radius: 0 0 6px 6px;
+    box-shadow: var(--bb-shadow-soft);
+    overflow: visible;
 }
 
 .bb-table-scroll {
     overflow-x: auto;
     overflow-y: visible;
-    scrollbar-color: #9aa6b5 #eef2f6;
+    scrollbar-color: #a8b3c2 #f3f6fa;
     scrollbar-width: thin;
 }
 
 .bb-table-scroll::-webkit-scrollbar {
-    height: 12px;
+    height: 10px;
 }
 
 .bb-table-scroll::-webkit-scrollbar-track {
-    background: #eef2f6;
+    background: #f3f6fa;
 }
 
 .bb-table-scroll::-webkit-scrollbar-thumb {
-    background: #9aa6b5;
-    border: 3px solid #eef2f6;
+    background: #a8b3c2;
+    border: 2px solid #f3f6fa;
     border-radius: 999px;
 }
 
 .bb-table {
     width: 100%;
-    min-width: 1320px;
+    min-width: 1280px;
     border-collapse: collapse;
+    table-layout: fixed;
+}
+
+.bb-col-name { width: 24%; }
+.bb-col-info { width: 64px; }
+.bb-col-requester { width: 17%; }
+.bb-col-project { width: 10%; }
+.bb-col-due { width: 13%; }
+.bb-col-sales { width: 10%; }
+.bb-col-estimator { width: 13%; }
+.bb-col-status { width: 150px; }
+.bb-col-actions { width: 58px; }
+
+.bb-table tbody tr:last-child td {
+    border-bottom: 0;
 }
 
 .bb-table th,
 .bb-table td {
-    padding: 9px 12px;
+    padding: 11px 14px;
     border-bottom: 1px solid var(--bb-line-soft);
     vertical-align: middle;
     text-align: left;
 }
 
 .bb-table th {
-    height: 34px;
+    height: 38px;
     color: #526173;
-    background: #f8fafc;
+    background: #f7f9fc;
     font-size: .7rem;
     text-transform: uppercase;
     font-weight: 800;
     white-space: nowrap;
+    letter-spacing: .01em;
 }
 
 .bb-table th i {
@@ -461,12 +510,13 @@ textarea {
 }
 
 .bb-table td {
-    font-size: .84rem;
+    height: 58px;
+    font-size: .85rem;
     color: #243244;
 }
 
 .bb-table tr:hover td {
-    background: #fbfdff;
+    background: #fafdff;
 }
 
 .bb-table .center,
@@ -479,6 +529,11 @@ textarea {
     font-weight: 800;
     text-decoration: none;
     line-height: 1.25;
+    display: inline-block;
+    max-width: 100%;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .bb-record-name:hover {
@@ -491,6 +546,9 @@ textarea {
     color: var(--bb-muted);
     font-size: .78rem;
     font-weight: 500;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
 }
 
 .bb-metrics-btn {
@@ -499,22 +557,31 @@ textarea {
     display: inline-grid;
     place-items: center;
     color: var(--bb-primary);
-    background: #fff;
+    background: #f8fbff;
     border: 1px solid #cbd5e1;
     border-radius: 6px;
     cursor: pointer;
+}
+
+.bb-metrics-btn:hover {
+    border-color: #9cc2e4;
+    background: #eef6ff;
 }
 
 .bb-money {
     font-weight: 800;
     white-space: nowrap;
     cursor: help;
+    display: inline-flex;
+    align-items: center;
+    min-height: 28px;
 }
 
 .bb-responsible {
     gap: 8px;
     white-space: nowrap;
     cursor: help;
+    min-width: 0;
 }
 
 .bb-avatar {
@@ -527,8 +594,8 @@ textarea {
 }
 
 .bb-status-select {
-    width: 150px;
-    min-height: 30px;
+    width: 138px;
+    min-height: 32px;
     border: 1px solid #cbd5e1;
     border-radius: 5px;
     background: #fff;
@@ -568,7 +635,7 @@ textarea {
 }
 
 .bb-name-cell {
-    min-width: 280px;
+    min-width: 0;
 }
 
 .bb-project-code {
@@ -583,19 +650,26 @@ textarea {
 
 .bb-actions-cell {
     width: 54px;
-    text-align: right;
+    text-align: center;
 }
 
 .bb-row-menu {
     position: relative;
     display: inline-flex;
-    justify-content: flex-end;
+    justify-content: center;
 }
 
 .bb-row-menu-toggle {
     width: 30px;
     min-height: 30px;
     color: #475569;
+    border-color: transparent;
+    background: transparent;
+}
+
+.bb-row-menu-toggle:hover {
+    border-color: #d8dee6;
+    background: #f8fafc;
 }
 
 .bb-row-menu-panel {
@@ -646,13 +720,13 @@ textarea {
 .bb-tooltip {
     position: fixed;
     z-index: 5000;
-    max-width: 280px;
-    padding: 9px 10px;
-    border-radius: 5px;
+    max-width: 300px;
+    padding: 10px 11px;
+    border-radius: 6px;
     background: #111827;
     color: #fff;
     box-shadow: 0 12px 34px rgba(15, 23, 42, .28);
-    font-size: .75rem;
+    font-size: .76rem;
     line-height: 1.45;
     white-space: pre-line;
     pointer-events: none;

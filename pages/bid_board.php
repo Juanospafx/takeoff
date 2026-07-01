@@ -65,6 +65,17 @@
         <section class="bb-table-shell" aria-label="Bid records">
             <div class="bb-table-scroll">
                 <table class="bb-table">
+                    <colgroup>
+                        <col class="bb-col-name">
+                        <col class="bb-col-info">
+                        <col class="bb-col-requester">
+                        <col class="bb-col-project">
+                        <col class="bb-col-due">
+                        <col class="bb-col-sales">
+                        <col class="bb-col-estimator">
+                        <col class="bb-col-status">
+                        <col class="bb-col-actions">
+                    </colgroup>
                     <thead>
                         <tr>
                             <th>Name <i class="fas fa-sort"></i></th>

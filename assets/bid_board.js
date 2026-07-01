@@ -71,7 +71,10 @@
     const toDate = (value) => {
         if (!value) return null;
         const date = new Date(String(value).replace(' ', 'T'));
-        return Number.isNaN(date.getTime()) ? null : date;
+        if (Number.isNaN(date.getTime())) return null;
+        const year = date.getFullYear();
+        if (year < 2000 || year > 2100) return null;
+        return date;
     };
 
     const safeText = (value) => {
