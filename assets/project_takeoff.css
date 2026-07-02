@@ -1386,6 +1386,234 @@
     margin: 2px 0;
 }
 
+.pro-active-layer-toolbar,
+.pro-selection-bar {
+    min-height: 42px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    padding: 7px 12px;
+    background: #f8fafc;
+    border-bottom: 1px solid #d8dee6;
+    color: #18212f;
+    flex-wrap: wrap;
+}
+
+.pro-active-layer-toolbar[hidden],
+.pro-selection-bar[hidden] {
+    display: none;
+}
+
+.pro-active-layer-toolbar small {
+    color: #64748b;
+    font-weight: 700;
+}
+
+.pro-active-layer-dot {
+    width: 10px;
+    height: 10px;
+    border-radius: 50%;
+    box-shadow: 0 0 0 3px rgba(31, 111, 178, .12);
+}
+
+.pro-active-layer-toolbar > div {
+    margin-left: auto;
+}
+
+.pro-active-layer-toolbar button,
+.pro-selection-bar button,
+.pro-compare-panel button,
+.pro-more-tools-panel button {
+    min-height: 30px;
+    border: 1px solid #d8dee6;
+    border-radius: 6px;
+    background: #fff;
+    color: #18212f;
+    font-weight: 800;
+    font-size: .78rem;
+    padding: 5px 9px;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    cursor: pointer;
+}
+
+.pro-active-layer-toolbar button:hover,
+.pro-selection-bar button:hover,
+.pro-compare-panel button:hover,
+.pro-more-tools-panel button:hover,
+.pro-compare-list button.active {
+    background: #edf6ff;
+    border-color: #b9d7f2;
+    color: #1f6fb2;
+}
+
+.pro-selection-bar {
+    background: #eff6ff;
+    border-bottom-color: #bfdbfe;
+}
+
+.pro-selection-bar strong {
+    color: #1d4ed8;
+}
+
+.pro-selection-bar button[data-selection-action="delete"]:hover {
+    background: #fff0ef;
+    border-color: #f0cecb;
+    color: #b42318;
+}
+
+.pro-selection-bar .icon {
+    width: 30px;
+    justify-content: center;
+    padding: 0;
+}
+
+.pro-canvas-shell.is-panning,
+.pro-canvas-shell.is-panning iframe {
+    cursor: grab;
+}
+
+.pro-compare-panel,
+.pro-more-tools-panel {
+    position: absolute;
+    z-index: 25;
+    background: #fff;
+    border: 1px solid #d8dee6;
+    box-shadow: 0 18px 50px rgba(15, 23, 42, .18);
+    border-radius: 8px;
+    color: #18212f;
+}
+
+.pro-compare-panel[hidden],
+.pro-more-tools-panel[hidden] {
+    display: none;
+}
+
+.pro-compare-panel {
+    top: 16px;
+    right: 16px;
+    width: min(640px, calc(100% - 32px));
+    max-height: calc(100% - 32px);
+    overflow: hidden;
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+}
+
+.pro-compare-head,
+.pro-compare-actions {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 12px;
+    border-bottom: 1px solid #e7ebf0;
+}
+
+.pro-compare-actions {
+    justify-content: flex-end;
+    border-top: 1px solid #e7ebf0;
+    border-bottom: 0;
+}
+
+.pro-compare-head span,
+.pro-compare-list small {
+    display: block;
+    color: #64748b;
+    font-size: .76rem;
+    font-weight: 700;
+}
+
+.pro-compare-body {
+    min-height: 260px;
+    overflow: auto;
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 12px;
+    padding: 12px;
+}
+
+.pro-compare-body label {
+    display: block;
+    margin-bottom: 7px;
+    color: #64748b;
+    font-size: .76rem;
+    font-weight: 900;
+    text-transform: uppercase;
+}
+
+.pro-compare-list {
+    display: grid;
+    gap: 6px;
+}
+
+.pro-compare-list button {
+    justify-content: space-between;
+    text-align: left;
+}
+
+.pro-more-tools-panel {
+    right: 62px;
+    bottom: 18px;
+    width: 220px;
+    padding: 6px;
+    display: grid;
+    gap: 4px;
+}
+
+.pro-more-tools-panel button {
+    justify-content: flex-start;
+    width: 100%;
+}
+
+.pro-layer-type-fields [hidden] {
+    display: none;
+}
+
+[data-theme="dark"] .pro-active-layer-toolbar,
+[data-theme="dark"] .pro-selection-bar,
+[data-theme="dark"] .pro-compare-panel,
+[data-theme="dark"] .pro-more-tools-panel {
+    background: #1e293b;
+    color: #f8fafc;
+    border-color: #334155;
+}
+
+[data-theme="dark"] .pro-active-layer-toolbar small,
+[data-theme="dark"] .pro-compare-head span,
+[data-theme="dark"] .pro-compare-list small,
+[data-theme="dark"] .pro-compare-body label {
+    color: #94a3b8;
+}
+
+[data-theme="dark"] .pro-active-layer-toolbar button,
+[data-theme="dark"] .pro-selection-bar button,
+[data-theme="dark"] .pro-compare-panel button,
+[data-theme="dark"] .pro-more-tools-panel button {
+    background: #0f172a;
+    color: #f8fafc;
+    border-color: #334155;
+}
+
+[data-theme="dark"] .pro-active-layer-toolbar button:hover,
+[data-theme="dark"] .pro-selection-bar button:hover,
+[data-theme="dark"] .pro-compare-panel button:hover,
+[data-theme="dark"] .pro-more-tools-panel button:hover,
+[data-theme="dark"] .pro-compare-list button.active {
+    background: #273449;
+    border-color: #3b82f6;
+    color: #bfdbfe;
+}
+
+[data-theme="dark"] .pro-selection-bar strong {
+    color: #93c5fd;
+}
+
+[data-theme="dark"] .pro-compare-head,
+[data-theme="dark"] .pro-compare-actions {
+    border-color: #334155;
+}
+
 @media (max-width: 1200px) {
     .pro-takeoff-workspace {
         grid-template-columns: 280px minmax(0, 1fr) 54px;

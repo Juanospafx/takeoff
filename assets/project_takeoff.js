@@ -232,8 +232,8 @@
         }
     }
 
-    const TAKEOFF_TYPES = ['Count', 'Linear', 'Area'];
-    const TAKEOFF_UOMS = ['ea', 'ft', 'lf', 'sq ft', 'yd', 'm'];
+    const TAKEOFF_TYPES = ['Count', 'Linear', 'Linear with drop', 'Linear avg. with drop', 'Count by distance', 'Area / Volume', 'Vertical wall area'];
+    const TAKEOFF_UOMS = ['ea', 'ft', 'lf', 'sq ft', 'ft3', 'yd', 'm'];
     const TAKEOFF_SYMBOLS = ['Solid Circle', 'Hollow Circle', 'Square', 'Triangle', 'Diamond', 'Cross'];
     const TAKEOFF_SIZES = ['Small', 'Medium', 'Large'];
     const TAKEOFF_COLORS = [
@@ -248,7 +248,11 @@
     const TAKEOFF_TYPE_HELP = {
         Count: 'Use Count for fixtures, receptacles, luminaires, devices, or any item measured by quantity.',
         Linear: 'Use Linear for conduits, cables, piping, or any item measured by length.',
-        Area: 'Use Area for surfaces, zones, slabs, rooms, or any item measured by square footage.'
+        'Linear with drop': 'Use Linear with drop when horizontal runs include vertical drops at defined points.',
+        'Linear avg. with drop': 'Use Linear avg. with drop for repeated runs where an average drop is applied.',
+        'Count by distance': 'Use Count by distance for supports, straps, or devices repeated every fixed spacing.',
+        'Area / Volume': 'Use Area / Volume for surfaces or volumetric quantities.',
+        'Vertical wall area': 'Use Vertical wall area for wall takeoffs measured by height and length.'
     };
 
     const takeoffState = {
@@ -259,8 +263,20 @@
         pendingLayerGroupId: 'default',
         pendingCatalogItem: null,
         canvasSnapshots: {},
+        annotations: [],
+        pins: [],
+        snapshots: [],
+        compare: null,
+        globalVisible: true,
         query: ''
     };
+
+    const selectionState = {
+        selectedObjectIds: [],
+        activeLayerId: null
+    };
+
+    const historyState = [];
 
     const catalogState = {
         loaded: false,
@@ -279,8 +295,9 @@
     }
 
     function typeToUom(type) {
-        if (type === 'Linear') return 'ft';
-        if (type === 'Area') return 'sq ft';
+        if (['Linear', 'Linear with drop', 'Linear avg. with drop'].includes(type)) return 'ft';
+        if (type === 'Count by distance') return 'ea';
+        if (['Area', 'Area / Volume', 'Vertical wall area'].includes(type)) return 'sq ft';
         return 'ea';
     }
 
@@ -310,7 +327,11 @@
     function normalizeTakeoffType(value) {
         const raw = String(value || '').toLowerCase();
         if (raw === 'linear') return 'Linear';
-        if (raw === 'area') return 'Area';
+        if (raw === 'linear with drop') return 'Linear with drop';
+        if (raw === 'linear avg. with drop' || raw === 'linear avg with drop') return 'Linear avg. with drop';
+        if (raw === 'count by distance') return 'Count by distance';
+        if (raw === 'area' || raw === 'area / volume' || raw === 'volume') return 'Area / Volume';
+        if (raw === 'vertical wall area') return 'Vertical wall area';
         return 'Count';
     }
 
@@ -362,7 +383,11 @@
                 laborHours: Number(layer.labor_hours || layer.laborHours || 0),
                 labor_hours: Number(layer.labor_hours || layer.laborHours || 0),
                 category: layer.category || layer.catalog_name || layer.group_name || '',
-                description: layer.description || ''
+                description: layer.description || '',
+                dropLength: Number(layer.dropLength || layer.drop_length || 0),
+                spacing: Number(layer.spacing || 0),
+                height: Number(layer.height || 0),
+                depth: Number(layer.depth || 0)
             });
         });
         return groups;
@@ -404,7 +429,11 @@
                 laborHours: Number(layer.laborHours || layer.labor_hours || 0),
                 labor_hours: Number(layer.labor_hours || layer.laborHours || 0),
                 category: layer.category || '',
-                description: layer.description || ''
+                description: layer.description || '',
+                dropLength: Number(layer.dropLength || layer.drop_length || 0),
+                spacing: Number(layer.spacing || 0),
+                height: Number(layer.height || 0),
+                depth: Number(layer.depth || 0)
             }))
         }));
     }
@@ -415,11 +444,56 @@
                 groups: takeoffState.groups,
                 activeGroupId: takeoffState.activeGroupId,
                 activeLayerId: takeoffState.activeLayerId,
-                canvasSnapshots: takeoffState.canvasSnapshots
+                canvasSnapshots: takeoffState.canvasSnapshots,
+                annotations: takeoffState.annotations,
+                pins: takeoffState.pins,
+                snapshots: takeoffState.snapshots,
+                compare: takeoffState.compare,
+                globalVisible: takeoffState.globalVisible
             }));
+            syncTakeoffToEstimating();
         } catch (e) {
             console.warn('Takeoff state could not be saved', e);
         }
+    }
+
+    function pushTakeoffHistory(reason = 'change') {
+        try {
+            historyState.push({
+                reason,
+                groups: JSON.parse(JSON.stringify(takeoffState.groups)),
+                activeGroupId: takeoffState.activeGroupId,
+                activeLayerId: takeoffState.activeLayerId,
+                canvasSnapshots: JSON.parse(JSON.stringify(takeoffState.canvasSnapshots || {})),
+                annotations: JSON.parse(JSON.stringify(takeoffState.annotations || [])),
+                pins: JSON.parse(JSON.stringify(takeoffState.pins || [])),
+                globalVisible: takeoffState.globalVisible
+            });
+            if (historyState.length > 60) historyState.shift();
+        } catch (e) {
+            console.warn('Takeoff history could not be saved', e);
+        }
+    }
+
+    function undoTakeoff() {
+        const previous = historyState.pop();
+        const editorUndone = callEditor('undo') || callEditor('projectTakeoffUndo');
+        if (!previous) {
+            if (!editorUndone) showPrepared('Nothing to undo.');
+            return;
+        }
+        takeoffState.groups = previous.groups;
+        takeoffState.activeGroupId = previous.activeGroupId;
+        takeoffState.activeLayerId = previous.activeLayerId;
+        takeoffState.canvasSnapshots = previous.canvasSnapshots || {};
+        takeoffState.annotations = previous.annotations || [];
+        takeoffState.pins = previous.pins || [];
+        takeoffState.globalVisible = previous.globalVisible !== false;
+        saveTakeoffState();
+        syncAllLayersToCanvas();
+        syncTakeoffToEstimating();
+        renderTakeoffPanel();
+        renderActiveLayerToolbar();
     }
 
     function allLayers() {
@@ -432,6 +506,121 @@
 
     function findLayer(layerId) {
         return allLayers().find(layer => layer.id === layerId) || null;
+    }
+
+    function groupForLayer(layer) {
+        return takeoffState.groups.find(group => group.id === layer?.groupId) || takeoffState.groups[0] || defaultGroup();
+    }
+
+    function estimatingStoreKey() {
+        return `takeoff.estimating.module.${window.ProjectState?.projectId || 'draft'}`;
+    }
+
+    function loadEstimatingStateForSync() {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(estimatingStoreKey()) || 'null');
+            if (parsed && Array.isArray(parsed.groups)) return parsed;
+        } catch (e) {}
+        return {
+            search: '',
+            selected: [],
+            fullscreen: false,
+            hiddenColumns: [],
+            laborUnit: 'mins',
+            groups: [],
+            estimates: [{ id: 'est_primary', name: 'Primary Estimate', primary: true }],
+            activeEstimateId: 'est_primary',
+            globalLaborCost: 85,
+            globalLaborSales: 110,
+            taxes: { Labor: 0, Materials: 0, Equipment: 0 },
+            preTaxMarkups: [],
+            postTaxMarkups: []
+        };
+    }
+
+    function estimateLineFromLayer(layer) {
+        const group = groupForLayer(layer);
+        const hasCatalog = Boolean(layer.catalogItemId || layer.catalog_item_id);
+        const estimateGroupName = hasCatalog ? (group?.name || 'Default Group') : 'Default Group';
+        const itemType = layer.itemType || layer.item_type || (String(layer.category || '').toLowerCase().includes('labor') ? 'Labor' : 'Materials');
+        return {
+            id: `takeoff_${layer.id}`,
+            takeoffLayerId: String(layer.id),
+            catalogItemId: layer.catalogItemId || layer.catalog_item_id || null,
+            name: layer.name || 'Takeoff item',
+            description: layer.description || '',
+            type: itemType,
+            budgetCode: layer.catalogNumber || layer.catalog_number || '',
+            originalQuantity: Number(layer.quantity || 0),
+            quantity: Number(layer.quantity || 0),
+            unitCost: Number(layer.unitCost || layer.unit_cost || 0),
+            waste: 0,
+            margin: 0,
+            unitLabor: Number(layer.laborHours || layer.labor_hours || 0),
+            laborRate: 85,
+            difficulty: 1,
+            laborMargin: 0,
+            notes: `Synced from Takeoff${group?.name ? ` / ${group.name}` : ''}`,
+            taxable: true,
+            groupId: hasCatalog ? (group?.id || 'default') : 'default',
+            groupName: estimateGroupName,
+            uom: layer.uom || typeToUom(layer.type),
+            projectId: String(window.ProjectState?.projectId || ''),
+            estimateId: ''
+        };
+    }
+
+    function syncTakeoffToEstimating() {
+        const state = loadEstimatingStateForSync();
+        const byName = new Map((state.groups || []).map(group => [group.name, group]));
+        const syncedLayerIds = new Set();
+        allLayers().forEach(layer => {
+            const line = estimateLineFromLayer(layer);
+            syncedLayerIds.add(String(layer.id));
+            let group = byName.get(line.groupName);
+            if (!group) {
+                group = { id: makeId('estgrp'), type: 'group', name: line.groupName, expanded: true, items: [] };
+                state.groups.push(group);
+                byName.set(group.name, group);
+            }
+            const existing = (state.groups || [])
+                .flatMap(candidate => candidate.items || [])
+                .find(item => String(item.takeoffLayerId || '') === String(layer.id));
+            if (existing) {
+                Object.assign(existing, {
+                    catalogItemId: line.catalogItemId,
+                    name: line.name,
+                    description: line.description,
+                    type: line.type,
+                    budgetCode: line.budgetCode,
+                    originalQuantity: line.quantity,
+                    quantity: line.quantity,
+                    unitCost: line.unitCost,
+                    unitLabor: line.unitLabor,
+                    notes: line.notes,
+                    uom: line.uom,
+                    groupId: group.id,
+                    groupName: group.name
+                });
+                if (!group.items.includes(existing)) {
+                    state.groups.forEach(candidate => {
+                        candidate.items = (candidate.items || []).filter(item => item !== existing);
+                    });
+                    group.items.push(existing);
+                }
+            } else {
+                group.items.push(line);
+            }
+        });
+        state.groups.forEach(group => {
+            group.items = (group.items || []).filter(item => !item.takeoffLayerId || syncedLayerIds.has(String(item.takeoffLayerId)));
+        });
+        try {
+            localStorage.setItem(estimatingStoreKey(), JSON.stringify(state));
+            window.dispatchEvent(new CustomEvent('takeoff:estimating-lines-updated', { detail: { groups: state.groups } }));
+        } catch (e) {
+            console.warn('Estimating sync failed', e);
+        }
     }
 
     function layerCanvasPayload(layer) {
@@ -453,6 +642,10 @@
             labor_hours: layer.laborHours || 0,
             category: layer.category || '',
             description: layer.description || '',
+            dropLength: layer.dropLength || 0,
+            spacing: layer.spacing || 0,
+            height: layer.height || 0,
+            depth: layer.depth || 0,
             visible: layer.visible !== false
         };
     }
@@ -469,8 +662,8 @@
     }
 
     function symbolGlyph(layer) {
-        if (layer.type === 'Linear') return '<i class="fas fa-minus"></i>';
-        if (layer.type === 'Area') return '<i class="far fa-square"></i>';
+        if (isLinearType(layer.type)) return '<i class="fas fa-minus"></i>';
+        if (isAreaType(layer.type)) return '<i class="far fa-square"></i>';
         const map = {
             'Solid Circle': '<i class="fas fa-circle"></i>',
             'Hollow Circle': '<i class="far fa-circle"></i>',
@@ -480,6 +673,14 @@
             Cross: '<i class="fas fa-xmark"></i>'
         };
         return map[layer.symbol] || '<i class="fas fa-circle"></i>';
+    }
+
+    function isLinearType(type) {
+        return ['Linear', 'Linear with drop', 'Linear avg. with drop'].includes(type);
+    }
+
+    function isAreaType(type) {
+        return ['Area', 'Area / Volume', 'Vertical wall area'].includes(type);
     }
 
     function renderTakeoffPanel() {
@@ -492,6 +693,7 @@
         if (title) title.textContent = `Takeoffs (${layersCount})`;
         const activeLayer = findLayer(takeoffState.activeLayerId);
         if (activeLabel) activeLabel.textContent = activeLayer ? activeLayer.name : 'None';
+        renderActiveLayerToolbar();
         tree.innerHTML = takeoffState.groups.map(group => {
             const visibleLayers = (group.layers || []).filter(layer => {
                 if (!q) return true;
@@ -593,11 +795,19 @@
         takeoffState.activeGroupId = saved?.activeGroupId || 'default';
         takeoffState.activeLayerId = saved?.activeLayerId || null;
         takeoffState.canvasSnapshots = saved?.canvasSnapshots && typeof saved.canvasSnapshots === 'object' ? saved.canvasSnapshots : {};
+        takeoffState.annotations = Array.isArray(saved?.annotations) ? saved.annotations : [];
+        takeoffState.pins = Array.isArray(saved?.pins) ? saved.pins : [];
+        takeoffState.snapshots = Array.isArray(saved?.snapshots) ? saved.snapshots : [];
+        takeoffState.compare = saved?.compare || null;
+        takeoffState.globalVisible = saved?.globalVisible !== false;
         applyAggregatedCanvasQuantities();
         if (!findGroup(takeoffState.activeGroupId)) takeoffState.activeGroupId = 'default';
         if (takeoffState.activeLayerId && !findLayer(takeoffState.activeLayerId)) takeoffState.activeLayerId = null;
         ensureTakeoffModal();
+        ensureTakeoffOverlays();
         renderTakeoffPanel();
+        renderActiveLayerToolbar();
+        syncTakeoffToEstimating();
     }
 
     function ensureTakeoffModal() {
@@ -637,6 +847,12 @@
                         </div>
                     </div>
                 </div>
+                <div class="pro-layer-field-grid pro-layer-type-fields" id="layerTypeFields">
+                    <div class="pro-field" data-type-field="drop"><label for="layerDropInput">Drop length (ft)</label><input id="layerDropInput" type="number" min="0" step="0.1" placeholder="0"></div>
+                    <div class="pro-field" data-type-field="spacing"><label for="layerSpacingInput">Spacing (ft)</label><input id="layerSpacingInput" type="number" min="0.1" step="0.1" placeholder="5"></div>
+                    <div class="pro-field" data-type-field="height"><label for="layerHeightInput">Height (ft)</label><input id="layerHeightInput" type="number" min="0" step="0.1" placeholder="0"></div>
+                    <div class="pro-field" data-type-field="depth"><label for="layerDepthInput">Depth (ft)</label><input id="layerDepthInput" type="number" min="0" step="0.1" placeholder="0"></div>
+                </div>
             </div>
             <div class="pro-layer-modal-actions">
                 <button class="pro-toolbar-btn" type="button" data-layer-modal-close>Cancel</button>
@@ -652,13 +868,31 @@
         });
         $('layerTypeInput').addEventListener('change', () => {
             const type = $('layerTypeInput').value;
-            $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[type];
+            $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[type] || TAKEOFF_TYPE_HELP.Count;
             $('layerUomInput').value = typeToUom(type);
+            updateLayerTypeFields(type);
             updateLayerSubmitState();
         });
         $('layerColorInput').addEventListener('change', updateLayerColorSwatch);
         $('layerCreateSubmit').addEventListener('click', submitLayerModal);
         ensureCatalogModal();
+    }
+
+    function updateLayerTypeFields(type = $('layerTypeInput')?.value || 'Count') {
+        document.querySelectorAll('[data-type-field]').forEach(field => {
+            const name = field.dataset.typeField;
+            const visible = (
+                (name === 'drop' && ['Linear with drop', 'Linear avg. with drop'].includes(type)) ||
+                (name === 'spacing' && type === 'Count by distance') ||
+                (name === 'height' && ['Area / Volume', 'Vertical wall area'].includes(type)) ||
+                (name === 'depth' && type === 'Area / Volume')
+            );
+            field.toggleAttribute('hidden', !visible);
+        });
+        const symbolField = $('layerSymbolInput')?.closest('.pro-field');
+        const sizeField = $('layerSizeInput')?.closest('.pro-field');
+        if (symbolField) symbolField.toggleAttribute('hidden', type !== 'Count' && type !== 'Count by distance');
+        if (sizeField) sizeField.toggleAttribute('hidden', !['Count', 'Count by distance'].includes(type));
     }
 
     function openLayerModal(groupId = takeoffState.activeGroupId, layerId = null) {
@@ -679,14 +913,19 @@
         $('takeoffLayerModalTitle').textContent = layer ? 'Edit takeoff layer' : 'Create new takeoff layer';
         $('layerNameInput').value = layer?.name || '';
         $('layerTypeInput').value = layer?.type || 'Count';
-        $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[$('layerTypeInput').value];
+        $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[$('layerTypeInput').value] || TAKEOFF_TYPE_HELP.Count;
         setSelectValue($('layerUomInput'), layer?.uom || typeToUom($('layerTypeInput').value));
         $('layerSymbolInput').value = layer?.symbol || 'Solid Circle';
         $('layerSizeInput').value = layer?.size || 'Medium';
         $('layerColorInput').value = layer?.color || '#111827';
+        $('layerDropInput').value = layer?.dropLength || '';
+        $('layerSpacingInput').value = layer?.spacing || '';
+        $('layerHeightInput').value = layer?.height || '';
+        $('layerDepthInput').value = layer?.depth || '';
         $('layerCreateSubmit').textContent = layer ? 'Save' : 'Create';
         updateCatalogSelectionIndicator();
         updateLayerColorSwatch();
+        updateLayerTypeFields($('layerTypeInput').value);
         updateLayerSubmitState();
         $('takeoffLayerModal').hidden = false;
         setTimeout(() => $('layerNameInput')?.focus(), 40);
@@ -763,6 +1002,7 @@
     function submitLayerModal() {
         const name = $('layerNameInput')?.value.trim();
         if (!name) return;
+        pushTakeoffHistory(takeoffState.editingLayerId ? 'edit-layer' : 'create-layer');
         const type = $('layerTypeInput').value;
         const payload = {
             name,
@@ -770,7 +1010,11 @@
             uom: $('layerUomInput').value || typeToUom(type),
             symbol: $('layerSymbolInput').value || 'Solid Circle',
             size: $('layerSizeInput').value || 'Medium',
-            color: $('layerColorInput').value || '#111827'
+            color: $('layerColorInput').value || '#111827',
+            dropLength: Number($('layerDropInput')?.value || 0),
+            spacing: Number($('layerSpacingInput')?.value || 0),
+            height: Number($('layerHeightInput')?.value || 0),
+            depth: Number($('layerDepthInput')?.value || 0)
         };
         if (takeoffState.pendingCatalogItem) Object.assign(payload, catalogItemMeta(takeoffState.pendingCatalogItem));
         if (takeoffState.editingLayerId) {
@@ -1004,6 +1248,7 @@
     function createTakeoffGroup() {
         const name = prompt('Group name', 'New Group');
         if (!name || !name.trim()) return;
+        pushTakeoffHistory('create-group');
         const group = { id: makeId('grp'), name: name.trim(), isExpanded: true, isDefault: false, layers: [] };
         takeoffState.groups.push(group);
         takeoffState.activeGroupId = group.id;
@@ -1019,6 +1264,7 @@
 
     function duplicateGroup(groupId) {
         const group = findGroup(groupId);
+        pushTakeoffHistory('duplicate-group');
         const copy = {
             id: makeId('grp'),
             name: `${group.name} Copy`,
@@ -1036,6 +1282,7 @@
         const group = findGroup(groupId);
         if (!group || group.isDefault) return;
         if (group.layers.length && !confirm('Delete this group and its takeoff layers?')) return;
+        pushTakeoffHistory('delete-group');
         takeoffState.groups = takeoffState.groups.filter(item => item.id !== group.id);
         if (takeoffState.activeGroupId === group.id) takeoffState.activeGroupId = 'default';
         if (group.layers.some(layer => layer.id === takeoffState.activeLayerId)) takeoffState.activeLayerId = null;
@@ -1048,6 +1295,7 @@
         if (!group) return;
         const name = prompt('Rename group', group.name);
         if (!name || !name.trim()) return;
+        pushTakeoffHistory('rename-group');
         group.name = group.isDefault ? 'Default Group' : name.trim();
         saveTakeoffState();
         renderTakeoffPanel();
@@ -1057,6 +1305,7 @@
         const layer = findLayer(layerId);
         if (!layer) return;
         if (!confirm('Delete this takeoff layer?')) return;
+        pushTakeoffHistory('delete-layer');
         callEditor('projectTakeoffDeleteLayer', layer.id);
         const group = findGroup(layer.groupId);
         group.layers = group.layers.filter(item => item.id !== layerId);
@@ -1068,6 +1317,7 @@
     function duplicateLayer(layerId) {
         const layer = findLayer(layerId);
         if (!layer) return;
+        pushTakeoffHistory('duplicate-layer');
         const group = findGroup(layer.groupId);
         const copy = { ...layer, id: makeId('layer'), name: `${layer.name} Copy`, quantity: 0 };
         group.layers.push(copy);
@@ -1081,6 +1331,7 @@
         if (!layer) return;
         const name = prompt('Rename layer', layer.name);
         if (!name || !name.trim()) return;
+        pushTakeoffHistory('rename-layer');
         layer.name = name.trim();
         saveTakeoffState();
         renderTakeoffPanel();
@@ -1091,6 +1342,7 @@
         if (!layer) return;
         const color = prompt('Layer color hex', layer.color);
         if (!color) return;
+        pushTakeoffHistory('change-layer-color');
         layer.color = color.trim();
         saveTakeoffState();
         renderTakeoffPanel();
@@ -1103,6 +1355,7 @@
         const targetName = prompt(`Move to group (${names})`, findGroup(layer.groupId).name);
         const target = takeoffState.groups.find(group => group.name.toLowerCase() === String(targetName || '').trim().toLowerCase());
         if (!target || target.id === layer.groupId) return;
+        pushTakeoffHistory('move-layer');
         findGroup(layer.groupId).layers = findGroup(layer.groupId).layers.filter(item => item.id !== layerId);
         layer.groupId = target.id;
         target.layers.push(layer);
@@ -1120,6 +1373,7 @@
         applyLayerToCanvas(layer);
         saveTakeoffState();
         if (rerender) renderTakeoffPanel();
+        renderActiveLayerToolbar();
     }
 
     function clearActiveTakeoffLayer(rerender = true) {
@@ -1127,12 +1381,14 @@
         callEditor('projectTakeoffClearActiveLayer');
         saveTakeoffState();
         if (rerender) renderTakeoffPanel();
+        renderActiveLayerToolbar();
     }
 
     function toggleLayerVisibility(layerId, visible) {
         const layer = findLayer(layerId);
         if (!layer) return;
         layer.visible = Boolean(visible);
+        pushTakeoffHistory('toggle-layer-visibility');
         callEditor('projectTakeoffSetLayerVisibility', layer.id, layer.visible);
 
         saveTakeoffState();
@@ -1143,6 +1399,7 @@
     function toggleGroupVisibility(groupId, visible) {
         const group = findGroup(groupId);
         if (!group) return;
+        pushTakeoffHistory('toggle-group-visibility');
         (group.layers || []).forEach(layer => {
             layer.visible = Boolean(visible);
             callEditor('projectTakeoffSetLayerVisibility', layer.id, layer.visible);
@@ -1159,9 +1416,9 @@
         const payload = layerCanvasPayload(layer);
         win.__projectActiveTakeoffLayer = payload;
         callEditor('projectTakeoffActivateLayer', payload);
-        if (layer.type === 'Linear') setActiveTool('linear');
-        if (layer.type === 'Area') setActiveTool('area');
-        if (layer.type === 'Count') setActiveTool('count');
+        if (isLinearType(layer.type)) setActiveTool('linear');
+        if (isAreaType(layer.type)) setActiveTool('area');
+        if (!isLinearType(layer.type) && !isAreaType(layer.type)) setActiveTool('count');
     }
 
     function syncTakeoffFromCanvasSnapshot(snapshot) {
@@ -1188,6 +1445,7 @@
         saveTakeoffState();
         renderTakeoffPanel();
         renderViewerLayersPopover();
+        renderActiveLayerToolbar();
     }
 
     function applyAggregatedCanvasQuantities() {
@@ -1264,6 +1522,232 @@
         document.querySelector('[data-viewer-command="grid"]')?.classList.toggle('active', viewerState.isGridVisible);
     }
 
+    function ensureTakeoffOverlays() {
+        const viewer = document.querySelector('.pro-takeoff-viewer');
+        const shell = document.querySelector('.pro-canvas-shell');
+        if (viewer && !$('takeoffActiveLayerToolbar')) {
+            const toolbar = document.createElement('div');
+            toolbar.id = 'takeoffActiveLayerToolbar';
+            toolbar.className = 'pro-active-layer-toolbar';
+            toolbar.hidden = true;
+            viewer.insertBefore(toolbar, shell);
+        }
+        if (viewer && !$('takeoffSelectionBar')) {
+            const bar = document.createElement('div');
+            bar.id = 'takeoffSelectionBar';
+            bar.className = 'pro-selection-bar';
+            bar.hidden = true;
+            viewer.insertBefore(bar, shell);
+        }
+        if (shell && !$('takeoffComparePanel')) {
+            const panel = document.createElement('div');
+            panel.id = 'takeoffComparePanel';
+            panel.className = 'pro-compare-panel';
+            panel.hidden = true;
+            shell.appendChild(panel);
+        }
+        if (shell && !$('takeoffMoreToolsPanel')) {
+            const panel = document.createElement('div');
+            panel.id = 'takeoffMoreToolsPanel';
+            panel.className = 'pro-more-tools-panel';
+            panel.hidden = true;
+            shell.appendChild(panel);
+        }
+    }
+
+    function renderActiveLayerToolbar() {
+        ensureTakeoffOverlays();
+        const toolbar = $('takeoffActiveLayerToolbar');
+        if (!toolbar) return;
+        const layer = findLayer(takeoffState.activeLayerId);
+        toolbar.hidden = !layer;
+        if (!layer) {
+            toolbar.innerHTML = '';
+            return;
+        }
+        let tools = '';
+        if (isLinearType(layer.type)) {
+            tools = `
+                <button type="button" data-layer-tool="linear-straight"><i class="fas fa-grip-lines"></i> Straight</button>
+                <button type="button" data-layer-tool="linear-angled"><i class="fas fa-route"></i> Angled</button>
+                <button type="button" data-layer-tool="linear-curved"><i class="fas fa-bezier-curve"></i> Curved</button>
+                <button type="button" data-layer-tool="linear-freehand"><i class="fas fa-signature"></i> Freehand</button>`;
+        } else if (isAreaType(layer.type)) {
+            tools = `
+                <button type="button" data-layer-tool="area-polygon"><i class="fas fa-draw-polygon"></i> Polygon</button>
+                <button type="button" data-layer-tool="auto-area"><i class="fas fa-wand-magic-sparkles"></i> Auto-Area Takeoff</button>`;
+        } else {
+            tools = `
+                <button type="button" data-layer-tool="count-point"><i class="fas fa-circle-dot"></i> Point</button>
+                <button type="button" data-layer-tool="auto-count"><i class="fas fa-wand-magic-sparkles"></i> Auto-Count</button>`;
+        }
+        toolbar.innerHTML = `
+            <span class="pro-active-layer-dot" style="background:${esc(layer.color)}"></span>
+            <strong>${esc(layer.name)}</strong>
+            <small>${esc(layer.type)} · ${esc(quantityLabel(layer))}</small>
+            <div>${tools}</div>
+        `;
+        toolbar.querySelectorAll('[data-layer-tool]').forEach(button => {
+            button.addEventListener('click', () => runLayerTool(button.dataset.layerTool));
+        });
+    }
+
+    function renderSelectionBar() {
+        ensureTakeoffOverlays();
+        const bar = $('takeoffSelectionBar');
+        if (!bar) return;
+        const count = selectionState.selectedObjectIds.length;
+        bar.hidden = count === 0;
+        if (!count) {
+            bar.innerHTML = '';
+            return;
+        }
+        bar.innerHTML = `
+            <strong>${count} element(s) selected</strong>
+            <button type="button" data-selection-action="copy"><i class="fas fa-copy"></i> Copy</button>
+            <button type="button" data-selection-action="move"><i class="fas fa-folder-tree"></i> Move To</button>
+            <button type="button" data-selection-action="delete"><i class="fas fa-trash"></i> Delete</button>
+            <button type="button" class="icon" data-selection-action="clear" aria-label="Clear selection"><i class="fas fa-times"></i></button>
+        `;
+        bar.querySelectorAll('[data-selection-action]').forEach(button => {
+            button.addEventListener('click', () => runSelectionAction(button.dataset.selectionAction));
+        });
+    }
+
+    function setSelectedObjects(ids = [], layerId = null) {
+        selectionState.selectedObjectIds = Array.from(new Set(ids.map(String).filter(Boolean)));
+        selectionState.activeLayerId = layerId || selectionState.activeLayerId || takeoffState.activeLayerId;
+        renderSelectionBar();
+    }
+
+    function runSelectionAction(action) {
+        if (action === 'clear') {
+            setSelectedObjects([]);
+            callEditor('projectTakeoffClearSelection');
+            return;
+        }
+        if (!selectionState.selectedObjectIds.length) return showPrepared('Select one or more takeoff objects first.');
+        pushTakeoffHistory(`selection-${action}`);
+        if (action === 'copy') {
+            const copied = callEditor('projectTakeoffCopySelection', selectionState.selectedObjectIds) || callEditor('copySelected');
+            if (!copied) showPrepared('Copy selection is ready to be connected.');
+        }
+        if (action === 'delete') {
+            const deleted = callEditor('projectTakeoffDeleteSelection', selectionState.selectedObjectIds) || callEditor('deleteSelected');
+            if (!deleted) showPrepared('Delete selection is ready to be connected.');
+        }
+        if (action === 'move') {
+            const names = allLayers().map(layer => layer.name).join(', ');
+            const targetName = prompt(`Move selected objects to layer (${names})`, findLayer(takeoffState.activeLayerId)?.name || '');
+            const target = allLayers().find(layer => layer.name.toLowerCase() === String(targetName || '').trim().toLowerCase());
+            if (!target) return;
+            const moved = callEditor('projectTakeoffMoveSelectionToLayer', selectionState.selectedObjectIds, layerCanvasPayload(target));
+            if (!moved) showPrepared('Move selection is ready to be connected.');
+        }
+        const snapshot = callEditor('projectTakeoffSnapshot');
+        if (snapshot) syncTakeoffFromCanvasSnapshot(snapshot);
+    }
+
+    function runLayerTool(command) {
+        if (command === 'auto-count') return showPrepared('Auto-Count is ready to be connected to detection service.');
+        if (command === 'auto-area') return showPrepared('Auto-Area Takeoff is ready to be connected to detection service.');
+        const map = {
+            'linear-straight': 'linear',
+            'linear-angled': 'linear-angled',
+            'linear-curved': 'linear-curved',
+            'linear-freehand': 'freehand',
+            'area-polygon': 'area',
+            'count-point': 'count'
+        };
+        runTool(map[command] || command);
+    }
+
+    function openComparePanel() {
+        ensureTakeoffOverlays();
+        const panel = $('takeoffComparePanel');
+        if (!panel) return;
+        const activeDoc = activeDrawingDoc();
+        const docs = drawingState.documents.length ? drawingState.documents : drawingDocs();
+        panel.hidden = false;
+        panel.innerHTML = `
+            <div class="pro-compare-head">
+                <div><strong>Compare Drawings</strong><span>Base: ${esc(activeDoc?.name || 'Current drawing')}</span></div>
+                <button class="pro-icon-btn" type="button" data-compare-action="cancel" aria-label="Close"><i class="fas fa-times"></i></button>
+            </div>
+            <div class="pro-compare-body">
+                <div>
+                    <label>Documents</label>
+                    <div class="pro-compare-list">
+                        ${docs.map(doc => `<button type="button" data-compare-doc="${esc(doc.id)}">${esc(doc.name)}<small>${esc(doc.folder || '')}</small></button>`).join('') || '<span>No drawings available.</span>'}
+                    </div>
+                </div>
+                <div>
+                    <label>Pages</label>
+                    <div class="pro-compare-list" id="takeoffComparePages"><span>Select a drawing.</span></div>
+                </div>
+            </div>
+            <div class="pro-compare-actions">
+                <button type="button" data-compare-action="align">Align</button>
+                <button type="button" data-compare-action="swap">Swap</button>
+                <button type="button" data-compare-action="start">Compare</button>
+            </div>
+        `;
+        panel.querySelectorAll('[data-compare-doc]').forEach(button => {
+            button.addEventListener('click', async () => {
+                panel.querySelectorAll('[data-compare-doc]').forEach(item => item.classList.toggle('active', item === button));
+                const doc = docs.find(item => String(item.id) === String(button.dataset.compareDoc));
+                if (!doc) return;
+                await ensurePageCount(doc);
+                const pages = buildSheets(doc);
+                const pageBox = $('takeoffComparePages');
+                if (pageBox) pageBox.innerHTML = pages.map(sheet => `<button type="button" data-compare-page="${sheet.pageNumber}">${esc(sheet.name)}</button>`).join('');
+                panel.dataset.compareDoc = doc.id;
+            });
+        });
+        panel.querySelectorAll('[data-compare-action]').forEach(button => {
+            button.addEventListener('click', () => runCompareAction(button.dataset.compareAction));
+        });
+    }
+
+    function runCompareAction(action) {
+        if (action === 'cancel') {
+            takeoffState.compare = null;
+            $('takeoffComparePanel')?.setAttribute('hidden', '');
+            saveTakeoffState();
+            return;
+        }
+        if (action === 'align' || action === 'swap') return showPrepared(`${action.charAt(0).toUpperCase() + action.slice(1)} is ready to be connected.`);
+        takeoffState.compare = {
+            baseDocumentId: drawingState.selectedDocumentId,
+            basePage: drawingState.selectedPage,
+            compareDocumentId: $('takeoffComparePanel')?.dataset.compareDoc || null,
+            updatedAt: Date.now()
+        };
+        saveTakeoffState();
+        showPrepared('Drawing comparison is ready to be connected.');
+    }
+
+    function toggleMoreToolsPanel() {
+        ensureTakeoffOverlays();
+        const panel = $('takeoffMoreToolsPanel');
+        if (!panel) return;
+        const open = panel.hidden;
+        panel.hidden = !open;
+        if (!open) return;
+        panel.innerHTML = `
+            <button type="button" data-tool-command-inline="transform"><i class="fas fa-up-down-left-right"></i><span>Transform / Scale</span></button>
+            <button type="button" data-tool-command-inline="vertices"><i class="fas fa-vector-square"></i><span>Edit vertices</span></button>
+            <button type="button" data-tool-command-inline="multi-select"><i class="fas fa-object-group"></i><span>Rectangle select</span></button>
+            <button type="button" data-tool-command-inline="freehand"><i class="fas fa-signature"></i><span>Freehand / Lasso</span></button>
+        `;
+        panel.querySelectorAll('[data-tool-command-inline]').forEach(button => {
+            button.addEventListener('click', () => {
+                panel.hidden = true;
+                runTool(button.dataset.toolCommandInline);
+            });
+        });
+    }
+
     function openTakeoffContextMenu(button, type, id) {
         const menu = $('takeoffRowMenu');
         if (!menu) return;
@@ -1272,6 +1756,8 @@
             ? `<button type="button" data-menu-act="group-create"><i class="fas fa-plus"></i> Create New Takeoff Layer</button>
                <button type="button" data-menu-act="group-rename"><i class="fas fa-pen"></i> Rename</button>
                <button type="button" data-menu-act="group-copy"><i class="fas fa-copy"></i> Copy</button>
+               <button type="button" data-menu-act="group-copy-estimate"><i class="fas fa-copy"></i> Copy to other estimate</button>
+               <button type="button" data-menu-act="group-move-estimate"><i class="fas fa-arrow-right"></i> Move to other estimate</button>
                ${group?.isDefault ? '' : '<button type="button" class="danger" data-menu-act="group-delete"><i class="fas fa-trash"></i> Delete</button>'}`
             : `<button type="button" data-menu-act="layer-edit"><i class="fas fa-sliders"></i> Edit Layer</button>
                <button type="button" data-menu-act="layer-rename"><i class="fas fa-pen"></i> Rename</button>
@@ -1287,6 +1773,8 @@
                 if (action === 'group-create') openLayerModal(id);
                 if (action === 'group-rename') renameGroup(id);
                 if (action === 'group-copy') duplicateGroup(id);
+                if (action === 'group-copy-estimate') showPrepared('Copy to other estimate is ready to be connected.');
+                if (action === 'group-move-estimate') showPrepared('Move to other estimate is ready to be connected.');
                 if (action === 'group-delete') deleteGroup(id);
                 if (action === 'layer-edit') openLayerModal(findLayer(id)?.groupId, id);
                 if (action === 'layer-rename') renameLayer(id);
@@ -1304,9 +1792,59 @@
         if (action === 'create-group') return createTakeoffGroup();
         if (action === 'create-layer') return openLayerModal(takeoffState.activeGroupId);
         if (action === 'collapse-all') return collapseAllTakeoffGroups();
-        if (action === 'export-excel') return showPrepared('Excel export is ready to be connected.');
+        if (action === 'toggle-global-visibility') return toggleGlobalVisibility();
+        if (action === 'export-excel') return exportTakeoffQuantities();
         if (action === 'browse-catalog') return openCatalogModal();
         showPrepared(action);
+    }
+
+    function toggleGlobalVisibility() {
+        pushTakeoffHistory('toggle-global-visibility');
+        takeoffState.globalVisible = !takeoffState.globalVisible;
+        allLayers().forEach(layer => {
+            layer.visible = takeoffState.globalVisible;
+            callEditor('projectTakeoffSetLayerVisibility', layer.id, layer.visible);
+        });
+        saveTakeoffState();
+        renderTakeoffPanel();
+        syncAllLayersToCanvas();
+        const button = document.querySelector('[data-takeoff-action="toggle-global-visibility"] i');
+        if (button) button.className = takeoffState.globalVisible ? 'fas fa-eye' : 'fas fa-eye-slash';
+    }
+
+    function exportTakeoffQuantities() {
+        const rows = allLayers().map(layer => {
+            const group = groupForLayer(layer);
+            const activeDoc = activeDrawingDoc();
+            return {
+                project: window.ProjectState?.projectName || document.querySelector('.project-title h1')?.textContent || 'Project',
+                estimate: 'Primary Estimate',
+                group: group?.name || 'Default Group',
+                layer: layer.name,
+                catalog: layer.catalogItemId || '',
+                type: layer.type,
+                quantity: Number(layer.quantity || 0),
+                uom: layer.uom || typeToUom(layer.type),
+                document: activeDoc?.name || '',
+                sheet: drawingState.selectedPage ? `Page ${drawingState.selectedPage}` : '',
+                unitCost: Number(layer.unitCost || layer.unit_cost || 0),
+                labor: Number(layer.laborHours || layer.labor_hours || 0)
+            };
+        });
+        const headers = ['Project name', 'Estimate name', 'Group', 'Takeoff layer', 'Catalog item', 'Takeoff type', 'Quantity', 'UoM', 'Document', 'Sheet/Page', 'Unit cost', 'Labor'];
+        const body = rows.map(row => [
+            row.project, row.estimate, row.group, row.layer, row.catalog, row.type, row.quantity, row.uom, row.document, row.sheet, row.unitCost, row.labor
+        ]);
+        const html = `<table><thead><tr>${headers.map(header => `<th>${esc(header)}</th>`).join('')}</tr></thead><tbody>${body.map(cells => `<tr>${cells.map(cell => `<td>${esc(cell)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
+        const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `takeoff-quantities-${Date.now()}.xls`;
+        document.body.appendChild(link);
+        link.click();
+        link.remove();
+        URL.revokeObjectURL(url);
     }
 
     function setActiveTool(command) {
@@ -1322,15 +1860,18 @@
                 showPrepared('Select a takeoff layer before drawing.');
                 return;
             }
+            pushTakeoffHistory(`tool-${command}`);
             callEditor('projectTakeoffSetTool', command);
             setActiveTool(command);
             if ((command === 'linear' || command === 'area') && !hasScaleSet()) openScalePanel();
             return;
         }
         if (command === 'smart' || command === 'pan') {
-            callEditor('projectTakeoffSetTool', 'select');
+            callEditor('projectTakeoffSetTool', command === 'pan' ? 'pan' : 'select');
             setActiveTool(command);
-            return callEditor('setMode', 'smart');
+            callEditor('setMode', command === 'pan' ? 'pan' : 'smart');
+            document.querySelector('.pro-canvas-shell')?.classList.toggle('is-panning', command === 'pan');
+            return;
         }
         const modeMap = {
             smart: 'smart',
@@ -1345,12 +1886,42 @@
             callEditor('setMode', modeMap[command]);
             setActiveTool(command);
             if (command === 'calibrate') openScalePanel('manual');
+            if (command === 'measure') showPrepared("This tool measures distances, but doesn't add to a takeoff. To perform a takeoff, click Add Takeoff in top left corner.");
             if ((command === 'measure' || command === 'linear' || command === 'area') && !hasScaleSet()) openScalePanel();
             return;
         }
-        if (command === 'text') {
-            callEditor('addText');
+        if (command === 'multi-select') {
+            callEditor('projectTakeoffSetTool', 'multi-select');
+            callEditor('setMode', 'select-rect');
             setActiveTool(command);
+            return showPrepared('Drag a rectangle to select takeoff objects.');
+        }
+        if (command === 'snapshot') {
+            takeoffState.snapshots.push({
+                id: makeId('snapshot'),
+                documentId: drawingState.selectedDocumentId,
+                page: drawingState.selectedPage,
+                createdAt: Date.now()
+            });
+            saveTakeoffState();
+            return showPrepared('Snapshot is ready to be connected.');
+        }
+        if (command === 'freehand') {
+            callEditor('projectTakeoffSetTool', 'freehand');
+            callEditor('setMode', 'freehand');
+            setActiveTool(command);
+            return;
+        }
+        if (command === 'pin') {
+            const added = callEditor('projectTakeoffSetTool', 'pin') || callEditor('setMode', 'pin');
+            setActiveTool(command);
+            if (!added) showPrepared('Click the drawing to place a reference pin.');
+            return;
+        }
+        if (command === 'text') {
+            const added = callEditor('projectTakeoffSetTool', 'text') || callEditor('addText');
+            setActiveTool(command);
+            if (!added) showPrepared('Click the drawing to add a text annotation.');
             return;
         }
         if (command === 'cloud') {
@@ -1363,9 +1934,20 @@
             setActiveTool(command);
             return;
         }
-        if (command === 'undo') return callEditor('undo');
+        if (command === 'undo') return undoTakeoff();
         if (command === 'redo') return callEditor('redo');
-        if (command === 'delete') return callEditor('deleteSelected');
+        if (command === 'delete') return runSelectionAction('delete');
+        if (command === 'more') return toggleMoreToolsPanel();
+        if (command === 'transform') {
+            callEditor('projectTakeoffSetTool', 'transform');
+            setActiveTool(command);
+            return showPrepared('Transform / Scale tool is ready to be connected.');
+        }
+        if (command === 'vertices') {
+            callEditor('projectTakeoffSetTool', 'vertices');
+            setActiveTool(command);
+            return showPrepared('Edit vertices tool is ready to be connected.');
+        }
     }
 
     function runViewerCommand(command) {
@@ -1398,7 +1980,12 @@
         }
         if (command === 'grid') return toggleGrid();
         if (command === 'layers') return toggleViewerLayersPopover();
-        if (command === 'compare') showPrepared(command);
+        if (command === 'compare') return openComparePanel();
+        if (command === 'show-estimate') {
+            syncTakeoffToEstimating();
+            if (typeof window.setActiveTab === 'function') window.setActiveTab('estimating');
+            else document.querySelector('[data-tab="estimating"]')?.click();
+        }
     }
 
     function showPrepared(command) {
@@ -1845,6 +2432,12 @@
                 syncTakeoffFromCanvasSnapshot(event.data.payload);
                 return;
             }
+            if (event.data?.type === 'project-takeoff-selection') {
+                const payload = event.data.payload || {};
+                setSelectedObjects(payload.ids || payload.selectedObjectIds || [], payload.layerId || null);
+                if (payload.layerId && findLayer(payload.layerId)) setActiveTakeoffLayer(payload.layerId);
+                return;
+            }
             if (event.data?.type !== 'takeoff-editor-ready') return;
             const doc = activeDrawingDoc();
             if (doc && Number(event.data.fileId) === Number(doc.id)) {
@@ -1877,8 +2470,7 @@
             drawingState.browseDocumentId = drawingState.documents[0].id;
         }
         setDrawingLabel();
-        renderDrawingDocumentList();
-        renderDrawingSheetList();
+        renderDrawingDropdown();
     };
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -1949,6 +2541,7 @@
             activeRowMenuAnchor = null;
             closeScalePanel();
             closeDrawingDropdown();
+            $('takeoffMoreToolsPanel')?.setAttribute('hidden', '');
         });
         document.addEventListener('click', event => {
             if (!viewerState.isLayersPopoverOpen) return;
@@ -1963,8 +2556,29 @@
         });
         document.addEventListener('scroll', refreshOpenRowMenu, true);
         $('takeoffScalePanel')?.addEventListener('click', event => event.stopPropagation());
+        $('takeoffComparePanel')?.addEventListener('click', event => event.stopPropagation());
+        $('takeoffMoreToolsPanel')?.addEventListener('click', event => event.stopPropagation());
         $('takeoffLayerModal')?.addEventListener('click', event => {
             if (event.target.id === 'takeoffLayerModal') closeLayerModal();
+        });
+        document.addEventListener('keydown', event => {
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
+                event.preventDefault();
+                undoTakeoff();
+                return;
+            }
+            if (event.code === 'Space' && !event.repeat && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+                callEditor('projectTakeoffSetTemporaryPan', true);
+                document.querySelector('.pro-canvas-shell')?.classList.add('is-panning');
+            }
+        });
+        document.addEventListener('keyup', event => {
+            if (event.code === 'Space') {
+                callEditor('projectTakeoffSetTemporaryPan', false);
+                if (!document.querySelector('[data-tool-command="pan"]')?.classList.contains('active')) {
+                    document.querySelector('.pro-canvas-shell')?.classList.remove('is-panning');
+                }
+            }
         });
     });
 })();

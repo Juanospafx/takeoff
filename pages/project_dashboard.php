@@ -833,6 +833,7 @@ $state = [
                         <div>
                             <h2 id="takeoffPanelTitle">Takeoffs (0)</h2>
                         </div>
+                        <button class="pro-icon-btn" type="button" data-takeoff-action="toggle-global-visibility" title="Show/hide all takeoffs" aria-label="Show/hide all takeoffs"><i class="fas fa-eye"></i></button>
                         <button class="pro-add-btn" type="button" data-takeoff-action="create-layer" title="Create New Takeoff Layer" aria-label="Create New Takeoff Layer"><i class="fas fa-plus"></i></button>
                         <button class="pro-icon-btn" type="button" id="toggleTakeoffItemsPanel" title="Collapse panel" aria-label="Collapse items panel">
                             <i class="fas fa-angles-left"></i>
@@ -910,6 +911,7 @@ $state = [
                         </div>
                         <div class="pro-toolbar-group center">
                             <button type="button" class="pro-toolbar-btn" data-viewer-command="compare"><i class="fas fa-code-compare"></i> Compare</button>
+                            <button type="button" class="pro-toolbar-btn" data-viewer-command="show-estimate"><i class="fas fa-calculator"></i> Show Estimate</button>
                             <button type="button" class="pro-toolbar-btn" data-viewer-command="popout"><i class="fas fa-up-right-from-square"></i> Pop out</button>
                             <button type="button" class="pro-toolbar-btn" data-viewer-command="download"><i class="fas fa-download"></i> Download</button>
                         </div>
@@ -985,16 +987,21 @@ $state = [
                 <aside class="pro-tools-bar" aria-label="Takeoff tools">
                     <button class="pro-tool-btn active" type="button" data-tool-command="smart" title="Select"><i class="fas fa-mouse-pointer"></i></button>
                     <button class="pro-tool-btn" type="button" data-tool-command="pan" title="Pan"><i class="fas fa-hand"></i></button>
+                    <button class="pro-tool-btn" type="button" data-tool-command="multi-select" title="Rectangle Select"><i class="fas fa-object-group"></i></button>
                     <div class="pro-tool-separator"></div>
                     <button class="pro-tool-btn" type="button" data-tool-command="count" title="Count"><i class="fas fa-circle-dot"></i></button>
                     <button class="pro-tool-btn" type="button" data-tool-command="linear" title="Linear"><i class="fas fa-grip-lines"></i></button>
                     <button class="pro-tool-btn" type="button" data-tool-command="area" title="Area"><i class="fas fa-draw-polygon"></i></button>
                     <button class="pro-tool-btn" type="button" data-tool-command="measure" title="Measure"><i class="fas fa-ruler-horizontal"></i></button>
+                    <button class="pro-tool-btn" type="button" data-tool-command="freehand" title="Freehand / Lasso"><i class="fas fa-signature"></i></button>
                     <button class="pro-tool-btn" type="button" data-tool-command="text" title="Text"><i class="fas fa-font"></i></button>
+                    <button class="pro-tool-btn" type="button" data-tool-command="pin" title="Pin"><i class="fas fa-location-dot"></i></button>
+                    <button class="pro-tool-btn" type="button" data-tool-command="snapshot" title="Snapshot"><i class="fas fa-camera"></i></button>
                     <div class="pro-tool-separator"></div>
                     <button class="pro-tool-btn" type="button" data-tool-command="undo" title="Undo"><i class="fas fa-rotate-left"></i></button>
                     <button class="pro-tool-btn" type="button" data-tool-command="redo" title="Redo"><i class="fas fa-rotate-right"></i></button>
                     <button class="pro-tool-btn danger" type="button" data-tool-command="delete" title="Delete"><i class="fas fa-trash"></i></button>
+                    <button class="pro-tool-btn" type="button" data-tool-command="more" title="More tools"><i class="fas fa-ellipsis"></i></button>
                 </aside>
             </div>
         </section>

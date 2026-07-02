@@ -443,6 +443,17 @@
     root.querySelector('#columnMenu')?.addEventListener('change', event => { const col = event.target.value; state.hiddenColumns = event.target.checked ? state.hiddenColumns.filter(c => c !== col) : [...new Set([...state.hiddenColumns, col])]; render(); });
     root.querySelector('[data-labor-unit]')?.addEventListener('click', () => { state.laborUnit = state.laborUnit === 'mins' ? 'hrs' : 'mins'; root.querySelector('[data-labor-unit]').textContent = state.laborUnit === 'mins' ? 'mins' : 'hrs'; render(); });
 
+    window.addEventListener('takeoff:estimating-lines-updated', () => {
+        try {
+            const parsed = JSON.parse(localStorage.getItem(storageKey) || 'null');
+            if (!parsed || !Array.isArray(parsed.groups)) return;
+            Object.assign(state, parsed);
+            render();
+        } catch (e) {
+            console.warn('Unable to refresh estimating from Takeoff', e);
+        }
+    });
+
     root.querySelector('#columnMenu').innerHTML = columns.filter(([key]) => key !== 'select').map(([key, label]) => `<label><input type="checkbox" value="${key}" ${isHidden(key) ? '' : 'checked'}> ${esc(label)}</label>`).join('');
     render();
 })();
