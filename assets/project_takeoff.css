@@ -782,12 +782,15 @@
 .pro-takeoff-viewer {
     min-width: 0;
     min-height: 0;
-    display: grid;
-    grid-template-rows: 52px minmax(0, 1fr);
+    height: 100%;
+    display: flex;
+    flex-direction: column;
+    overflow: hidden;
     position: relative;
 }
 
 .pro-viewer-toolbar {
+    flex: 0 0 52px;
     justify-content: space-between;
     padding: 0 12px;
     background: #fff;
@@ -1162,7 +1165,9 @@
 }
 
 .pro-canvas-shell {
+    flex: 1 1 auto;
     position: relative;
+    width: 100%;
     min-width: 0;
     min-height: 0;
     overflow: hidden;
@@ -1388,7 +1393,10 @@
 
 .pro-active-layer-toolbar,
 .pro-selection-bar {
+    flex: 0 0 auto;
+    height: auto;
     min-height: 42px;
+    max-height: 80px;
     display: flex;
     align-items: center;
     gap: 10px;
@@ -1397,6 +1405,7 @@
     border-bottom: 1px solid #d8dee6;
     color: #18212f;
     flex-wrap: wrap;
+    overflow: visible;
 }
 
 .pro-active-layer-toolbar[hidden],
@@ -1417,6 +1426,10 @@
 }
 
 .pro-active-layer-toolbar > div {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    flex-wrap: wrap;
     margin-left: auto;
 }
 
@@ -1681,6 +1694,7 @@
     }
 
     .pro-viewer-toolbar {
+        flex: 0 0 auto;
         align-items: stretch;
         height: auto;
         padding: 8px;
