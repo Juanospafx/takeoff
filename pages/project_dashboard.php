@@ -1188,6 +1188,9 @@ $state = [
         if (takeoffFrame) {
             takeoffFrame.src = 'editor.php?id=' + encodeURIComponent(doc.id) + '&embedded=1';
             takeoffFrame.style.display = 'block';
+            takeoffFrame.addEventListener('load', () => {
+                takeoffFrame.contentWindow?.postMessage({ type: 'takeoff-visible' }, '*');
+            }, { once: true });
         }
         if (takeoffEmpty) takeoffEmpty.style.display = 'none';
         setActiveTab('takeoff');

@@ -40,7 +40,7 @@ if ($fileExt === '' && !empty($file['file_type'])) {
 }
 $filePath = str_replace('\\', '/', (string)($file['filepath'] ?? ''));
 if ($filePath !== '') {
-    if (preg_match('~(api/)?uploads/[^\\s]+$~', $filePath, $m)) {
+    if (preg_match('~(api/)?uploads/.+$~s', $filePath, $m)) {
         $filePath = $m[0];
     }
     if (strpos($filePath, 'uploads/') === 0) {
@@ -53,6 +53,7 @@ if ($filePath !== '') {
     if (strpos($filePath, 'uploads/') === 0 || strpos($filePath, 'api/uploads/') === 0) {
         $filePath = '../' . $filePath;
     }
+    $filePath = implode('/', array_map('rawurlencode', explode('/', $filePath)));
 }
 ?>
 <!DOCTYPE html>
@@ -1199,7 +1200,9 @@ if ($filePath !== '') {
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(resize, 120);
     });
-    setTimeout(resize, 100); 
+    // The wrapper can still be at 0x0 here if this editor is embedded in a tab/panel
+    // that hasn't been made visible by the parent page yet, so poll instead of a single check.
+    waitForWrapperSize();
     window.addEventListener('message', event => {
         if (!event.data || event.data.type !== 'takeoff-visible') return;
         resize();
