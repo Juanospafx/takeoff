@@ -587,21 +587,37 @@
                 .flatMap(candidate => candidate.items || [])
                 .find(item => String(item.takeoffLayerId || '') === String(layer.id));
             if (existing) {
+                const hasManualOverride = Boolean(existing.quantityOverride) || ['modified', 'detached', 'takeoff_changed'].includes(String(existing.quantitySyncStatus || ''));
+                const quantityPatch = hasManualOverride && Number(existing.quantity || 0) !== Number(line.quantity || 0)
+                    ? {
+                        pendingTakeoffQuantity: line.quantity,
+                        quantitySyncStatus: 'takeoff_changed',
+                        lastSyncedTakeoffQuantity: Number(existing.lastSyncedTakeoffQuantity ?? existing.quantity ?? 0)
+                    }
+                    : {
+                        originalQuantity: line.quantity,
+                        quantity: line.quantity,
+                        pendingTakeoffQuantity: null,
+                        quantityOverride: false,
+                        quantitySyncStatus: 'synced',
+                        lastSyncedTakeoffQuantity: line.quantity
+                    };
                 Object.assign(existing, {
                     catalogItemId: line.catalogItemId,
                     name: line.name,
                     description: line.description,
                     type: line.type,
                     budgetCode: line.budgetCode,
-                    originalQuantity: line.quantity,
-                    quantity: line.quantity,
                     unitCost: line.unitCost,
                     unitLabor: line.unitLabor,
                     notes: line.notes,
                     uom: line.uom,
                     groupId: group.id,
-                    groupName: group.name
-                });
+                    groupName: group.name,
+                    quantitySource: 'takeoff',
+                    catalogSyncStatus: line.catalogItemId ? (existing.catalogSyncStatus || 'synced') : 'detached',
+                    updatedAt: new Date().toISOString()
+                }, quantityPatch);
                 if (!group.items.includes(existing)) {
                     state.groups.forEach(candidate => {
                         candidate.items = (candidate.items || []).filter(item => item !== existing);

@@ -1265,6 +1265,7 @@ $state = [
 </script>
 <script src="../assets/project_overview.js"></script>
 <script src="../assets/project_takeoff.js"></script>
+<script src="../assets/estimate_calculation_service.js"></script>
 <script src="../assets/project_estimating.js"></script>
 <script src="../assets/project_proposal.js"></script>
 <script src="../assets/global_tools.js"></script>

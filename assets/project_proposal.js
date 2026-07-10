@@ -156,30 +156,33 @@
 
     function itemFromEstimate(item) {
         const quantity = num(item.quantity ?? item.qty);
-        const unitCost = num(item.unit_cost ?? item.unit_price ?? item.cost_each);
-        const total = num(item.total_cost ?? item.subtotal_cost ?? (quantity * unitCost));
-        const type = firstValue([item.item_type, item.catalog_item_type, item.cost_type, item.type]);
+        const unitCost = num(item.unit_cost ?? item.unit_price ?? item.cost_each ?? item.unitMaterialCost ?? item.unitCost);
+        const total = num(item.total_cost ?? item.subtotal_cost ?? item.totalSales ?? (quantity * unitCost));
+        const type = firstValue([item.item_type, item.catalog_item_type, item.cost_type, item.costCategory, item.type]);
         return {
             name: firstValue([item.name, item.catalog_item_name, item.description, 'Cost item']),
-            group: firstValue([item.group_name, item.group, item.cost_group, type, 'Ungrouped']),
-            budgetCode: firstValue([item.budget_code, item.cost_code, item.code]),
+            group: firstValue([item.group_name, item.groupName, item.group, item.cost_group, type, 'Ungrouped']),
+            budgetCode: firstValue([item.budget_code, item.budgetCode, item.cost_code, item.costCode, item.code]),
             itemType: firstValue([type, 'Cost Item']),
             category: firstValue([item.category, item.catalog_category, item.catalog_name]),
             quantity,
             uom: firstValue([item.unit_of_measure, item.uom, item.unit]),
             unitCost,
             total,
-            material: num(item.material_cost),
-            labor: num(item.labor_cost),
-            equipment: num(item.equipment_cost),
+            material: num(item.material_cost ?? item.materialCost),
+            labor: num(item.labor_cost ?? item.laborCost),
+            equipment: num(item.equipment_cost ?? item.equipmentCost),
             manufacturer: firstValue([item.manufacturer, item.brand]),
-            catalogNumber: firstValue([item.catalog_number, item.sku, item.part_number]),
+            catalogNumber: firstValue([item.catalog_number, item.catalogNumber, item.sku, item.part_number]),
             description: firstValue([item.description, item.notes])
         };
     }
 
     function realItems() {
-        return Array.isArray(state.estimateItems) ? state.estimateItems.map(itemFromEstimate) : [];
+        if (Array.isArray(state.estimateItems) && state.estimateItems.length) return state.estimateItems.map(itemFromEstimate);
+        const estimating = readEstimatingModule();
+        const groups = Array.isArray(estimating.groups) ? estimating.groups : [];
+        return groups.flatMap(group => (group.items || []).map(item => itemFromEstimate({ ...item, groupName: group.name })));
     }
 
     function totals(items) {
