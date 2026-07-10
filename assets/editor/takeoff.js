@@ -511,6 +511,40 @@
         state.segments.forEach(s => (s.handles || []).forEach(h => h.visible(type === 'segment' && ref === s)));
         renderProperties();
         if (konvaLayer) konvaLayer.batchDraw();
+        emitSelectionState();
+    }
+
+    function emitSelectionState() {
+        if (!state.projectControlled) return;
+        try {
+            const selected = state.selectedElement;
+            window.parent?.postMessage({
+                type: 'project-takeoff-selection',
+                payload: {
+                    ids: selected?.ref?.client_uid ? [selected.ref.client_uid] : [],
+                    layerId: selected?.ref?.layer_client_uid || null,
+                    objectType: selected?.type || null
+                }
+            }, '*');
+        } catch (e) {}
+    }
+
+    function clearTakeoffSelection() {
+        state.selectedElement = null;
+        state.segments.forEach(s => (s.handles || []).forEach(h => h.visible(false)));
+        renderProperties();
+        if (konvaLayer) konvaLayer.batchDraw();
+        emitSelectionState();
+        return true;
+    }
+
+    function findTakeoffObjectByUid(objectUid) {
+        const uidValue = String(objectUid || '');
+        const marker = state.markers.find(m => String(m.client_uid) === uidValue);
+        if (marker) return { type: 'marker', ref: marker };
+        const segment = state.segments.find(s => String(s.client_uid) === uidValue);
+        if (segment) return { type: 'segment', ref: segment };
+        return null;
     }
 
     function addMarker(pos) {
@@ -732,6 +766,7 @@
         state.selectedElement = null;
         renderProperties();
         markDirty();
+        emitSelectionState();
     }
 
     function markDirty() {
@@ -1169,6 +1204,7 @@
     }
 
     function setTool(tool) {
+        if (tool === 'select') tool = 'smart';
         state.tool = tool;
         if (tool === 'takeoff_count' || tool === 'takeoff_linear' || tool === 'takeoff_area') {
             if (typeof setMode === 'function') setMode('smart');
@@ -1178,6 +1214,12 @@
             const label = tool === 'takeoff_count' ? 'Count tool active' : (tool === 'takeoff_area' ? 'Area tool active. Double-click to finish.' : 'Linear tool active. Double-click to finish.');
             showToast(label, 'success');
         } else if (konvaStage?.container()) {
+            if (tool === 'smart' && typeof setMode === 'function') {
+                setMode('smart');
+                ensureKonva();
+                bindKonva();
+                if (typeof setKonvaActive === 'function') setKonvaActive(true);
+            }
             clearDrafts();
             konvaStage.container().style.cursor = 'default';
         }
@@ -1188,6 +1230,10 @@
         if (!ensureKonva() || konvaStage._takeoffBound) return;
         konvaStage._takeoffBound = true;
         konvaStage.on('click tap', evt => {
+            if (state.tool === 'smart') {
+                if (evt.target === konvaStage || evt.target === konvaLayer) clearTakeoffSelection();
+                return;
+            }
             if (state.tool !== 'takeoff_count' && state.tool !== 'takeoff_linear' && state.tool !== 'takeoff_area') return;
             if (evt.target !== konvaStage && evt.target.getParent() !== konvaLayer) return;
             const layer = activeLayer();
@@ -2213,10 +2259,61 @@
 
     window.projectTakeoffSetTool = function (tool) {
         const normalized = String(tool || '').toLowerCase();
+        if (normalized === 'select' || normalized === 'smart') return setTool('smart');
         if (normalized === 'linear') return setTool('takeoff_linear');
         if (normalized === 'area') return setTool('takeoff_area');
         if (normalized === 'count') return setTool('takeoff_count');
-        return setTool('select');
+        return setTool('smart');
+    };
+
+    window.projectTakeoffClearSelection = function () {
+        return clearTakeoffSelection();
+    };
+
+    window.projectTakeoffDeleteSelection = function (objectIds) {
+        const ids = Array.isArray(objectIds) ? objectIds : [];
+        const targets = ids.map(findTakeoffObjectByUid).filter(Boolean);
+        if (!targets.length && state.selectedElement) targets.push(state.selectedElement);
+        if (!targets.length) return false;
+        snapshot();
+        targets.forEach(({ type, ref }) => {
+            if (type === 'marker') {
+                if (ref.node) ref.node.destroy();
+                state.markers = state.markers.filter(marker => marker !== ref);
+            } else {
+                destroySegmentNodes(ref);
+                state.segments = state.segments.filter(segment => segment !== ref);
+            }
+        });
+        state.selectedElement = null;
+        renderProperties();
+        markDirty();
+        emitSelectionState();
+        return true;
+    };
+
+    window.projectTakeoffCopySelection = function (objectIds) {
+        const ids = Array.isArray(objectIds) ? objectIds : [];
+        const target = ids.map(findTakeoffObjectByUid).filter(Boolean)[0] || state.selectedElement;
+        if (!target?.ref) return false;
+        snapshot();
+        if (target.type === 'marker') {
+            const copy = { ...stripNodes(target.ref), client_uid: uid(), x: num(target.ref.x) + 16, y: num(target.ref.y) + 16, createdAt: timestamp(), updatedAt: timestamp() };
+            copy.created_at = copy.createdAt;
+            copy.updated_at = copy.updatedAt;
+            state.markers.push(copy);
+            createMarkerNode(copy);
+            selectElement('marker', copy);
+        } else {
+            const copy = { ...stripNodes(target.ref), client_uid: uid(), points_json: (target.ref.points_json || []).map(p => ({ x: p.x + 16, y: p.y + 16 })), createdAt: timestamp(), updatedAt: timestamp() };
+            copy.created_at = copy.createdAt;
+            copy.updated_at = copy.updatedAt;
+            state.segments.push(copy);
+            createSegmentNode(copy);
+            selectElement('segment', copy);
+        }
+        markDirty();
+        return true;
     };
 
     window.projectTakeoffSetZoom = function (percent) {
