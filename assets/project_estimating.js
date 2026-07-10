@@ -955,9 +955,7 @@
         render();
     }
 
-    async function openCatalog() {
-        state.catalogOpen = true;
-        render();
+    async function ensureCatalogLoaded() {
         if (state.catalogLoaded) return;
         try {
             const response = await fetch('../api/cost_catalog.php?action=list&view=all', { headers: { Accept: 'application/json' } });
@@ -968,6 +966,12 @@
         } catch (e) {
             state.catalogError = 'Unable to load Cost Catalog.';
         }
+    }
+
+    async function openCatalog() {
+        state.catalogOpen = true;
+        render();
+        await ensureCatalogLoaded();
         render();
     }
 
@@ -1000,7 +1004,8 @@
         else addManualItem(activeEstimate().groups[0]?.id, payload);
     }
 
-    function refreshCostsFromCatalog() {
+    async function refreshCostsFromCatalog() {
+        await ensureCatalogLoaded();
         allItems().forEach(item => refreshItemCost(findItem(item.id)?.item));
         audit('Costs refreshed from catalog', null, null, 'estimate');
         markDirty();

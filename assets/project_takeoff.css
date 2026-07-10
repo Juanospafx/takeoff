@@ -1609,6 +1609,24 @@
     color: #93c5fd;
 }
 
+[data-theme="dark"] .pro-viewer-layers-popover {
+    background: #1e293b;
+    color: #f8fafc;
+    border-color: #334155;
+}
+
+[data-theme="dark"] .pro-viewer-layers-head {
+    border-color: #334155;
+}
+
+[data-theme="dark"] .pro-viewer-layer-row:hover {
+    background: #273449;
+}
+
+[data-theme="dark"] .pro-viewer-layer-row small {
+    color: #94a3b8;
+}
+
 [data-theme="dark"] .pro-compare-head,
 [data-theme="dark"] .pro-compare-actions {
     border-color: #334155;

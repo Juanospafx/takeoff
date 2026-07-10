@@ -1286,7 +1286,7 @@
             name: `${group.name} Copy`,
             isExpanded: true,
             isDefault: false,
-            layers: (group.layers || []).map(layer => ({ ...layer, id: makeId('layer'), groupId: null }))
+            layers: (group.layers || []).map(layer => ({ ...layer, id: makeId('layer'), groupId: null, quantity: 0, baseQuantity: 0, shapes: [], takeoffObjects: [] }))
         };
         copy.layers.forEach(layer => { layer.groupId = copy.id; });
         takeoffState.groups.push(copy);
@@ -1335,7 +1335,7 @@
         if (!layer) return;
         pushTakeoffHistory('duplicate-layer');
         const group = findGroup(layer.groupId);
-        const copy = { ...layer, id: makeId('layer'), name: `${layer.name} Copy`, quantity: 0 };
+        const copy = { ...layer, id: makeId('layer'), name: `${layer.name} Copy`, quantity: 0, baseQuantity: 0, shapes: [], takeoffObjects: [] };
         group.layers.push(copy);
         setActiveTakeoffLayer(copy.id, false);
         saveTakeoffState();

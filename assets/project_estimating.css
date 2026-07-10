@@ -169,6 +169,13 @@
     font: inherit;
 }
 
+.est-cell-input:disabled,
+.est-cell-select:disabled {
+    background: #f1f5f9;
+    color: #94a3b8;
+    cursor: not-allowed;
+}
+
 .est-search input {
     height: 34px;
     padding: 6px 10px 6px 32px;
@@ -1103,6 +1110,12 @@
     background: #0f172a;
     color: #f8fafc;
     border-color: #334155;
+}
+
+[data-theme="dark"] .est-cell-input:disabled,
+[data-theme="dark"] .est-cell-select:disabled {
+    background: #16202f;
+    color: #64748b;
 }
 
 [data-theme="dark"] .est-btn,
