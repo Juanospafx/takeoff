@@ -38,7 +38,7 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
                 <strong>Preconstruction</strong>
                 <i class="fas fa-chevron-down"></i>
             </button>
-            <div class="bt-tools-mega" data-global-menu="tools">
+            <div class="bt-tools-mega bt-tools-limited" data-global-menu="tools">
                 <div class="bt-tools-eyebrow">Select a tool</div>
                 <div class="bt-tools-grid">
                     <?php foreach ($companyToolsCategories as $category): ?>
