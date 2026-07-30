@@ -146,6 +146,41 @@
         }
         const suffix = doc.pageCount && doc.pageCount > 1 ? ` - Page ${drawingState.selectedPage}` : '';
         label.textContent = `${doc.name}${suffix}`;
+        renderCompactDocuments();
+        renderWorkspaceSummary();
+    }
+
+    function renderCompactDocuments() {
+        const list = $('takeoffDocumentsCompact');
+        const count = $('takeoffDocumentCount');
+        if (count) count.textContent = String(drawingState.documents.length);
+        if (!list) return;
+        list.innerHTML = drawingState.documents.map(doc => {
+            const active = Number(doc.id) === Number(drawingState.selectedDocumentId);
+            const pages = doc.pageCount ? `${doc.pageCount} page${doc.pageCount === 1 ? '' : 's'}` : 'Drawing';
+            return `<button class="pro-compact-document ${active ? 'active' : ''}" type="button" data-compact-document="${esc(doc.id)}">
+                <i class="fas ${doc.extension === 'pdf' ? 'fa-file-pdf' : 'fa-file-image'}"></i>
+                <span><strong>${esc(doc.name)}</strong><small>${esc(doc.folder)} · ${esc(pages)}</small></span>
+                <em>${active ? 'Active' : 'Open'}</em>
+            </button>`;
+        }).join('') || '<div class="pro-inspector-empty"><span>No drawings uploaded.</span></div>';
+        list.querySelectorAll('[data-compact-document]').forEach(button => {
+            button.addEventListener('click', () => {
+                const doc = drawingState.documents.find(row => Number(row.id) === Number(button.dataset.compactDocument));
+                if (doc) selectDrawingSheet(doc, 1);
+            });
+        });
+    }
+
+    function renderWorkspaceSummary() {
+        const page = $('takeoffTopPage');
+        const progress = $('takeoffTopProgress');
+        const doc = activeDrawingDoc();
+        if (page) page.textContent = `${drawingState.selectedPage || 1} / ${doc?.pageCount || 1}`;
+        const layers = allLayers();
+        const ready = layers.filter(layer => Number(layer.quantity || 0) > 0).length;
+        const percentage = layers.length ? Math.round((ready / layers.length) * 100) : 0;
+        if (progress) progress.textContent = `${percentage}% ready`;
     }
 
     function loadPdfJs() {
@@ -710,6 +745,8 @@
         const activeLayer = findLayer(takeoffState.activeLayerId);
         if (activeLabel) activeLabel.textContent = activeLayer ? activeLayer.name : 'None';
         renderActiveLayerToolbar();
+        renderInspector();
+        renderWorkspaceSummary();
         tree.innerHTML = takeoffState.groups.map(group => {
             const visibleLayers = (group.layers || []).filter(layer => {
                 if (!q) return true;
@@ -745,6 +782,43 @@
             </div>`;
         }).join('') || '<div class="pro-drawing-empty">No takeoffs match your search.</div>';
         bindTakeoffTreeEvents();
+    }
+
+    function renderInspector() {
+        const content = $('takeoffInspectorContent');
+        if (!content) return;
+        const selectionCount = selectionState.selectedObjectIds.length;
+        const layer = findLayer(selectionCount ? selectionState.activeLayerId : takeoffState.activeLayerId);
+        if (!layer) {
+            content.innerHTML = `<div class="pro-inspector-empty">
+                <i class="fas fa-arrow-pointer"></i>
+                <strong>No takeoff selected</strong>
+                <span>Select a layer or an element on the drawing to review its properties and metrics.</span>
+            </div>`;
+            return;
+        }
+        const group = groupForLayer(layer);
+        content.innerHTML = `
+            <section class="pro-property-card">
+                <div class="pro-property-title">
+                    <span class="pro-color-dot" style="background:${esc(layer.color)}"></span>
+                    <span><strong>${esc(layer.name)}</strong><small>${esc(group?.name || 'Ungrouped')}</small></span>
+                </div>
+                <span class="pro-status-pill"><i class="fas fa-circle-check"></i>${layer.visible === false ? 'Inactive' : 'Active'}</span>
+            </section>
+            <section class="pro-property-card">
+                <h3>Takeoff metrics</h3>
+                <div class="pro-property-row"><span>Quantity</span><strong>${esc(quantityLabel(layer))}</strong></div>
+                <div class="pro-property-row"><span>Type</span><strong>${esc(layer.type)}</strong></div>
+                <div class="pro-property-row"><span>Unit</span><strong>${esc(layer.uom || typeToUom(layer.type))}</strong></div>
+                <div class="pro-property-row"><span>Selected</span><strong>${selectionCount} element${selectionCount === 1 ? '' : 's'}</strong></div>
+            </section>
+            <section class="pro-property-card">
+                <h3>Estimate link</h3>
+                <div class="pro-property-row"><span>Catalog</span><strong>${layer.catalogItemId ? 'Linked' : 'Not linked'}</strong></div>
+                <div class="pro-property-row"><span>Unit cost</span><strong>$${Number(layer.unitCost || layer.unit_cost || 0).toFixed(2)}</strong></div>
+                <div class="pro-property-row"><span>Labor hours</span><strong>${Number(layer.laborHours || layer.labor_hours || 0).toFixed(2)}</strong></div>
+            </section>`;
     }
 
     function bindTakeoffTreeEvents() {
@@ -1634,6 +1708,7 @@
         selectionState.selectedObjectIds = Array.from(new Set(ids.map(String).filter(Boolean)));
         selectionState.activeLayerId = layerId || selectionState.activeLayerId || takeoffState.activeLayerId;
         renderSelectionBar();
+        renderInspector();
     }
 
     function runSelectionAction(action) {
@@ -1811,6 +1886,12 @@
         if (action === 'toggle-global-visibility') return toggleGlobalVisibility();
         if (action === 'export-excel') return exportTakeoffQuantities();
         if (action === 'browse-catalog') return openCatalogModal();
+        if (action === 'upload-drawing') return document.querySelector('[data-tab="documents"]')?.click();
+        if (action === 'save-workspace') {
+            saveTakeoffState();
+            callEditor('projectTakeoffSnapshot');
+            return showPrepared('Workspace saved.');
+        }
         showPrepared(action);
     }
 

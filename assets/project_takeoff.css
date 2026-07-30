@@ -14,6 +14,12 @@
 }
 
 [data-theme="dark"] .pro-takeoff-items,
+[data-theme="dark"] .pro-takeoff-inspector,
+[data-theme="dark"] .pro-inspector-head,
+[data-theme="dark"] .pro-inspector-content,
+[data-theme="dark"] .pro-property-card,
+[data-theme="dark"] .pro-left-section-head,
+[data-theme="dark"] .pro-compact-documents,
 [data-theme="dark"] .pro-takeoff-panel-head,
 [data-theme="dark"] .pro-takeoff-searchbar,
 [data-theme="dark"] .pro-takeoff-actions-row,
@@ -114,8 +120,35 @@
     color: #fca5a5;
 }
 
+[data-theme="dark"] .pro-compact-document,
+[data-theme="dark"] .pro-property-title strong,
+[data-theme="dark"] .pro-property-row strong,
+[data-theme="dark"] .pro-inspector-head strong,
+[data-theme="dark"] .pro-inspector-empty strong,
+[data-theme="dark"] .pro-property-card h3 {
+    color: #e5edf7;
+}
+
+[data-theme="dark"] .pro-compact-document:hover,
+[data-theme="dark"] .pro-compact-document.active {
+    background: #273449;
+    border-color: #3b4d65;
+}
+
+[data-theme="dark"] .pro-compact-document small,
+[data-theme="dark"] .pro-compact-document em,
+[data-theme="dark"] .pro-property-row span,
+[data-theme="dark"] .pro-inspector-head small,
+[data-theme="dark"] .pro-inspector-empty span {
+    color: #94a3b8;
+}
+
+[data-theme="dark"] .pro-property-row {
+    border-color: #334155;
+}
+
 .pro-takeoff-workspace.items-collapsed {
-    grid-template-columns: 54px minmax(0, 1fr) 58px;
+    grid-template-columns: 54px minmax(0, 1fr) 292px;
 }
 
 .pro-takeoff-items {
@@ -213,6 +246,8 @@
 .pro-takeoff-workspace.items-collapsed .pro-takeoff-searchbar,
 .pro-takeoff-workspace.items-collapsed .pro-takeoff-actions-row,
 .pro-takeoff-workspace.items-collapsed .pro-takeoff-tree,
+.pro-takeoff-workspace.items-collapsed .pro-left-section-head,
+.pro-takeoff-workspace.items-collapsed .pro-compact-documents,
 .pro-takeoff-workspace.items-collapsed .pro-takeoff-footer div,
 .pro-takeoff-workspace.items-collapsed .pro-takeoff-panel-head h2 {
     display: none;
@@ -1918,6 +1953,14 @@
 
     .pro-toolbar-btn i {
         font-size: .9rem;
+    }
+
+    .pro-top-stat {
+        display: none;
+    }
+
+    .pro-sheet-select {
+        min-width: 150px;
     }
 }
 
