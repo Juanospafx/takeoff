@@ -244,6 +244,17 @@
         return `${num(area).toFixed(2)} sq ft`;
     }
 
+    function pointsLength(points) {
+        let px = 0;
+        for (let index = 1; index < (points || []).length; index++) {
+            const dx = points[index].x - points[index - 1].x;
+            const dy = points[index].y - points[index - 1].y;
+            px += Math.sqrt(dx * dx + dy * dy);
+        }
+        const scale = getPlanScale();
+        return scale > 0 ? px / scale : 0;
+    }
+
     function calculateItemCost(item, quantity) {
         if (!item) return { unitCost: 0, material: 0, labor: 0, equipment: 0, total: 0, laborHours: 0, waste: 0, markup: 0 };
         const wasteQty = quantity * (num(item.waste_factor) / 100);
@@ -604,37 +615,74 @@
             return;
         }
         if (!state.draftLine) {
+            const vertex = new Konva.Circle({
+                x: pos.x,
+                y: pos.y,
+                radius: 5,
+                fill: '#fff',
+                stroke: layer.color || '#22c55e',
+                strokeWidth: 3,
+                listening: false
+            });
             state.draftLine = {
                 points: [pos],
+                layerUid: layer.client_uid,
+                vertices: [vertex],
                 preview: new Konva.Line({
                     points: [pos.x, pos.y, pos.x, pos.y],
                     stroke: layer.color || '#22c55e',
                     strokeWidth: 4,
                     lineCap: 'round',
-                    lineJoin: 'round'
+                    lineJoin: 'round',
+                    listening: false
                 }),
+                lengthLabel: new Konva.Text({
+                    x: pos.x + 12,
+                    y: pos.y - 28,
+                    text: '',
+                    fill: layer.color || '#22c55e',
+                    fontSize: 14,
+                    fontStyle: 'bold',
+                    listening: false
+                })
             };
-            konvaLayer.add(state.draftLine.preview);
+            konvaLayer.add(state.draftLine.preview, vertex, state.draftLine.lengthLabel);
+            updateDrawingStatus();
+            konvaLayer.batchDraw();
             return;
         }
+        const last = state.draftLine.points[state.draftLine.points.length - 1];
+        if (Math.hypot(pos.x - last.x, pos.y - last.y) < 0.5) return;
         state.draftLine.points.push(pos);
         state.draftLine.preview.points(state.draftLine.points.flatMap(p => [p.x, p.y]));
+        const vertex = new Konva.Circle({
+            x: pos.x,
+            y: pos.y,
+            radius: 5,
+            fill: '#fff',
+            stroke: layer.color || '#22c55e',
+            strokeWidth: 3,
+            listening: false
+        });
+        state.draftLine.vertices.push(vertex);
+        konvaLayer.add(vertex);
+        updateDrawingStatus();
         konvaLayer.batchDraw();
-        finishLinear();
     }
 
     function finishLinear() {
-        if (!state.draftLine || state.draftLine.points.length < 2) return;
-        const layer = activeLayer();
+        if (!state.draftLine) return false;
+        if (state.draftLine.points.length < 2) {
+            cancelLinearDraft();
+            return false;
+        }
+        const layer = state.layers.find(row => row.client_uid === state.draftLine.layerUid);
         if (!layer) {
-            showToast('Select a takeoff layer before drawing.', 'error');
-            return;
+            cancelLinearDraft();
+            return false;
         }
         snapshot();
-        if (Number(layer.locked)) {
-            showToast('Layer is locked', 'error');
-            return;
-        }
+        const points = state.draftLine.points.map(point => ({ ...point }));
         const segment = {
             client_uid: uid(),
             layer_client_uid: layer.client_uid,
@@ -643,7 +691,7 @@
             takeoff_type: 'linear',
             type: 'linear',
             page_number: pageNum,
-            points_json: state.draftLine.points,
+            points_json: points,
             measured_length: 0,
             multiplier: 1,
             total_length: 0,
@@ -661,12 +709,42 @@
         segment.created_at = segment.createdAt;
         segment.updated_at = segment.updatedAt;
         calculateLinearLength(segment);
-        state.draftLine.preview.destroy();
-        state.draftLine = null;
+        destroyLinearDraftNodes();
         state.segments.push(segment);
         createSegmentNode(segment);
         selectElement('segment', segment);
         markDirty();
+        updateDrawingStatus();
+        return true;
+    }
+
+    function destroyLinearDraftNodes() {
+        if (!state.draftLine) return;
+        state.draftLine.preview?.destroy();
+        state.draftLine.lengthLabel?.destroy();
+        (state.draftLine.vertices || []).forEach(vertex => vertex.destroy());
+        state.draftLine = null;
+        konvaLayer?.batchDraw();
+    }
+
+    function cancelLinearDraft() {
+        destroyLinearDraftNodes();
+        updateDrawingStatus();
+    }
+
+    function undoLinearPoint() {
+        if (!state.draftLine) return false;
+        if (state.draftLine.points.length <= 1) {
+            cancelLinearDraft();
+            return true;
+        }
+        state.draftLine.points.pop();
+        state.draftLine.vertices.pop()?.destroy();
+        state.draftLine.preview.points(state.draftLine.points.flatMap(point => [point.x, point.y]));
+        state.draftLine.lengthLabel?.text('');
+        updateDrawingStatus();
+        konvaLayer?.batchDraw();
+        return true;
     }
 
     function addAreaPoint(pos) {
@@ -745,10 +823,10 @@
     }
 
     function clearDrafts() {
-        if (state.draftLine?.preview) state.draftLine.preview.destroy();
+        if (state.draftLine) destroyLinearDraftNodes();
         if (state.draftArea?.preview) state.draftArea.preview.destroy();
-        state.draftLine = null;
         state.draftArea = null;
+        updateDrawingStatus();
         konvaLayer?.batchDraw();
     }
 
@@ -1205,13 +1283,19 @@
 
     function setTool(tool) {
         if (tool === 'select') tool = 'smart';
+        const leavingLinear = state.tool === 'takeoff_linear' && tool !== 'takeoff_linear';
+        if (leavingLinear && state.draftLine) finishLinear();
         state.tool = tool;
         if (tool === 'takeoff_count' || tool === 'takeoff_linear' || tool === 'takeoff_area') {
             if (typeof setMode === 'function') setMode('smart');
             ensureKonva();
             bindKonva();
             if (konvaStage?.container()) konvaStage.container().style.cursor = 'crosshair';
-            const label = tool === 'takeoff_count' ? 'Count tool active' : (tool === 'takeoff_area' ? 'Area tool active. Double-click to finish.' : 'Linear tool active. Double-click to finish.');
+            const label = tool === 'takeoff_count'
+                ? 'Count tool active'
+                : (tool === 'takeoff_area'
+                    ? 'Area tool active. Double-click to finish.'
+                    : 'Click to add points. Double-click, Enter, or deselect the item to finish.');
             showToast(label, 'success');
         } else if (konvaStage?.container()) {
             if (tool === 'smart' && typeof setMode === 'function') {
@@ -1224,6 +1308,24 @@
             konvaStage.container().style.cursor = 'default';
         }
         document.querySelectorAll('[data-takeoff-tool]').forEach(btn => btn.classList.toggle('active', btn.dataset.takeoffTool === tool));
+        updateDrawingStatus();
+    }
+
+    function updateDrawingStatus(pointer) {
+        const badge = document.getElementById('takeoffDrawingStatus');
+        if (!badge) return;
+        const layer = state.layers.find(row => row.client_uid === (state.draftLine?.layerUid || state.selectedLayerUid));
+        const active = state.tool === 'takeoff_linear' && layer && layerType(layer) === 'linear';
+        badge.classList.toggle('takeoff-hidden', !active);
+        if (!active) return;
+        let detail = 'Click to place the first point';
+        if (state.draftLine?.points.length) {
+            const confirmed = pointsLength(state.draftLine.points);
+            const last = state.draftLine.points[state.draftLine.points.length - 1];
+            const partial = pointer ? pointsLength([last, pointer]) : 0;
+            detail = `Segment: ${formatFeetLabel(partial)} · Total: ${formatFeetLabel(confirmed + partial)}`;
+        }
+        badge.innerHTML = `<strong>Drawing: ${escapeHtml(layer.name)}</strong><span>${escapeHtml(detail)}</span><small>Click to add points. Double-click, Enter, or deselect the item to finish.</small>`;
     }
 
     function bindKonva() {
@@ -1265,9 +1367,14 @@
             const pos = konvaStage.getPointerPosition();
             if (!pos) return;
             const world = screenToWorld(pos);
-            if (state.tool === 'takeoff_linear' && state.draftLine?.preview && state.draftLine.points.length === 1) {
-                const start = state.draftLine.points[0];
-                state.draftLine.preview.points([start.x, start.y, world.x, world.y]);
+            if (state.tool === 'takeoff_linear' && state.draftLine?.preview && state.draftLine.points.length) {
+                state.draftLine.preview.points([...state.draftLine.points, world].flatMap(p => [p.x, p.y]));
+                const last = state.draftLine.points[state.draftLine.points.length - 1];
+                const partial = pointsLength([last, world]);
+                const total = pointsLength(state.draftLine.points) + partial;
+                state.draftLine.lengthLabel.position({ x: world.x + 12, y: world.y - 28 });
+                state.draftLine.lengthLabel.text(`${formatFeetLabel(partial)} · Σ ${formatFeetLabel(total)}`);
+                updateDrawingStatus(world);
                 konvaLayer.batchDraw();
             }
             if (state.tool === 'takeoff_area' && state.draftArea?.preview && state.draftArea.points.length) {
@@ -1302,6 +1409,7 @@
             </section>
             <section class="takeoff-props" id="takeoffProps"></section>
             <section class="takeoff-summary" id="takeoffSummary"></section>
+            <div class="takeoff-drawing-status takeoff-hidden" id="takeoffDrawingStatus"></div>
             <div class="takeoff-modal-backdrop takeoff-hidden" id="takeoffCreateModal">
                 <div class="takeoff-modal">
                     <div class="takeoff-modal-head">
@@ -1384,6 +1492,10 @@
             }
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
                 event.preventDefault();
+                if (state.draftLine) {
+                    undoLinearPoint();
+                    return;
+                }
                 if (!state.undo.length) return;
                 state.redo.push(JSON.stringify({ layers: state.layers, markers: state.markers.map(stripNodes), segments: state.segments.map(stripNodes) }));
                 restore(state.undo.pop());
@@ -1776,6 +1888,7 @@
     function activateLayerForInsert(uidValue) {
         const layer = state.layers.find(row => row.client_uid === uidValue);
         if (!layer) return;
+        if (state.draftLine && state.draftLine.layerUid !== layer.client_uid) finishLinear();
         state.selectedLayerUid = layer.client_uid;
         state.selectedLayerUids = new Set([layer.client_uid]);
         const type = layerType(layer);
@@ -2088,10 +2201,15 @@
         }
         window.addEventListener('keydown', e => {
             if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
-            if (e.key === 'Escape' && state.draftLine) {
-                state.draftLine.preview.destroy();
-                state.draftLine = null;
-                konvaLayer?.batchDraw();
+            if (state.draftLine && e.key === 'Backspace') {
+                e.preventDefault();
+                undoLinearPoint();
+                return;
+            }
+            if (state.draftLine && (e.key === 'Enter' || e.key === 'Escape')) {
+                e.preventDefault();
+                finishLinear();
+                return;
             }
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && state.selectedElement) {
                 window.__takeoffClipboard = { type: state.selectedElement.type, data: stripNodes(state.selectedElement.ref) };

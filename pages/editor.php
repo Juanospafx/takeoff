@@ -70,7 +70,7 @@ if ($filePath !== '') {
     <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 
     <link rel="stylesheet" href="../assets/editor/editor.css?v=takeoff-editor-20260611-4">
-    <link rel="stylesheet" href="../assets/editor/takeoff.css?v=takeoff-panel-20260611-4">
+    <link rel="stylesheet" href="../assets/editor/takeoff.css?v=takeoff-polyline-20260730-1">
 
     <style>
         :root {
@@ -3482,7 +3482,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-panel-20260611-4"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-polyline-20260730-1"></script>
 </body>
 </html>
 

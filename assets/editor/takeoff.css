@@ -5,6 +5,36 @@
     z-index: 35;
 }
 
+.takeoff-drawing-status {
+    position: absolute;
+    top: 16px;
+    left: 50%;
+    z-index: 1150;
+    transform: translateX(-50%);
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 330px;
+    max-width: min(620px, calc(100% - 32px));
+    padding: 10px 14px;
+    border: 1px solid rgba(37, 99, 235, .35);
+    border-radius: 9px;
+    background: rgba(15, 23, 42, .92);
+    color: #fff;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, .22);
+    pointer-events: none;
+    text-align: center;
+}
+
+.takeoff-drawing-status span {
+    color: #bfdbfe;
+    font-variant-numeric: tabular-nums;
+}
+
+.takeoff-drawing-status small {
+    color: #cbd5e1;
+}
+
 .takeoff-panel,
 .takeoff-props {
     position: absolute;
