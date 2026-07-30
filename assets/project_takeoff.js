@@ -173,30 +173,7 @@
         }
         const suffix = doc.pageCount && doc.pageCount > 1 ? ` - Page ${drawingState.selectedPage}` : '';
         label.textContent = `${doc.name}${suffix}`;
-        renderCompactDocuments();
         renderWorkspaceSummary();
-    }
-
-    function renderCompactDocuments() {
-        const list = $('takeoffDocumentsCompact');
-        const count = $('takeoffDocumentCount');
-        if (count) count.textContent = String(drawingState.documents.length);
-        if (!list) return;
-        list.innerHTML = drawingState.documents.map(doc => {
-            const active = Number(doc.id) === Number(drawingState.selectedDocumentId);
-            const pages = doc.pageCount ? `${doc.pageCount} page${doc.pageCount === 1 ? '' : 's'}` : 'Drawing';
-            return `<button class="pro-compact-document ${active ? 'active' : ''}" type="button" data-compact-document="${esc(doc.id)}">
-                <i class="fas ${doc.extension === 'pdf' ? 'fa-file-pdf' : 'fa-file-image'}"></i>
-                <span><strong>${esc(doc.name)}</strong><small>${esc(doc.folder)} · ${esc(pages)}</small></span>
-                <em>${active ? 'Active' : 'Open'}</em>
-            </button>`;
-        }).join('') || '<div class="pro-inspector-empty"><span>No drawings uploaded.</span></div>';
-        list.querySelectorAll('[data-compact-document]').forEach(button => {
-            button.addEventListener('click', () => {
-                const doc = drawingState.documents.find(row => Number(row.id) === Number(button.dataset.compactDocument));
-                if (doc) selectDrawingSheet(doc, 1);
-            });
-        });
     }
 
     function renderWorkspaceSummary() {

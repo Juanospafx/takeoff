@@ -560,7 +560,7 @@ $state = [
         }
     </style>
     <link rel="stylesheet" href="../assets/project_overview.css">
-    <link rel="stylesheet" href="../assets/project_takeoff.css?v=workspace-takeoff-20260730-2">
+    <link rel="stylesheet" href="../assets/project_takeoff.css?v=workspace-takeoff-20260730-3">
     <link rel="stylesheet" href="../assets/project_estimating.css">
     <link rel="stylesheet" href="../assets/project_proposal.css">
 </head>
@@ -838,15 +838,6 @@ $state = [
                         <button class="pro-icon-btn" type="button" id="toggleTakeoffItemsPanel" title="Collapse panel" aria-label="Collapse items panel">
                             <i class="fas fa-angles-left"></i>
                         </button>
-                    </div>
-                    <div class="pro-left-section-head">
-                        <span>Documents</span>
-                        <small id="takeoffDocumentCount">0</small>
-                    </div>
-                    <div class="pro-compact-documents" id="takeoffDocumentsCompact"></div>
-                    <div class="pro-left-section-head">
-                        <span>Layers</span>
-                        <small>Quantity</small>
                     </div>
                     <div class="pro-takeoff-searchbar">
                         <div class="pro-search-input">
@@ -1292,7 +1283,7 @@ $state = [
     setActiveTab(ProjectState.activeTab || 'overview', false);
 </script>
 <script src="../assets/project_overview.js"></script>
-<script src="../assets/project_takeoff.js?v=workspace-takeoff-20260730-2"></script>
+<script src="../assets/project_takeoff.js?v=workspace-takeoff-20260730-3"></script>
 <script src="../assets/estimate_calculation_service.js"></script>
 <script src="../assets/project_estimating.js"></script>
 <script src="../assets/project_proposal.js"></script>
