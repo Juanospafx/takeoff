@@ -81,6 +81,33 @@
         });
     }
 
+    function syncWorkspaceDensity() {
+        const workspace = $('takeoffWorkspace');
+        const viewer = document.querySelector('.pro-takeoff-viewer');
+        if (!workspace || !viewer) return;
+        const width = viewer.clientWidth;
+        workspace.classList.toggle('workspace-compact', width < 920);
+        workspace.classList.toggle('workspace-tight', width < 690);
+    }
+
+    function setInspectorCollapsed(collapsed) {
+        const workspace = $('takeoffWorkspace');
+        const button = $('toggleTakeoffInspector');
+        if (!workspace) return;
+        workspace.classList.toggle('inspector-collapsed', Boolean(collapsed));
+        if (button) {
+            const icon = button.querySelector('i');
+            button.setAttribute('aria-label', collapsed ? 'Expand inspector' : 'Collapse inspector');
+            button.dataset.proTooltip = collapsed ? 'Expand inspector' : 'Collapse inspector';
+            if (icon) icon.className = collapsed ? 'fas fa-angles-left' : 'fas fa-angles-right';
+        }
+        try {
+            localStorage.setItem('takeoff.inspector.collapsed', collapsed ? '1' : '0');
+        } catch (e) {}
+        requestAnimationFrame(syncWorkspaceDensity);
+        setTimeout(notifyEditorVisible, 80);
+    }
+
     window.projectTakeoffFitToScreen = fitTakeoffToScreen;
 
     const viewerState = {
@@ -2571,6 +2598,15 @@
     };
 
     document.addEventListener('DOMContentLoaded', () => {
+        let inspectorCollapsed = false;
+        try {
+            inspectorCollapsed = localStorage.getItem('takeoff.inspector.collapsed') === '1';
+        } catch (e) {}
+        setInspectorCollapsed(inspectorCollapsed);
+        $('toggleTakeoffInspector')?.addEventListener('click', () => {
+            setInspectorCollapsed(!$('takeoffWorkspace')?.classList.contains('inspector-collapsed'));
+        });
+
         $('toggleTakeoffItemsPanel')?.addEventListener('click', () => {
             const workspace = $('takeoffWorkspace');
             workspace?.classList.toggle('items-collapsed');
@@ -2578,6 +2614,8 @@
             if (icon) {
                 icon.className = workspace?.classList.contains('items-collapsed') ? 'fas fa-angles-right' : 'fas fa-angles-left';
             }
+            requestAnimationFrame(syncWorkspaceDensity);
+            setTimeout(notifyEditorVisible, 80);
         });
 
         document.querySelectorAll('[data-takeoff-menu-toggle]').forEach(button => {
@@ -2645,7 +2683,16 @@
             if (event.target.closest('#takeoffViewerLayersPopover') || event.target.closest('[data-viewer-command="layers"]')) return;
             closeViewerLayersPopover();
         });
-        window.addEventListener('resize', refreshOpenRowMenu);
+        window.addEventListener('resize', () => {
+            refreshOpenRowMenu();
+            syncWorkspaceDensity();
+        });
+        if (typeof ResizeObserver === 'function') {
+            const observer = new ResizeObserver(syncWorkspaceDensity);
+            const viewer = document.querySelector('.pro-takeoff-viewer');
+            if (viewer) observer.observe(viewer);
+        }
+        syncWorkspaceDensity();
         document.addEventListener('fullscreenchange', () => {
             viewerState.isFullscreen = Boolean(document.fullscreenElement);
             const icon = document.querySelector('[data-viewer-command="fullscreen"] i');

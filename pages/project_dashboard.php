@@ -560,7 +560,7 @@ $state = [
         }
     </style>
     <link rel="stylesheet" href="../assets/project_overview.css">
-    <link rel="stylesheet" href="../assets/project_takeoff.css?v=workspace-takeoff-20260730-1">
+    <link rel="stylesheet" href="../assets/project_takeoff.css?v=workspace-takeoff-20260730-2">
     <link rel="stylesheet" href="../assets/project_estimating.css">
     <link rel="stylesheet" href="../assets/project_proposal.css">
 </head>
@@ -954,7 +954,7 @@ $state = [
                         </div>
                         <div class="pro-menu-wrap">
                             <button class="pro-actions-btn" type="button" data-takeoff-menu-toggle="takeoffWorkspaceActions">
-                                Project actions <i class="fas fa-chevron-down"></i>
+                                <i class="fas fa-ellipsis-vertical"></i><span>Project actions</span><i class="fas fa-chevron-down"></i>
                             </button>
                             <div class="pro-menu" id="takeoffWorkspaceActions">
                                 <button type="button" data-takeoff-action="upload-drawing"><i class="fas fa-cloud-arrow-up"></i> Upload drawing</button>
@@ -1003,6 +1003,9 @@ $state = [
                 <aside class="pro-takeoff-inspector" aria-label="Takeoff tools and properties">
                     <div class="pro-inspector-head">
                         <div><strong>Takeoff inspector</strong><small>Tools & properties</small></div>
+                        <button class="pro-icon-btn" type="button" id="toggleTakeoffInspector" title="Collapse inspector" aria-label="Collapse inspector">
+                            <i class="fas fa-angles-right"></i>
+                        </button>
                     </div>
                     <div class="pro-inspector-tools">
                         <div class="pro-tools-bar" aria-label="Takeoff tools">
@@ -1289,7 +1292,7 @@ $state = [
     setActiveTab(ProjectState.activeTab || 'overview', false);
 </script>
 <script src="../assets/project_overview.js"></script>
-<script src="../assets/project_takeoff.js?v=workspace-takeoff-20260730-1"></script>
+<script src="../assets/project_takeoff.js?v=workspace-takeoff-20260730-2"></script>
 <script src="../assets/estimate_calculation_service.js"></script>
 <script src="../assets/project_estimating.js"></script>
 <script src="../assets/project_proposal.js"></script>
