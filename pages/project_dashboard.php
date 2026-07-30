@@ -560,7 +560,7 @@ $state = [
         }
     </style>
     <link rel="stylesheet" href="../assets/project_overview.css">
-    <link rel="stylesheet" href="../assets/project_takeoff.css">
+    <link rel="stylesheet" href="../assets/project_takeoff.css?v=workspace-takeoff-20260730-1">
     <link rel="stylesheet" href="../assets/project_estimating.css">
     <link rel="stylesheet" href="../assets/project_proposal.css">
 </head>
@@ -839,6 +839,15 @@ $state = [
                             <i class="fas fa-angles-left"></i>
                         </button>
                     </div>
+                    <div class="pro-left-section-head">
+                        <span>Documents</span>
+                        <small id="takeoffDocumentCount">0</small>
+                    </div>
+                    <div class="pro-compact-documents" id="takeoffDocumentsCompact"></div>
+                    <div class="pro-left-section-head">
+                        <span>Layers</span>
+                        <small>Quantity</small>
+                    </div>
                     <div class="pro-takeoff-searchbar">
                         <div class="pro-search-input">
                             <input id="takeoffItemSearch" type="search" placeholder="Search Takeoffs">
@@ -871,8 +880,6 @@ $state = [
                 <section class="pro-takeoff-viewer">
                     <div class="pro-viewer-toolbar">
                         <div class="pro-toolbar-group">
-                            <button class="pro-icon-btn" type="button" data-viewer-command="previous" title="Previous sheet"><i class="fas fa-chevron-left"></i></button>
-                            <button class="pro-icon-btn" type="button" data-viewer-command="next" title="Next sheet"><i class="fas fa-chevron-right"></i></button>
                             <div class="pro-drawing-selector">
                                 <button class="pro-sheet-select pro-sheet-trigger" id="takeoffSheetSelect" type="button" aria-expanded="false">
                                     <span id="takeoffSheetLabel"><?= htmlspecialchars($selectedDoc['filename'] ?? 'No drawing selected') ?></span>
@@ -910,10 +917,8 @@ $state = [
                             </div>
                         </div>
                         <div class="pro-toolbar-group center">
-                            <button type="button" class="pro-toolbar-btn" data-viewer-command="compare"><i class="fas fa-code-compare"></i> Compare</button>
-                            <button type="button" class="pro-toolbar-btn" data-viewer-command="show-estimate"><i class="fas fa-calculator"></i> Show Estimate</button>
-                            <button type="button" class="pro-toolbar-btn" data-viewer-command="popout"><i class="fas fa-up-right-from-square"></i> Pop out</button>
-                            <button type="button" class="pro-toolbar-btn" data-viewer-command="download"><i class="fas fa-download"></i> Download</button>
+                            <div class="pro-top-stat"><span>Page</span><strong id="takeoffTopPage">1 / 1</strong></div>
+                            <div class="pro-top-stat"><span>Estimate</span><strong id="takeoffTopProgress">0% ready</strong></div>
                         </div>
                         <div class="pro-scale-wrap">
                             <button class="pro-scale-status" id="takeoffScaleStatus" type="button" data-scale-toggle aria-expanded="false">
@@ -947,6 +952,17 @@ $state = [
                                 <div class="pro-scale-hint" id="takeoffScaleHint">Choose a preset scale or calibrate manually.</div>
                             </div>
                         </div>
+                        <div class="pro-menu-wrap">
+                            <button class="pro-actions-btn" type="button" data-takeoff-menu-toggle="takeoffWorkspaceActions">
+                                Project actions <i class="fas fa-chevron-down"></i>
+                            </button>
+                            <div class="pro-menu" id="takeoffWorkspaceActions">
+                                <button type="button" data-takeoff-action="upload-drawing"><i class="fas fa-cloud-arrow-up"></i> Upload drawing</button>
+                                <button type="button" data-takeoff-action="save-workspace"><i class="fas fa-floppy-disk"></i> Save workspace</button>
+                                <button type="button" data-takeoff-action="export-excel"><i class="fas fa-file-export"></i> Export quantities</button>
+                                <button type="button" data-viewer-command="download"><i class="fas fa-download"></i> Download drawing</button>
+                            </div>
+                        </div>
                     </div>
 
                     <div class="pro-canvas-shell">
@@ -964,13 +980,13 @@ $state = [
                         <?php endif; ?>
 
                         <div class="pro-floating-controls">
+                            <button class="pro-icon-btn" type="button" data-viewer-command="previous" title="Previous sheet"><i class="fas fa-chevron-left"></i></button>
+                            <button class="pro-icon-btn" type="button" data-viewer-command="next" title="Next sheet"><i class="fas fa-chevron-right"></i></button>
                             <button class="pro-icon-btn" type="button" data-viewer-command="zoom-out" title="Zoom out"><i class="fas fa-minus"></i></button>
                             <input id="takeoffZoomSlider" type="range" min="25" max="400" value="100" aria-label="Zoom">
                             <span id="takeoffZoomPercent">100%</span>
                             <button class="pro-icon-btn" type="button" data-viewer-command="zoom-in" title="Zoom in"><i class="fas fa-plus"></i></button>
                             <button class="pro-chip-btn" type="button" data-viewer-command="fit">Fit</button>
-                            <button class="pro-chip-btn" type="button" data-viewer-command="grid">Grid</button>
-                            <button class="pro-chip-btn" type="button" data-viewer-command="layers">Layers</button>
                             <button class="pro-icon-btn" type="button" data-viewer-command="fullscreen" title="Fullscreen"><i class="fas fa-expand"></i></button>
                         </div>
                     </div>
@@ -984,24 +1000,30 @@ $state = [
                     </div>
                 </section>
 
-                <aside class="pro-tools-bar" aria-label="Takeoff tools">
-                    <button class="pro-tool-btn active" type="button" data-tool-command="smart" title="Select"><i class="fas fa-mouse-pointer"></i></button>
-                    <button class="pro-tool-btn" type="button" data-tool-command="pan" title="Pan"><i class="fas fa-hand"></i></button>
-                    <button class="pro-tool-btn" type="button" data-tool-command="multi-select" title="Rectangle Select"><i class="fas fa-object-group"></i></button>
-                    <div class="pro-tool-separator"></div>
-                    <button class="pro-tool-btn" type="button" data-tool-command="count" title="Count"><i class="fas fa-circle-dot"></i></button>
-                    <button class="pro-tool-btn" type="button" data-tool-command="linear" title="Linear"><i class="fas fa-grip-lines"></i></button>
-                    <button class="pro-tool-btn" type="button" data-tool-command="area" title="Area"><i class="fas fa-draw-polygon"></i></button>
-                    <button class="pro-tool-btn" type="button" data-tool-command="measure" title="Measure"><i class="fas fa-ruler-horizontal"></i></button>
-                    <button class="pro-tool-btn" type="button" data-tool-command="freehand" title="Freehand / Lasso"><i class="fas fa-signature"></i></button>
-                    <button class="pro-tool-btn" type="button" data-tool-command="text" title="Text"><i class="fas fa-font"></i></button>
-                    <button class="pro-tool-btn" type="button" data-tool-command="pin" title="Pin"><i class="fas fa-location-dot"></i></button>
-                    <button class="pro-tool-btn" type="button" data-tool-command="snapshot" title="Snapshot"><i class="fas fa-camera"></i></button>
-                    <div class="pro-tool-separator"></div>
-                    <button class="pro-tool-btn" type="button" data-tool-command="undo" title="Undo"><i class="fas fa-rotate-left"></i></button>
-                    <button class="pro-tool-btn" type="button" data-tool-command="redo" title="Redo"><i class="fas fa-rotate-right"></i></button>
-                    <button class="pro-tool-btn danger" type="button" data-tool-command="delete" title="Delete"><i class="fas fa-trash"></i></button>
-                    <button class="pro-tool-btn" type="button" data-tool-command="more" title="More tools"><i class="fas fa-ellipsis"></i></button>
+                <aside class="pro-takeoff-inspector" aria-label="Takeoff tools and properties">
+                    <div class="pro-inspector-head">
+                        <div><strong>Takeoff inspector</strong><small>Tools & properties</small></div>
+                    </div>
+                    <div class="pro-inspector-tools">
+                        <div class="pro-tools-bar" aria-label="Takeoff tools">
+                            <button class="pro-tool-btn active" type="button" data-tool-command="smart" title="Select"><i class="fas fa-mouse-pointer"></i></button>
+                            <button class="pro-tool-btn" type="button" data-tool-command="pan" title="Pan"><i class="fas fa-hand"></i></button>
+                            <button class="pro-tool-btn" type="button" data-tool-command="multi-select" title="Rectangle Select"><i class="fas fa-object-group"></i></button>
+                            <div class="pro-tool-separator"></div>
+                            <button class="pro-tool-btn" type="button" data-tool-command="count" title="Count"><i class="fas fa-circle-dot"></i></button>
+                            <button class="pro-tool-btn" type="button" data-tool-command="linear" title="Linear"><i class="fas fa-grip-lines"></i></button>
+                            <button class="pro-tool-btn" type="button" data-tool-command="area" title="Area"><i class="fas fa-draw-polygon"></i></button>
+                            <button class="pro-tool-btn" type="button" data-tool-command="measure" title="Measure"><i class="fas fa-ruler-horizontal"></i></button>
+                            <button class="pro-tool-btn" type="button" data-tool-command="freehand" title="Freehand"><i class="fas fa-signature"></i></button>
+                            <button class="pro-tool-btn" type="button" data-tool-command="text" title="Text"><i class="fas fa-font"></i></button>
+                            <button class="pro-tool-btn" type="button" data-tool-command="pin" title="Pin"><i class="fas fa-location-dot"></i></button>
+                            <div class="pro-tool-separator"></div>
+                            <button class="pro-tool-btn" type="button" data-tool-command="undo" title="Undo"><i class="fas fa-rotate-left"></i></button>
+                            <button class="pro-tool-btn" type="button" data-tool-command="redo" title="Redo"><i class="fas fa-rotate-right"></i></button>
+                            <button class="pro-tool-btn danger" type="button" data-tool-command="delete" title="Delete"><i class="fas fa-trash"></i></button>
+                        </div>
+                        <div class="pro-inspector-content" id="takeoffInspectorContent"></div>
+                    </div>
                 </aside>
             </div>
         </section>
@@ -1267,7 +1289,7 @@ $state = [
     setActiveTab(ProjectState.activeTab || 'overview', false);
 </script>
 <script src="../assets/project_overview.js"></script>
-<script src="../assets/project_takeoff.js"></script>
+<script src="../assets/project_takeoff.js?v=workspace-takeoff-20260730-1"></script>
 <script src="../assets/estimate_calculation_service.js"></script>
 <script src="../assets/project_estimating.js"></script>
 <script src="../assets/project_proposal.js"></script>
