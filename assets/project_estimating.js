@@ -224,7 +224,8 @@
             catalogItems: [],
             catalogLoaded: false,
             importPreview: null,
-            reviewOpen: false
+            reviewOpen: false,
+            copyEstimateOpen: false
         };
     }
 
@@ -413,7 +414,7 @@
             </header>
             ${takeoffAlert()}
             <main class="est-main">
-                <section class="est-left">
+                <section class="est-left ${state.tableSettingsOpen ? 'has-table-settings' : ''}">
                     <div class="est-toolbar">
                         <label class="est-search"><i class="fas fa-search"></i><input id="estSearch" value="${esc(state.search)}" type="search" placeholder="Search cost item"></label>
                         <button class="est-btn est-btn-primary" data-est-action="add-catalog"><i class="fas fa-book"></i><span>Add from Catalog</span></button>
@@ -474,7 +475,7 @@
         const totals = Calc.calculateSummary([{ ...group, items: group.items }], activeSettings()).direct;
         return `<tr class="est-row-group" data-group-id="${esc(group.id)}">
             ${cell('select', `<input type="checkbox" data-select-group="${esc(group.id)}">`)}
-            ${cell('name', `<button class="est-icon-btn" data-toggle-group="${esc(group.id)}"><i class="fas ${group.expanded === false ? 'fa-chevron-right' : 'fa-chevron-down'}"></i></button><i class="fas fa-folder"></i><strong>${esc(group.name)}</strong><small>${group.items.length} item(s)</small>`)}
+            ${cell('name', `<div class="est-group-name"><button class="est-icon-btn" data-toggle-group="${esc(group.id)}"><i class="fas ${group.expanded === false ? 'fa-chevron-right' : 'fa-chevron-down'}"></i></button><i class="fas fa-folder"></i><span><strong>${esc(group.name)}</strong><small>${group.items.length} item(s)</small></span></div>`)}
             ${cell('description', '')}${cell('budgetCode', '')}${cell('costCode', '')}${cell('costCategory', '')}${cell('uom', '')}
             ${cell('quantity', number(group.items.reduce((sum, item) => sum + Number(item.quantity || 0), 0)), 'est-number')}
             ${cell('quantitySource', 'calculated')}${cell('unitMaterialCost', '')}${cell('waste', '')}
@@ -604,19 +605,53 @@
     }
 
     function renderVersionBar(summary) {
-        return `<footer class="est-version-bar"><span class="est-pill">${state.estimates.length} estimates</span>${state.estimates.map(est => `<button class="est-version-tab ${est.id === state.activeEstimateId ? 'active' : ''}" data-version="${esc(est.id)}"><span><strong>${esc(est.name)}</strong><small>${esc(est.status)}</small></span>${est.isLocked ? '<i class="fas fa-lock"></i>' : ''}</button>`).join('')}<button class="est-icon-btn" data-est-action="new-estimate"><i class="fas fa-plus"></i></button><button class="est-btn" data-est-action="compare-estimates"><i class="fas fa-code-compare"></i><span>Compare</span></button></footer>`;
+        return `<footer class="est-version-bar"><span class="est-pill">${state.estimates.length} estimates</span>${state.estimates.map(est => `<button class="est-version-tab ${est.id === state.activeEstimateId ? 'active' : ''}" data-version="${esc(est.id)}"><span><strong>${esc(est.name)}</strong><small>${esc(est.status)} · ${est.groups.reduce((sum, group) => sum + group.items.length, 0)} items</small></span>${est.isLocked ? '<i class="fas fa-lock"></i>' : ''}</button>`).join('')}<button class="est-btn est-new-estimate" data-est-action="new-estimate"><i class="fas fa-plus"></i><span>New estimate</span></button><button class="est-btn" data-est-action="compare-estimates" ${state.estimates.length < 2 ? 'disabled' : ''}><i class="fas fa-code-compare"></i><span>Compare</span></button></footer>`;
     }
 
     function renderModals() {
-        return `${state.catalogOpen ? catalogModal() : ''}${state.importOpen ? importModal() : ''}${state.reviewOpen ? reviewModal() : ''}${state.compareOpen ? compareModal() : ''}`;
+        return `${state.catalogOpen ? catalogModal() : ''}${state.importOpen ? importModal() : ''}${state.reviewOpen ? reviewModal() : ''}${state.compareOpen ? compareModal() : ''}${state.copyEstimateOpen ? copyEstimateModal() : ''}`;
+    }
+
+    function copyEstimateModal() {
+        const current = activeEstimate();
+        return `<div class="est-modal-backdrop" data-copy-estimate-backdrop>
+            <section class="est-copy-modal" role="dialog" aria-modal="true" aria-labelledby="copyEstimateTitle">
+                <header>
+                    <div><strong id="copyEstimateTitle">Create estimate</strong><span>Each estimate is an independent workspace.</span></div>
+                    <button class="est-icon-btn" data-est-action="close-copy-estimate" aria-label="Close"><i class="fas fa-times"></i></button>
+                </header>
+                <div class="est-copy-body">
+                    <label class="est-copy-name"><span>Estimate name</span><input id="copyEstimateName" value="${esc(`${current.name} Copy`)}" autocomplete="off"></label>
+                    <fieldset>
+                        <legend>What should be copied?</legend>
+                        <label class="est-copy-option">
+                            <input type="radio" name="copyEstimateMode" value="all" checked>
+                            <span><strong>Complete estimate</strong><small>Copies every layer, item, price, note and estimate setting.</small></span>
+                        </label>
+                        <label class="est-copy-option">
+                            <input type="radio" name="copyEstimateMode" value="structure">
+                            <span><strong>Layers only</strong><small>Copies group/layer structure without cost items.</small></span>
+                        </label>
+                        <label class="est-copy-option">
+                            <input type="radio" name="copyEstimateMode" value="blank">
+                            <span><strong>Blank estimate</strong><small>Starts empty so new layers and items can be added independently.</small></span>
+                        </label>
+                    </fieldset>
+                </div>
+                <footer>
+                    <button class="est-btn" data-est-action="close-copy-estimate">Cancel</button>
+                    <button class="est-btn est-btn-primary" data-est-action="create-estimate-copy"><i class="fas fa-copy"></i>Create estimate</button>
+                </footer>
+            </section>
+        </div>`;
     }
 
     function bindEvents() {
         root.querySelector('#estSearch')?.addEventListener('input', e => { state.search = e.target.value; render(); });
         root.querySelectorAll('[data-menu-toggle]').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); root.querySelector(`#estMenu-${btn.dataset.menuToggle}`)?.classList.toggle('open'); }));
         root.querySelectorAll('[data-est-action]').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); handleAction(btn.dataset.estAction); }));
-        root.querySelector('[data-estimate-select]')?.addEventListener('change', e => { state.activeEstimateId = e.target.value; render(); });
-        root.querySelectorAll('[data-version]').forEach(btn => btn.addEventListener('click', () => { state.activeEstimateId = btn.dataset.version; render(); }));
+        root.querySelector('[data-estimate-select]')?.addEventListener('change', e => { state.activeEstimateId = e.target.value; state.selected = []; render(); });
+        root.querySelectorAll('[data-version]').forEach(btn => btn.addEventListener('click', () => { state.activeEstimateId = btn.dataset.version; state.selected = []; render(); }));
         root.querySelectorAll('[data-toggle-group]').forEach(btn => btn.addEventListener('click', () => { const group = activeEstimate().groups.find(g => g.id === btn.dataset.toggleGroup); if (group) group.expanded = group.expanded === false; markDirty(); render(); }));
         root.querySelectorAll('[data-add-item]').forEach(btn => btn.addEventListener('click', () => addManualItem(btn.dataset.addItem)));
         root.querySelectorAll('[data-select-item]').forEach(box => box.addEventListener('change', () => { state.selected = box.checked ? [...new Set([...state.selected, box.dataset.selectItem])] : state.selected.filter(row => row !== box.dataset.selectItem); render(); }));
@@ -636,6 +671,15 @@
         root.querySelectorAll('[data-markup-field]').forEach(input => input.addEventListener('change', () => updateMarkupField(input)));
         root.querySelectorAll('[data-markup-add]').forEach(btn => btn.addEventListener('click', () => { activeSettings()[btn.dataset.markupAdd].push({ id: id('mk'), name: 'Custom markup', type: 'percentage', percent: 0, base: 'subtotal_sales', active: true }); markDirty(); render(); }));
         root.querySelectorAll('[data-markup-remove]').forEach(btn => btn.addEventListener('click', () => { const [key, rowId] = btn.dataset.markupRemove.split(':'); activeSettings()[key] = activeSettings()[key].filter(row => row.id !== rowId); markDirty(); render(); }));
+        root.querySelector('[data-copy-estimate-backdrop]')?.addEventListener('click', event => {
+            if (event.target === event.currentTarget) {
+                state.copyEstimateOpen = false;
+                render();
+            }
+        });
+        root.querySelector('#copyEstimateName')?.addEventListener('keydown', event => {
+            if (event.key === 'Enter') createEstimateCopy();
+        });
         root.querySelectorAll('[data-editor-cmd]').forEach(btn => btn.addEventListener('click', () => document.execCommand(btn.dataset.editorCmd, false, null)));
         document.addEventListener('click', closeFloatingMenus, { once: true });
     }
@@ -686,13 +730,14 @@
         if (action === 'refresh-takeoff') return refreshTakeoffQuantities(true);
         if (action === 'refresh-catalog') return refreshCostsFromCatalog();
         if (action === 'recalculate') return render();
-        if (action === 'duplicate-estimate') return duplicateEstimate();
+        if (action === 'duplicate-estimate' || action === 'new-estimate') { state.copyEstimateOpen = true; return render(); }
+        if (action === 'close-copy-estimate') { state.copyEstimateOpen = false; return render(); }
+        if (action === 'create-estimate-copy') return createEstimateCopy();
         if (action === 'rename-estimate') return renameEstimate();
         if (action === 'lock-estimate') { estimate.isLocked = true; audit('Estimate locked', false, true, 'estimate'); markDirty(); return render(); }
         if (action === 'unlock-estimate') { estimate.isLocked = false; audit('Estimate unlocked', true, false, 'estimate'); markDirty(); return render(); }
         if (action === 'delete-estimate') return deleteEstimate();
         if (action === 'show-proposal') return showProposal();
-        if (action === 'new-estimate') { const next = defaultEstimate(`Alternate ${state.estimates.length}`); state.estimates.push(next); state.activeEstimateId = next.id; markDirty(); return render(); }
         if (action === 'compare-estimates') { state.compareOpen = true; return render(); }
         if (action === 'review-takeoff') { state.reviewOpen = true; return render(); }
         if (action === 'sync-all') return syncAllPendingTakeoff();
@@ -733,23 +778,63 @@
         render();
     }
 
-    function duplicateEstimate() {
+    function createEstimateCopy() {
         const current = activeEstimate();
-        const copy = JSON.parse(JSON.stringify(current));
+        const nameInput = root.querySelector('#copyEstimateName');
+        const modeInput = root.querySelector('input[name="copyEstimateMode"]:checked');
+        const name = String(nameInput?.value || '').trim();
+        const mode = modeInput?.value || 'all';
+        if (!name) {
+            nameInput?.focus();
+            return toast('Enter an estimate name.');
+        }
+        const copy = mode === 'blank'
+            ? defaultEstimate(name)
+            : JSON.parse(JSON.stringify(current));
         copy.id = id('est');
-        copy.name = `${current.name} Copy`;
+        copy.name = name;
         copy.status = 'draft';
         copy.isLocked = false;
         copy.createdAt = new Date().toISOString();
         copy.updatedAt = copy.createdAt;
-        copy.groups.forEach(group => {
-            group.id = id('grp');
-            group.items.forEach(item => { item.id = id('item'); });
+        copy.auditLog = [];
+        if (mode === 'blank') copy.groups = [];
+        else {
+            const groupIds = new Map();
+            const itemIds = new Map();
+            copy.groups.forEach(group => {
+                const oldId = group.id;
+                group.id = id('grp');
+                groupIds.set(oldId, group.id);
+                if (mode === 'structure') group.items = [];
+                else group.items.forEach(item => {
+                    const oldItemId = item.id;
+                    item.id = id('item');
+                    itemIds.set(oldItemId, item.id);
+                });
+            });
+            copy.groups.forEach(group => {
+                group.parentId = group.parentId ? groupIds.get(group.parentId) || null : null;
+                group.items.forEach(item => {
+                    item.parentId = item.parentId ? itemIds.get(item.parentId) || null : null;
+                });
+            });
+        }
+        copy.auditLog.unshift({
+            id: id('audit'),
+            user: 'Current user',
+            at: new Date().toISOString(),
+            action: mode === 'all' ? 'Estimate copied with all items' : (mode === 'structure' ? 'Estimate copied with layers only' : 'Blank estimate created'),
+            entity: 'estimate',
+            before: current.id,
+            after: copy.id
         });
         state.estimates.push(copy);
         state.activeEstimateId = copy.id;
-        audit('Estimate duplicated', current.id, copy.id, 'estimate');
+        state.selected = [];
+        state.copyEstimateOpen = false;
         markDirty();
+        persist();
         render();
     }
 

@@ -561,7 +561,7 @@ $state = [
     </style>
     <link rel="stylesheet" href="../assets/project_overview.css">
     <link rel="stylesheet" href="../assets/project_takeoff.css?v=workspace-takeoff-20260730-3">
-    <link rel="stylesheet" href="../assets/project_estimating.css">
+    <link rel="stylesheet" href="../assets/project_estimating.css?v=estimating-workspace-20260730-1">
     <link rel="stylesheet" href="../assets/project_proposal.css">
 </head>
 <body>
@@ -1022,7 +1022,7 @@ $state = [
             </div>
         </section>
 
-        <section id="tab-estimating" class="tab-panel estimating-page">
+        <section id="tab-estimating" class="tab-panel fullscreen estimating-page">
             <div id="estimatingModule" class="est-shell" data-project-id="<?= (int)$projectId ?>">
                 <section class="est-left" aria-label="Estimate cost items">
                     <div class="est-toolbar">
@@ -1285,7 +1285,7 @@ $state = [
 <script src="../assets/project_overview.js"></script>
 <script src="../assets/project_takeoff.js?v=workspace-takeoff-20260730-3"></script>
 <script src="../assets/estimate_calculation_service.js"></script>
-<script src="../assets/project_estimating.js"></script>
+<script src="../assets/project_estimating.js?v=estimating-workspace-20260730-1"></script>
 <script src="../assets/project_proposal.js"></script>
 <script src="../assets/global_tools.js"></script>
 </body>

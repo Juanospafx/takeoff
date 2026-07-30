@@ -74,7 +74,8 @@
     min-height: 0;
     display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto minmax(0, 1fr) 56px;
+    grid-template-rows: auto auto minmax(0, 1fr) 62px;
+    overflow: hidden;
     background: var(--est-bg);
 }
 
@@ -209,8 +210,12 @@
 
 .est-left {
     display: grid;
-    grid-template-rows: auto auto minmax(0, 1fr) 50px;
+    grid-template-rows: auto minmax(0, 1fr) 44px;
     border-right: 1px solid var(--est-line);
+}
+
+.est-left.has-table-settings {
+    grid-template-rows: auto auto minmax(0, 1fr) 44px;
 }
 
 .est-right {
@@ -235,12 +240,13 @@
     border-bottom: 1px solid var(--est-line-soft);
     background: var(--est-surface-2);
     min-width: 0;
+    flex-wrap: wrap;
 }
 
 .est-search {
     position: relative;
     min-width: 260px;
-    flex: 1;
+    flex: 1 1 240px;
 }
 
 .est-search i {
@@ -371,6 +377,8 @@
 .est-create-bottom {
     width: max-content;
     color: var(--est-muted);
+    align-self: center;
+    margin-left: 12px;
 }
 
 .est-menu-wrap {
@@ -561,6 +569,35 @@
 .est-name-cell {
     min-width: 260px;
     max-width: 340px;
+}
+
+.est-group-name {
+    min-width: 0;
+    display: grid;
+    grid-template-columns: 34px 14px minmax(0, 1fr);
+    align-items: center;
+    gap: 7px;
+}
+
+.est-group-name > span,
+.est-group-name strong,
+.est-group-name small {
+    min-width: 0;
+    display: block;
+}
+
+.est-group-name strong,
+.est-group-name small {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+}
+
+.est-group-name small {
+    margin-top: 2px;
+    color: var(--est-muted);
+    font-size: 10px;
+    font-weight: 700;
 }
 
 .est-name-main {
@@ -1021,6 +1058,129 @@
     border-top: 1px solid var(--est-line);
     background: var(--est-surface);
     overflow-x: auto;
+    min-width: 0;
+    min-height: 62px;
+    position: relative;
+    z-index: 12;
+    scrollbar-width: thin;
+}
+
+.est-copy-modal {
+    width: min(560px, 100%);
+    max-height: min(720px, 100%);
+    display: grid;
+    grid-template-rows: auto minmax(0, 1fr) auto;
+    background: var(--est-surface);
+    border: 1px solid var(--est-line);
+    border-radius: var(--est-radius-lg);
+    box-shadow: var(--est-shadow-lg);
+    overflow: hidden;
+}
+
+.est-copy-modal > header,
+.est-copy-modal > footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 12px;
+    padding: 14px 16px;
+}
+
+.est-copy-modal > header {
+    border-bottom: 1px solid var(--est-line);
+}
+
+.est-copy-modal > footer {
+    justify-content: flex-end;
+    border-top: 1px solid var(--est-line);
+    background: var(--est-surface-2);
+}
+
+.est-copy-modal > header strong,
+.est-copy-modal > header span {
+    display: block;
+}
+
+.est-copy-modal > header strong {
+    color: var(--est-text);
+    font-size: 1rem;
+}
+
+.est-copy-modal > header span {
+    margin-top: 3px;
+    color: var(--est-muted);
+    font-size: .76rem;
+}
+
+.est-copy-body {
+    min-height: 0;
+    overflow-y: auto;
+    display: grid;
+    gap: 18px;
+    padding: 18px;
+}
+
+.est-copy-name,
+.est-copy-body fieldset {
+    display: grid;
+    gap: 8px;
+}
+
+.est-copy-name > span,
+.est-copy-body legend {
+    color: var(--est-text-soft);
+    font-size: .76rem;
+    font-weight: 800;
+}
+
+.est-copy-name input {
+    width: 100%;
+    height: 40px;
+    padding: 0 11px;
+    border: 1px solid var(--est-line);
+    border-radius: var(--est-radius-sm);
+    background: var(--est-surface);
+    color: var(--est-text);
+    font: inherit;
+}
+
+.est-copy-body fieldset {
+    margin: 0;
+    padding: 0;
+    border: 0;
+}
+
+.est-copy-option {
+    display: grid;
+    grid-template-columns: 20px minmax(0, 1fr);
+    gap: 10px;
+    padding: 12px;
+    border: 1px solid var(--est-line);
+    border-radius: var(--est-radius-md);
+    background: var(--est-surface-2);
+    cursor: pointer;
+}
+
+.est-copy-option:has(input:checked) {
+    border-color: var(--est-primary-border);
+    background: var(--est-primary-soft);
+}
+
+.est-copy-option strong,
+.est-copy-option small {
+    display: block;
+}
+
+.est-copy-option strong {
+    color: var(--est-text);
+    font-size: .84rem;
+}
+
+.est-copy-option small {
+    margin-top: 3px;
+    color: var(--est-muted);
+    font-size: .74rem;
+    line-height: 1.4;
 }
 
 .est-pill {
