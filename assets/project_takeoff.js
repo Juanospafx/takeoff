@@ -79,6 +79,18 @@
             button.dataset.proTooltip = label.replace(/[-_]+/g, ' ');
             button.removeAttribute('title');
         });
+        document.querySelectorAll('[data-takeoff-menu-toggle]').forEach(button => {
+            const menu = $(button.dataset.takeoffMenuToggle);
+            button.setAttribute('aria-haspopup', 'menu');
+            button.setAttribute('aria-expanded', menu?.classList.contains('open') ? 'true' : 'false');
+        });
+    }
+
+    function setMenuExpanded(button, expanded) {
+        const menu = button && $(button.dataset.takeoffMenuToggle);
+        if (!button || !menu) return;
+        menu.classList.toggle('open', expanded);
+        button.setAttribute('aria-expanded', expanded ? 'true' : 'false');
     }
 
     function syncWorkspaceDensity() {
@@ -1283,6 +1295,8 @@
         const rows = $('takeoffCatalogRows');
         const status = $('takeoffCatalogStatus');
         if (!rows || !status) return;
+        status.setAttribute('role', 'status');
+        status.setAttribute('aria-live', 'polite');
         if (catalogState.loading) {
             status.hidden = false;
             status.textContent = 'Loading Cost Catalog...';
@@ -2094,6 +2108,8 @@
         if (old) old.remove();
         const toast = document.createElement('div');
         toast.className = 'toast-lite';
+        toast.setAttribute('role', 'status');
+        toast.setAttribute('aria-live', 'polite');
         toast.textContent = command.includes('.') ? command : `${command.replace('-', ' ')} is ready to connect.`;
         document.body.appendChild(toast);
         setTimeout(() => toast.remove(), 2400);
@@ -2598,7 +2614,8 @@
         document.querySelectorAll('[data-takeoff-menu-toggle]').forEach(button => {
             button.addEventListener('click', event => {
                 event.stopPropagation();
-                $(button.dataset.takeoffMenuToggle)?.classList.toggle('open');
+                const menu = $(button.dataset.takeoffMenuToggle);
+                setMenuExpanded(button, !menu?.classList.contains('open'));
             });
         });
 
@@ -2650,6 +2667,7 @@
 
         document.addEventListener('click', () => {
             document.querySelectorAll('.pro-menu, .pro-row-menu').forEach(menu => menu.classList.remove('open'));
+            document.querySelectorAll('[data-takeoff-menu-toggle]').forEach(button => button.setAttribute('aria-expanded', 'false'));
             activeRowMenuAnchor = null;
             closeScalePanel();
             closeDrawingDropdown();

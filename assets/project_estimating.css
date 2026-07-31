@@ -117,6 +117,10 @@
     display: inline-flex;
     align-items: center;
     gap: 5px;
+    min-height: 30px;
+    padding: 4px 8px;
+    border: 1px solid transparent;
+    border-radius: 999px;
 }
 
 .est-save-state::before {
@@ -127,13 +131,49 @@
     background: var(--est-success);
 }
 
-.est-save-state.dirty {
+.est-save-state.pending,
+.est-save-state.saving,
+.est-save-state.loading {
     color: var(--est-warning);
+    background: var(--est-warning-soft);
+    border-color: var(--est-warning-border);
 }
 
-.est-save-state.dirty::before {
+.est-save-state.pending::before,
+.est-save-state.saving::before,
+.est-save-state.loading::before {
     background: var(--est-warning);
 }
+
+.est-save-state.saving::before,
+.est-save-state.loading::before {
+    animation: est-pulse 1s ease-in-out infinite;
+}
+
+.est-save-state.error,
+.est-save-state.conflict {
+    color: var(--est-danger);
+    background: var(--est-danger-soft);
+    border-color: var(--est-danger-border);
+}
+
+.est-save-state.error::before,
+.est-save-state.conflict::before { background: var(--est-danger); }
+
+.est-save-state button {
+    border: 0;
+    padding: 0 2px;
+    background: transparent;
+    color: inherit;
+    font: inherit;
+    font-weight: 800;
+    text-decoration: underline;
+    cursor: pointer;
+}
+
+.est-save-state button[hidden] { display: none; }
+
+@keyframes est-pulse { 50% { opacity: .25; transform: scale(.75); } }
 
 .est-header-actions {
     display: flex;
@@ -432,6 +472,13 @@
 .est-table-wrap {
     min-height: 0;
     overflow: auto;
+    overscroll-behavior: contain;
+    scrollbar-gutter: stable;
+}
+
+.est-table-wrap:focus-visible {
+    outline: 3px solid var(--est-primary-soft);
+    outline-offset: -3px;
 }
 
 .est-table-settings {
@@ -564,6 +611,49 @@
     color: var(--est-muted);
     font-weight: 600;
     font-size: .86rem;
+}
+
+.est-empty-state {
+    width: min(430px, 100%);
+    margin: 22px auto;
+    display: grid;
+    justify-items: center;
+    gap: 9px;
+}
+
+.est-empty-state > i {
+    display: grid;
+    place-items: center;
+    width: 46px;
+    height: 46px;
+    border-radius: 50%;
+    background: var(--est-primary-soft);
+    color: var(--est-primary);
+    font-size: 1.1rem;
+}
+
+.est-empty-state strong { color: var(--est-text); font-size: .95rem; }
+.est-empty-state span { color: var(--est-muted); font-weight: 500; line-height: 1.45; }
+.est-empty-state .est-btn { margin-top: 3px; }
+
+.est-sr-only {
+    position: absolute !important;
+    width: 1px !important;
+    height: 1px !important;
+    padding: 0 !important;
+    margin: -1px !important;
+    overflow: hidden !important;
+    clip: rect(0, 0, 0, 0) !important;
+    white-space: nowrap !important;
+    border: 0 !important;
+}
+
+.estimating-page button:focus-visible,
+.estimating-page select:focus-visible,
+.estimating-page a:focus-visible,
+.estimating-page [contenteditable]:focus-visible {
+    outline: 3px solid var(--est-primary-soft);
+    outline-offset: 2px;
 }
 
 .est-name-cell {
@@ -1451,4 +1541,30 @@
     .est-left { border-right: 0; border-bottom: 1px solid var(--est-line); }
     .est-header { align-items: flex-start; flex-direction: column; }
     .est-markup-row { grid-template-columns: 1fr 1fr; }
+}
+
+@media (max-width: 720px) {
+    .est-shell { grid-template-rows: auto auto minmax(0, 1fr) auto; }
+    .est-header { padding: 10px 12px; }
+    .est-header-actions { width: 100%; justify-content: flex-start; }
+    .est-save-state { order: -2; }
+    .est-estimate-select { order: -1; flex: 1 1 180px; min-width: 0; }
+    .est-header-actions > .est-menu-wrap { flex: 1 1 auto; }
+    .est-header-actions > .est-menu-wrap > .est-btn { width: 100%; }
+    .est-toolbar { flex-wrap: nowrap; overflow-x: auto; }
+    .est-search { min-width: 210px; }
+    .est-main { grid-template-rows: minmax(430px, 1fr) minmax(360px, .75fr); }
+    .est-sync-alert { align-items: flex-start; flex-wrap: wrap; }
+    .est-sync-alert strong { flex-basis: 100%; }
+    .est-rate-grid, .est-global-rates { grid-template-columns: 1fr; }
+    .est-version-tab { min-width: 175px; }
+    .est-modal-backdrop { padding: 10px; }
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .estimating-page *, .estimating-page *::before, .estimating-page *::after {
+        animation-duration: .01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: .01ms !important;
+    }
 }

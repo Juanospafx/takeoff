@@ -613,7 +613,7 @@ $state = [
         </div>
     </header>
 
-    <nav class="top-tabs" aria-label="Project workspace tabs">
+    <nav class="top-tabs" aria-label="Project workspace tabs" role="tablist">
         <button type="button" data-tab="overview">Overview</button>
         <button type="button" data-tab="documents">Documents</button>
         <button type="button" data-tab="takeoff">Takeoff</button>
@@ -1121,17 +1121,35 @@ $state = [
     const takeoffFrame = document.getElementById('takeoffFrame');
     const takeoffEmpty = document.getElementById('takeoffEmpty');
 
+    tabs.forEach(btn => {
+        const panelId = 'tab-' + btn.dataset.tab;
+        btn.id = btn.id || 'workspace-tab-' + btn.dataset.tab;
+        btn.setAttribute('role', 'tab');
+        btn.setAttribute('aria-controls', panelId);
+        document.getElementById(panelId)?.setAttribute('role', 'tabpanel');
+        document.getElementById(panelId)?.setAttribute('aria-labelledby', btn.id);
+    });
+
     function setActiveTab(tab, push = true) {
         ProjectState.activeTab = tab;
         const scrollTabs = ['overview'];
         document.querySelector('.workspace-shell')?.classList.toggle('workspace-scroll-mode', scrollTabs.includes(tab));
-        tabs.forEach(btn => btn.classList.toggle('active', btn.dataset.tab === tab));
-        panels.forEach(panel => panel.classList.toggle('active', panel.id === 'tab-' + tab));
+        tabs.forEach(btn => {
+            const active = btn.dataset.tab === tab;
+            btn.classList.toggle('active', active);
+            btn.setAttribute('aria-selected', active ? 'true' : 'false');
+            btn.tabIndex = active ? 0 : -1;
+        });
+        panels.forEach(panel => {
+            const active = panel.id === 'tab-' + tab;
+            panel.classList.toggle('active', active);
+            panel.hidden = !active;
+        });
         if (push) {
             const url = new URL(window.location.href);
             url.searchParams.set('tab', tab);
             if (ProjectState.selectedDocumentId) url.searchParams.set('file_id', ProjectState.selectedDocumentId);
-            history.replaceState(ProjectState, '', url.toString());
+            history.pushState({ ...ProjectState }, '', url.toString());
         }
         if (tab === 'takeoff') {
             requestAnimationFrame(() => {
@@ -1212,7 +1230,24 @@ $state = [
         setActiveTab('takeoff');
     }
 
-    tabs.forEach(btn => btn.addEventListener('click', () => setActiveTab(btn.dataset.tab)));
+    tabs.forEach((btn, index) => {
+        btn.addEventListener('click', () => setActiveTab(btn.dataset.tab));
+        btn.addEventListener('keydown', event => {
+            let next = null;
+            if (event.key === 'ArrowRight') next = (index + 1) % tabs.length;
+            if (event.key === 'ArrowLeft') next = (index - 1 + tabs.length) % tabs.length;
+            if (event.key === 'Home') next = 0;
+            if (event.key === 'End') next = tabs.length - 1;
+            if (next === null) return;
+            event.preventDefault();
+            tabs[next].focus();
+            setActiveTab(tabs[next].dataset.tab);
+        });
+    });
+    window.addEventListener('popstate', () => {
+        const tab = new URL(window.location.href).searchParams.get('tab') || 'overview';
+        if ([...tabs].some(btn => btn.dataset.tab === tab)) setActiveTab(tab, false);
+    });
     document.querySelectorAll('[data-action-tab]').forEach(btn => btn.addEventListener('click', () => setActiveTab(btn.dataset.actionTab)));
     docButtons.forEach(btn => btn.addEventListener('click', () => selectDocument(btn.dataset.docId)));
     document.getElementById('openTakeoffBtn')?.addEventListener('click', openSelectedInTakeoff);

@@ -14,8 +14,11 @@
     let saveTimer = null;
     let saveInFlight = false;
     let saveRequested = false;
+    let savePaused = false;
     let changeRevision = 0;
     let localCacheFound = false;
+    let syncState = projectId ? 'loading' : 'local';
+    let syncMessage = projectId ? 'Loading server data' : 'Saved on this device';
 
     const money = value => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(Number(value || 0));
     const number = (value, digits = 2) => Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: digits, minimumFractionDigits: digits });
@@ -299,6 +302,23 @@
         state.dirty = true;
         changeRevision += 1;
         activeEstimate().updatedAt = new Date().toISOString();
+        setSyncState(projectId ? 'pending' : 'local', projectId ? 'Changes waiting to save' : 'Saved on this device');
+    }
+
+    function setSyncState(status, message) {
+        syncState = status;
+        syncMessage = message;
+        const indicator = root.querySelector('[data-save-state]');
+        if (!indicator) return;
+        indicator.className = `est-save-state ${status}`;
+        indicator.setAttribute('aria-label', message);
+        indicator.querySelector('span').textContent = message;
+        const retry = indicator.querySelector('[data-est-action="retry-save"]');
+        if (retry) retry.hidden = status !== 'error' && status !== 'conflict';
+    }
+
+    function saveStateMarkup() {
+        return `<div class="est-save-state ${esc(syncState)}" data-save-state role="status" aria-live="polite" aria-label="${esc(syncMessage)}"><span>${esc(syncMessage)}</span><button type="button" data-est-action="retry-save" ${syncState === 'error' || syncState === 'conflict' ? '' : 'hidden'}>Retry</button></div>`;
     }
 
     function serializableState() {
@@ -342,7 +362,7 @@
     }
 
     function scheduleServerSave(immediate = false) {
-        if (!projectId) return;
+        if (!projectId || savePaused) return;
         clearTimeout(saveTimer);
         saveTimer = setTimeout(flushServerSave, immediate ? 0 : saveDelay);
     }
@@ -355,6 +375,7 @@
             return;
         }
         saveInFlight = true;
+        setSyncState('saving', 'Saving to server…');
         const savedRevision = changeRevision;
         try {
             const response = await fetch(estimatingApi, {
@@ -364,14 +385,31 @@
                 body: JSON.stringify({ action: 'save', project_id: projectId, state: serializableState() })
             });
             const result = await response.json().catch(() => null);
-            if (!response.ok || result?.success === false) throw new Error(result?.message || `HTTP ${response.status}`);
-            if (savedRevision === changeRevision) state.dirty = false;
+            if (response.status === 409) {
+                const conflict = new Error(result?.error?.message || result?.message || 'This estimate was changed elsewhere. Reload before saving again.');
+                conflict.isConflict = true;
+                throw conflict;
+            }
+            if (!response.ok || result?.success === false) throw new Error(result?.error?.message || result?.message || `HTTP ${response.status}`);
+            if (savedRevision === changeRevision) {
+                const remote = result?.state || result?.data?.state;
+                if (remote && Array.isArray(remote.estimates)) {
+                    const hydrated = migrateState(remote);
+                    Object.keys(state).forEach(key => delete state[key]);
+                    Object.assign(state, hydrated);
+                    localStorage.setItem(storageKey, JSON.stringify(serializableState()));
+                }
+                state.dirty = false;
+                setSyncState('saved', 'Saved to server');
+            }
         } catch (error) {
             state.dirty = true;
+            if (error.isConflict) savePaused = true;
+            setSyncState(error.isConflict ? 'conflict' : 'error', error.isConflict ? error.message : 'Server save failed — draft kept locally');
             console.warn('Estimating server save failed; local cache retained.', error);
         } finally {
             saveInFlight = false;
-            if (saveRequested || savedRevision !== changeRevision) {
+            if (!savePaused && (saveRequested || savedRevision !== changeRevision)) {
                 saveRequested = false;
                 scheduleServerSave();
             }
@@ -395,6 +433,8 @@
             const remote = result?.state || result?.data?.state || result?.data || (Array.isArray(result?.estimates) ? result : null);
             if (!remote || !Array.isArray(remote.estimates)) {
                 state.dirty = true;
+                syncState = 'error';
+                syncMessage = 'Invalid server response — using local draft';
                 return;
             }
 
@@ -406,12 +446,21 @@
                 Object.keys(state).forEach(key => delete state[key]);
                 Object.assign(state, hydrated);
                 localStorage.setItem(storageKey, JSON.stringify(serializableState()));
+                syncState = 'saved';
+                syncMessage = 'Loaded from server';
                 render();
+            } else if (startingRevision === changeRevision && localCacheFound && newestStateTimestamp(local) > newestStateTimestamp(remote)) {
+                state.dirty = true;
+                syncState = 'pending';
+                syncMessage = 'Local draft waiting to sync';
             }
         } catch (error) {
+            syncState = 'error';
+            syncMessage = 'Server unavailable — using local draft';
             console.warn('Estimating server load failed; using local cache.', error);
         } finally {
             serverReady = true;
+            setSyncState(syncState, syncMessage);
             if (state.dirty || startingRevision !== changeRevision) scheduleServerSave();
         }
     }
@@ -481,7 +530,7 @@
                     <span>${esc(estimate.name)} · ${esc(estimate.status.replace('_', ' '))} · Updated ${new Date(estimate.updatedAt).toLocaleString()}</span>
                 </div>
                 <div class="est-header-actions">
-                    <span class="est-save-state ${state.dirty ? 'dirty' : ''}">${state.dirty ? 'Unsaved changes' : 'Saved'}</span>
+                    ${saveStateMarkup()}
                     <select class="est-estimate-select" data-estimate-select>${state.estimates.map(est => `<option value="${esc(est.id)}" ${est.id === estimate.id ? 'selected' : ''}>${esc(est.name)}</option>`).join('')}</select>
                     <button class="est-btn est-btn-primary" data-est-action="save"><i class="fas fa-floppy-disk"></i><span>Save</span></button>
                     ${menuButton('actions', 'Actions', [
@@ -520,7 +569,7 @@
                         <button class="est-btn est-btn-danger" data-est-action="delete-selected" ${state.selected.length ? '' : 'disabled'}><i class="fas fa-trash"></i><span>Delete</span></button>
                     </div>
                     ${state.tableSettingsOpen ? renderTableSettings() : ''}
-                    <div class="est-table-wrap"><table class="est-table"><thead>${renderTableHead()}</thead><tbody>${renderTableBody(summary)}</tbody></table></div>
+                    <div class="est-table-wrap" role="region" aria-label="Estimate cost items" tabindex="0"><table class="est-table"><caption class="est-sr-only">Cost items for ${esc(estimate.name)}</caption><thead>${renderTableHead()}</thead><tbody>${renderTableBody(summary)}</tbody></table></div>
                     <button class="est-create-bottom" data-est-action="create-group"><i class="fas fa-folder-plus"></i> Create new group</button>
                 </section>
                 <aside class="est-right ${state.rightCollapsed ? 'collapsed' : ''}">
@@ -536,7 +585,7 @@
     }
 
     function menuButton(idValue, label, items) {
-        return `<div class="est-menu-wrap"><button class="est-btn" data-menu-toggle="${idValue}">${esc(label)} <i class="fas fa-chevron-down"></i></button><div class="est-menu" id="estMenu-${idValue}">${items.map(([action, text, cls]) => `<button class="${cls || ''}" data-est-action="${action}">${esc(text)}</button>`).join('')}</div></div>`;
+        return `<div class="est-menu-wrap"><button class="est-btn" data-menu-toggle="${idValue}" aria-haspopup="menu" aria-expanded="false" aria-controls="estMenu-${idValue}">${esc(label)} <i class="fas fa-chevron-down" aria-hidden="true"></i></button><div class="est-menu" id="estMenu-${idValue}" role="menu">${items.map(([action, text, cls]) => `<button class="${cls || ''}" role="menuitem" data-est-action="${action}">${esc(text)}</button>`).join('')}</div></div>`;
     }
 
     function takeoffAlert() {
@@ -546,7 +595,7 @@
     }
 
     function renderTableHead() {
-        return `<tr>${columns.map(([key, label]) => `<th class="${colClass(key)}">${esc(label)}</th>`).join('')}<th class="est-actions-col"></th></tr>`;
+        return `<tr>${columns.map(([key, label]) => `<th scope="col" class="${colClass(key)}">${esc(label)}</th>`).join('')}<th scope="col" class="est-actions-col"><span class="est-sr-only">Row actions</span></th></tr>`;
     }
 
     function colClass(key) {
@@ -563,7 +612,9 @@
             rows.push(groupRow(group, visibleItems));
             if (group.expanded !== false) visibleItems.forEach(item => rows.push(itemRow(group, item)));
         });
-        return rows.join('') || `<tr><td colspan="${columns.length + 1}" class="est-empty">No cost items found.</td></tr>`;
+        const emptyTitle = query ? 'No matching cost items' : 'Build your first estimate';
+        const emptyText = query ? 'Try another name, code, or description.' : 'Add a manual item, create a group, or choose an item from the catalog.';
+        return rows.join('') || `<tr><td colspan="${columns.length + 1}" class="est-empty"><div class="est-empty-state"><i class="fas ${query ? 'fa-magnifying-glass' : 'fa-file-invoice-dollar'}" aria-hidden="true"></i><strong>${emptyTitle}</strong><span>${emptyText}</span>${query ? '<button type="button" class="est-btn" data-est-action="clear-search">Clear search</button>' : '<button type="button" class="est-btn est-btn-primary" data-est-action="create-item">Add first item</button>'}</div></td></tr>`;
     }
 
     function groupRow(group, visibleItems) {
@@ -743,7 +794,7 @@
 
     function bindEvents() {
         root.querySelector('#estSearch')?.addEventListener('input', e => { state.search = e.target.value; render(); });
-        root.querySelectorAll('[data-menu-toggle]').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); root.querySelector(`#estMenu-${btn.dataset.menuToggle}`)?.classList.toggle('open'); }));
+        root.querySelectorAll('[data-menu-toggle]').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); const menu = root.querySelector(`#estMenu-${btn.dataset.menuToggle}`); menu?.classList.toggle('open'); btn.setAttribute('aria-expanded', String(Boolean(menu?.classList.contains('open')))); }));
         root.querySelectorAll('[data-est-action]').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); handleAction(btn.dataset.estAction); }));
         root.querySelector('[data-estimate-select]')?.addEventListener('change', e => { state.activeEstimateId = e.target.value; state.selected = []; render(); });
         root.querySelectorAll('[data-version]').forEach(btn => btn.addEventListener('click', () => { state.activeEstimateId = btn.dataset.version; state.selected = []; render(); }));
@@ -818,6 +869,8 @@
             persist({ forceServer: true, immediate: true });
             return;
         }
+        if (action === 'retry-save') { savePaused = false; scheduleServerSave(true); return; }
+        if (action === 'clear-search') { state.search = ''; render(); return; }
         if (action === 'create-group') return createGroup();
         if (action === 'create-item') return addManualItem(estimate.groups[0]?.id);
         if (action === 'delete-selected') return deleteSelected();

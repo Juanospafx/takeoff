@@ -96,7 +96,17 @@ function pew_existing_items(PDO $pdo, $estimateId) {
     }
     return $map;
 }
-function pew_save_items(PDO $pdo, $estimateId, array $groups) {
+function pew_takeoff_layer_id(PDO $pdo, $projectId, $layerKey) {
+    $layerKey = pew_text($layerKey, 191);
+    if ($layerKey === '') return null;
+    $stmt = $pdo->prepare('SELECT tl.id FROM takeoff_layers tl LEFT JOIN takeoffs t ON t.id=tl.takeoff_id
+        WHERE tl.deleted_at IS NULL AND (tl.integration_key=? OR tl.id=?)
+          AND (tl.project_id=? OR t.project_id=?) LIMIT 1');
+    $stmt->execute(array($layerKey, pew_int($layerKey), $projectId, $projectId));
+    $id = (int)$stmt->fetchColumn();
+    return $id > 0 ? $id : null;
+}
+function pew_save_items(PDO $pdo, $projectId, $estimateId, array $groups) {
     $existing = pew_existing_items($pdo, $estimateId);
     $kept = array();
     $insert = $pdo->prepare('INSERT INTO estimate_items
@@ -121,6 +131,7 @@ function pew_save_items(PDO $pdo, $estimateId, array $groups) {
             if ($clientId === '') pew_error('Every item must have an id.', 422, 'invalid_item');
             $source = pew_text(isset($item['quantitySource']) ? $item['quantitySource'] : (isset($item['sourceType']) ? $item['sourceType'] : 'manual'), 50);
             $sourceLayerKey = !empty($item['takeoffLayerId']) ? pew_text($item['takeoffLayerId'], 191) : null;
+            $takeoffLayerId = $sourceLayerKey ? pew_takeoff_layer_id($pdo, $projectId, $sourceLayerKey) : null;
             $qty = pew_num(isset($item['quantity']) ? $item['quantity'] : 0);
             $unitCost = pew_num(isset($item['unitMaterialCost']) ? $item['unitMaterialCost'] : 0);
             $waste = pew_num(isset($item['waste']) ? $item['waste'] : 0);
@@ -130,7 +141,7 @@ function pew_save_items(PDO $pdo, $estimateId, array $groups) {
             $equipmentCost = pew_num(isset($item['equipmentCost']) ? $item['equipmentCost'] : (pew_num(isset($item['unitEquipmentCost']) ? $item['unitEquipmentCost'] : 0) * pew_num(isset($item['equipmentQuantity']) ? $item['equipmentQuantity'] : 0)));
             $subtotal = pew_num(isset($item['totalCost']) ? $item['totalCost'] : ($materialCost + $laborCost + $equipmentCost));
             $values = array(
-                !empty($item['takeoffLayerId']) ? pew_int($item['takeoffLayerId']) : null,
+                $takeoffLayerId,
                 !empty($item['catalogItemId']) ? pew_int($item['catalogItemId']) : null,
                 $sourceLayerKey, $source, $source === 'manual' ? 1 : 0, $source === 'takeoff' && empty($item['quantityOverride']) ? 1 : 0,
                 !empty($item['isAssembly']) ? 'assembly' : 'line_item', $groupName,
@@ -211,7 +222,7 @@ function pew_save_estimate(PDO $pdo, $projectId, array $estimate, array $summary
         json_encode(isset($estimate['settings']) && is_array($estimate['settings']) ? $estimate['settings'] : array(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
         json_encode(isset($estimate['notes']) && is_array($estimate['notes']) ? $estimate['notes'] : array(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
         json_encode(array('workspaceClientId' => $clientId), JSON_UNESCAPED_SLASHES), $estimateId, $projectId));
-    pew_save_items($pdo, $estimateId, isset($estimate['groups']) && is_array($estimate['groups']) ? $estimate['groups'] : array());
+    pew_save_items($pdo, $projectId, $estimateId, isset($estimate['groups']) && is_array($estimate['groups']) ? $estimate['groups'] : array());
     pew_save_markups($pdo, $estimateId, isset($estimate['settings']) && is_array($estimate['settings']) ? $estimate['settings'] : array());
     $stmt = $pdo->prepare('INSERT INTO estimate_workspace_states (estimate_id,project_id,client_estimate_id,state_json,revision) VALUES (?,?,?,?,1)
         ON DUPLICATE KEY UPDATE client_estimate_id=VALUES(client_estimate_id),state_json=VALUES(state_json),revision=revision+1,updated_at=CURRENT_TIMESTAMP');
