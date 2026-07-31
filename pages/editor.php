@@ -3325,13 +3325,24 @@ if ($filePath !== '') {
     }
 
     function showToast(msg, type) {
-        const box = document.getElementById('toast-container'); 
+        const box = document.getElementById('toast-container');
+        if (!box) return;
+        const key = `${type || 'info'}:${msg}`;
+        const duplicate = [...box.querySelectorAll('.toast-msg')].find(item => item.dataset.toastKey === key);
+        if (duplicate) return;
+        if (type === 'warning') box.querySelectorAll('.toast-msg[data-toast-type="warning"]').forEach(item => item.remove());
+        while (box.children.length >= 2) box.firstElementChild.remove();
         const el = document.createElement('div'); el.className = `toast-msg`;
+        el.dataset.toastKey = key;
+        el.dataset.toastType = type || 'info';
         el.style.borderLeft = `4px solid ${type==='success'?'#10b981': (type==='warning'?'#eab308':'#ef4444')}`;
         let icon = '<i class="fas fa-check-circle text-success"></i>';
         if(type === 'error') icon = '<i class="fas fa-exclamation-circle text-danger"></i>';
         if(type === 'warning') icon = '<i class="fas fa-lock-open text-warning"></i>';
-        el.innerHTML = icon + `<span>${msg}</span>`;
+        el.innerHTML = icon;
+        const message = document.createElement('span');
+        message.textContent = msg;
+        el.appendChild(message);
         box.appendChild(el); setTimeout(() => el.remove(), 4000);
     }
 

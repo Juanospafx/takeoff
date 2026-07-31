@@ -31,6 +31,17 @@
     const num = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
     const money = (v) => '$' + num(v).toFixed(2);
     let takeoffAutosaveTimer = null;
+    let missingScaleWarningShown = false;
+
+    function warnMissingScale() {
+        if (hasPlanScale()) {
+            missingScaleWarningShown = false;
+            return;
+        }
+        if (missingScaleWarningShown) return;
+        missingScaleWarningShown = true;
+        showToast('Drawing scale is not defined. Set the scale to calculate quantities.', 'warning');
+    }
 
     function localTakeoffKey() {
         const pid = typeof projectId !== 'undefined' ? projectId : 0;
@@ -604,7 +615,7 @@
     }
 
     function addLinearPoint(pos) {
-        if (!hasPlanScale()) showToast('Drawing scale is not defined. Length will stay 0 until scale is set.', 'warning');
+        warnMissingScale();
         const layer = activeLayer();
         if (!layer) {
             showToast('Select a takeoff layer before drawing.', 'error');
@@ -748,7 +759,7 @@
     }
 
     function addAreaPoint(pos) {
-        if (!hasPlanScale()) showToast('Drawing scale is not defined. Area will stay 0 until scale is set.', 'warning');
+        warnMissingScale();
         const layer = activeLayer();
         if (!layer) {
             showToast('Select a takeoff layer before drawing.', 'error');
@@ -1314,6 +1325,11 @@
     function updateDrawingStatus(pointer) {
         const badge = document.getElementById('takeoffDrawingStatus');
         if (!badge) return;
+        // Drawing guidance is already conveyed by the active tool and cursor.
+        // Keep the former overlay disabled so it does not cover the plan.
+        badge.classList.add('takeoff-hidden');
+        badge.replaceChildren();
+        return;
         const layer = state.layers.find(row => row.client_uid === (state.draftLine?.layerUid || state.selectedLayerUid));
         const active = state.tool === 'takeoff_linear' && layer && layerType(layer) === 'linear';
         badge.classList.toggle('takeoff-hidden', !active);
@@ -1893,7 +1909,7 @@
         state.selectedLayerUids = new Set([layer.client_uid]);
         const type = layerType(layer);
         if ((type === 'linear' || type === 'area') && !hasPlanScale()) {
-            showToast('Drawing scale is not defined. Quantities will stay 0 until scale is set.', 'warning');
+            warnMissingScale();
         }
         setTool(type === 'linear' ? 'takeoff_linear' : (type === 'area' ? 'takeoff_area' : 'takeoff_count'));
         showToast(`${layer.name} active`, 'success');
