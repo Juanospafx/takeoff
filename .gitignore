@@ -1,1 +1,10 @@
 graphify-out/
+
+# Ruflo runtime state (project configuration remains versioned)
+ruvector.db
+.swarm/
+.claude-flow/logs/
+.claude-flow/sessions/
+.claude-flow/data/
+.claude-flow/daemon.pid
+.claude-flow/daemon-state.json

@@ -404,7 +404,7 @@
             }
             const type = normalizeTakeoffType(layer.takeoff_type || layer.type);
             group.layers.push({
-                id: String(layer.id || makeId('layer')),
+                id: String(layer.integration_key || layer.id || makeId('layer')),
                 groupId: group.id,
                 name: layer.name || layer.title || `Takeoff Item ${index + 1}`,
                 type,

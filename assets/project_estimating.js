@@ -7,7 +7,15 @@
     const storageKey = `takeoff.estimating.module.${projectId || 'draft'}`;
     const columnPrefKey = `takeoff.estimating.columns.${projectId || 'draft'}`;
     const takeoffKey = `takeoff.quantification.${projectId || 'draft'}`;
+    const estimatingApi = '../api/project_estimating.php';
+    const saveDelay = 750;
     const squareFootage = Number(window.ProjectState?.projectMeta?.square_footage || 0);
+    let serverReady = !projectId;
+    let saveTimer = null;
+    let saveInFlight = false;
+    let saveRequested = false;
+    let changeRevision = 0;
+    let localCacheFound = false;
 
     const money = value => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(Number(value || 0));
     const number = (value, digits = 2) => Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: digits, minimumFractionDigits: digits });
@@ -232,7 +240,10 @@
     function loadState() {
         try {
             const parsed = JSON.parse(localStorage.getItem(storageKey) || 'null');
-            if (parsed) return migrateState(parsed);
+            if (parsed) {
+                localCacheFound = true;
+                return migrateState(parsed);
+            }
         } catch (e) {}
         const estimate = defaultEstimate();
         return migrateState({ activeEstimateId: estimate.id, estimates: [estimate] });
@@ -286,13 +297,14 @@
 
     function markDirty() {
         state.dirty = true;
+        changeRevision += 1;
         activeEstimate().updatedAt = new Date().toISOString();
     }
 
-    function persist() {
+    function serializableState() {
         const estimate = activeEstimate();
         const summary = publicEstimateSummary();
-        const payload = {
+        return {
             activeEstimateId: state.activeEstimateId,
             estimates: state.estimates,
             selected: state.selected,
@@ -311,14 +323,97 @@
             scope: estimate.notes.scope,
             projectNotes: estimate.notes.projectNotes,
             included: estimate.notes.included,
-            excluded: estimate.notes.excluded
+            excluded: estimate.notes.excluded,
+            clientUpdatedAt: estimate.updatedAt
         };
+    }
+
+    function persist(options = {}) {
+        const estimate = activeEstimate();
+        const summary = publicEstimateSummary();
+        const payload = serializableState();
         localStorage.setItem(storageKey, JSON.stringify(payload));
         if (window.ProjectState) {
             window.ProjectState.estimateSummary = summary;
             window.ProjectState.estimateItems = allItems(estimate);
         }
         window.dispatchEvent(new CustomEvent('takeoff:estimate-summary-updated', { detail: summary }));
+        if ((state.dirty || options.forceServer) && serverReady && projectId) scheduleServerSave(Boolean(options.immediate));
+    }
+
+    function scheduleServerSave(immediate = false) {
+        if (!projectId) return;
+        clearTimeout(saveTimer);
+        saveTimer = setTimeout(flushServerSave, immediate ? 0 : saveDelay);
+    }
+
+    async function flushServerSave() {
+        clearTimeout(saveTimer);
+        saveTimer = null;
+        if (saveInFlight) {
+            saveRequested = true;
+            return;
+        }
+        saveInFlight = true;
+        const savedRevision = changeRevision;
+        try {
+            const response = await fetch(estimatingApi, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                keepalive: true,
+                body: JSON.stringify({ action: 'save', project_id: projectId, state: serializableState() })
+            });
+            const result = await response.json().catch(() => null);
+            if (!response.ok || result?.success === false) throw new Error(result?.message || `HTTP ${response.status}`);
+            if (savedRevision === changeRevision) state.dirty = false;
+        } catch (error) {
+            state.dirty = true;
+            console.warn('Estimating server save failed; local cache retained.', error);
+        } finally {
+            saveInFlight = false;
+            if (saveRequested || savedRevision !== changeRevision) {
+                saveRequested = false;
+                scheduleServerSave();
+            }
+        }
+    }
+
+    function newestStateTimestamp(candidate) {
+        const estimates = Array.isArray(candidate?.estimates) ? candidate.estimates : [];
+        return Math.max(0, ...estimates.map(estimate => Date.parse(estimate.updatedAt || estimate.updated_at || '') || 0));
+    }
+
+    async function loadServerState() {
+        if (!projectId) return;
+        const startingRevision = changeRevision;
+        try {
+            const response = await fetch(`${estimatingApi}?action=load&project_id=${encodeURIComponent(projectId)}`, {
+                headers: { Accept: 'application/json' }
+            });
+            const result = await response.json().catch(() => null);
+            if (!response.ok || result?.success === false) throw new Error(result?.message || `HTTP ${response.status}`);
+            const remote = result?.state || result?.data?.state || result?.data || (Array.isArray(result?.estimates) ? result : null);
+            if (!remote || !Array.isArray(remote.estimates)) {
+                state.dirty = true;
+                return;
+            }
+
+            // Changes made while the request was pending always win. Otherwise use
+            // the newest copy so an unsent local draft is never silently discarded.
+            const local = serializableState();
+            if (startingRevision === changeRevision && (!localCacheFound || newestStateTimestamp(remote) >= newestStateTimestamp(local))) {
+                const hydrated = migrateState(remote);
+                Object.keys(state).forEach(key => delete state[key]);
+                Object.assign(state, hydrated);
+                localStorage.setItem(storageKey, JSON.stringify(serializableState()));
+                render();
+            }
+        } catch (error) {
+            console.warn('Estimating server load failed; using local cache.', error);
+        } finally {
+            serverReady = true;
+            if (state.dirty || startingRevision !== changeRevision) scheduleServerSave();
+        }
     }
 
     function publicEstimateSummary() {
@@ -716,7 +811,13 @@
 
     function handleAction(action) {
         const estimate = activeEstimate();
-        if (action === 'save') { state.dirty = false; audit('Estimate saved', null, estimate, 'estimate'); return render(); }
+        if (action === 'save') {
+            audit('Estimate saved', null, estimate, 'estimate');
+            markDirty();
+            render();
+            persist({ forceServer: true, immediate: true });
+            return;
+        }
         if (action === 'create-group') return createGroup();
         if (action === 'create-item') return addManualItem(estimate.groups[0]?.id);
         if (action === 'delete-selected') return deleteSelected();
@@ -1270,4 +1371,5 @@
     });
 
     render();
+    loadServerState();
 })();

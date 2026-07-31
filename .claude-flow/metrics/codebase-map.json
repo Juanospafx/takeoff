@@ -1,0 +1,11 @@
+{
+  "timestamp": "2026-07-31T19:04:58.008Z",
+  "projectRoot": "C:\\Users\\pablo\\Desktop\\htdocs\\TAKEOFF",
+  "structure": {
+    "hasPackageJson": false,
+    "hasTsConfig": false,
+    "hasClaudeConfig": true,
+    "hasClaudeFlow": true
+  },
+  "scannedAt": 1785524698008
+}

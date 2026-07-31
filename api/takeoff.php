@@ -78,6 +78,7 @@ function takeoff_table_exists(PDO $pdo, string $table): bool
 
 function ensure_takeoff_layer_columns(PDO $pdo): void
 {
+    takeoff_add_column($pdo, 'takeoff_layers', 'integration_key', "ALTER TABLE takeoff_layers ADD COLUMN integration_key VARCHAR(191) NULL");
     takeoff_add_column($pdo, 'takeoff_layers', 'drawing_id', "ALTER TABLE takeoff_layers ADD COLUMN drawing_id BIGINT UNSIGNED NULL");
     takeoff_add_column($pdo, 'takeoff_layers', 'page_number', "ALTER TABLE takeoff_layers ADD COLUMN page_number INT UNSIGNED NOT NULL DEFAULT 1");
     takeoff_add_column($pdo, 'takeoff_layers', 'type', "ALTER TABLE takeoff_layers ADD COLUMN type VARCHAR(50) NOT NULL DEFAULT 'mixed'");
@@ -146,6 +147,7 @@ function ensure_estimate_schema(PDO $pdo): void
 
     foreach ([
         'takeoff_layer_id' => "ALTER TABLE estimate_items ADD COLUMN takeoff_layer_id BIGINT UNSIGNED NULL",
+        'source_layer_key' => "ALTER TABLE estimate_items ADD COLUMN source_layer_key VARCHAR(191) NULL",
         'catalog_item_id' => "ALTER TABLE estimate_items ADD COLUMN catalog_item_id BIGINT UNSIGNED NULL",
         'source_type' => "ALTER TABLE estimate_items ADD COLUMN source_type VARCHAR(50) NOT NULL DEFAULT 'manual'",
         'is_quantity_locked_from_takeoff' => "ALTER TABLE estimate_items ADD COLUMN is_quantity_locked_from_takeoff TINYINT(1) NOT NULL DEFAULT 0",
@@ -247,11 +249,11 @@ function sync_estimate_items(PDO $pdo, int $estimateId, array $summary, array $l
     if (!$summary) return;
     $insert = $pdo->prepare(
         "INSERT INTO estimate_items
-         (estimate_id, takeoff_layer_id, catalog_item_id, source_type, is_quantity_locked_from_takeoff, name, group_name, quantity, unit_of_measure, unit_cost, unit_labor_time, labor_hours, material_cost, labor_cost, subtotal_cost, total_cost)
-         VALUES (?, ?, ?, 'takeoff', 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+         (estimate_id, takeoff_layer_id, source_layer_key, catalog_item_id, source_type, is_quantity_locked_from_takeoff, name, group_name, quantity, unit_of_measure, unit_cost, unit_labor_time, labor_hours, material_cost, labor_cost, subtotal_cost, total_cost)
+         VALUES (?, ?, ?, ?, 'takeoff', 1, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
     );
     $update = $pdo->prepare(
-        "UPDATE estimate_items SET catalog_item_id = ?, source_type = 'takeoff', is_quantity_locked_from_takeoff = 1, name = ?, group_name = ?, quantity = ?, unit_of_measure = ?, unit_cost = ?, unit_labor_time = ?, labor_hours = ?, material_cost = ?, labor_cost = ?, subtotal_cost = ?, total_cost = ?, deleted_at = NULL WHERE estimate_id = ? AND takeoff_layer_id = ?"
+        "UPDATE estimate_items SET source_layer_key = ?, catalog_item_id = ?, source_type = 'takeoff', is_quantity_locked_from_takeoff = 1, name = ?, group_name = ?, quantity = ?, unit_of_measure = ?, unit_cost = ?, unit_labor_time = ?, labor_hours = ?, material_cost = ?, labor_cost = ?, subtotal_cost = ?, total_cost = ?, deleted_at = NULL WHERE estimate_id = ? AND takeoff_layer_id = ?"
     );
     foreach ($summary as $row) {
         if (!is_array($row)) continue;
@@ -265,6 +267,7 @@ function sync_estimate_items(PDO $pdo, int $estimateId, array $summary, array $l
         $labor = n($row['labor'] ?? 0);
         $total = n($row['total'] ?? ($material + $labor));
         $common = [
+            $clientUid !== '' ? $clientUid : null,
             !empty($row['itemId']) ? (int)$row['itemId'] : null,
             trim((string)($row['item'] ?? 'Takeoff Item')) ?: 'Takeoff Item',
             $row['group'] ?? null,
@@ -363,8 +366,8 @@ try {
             $layerMap = [];
             $layerStmt = $pdo->prepare(
                 "INSERT INTO takeoff_layers
-                 (drawing_id, page_number, name, type, takeoff_type, unit_of_measure, group_name, catalog_item_id, assembly_id, color, symbol, symbol_size, quantity, visible, locked, tag, estimate_item_id, metadata_json)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                 (integration_key, drawing_id, page_number, name, type, takeoff_type, unit_of_measure, group_name, catalog_item_id, assembly_id, color, symbol, symbol_size, quantity, visible, locked, tag, estimate_item_id, metadata_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             );
             foreach ($layers as $layer) {
                 if (!is_array($layer)) continue;
@@ -381,6 +384,7 @@ try {
                     }
                 }
                 $layerStmt->execute([
+                    $layerClientId !== '' ? $layerClientId : null,
                     $drawingId,
                     i($layer['page_number'] ?? 1, 1),
                     trim((string)($layer['name'] ?? 'Takeoff Layer')) ?: 'Takeoff Layer',
