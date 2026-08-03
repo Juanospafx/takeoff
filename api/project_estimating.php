@@ -181,7 +181,8 @@ function pew_save_markups(PDO $pdo, $estimateId, array $settings) {
         $rows = isset($settings[$key]) && is_array($settings[$key]) ? $settings[$key] : array();
         foreach ($rows as $row) {
             if (!is_array($row)) continue;
-            $type = isset($row['type']) && $row['type'] === 'fixed' ? 'fixed' : 'percentage';
+            $requestedType = isset($row['type']) ? (string)$row['type'] : 'percentage';
+            $type = in_array($requestedType, array('fixed', 'fixed_amount'), true) ? 'fixed' : 'percentage';
             $value = $type === 'fixed' ? pew_num(isset($row['amount']) ? $row['amount'] : 0) : pew_num(isset($row['percent']) ? $row['percent'] : 0);
             $meta = json_encode(array('phase' => $phase, 'workspace' => $row), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
             $stmt->execute(array($estimateId, pew_text(isset($row['name']) ? $row['name'] : 'Markup'), $type, 'subtotal', $value, 0, $order++, $meta));

@@ -187,6 +187,8 @@
             parentId: group.parentId || null,
             expanded: group.expanded !== false,
             sortOrder: Number(group.sortOrder ?? index),
+            source: group.source || (group.takeoffMirror ? 'takeoff' : ''),
+            takeoffMirror: Boolean(group.takeoffMirror || group.source === 'takeoff'),
             items: (group.items || []).map(normalizeItem)
         };
     }
@@ -460,6 +462,12 @@
             console.warn('Estimating server load failed; using local cache.', error);
         } finally {
             serverReady = true;
+            const takeoffSnapshot = readAuthoritativeTakeoffSnapshot();
+            if (Array.isArray(takeoffSnapshot)) {
+                reconcileTakeoffMirror(takeoffSnapshot, false);
+                markDirty();
+                render();
+            }
             setSyncState(syncState, syncMessage);
             if (state.dirty || startingRevision !== changeRevision) scheduleServerSave();
         }
@@ -907,7 +915,7 @@
     function createGroup() {
         const name = prompt('Group name', 'New Group');
         if (!name) return;
-        activeEstimate().groups.push({ id: id('grp'), name, parentId: null, expanded: true, sortOrder: activeEstimate().groups.length, items: [] });
+        activeEstimate().groups.push({ id: id('grp'), name, parentId: null, expanded: true, sortOrder: activeEstimate().groups.length, source: 'manual', takeoffMirror: false, items: [] });
         audit('Group created', null, name, 'group');
         markDirty();
         render();
@@ -1109,9 +1117,9 @@
 
     function refreshTakeoffQuantities(forceReview = false) {
         try {
-            const takeoff = JSON.parse(localStorage.getItem(takeoffKey) || 'null');
-            const layers = (takeoff?.groups || []).flatMap(group => (group.layers || []).map(layer => ({ ...layer, groupName: group.name })));
-            mergeTakeoffLayers(layers, forceReview);
+            const snapshot = readAuthoritativeTakeoffSnapshot();
+            if (!Array.isArray(snapshot)) throw new Error('Takeoff snapshot unavailable');
+            reconcileTakeoffMirror(snapshot, forceReview);
             toast('Takeoff quantities refreshed.');
         } catch (e) {
             toast('No Takeoff data found.');
@@ -1120,54 +1128,126 @@
         render();
     }
 
-    function mergeTakeoffLayers(layers, forceReview = false) {
-        const seen = new Set();
-        layers.forEach(layer => {
-            seen.add(String(layer.id));
-            const qty = Number(layer.quantity || 0);
-            let found = allItems().find(item => String(item.takeoffLayerId || '') === String(layer.id));
-            if (!found) {
-                const groupName = layer.catalogItemId || layer.catalog_item_id ? (layer.groupName || 'Default Group') : 'Default Group';
-                let group = activeEstimate().groups.find(row => row.name === groupName);
-                if (!group) {
-                    group = { id: id('grp'), name: groupName, expanded: true, sortOrder: activeEstimate().groups.length, items: [] };
-                    activeEstimate().groups.push(group);
-                }
-                group.items.push(normalizeItem({
-                    id: `takeoff_${layer.id}`,
-                    name: layer.name,
-                    description: layer.description,
-                    quantity: qty,
-                    uom: layer.uom || layer.unit_of_measure,
-                    takeoffLayerId: layer.id,
-                    catalogItemId: layer.catalogItemId || layer.catalog_item_id,
-                    unitMaterialCost: layer.unitCost || layer.unit_cost,
-                    unitLabor: layer.laborHours || layer.labor_hours,
-                    quantitySource: 'takeoff',
-                    quantitySyncStatus: 'synced',
-                    lastSyncedTakeoffQuantity: qty,
-                    catalogSyncStatus: layer.catalogItemId || layer.catalog_item_id ? 'synced' : 'detached'
-                }));
-                return;
+    function readAuthoritativeTakeoffSnapshot(detail = null) {
+        const directGroups = detail?.takeoffGroups || detail?.snapshot?.groups;
+        if (Array.isArray(directGroups)) return directGroups;
+        if (detail?.authoritative && Array.isArray(detail.groups)) {
+            return detail.groups.map(group => ({
+                id: group.takeoffGroupId || group.id,
+                name: group.name,
+                layers: (group.layers || group.items || []).filter(item => item.takeoffLayerId || item.quantitySource === 'takeoff').map(item => ({
+                    ...item,
+                    id: item.takeoffLayerId || item.id
+                }))
+            }));
+        }
+        try {
+            const stored = JSON.parse(localStorage.getItem(takeoffKey) || 'null');
+            if (Array.isArray(stored?.groups)) return stored.groups;
+        } catch (e) {}
+
+        // Backward compatibility with the original event, whose groups contain
+        // estimate-shaped rows. Only linked rows are accepted as Takeoff data.
+        if (!Array.isArray(detail?.groups)) return null;
+        return detail.groups.map(group => ({
+            id: group.id,
+            name: group.name,
+            layers: (group.items || []).filter(item => item.takeoffLayerId).map(item => ({
+                ...item,
+                id: item.takeoffLayerId,
+                quantity: item.quantity,
+                unitCost: item.unitMaterialCost ?? item.unitCost,
+                laborHours: item.unitLabor ?? item.laborHours
+            }))
+        })).filter(group => group.layers.length);
+    }
+
+    function isTakeoffItem(item) {
+        return Boolean(item?.takeoffLayerId) || item?.quantitySource === 'takeoff';
+    }
+
+    function reconcileTakeoffMirror(sourceGroups, forceReview = false) {
+        const estimate = activeEstimate();
+        if (window.TakeoffEstimatingSyncService) {
+            estimate.groups = window.TakeoffEstimatingSyncService
+                .reconcile(estimate.groups, sourceGroups)
+                .map(normalizeGroup);
+            Calc.calculateSummary(estimate.groups, activeSettings());
+            audit('Takeoff mirror reconciled', null, {
+                groups: sourceGroups.length,
+                items: sourceGroups.reduce((sum, group) => sum + (group.layers || group.items || []).length, 0)
+            }, 'estimate');
+            return;
+        }
+        const previousByLayer = new Map();
+        estimate.groups.forEach(group => (group.items || []).forEach(item => {
+            if (item.takeoffLayerId && !previousByLayer.has(String(item.takeoffLayerId))) {
+                previousByLayer.set(String(item.takeoffLayerId), item);
             }
-            const target = findItem(found.id)?.item;
-            if (!target) return;
-            if (forceReview || target.quantityOverride || target.quantitySyncStatus === 'modified') {
-                if (Number(target.quantity) !== qty) {
-                    target.pendingTakeoffQuantity = qty;
-                    target.quantitySyncStatus = 'takeoff_changed';
-                }
-                return;
-            }
-            target.quantity = qty;
-            target.lastSyncedTakeoffQuantity = qty;
-            target.quantitySyncStatus = 'synced';
-            target.updatedAt = new Date().toISOString();
+        }));
+
+        // Manual content is never deleted or folded into a Takeoff-owned folder.
+        const manualGroups = estimate.groups.filter(group => !group.takeoffMirror).map(group => ({
+            ...group,
+            items: (group.items || []).filter(item => !isTakeoffItem(item))
+        })).filter(group => group.items.length || group.source === 'manual');
+
+        const seenLayers = new Set();
+        const mirroredGroups = (sourceGroups || []).map((sourceGroup, groupIndex) => {
+            const uniqueLayers = [];
+            (sourceGroup.layers || sourceGroup.items || []).forEach(layer => {
+                const layerId = String(layer.id || layer.takeoffLayerId || '');
+                if (!layerId || seenLayers.has(layerId)) return;
+                seenLayers.add(layerId);
+                uniqueLayers.push({ ...layer, id: layerId });
+            });
+            const priorGroup = estimate.groups.find(group => group.takeoffMirror && String(group.takeoffGroupId || '') === String(sourceGroup.id || ''));
+            return {
+                id: priorGroup?.id || `takeoff_group_${String(sourceGroup.id || groupIndex)}`,
+                takeoffGroupId: String(sourceGroup.id || groupIndex),
+                name: sourceGroup.name || 'Default Group',
+                parentId: null,
+                expanded: priorGroup?.expanded !== false,
+                sortOrder: groupIndex,
+                source: 'takeoff',
+                takeoffMirror: true,
+                items: uniqueLayers.map(layer => takeoffEstimateItem(layer, previousByLayer.get(layer.id), forceReview))
+            };
         });
-        allItems().filter(item => item.takeoffLayerId && !seen.has(String(item.takeoffLayerId))).forEach(item => {
-            const target = findItem(item.id)?.item;
-            if (target) target.quantitySyncStatus = 'missing_takeoff';
+
+        estimate.groups = [...mirroredGroups, ...manualGroups].map((group, index) => ({ ...group, sortOrder: index }));
+        // Force the calculation service to evaluate the newly authoritative rows
+        // before persistence/summary events are emitted by render().
+        Calc.calculateSummary(estimate.groups, activeSettings());
+        audit('Takeoff mirror reconciled', null, { groups: mirroredGroups.length, items: seenLayers.size }, 'estimate');
+    }
+
+    function takeoffEstimateItem(layer, previous, forceReview) {
+        const qty = Number(layer.quantity ?? layer.originalQuantity ?? 0);
+        const catalogId = layer.catalogItemId || layer.catalog_item_id || previous?.catalogItemId || null;
+        const item = normalizeItem({
+            ...previous,
+            id: previous?.id || `takeoff_${layer.id}`,
+            takeoffLayerId: layer.id,
+            name: layer.name || previous?.name || 'Takeoff item',
+            description: layer.description ?? previous?.description ?? '',
+            quantity: qty,
+            originalQuantity: qty,
+            uom: layer.uom || layer.unit_of_measure || previous?.uom,
+            catalogItemId: catalogId,
+            unitMaterialCost: layer.unitMaterialCost ?? layer.unitCost ?? layer.unit_cost ?? previous?.unitMaterialCost,
+            unitLabor: layer.unitLabor ?? layer.laborHours ?? layer.labor_hours ?? previous?.unitLabor,
+            quantitySource: 'takeoff',
+            quantityOverride: false,
+            pendingTakeoffQuantity: null,
+            quantitySyncStatus: 'synced',
+            lastSyncedTakeoffQuantity: qty,
+            catalogSyncStatus: catalogId ? (previous?.catalogSyncStatus || 'synced') : 'detached',
+            updatedAt: new Date().toISOString()
         });
+        // An explicit review remains informative but cannot make the mirror stale.
+        if (forceReview && previous && Number(previous.quantity) !== qty) item.previousTakeoffQuantity = Number(previous.quantity);
+        return item;
     }
 
     function syncAllPendingTakeoff() {
@@ -1401,21 +1481,9 @@
         }
     });
 
-    window.addEventListener('takeoff:estimating-lines-updated', () => {
+    window.addEventListener('takeoff:estimating-lines-updated', event => {
         try {
-            const parsed = JSON.parse(localStorage.getItem(storageKey) || 'null');
-            const linked = (parsed?.groups || []).flatMap(group => (group.items || []).filter(item => item.takeoffLayerId));
-            mergeTakeoffLayers(linked.map(item => ({
-                id: item.takeoffLayerId,
-                name: item.name,
-                description: item.description,
-                quantity: item.quantity,
-                uom: item.uom,
-                groupName: item.groupName,
-                catalogItemId: item.catalogItemId,
-                unitCost: item.unitCost,
-                laborHours: item.unitLabor
-            })), false);
+            reconcileTakeoffMirror(readAuthoritativeTakeoffSnapshot(event.detail), false);
             markDirty();
             render();
         } catch (e) {

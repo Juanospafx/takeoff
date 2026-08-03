@@ -435,6 +435,8 @@
                 labor_hours: Number(layer.labor_hours || layer.laborHours || 0),
                 category: layer.category || layer.catalog_name || layer.group_name || '',
                 description: layer.description || '',
+                catalogNumber: layer.catalog_number || layer.catalogNumber || layer.sku || layer.cost_code || '',
+                itemType: layer.item_type || layer.itemType || '',
                 dropLength: Number(layer.dropLength || layer.drop_length || 0),
                 spacing: Number(layer.spacing || 0),
                 height: Number(layer.height || 0),
@@ -481,6 +483,8 @@
                 labor_hours: Number(layer.labor_hours || layer.laborHours || 0),
                 category: layer.category || '',
                 description: layer.description || '',
+                catalogNumber: layer.catalogNumber || layer.catalog_number || layer.costCode || layer.cost_code || '',
+                itemType: layer.itemType || layer.item_type || '',
                 dropLength: Number(layer.dropLength || layer.drop_length || 0),
                 spacing: Number(layer.spacing || 0),
                 height: Number(layer.height || 0),
@@ -591,8 +595,6 @@
 
     function estimateLineFromLayer(layer) {
         const group = groupForLayer(layer);
-        const hasCatalog = Boolean(layer.catalogItemId || layer.catalog_item_id);
-        const estimateGroupName = hasCatalog ? (group?.name || 'Default Group') : 'Default Group';
         const itemType = layer.itemType || layer.item_type || (String(layer.category || '').toLowerCase().includes('labor') ? 'Labor' : 'Materials');
         return {
             id: `takeoff_${layer.id}`,
@@ -601,10 +603,14 @@
             name: layer.name || 'Takeoff item',
             description: layer.description || '',
             type: itemType,
+            itemType,
             budgetCode: layer.catalogNumber || layer.catalog_number || '',
+            costCode: layer.catalogNumber || layer.catalog_number || '',
+            costCategory: itemType,
             originalQuantity: Number(layer.quantity || 0),
             quantity: Number(layer.quantity || 0),
             unitCost: Number(layer.unitCost || layer.unit_cost || 0),
+            unitMaterialCost: Number(layer.unitCost || layer.unit_cost || 0),
             waste: 0,
             margin: 0,
             unitLabor: Number(layer.laborHours || layer.labor_hours || 0),
@@ -613,8 +619,8 @@
             laborMargin: 0,
             notes: `Synced from Takeoff${group?.name ? ` / ${group.name}` : ''}`,
             taxable: true,
-            groupId: hasCatalog ? (group?.id || 'default') : 'default',
-            groupName: estimateGroupName,
+            groupId: group?.id || 'default',
+            groupName: group?.name || 'Default Group',
             uom: layer.uom || typeToUom(layer.type),
             projectId: String(window.ProjectState?.projectId || ''),
             estimateId: ''
@@ -623,68 +629,97 @@
 
     function syncTakeoffToEstimating() {
         const state = loadEstimatingStateForSync();
-        const byName = new Map((state.groups || []).map(group => [group.name, group]));
-        const syncedLayerIds = new Set();
-        allLayers().forEach(layer => {
-            const line = estimateLineFromLayer(layer);
-            syncedLayerIds.add(String(layer.id));
-            let group = byName.get(line.groupName);
-            if (!group) {
-                group = { id: makeId('estgrp'), type: 'group', name: line.groupName, expanded: true, items: [] };
-                state.groups.push(group);
-                byName.set(group.name, group);
-            }
-            const existing = (state.groups || [])
-                .flatMap(candidate => candidate.items || [])
-                .find(item => String(item.takeoffLayerId || '') === String(layer.id));
-            if (existing) {
-                const hasManualOverride = Boolean(existing.quantityOverride) || ['modified', 'detached', 'takeoff_changed'].includes(String(existing.quantitySyncStatus || ''));
-                const quantityPatch = hasManualOverride && Number(existing.quantity || 0) !== Number(line.quantity || 0)
-                    ? {
-                        pendingTakeoffQuantity: line.quantity,
-                        quantitySyncStatus: 'takeoff_changed',
-                        lastSyncedTakeoffQuantity: Number(existing.lastSyncedTakeoffQuantity ?? existing.quantity ?? 0)
-                    }
-                    : {
-                        originalQuantity: line.quantity,
-                        quantity: line.quantity,
-                        pendingTakeoffQuantity: null,
-                        quantityOverride: false,
-                        quantitySyncStatus: 'synced',
-                        lastSyncedTakeoffQuantity: line.quantity
-                    };
-                Object.assign(existing, {
-                    catalogItemId: line.catalogItemId,
-                    name: line.name,
-                    description: line.description,
-                    type: line.type,
-                    budgetCode: line.budgetCode,
-                    unitCost: line.unitCost,
-                    unitLabor: line.unitLabor,
-                    notes: line.notes,
-                    uom: line.uom,
-                    groupId: group.id,
-                    groupName: group.name,
-                    quantitySource: 'takeoff',
-                    catalogSyncStatus: line.catalogItemId ? (existing.catalogSyncStatus || 'synced') : 'detached',
-                    updatedAt: new Date().toISOString()
-                }, quantityPatch);
-                if (!group.items.includes(existing)) {
-                    state.groups.forEach(candidate => {
-                        candidate.items = (candidate.items || []).filter(item => item !== existing);
-                    });
-                    group.items.push(existing);
+        const activeEstimate = Array.isArray(state.estimates)
+            ? (state.estimates.find(estimate => String(estimate.id) === String(state.activeEstimateId)) || state.estimates[0])
+            : null;
+        const currentGroups = activeEstimate?.groups || state.groups || [];
+        const existingByLayerId = new Map();
+        const manualByGroupName = new Map();
+
+        currentGroups.forEach(group => {
+            (group.items || []).forEach(item => {
+                if (item.takeoffLayerId) {
+                    const key = String(item.takeoffLayerId);
+                    if (!existingByLayerId.has(key)) existingByLayerId.set(key, item);
+                    return;
                 }
-            } else {
-                group.items.push(line);
-            }
+                const name = group.name || 'Default Group';
+                if (!manualByGroupName.has(name)) manualByGroupName.set(name, []);
+                manualByGroupName.get(name).push(item);
+            });
         });
-        state.groups.forEach(group => {
-            group.items = (group.items || []).filter(item => !item.takeoffLayerId || syncedLayerIds.has(String(item.takeoffLayerId)));
+
+        const projectedLayerIds = new Set();
+        const projectedGroups = takeoffState.groups.map((takeoffGroup, groupIndex) => {
+            const groupName = takeoffGroup.name || 'Default Group';
+            const groupId = `takeoff_group_${String(takeoffGroup.id || groupIndex)}`;
+            const items = (takeoffGroup.layers || []).filter(layer => {
+                const layerId = String(layer.id);
+                if (projectedLayerIds.has(layerId)) return false;
+                projectedLayerIds.add(layerId);
+                return true;
+            }).map(layer => {
+                const line = estimateLineFromLayer(layer);
+                const existing = existingByLayerId.get(String(layer.id));
+                return {
+                    ...(existing || {}),
+                    ...line,
+                    id: existing?.id || line.id,
+                    groupId,
+                    groupName,
+                    originalQuantity: line.quantity,
+                    quantity: line.quantity,
+                    pendingTakeoffQuantity: null,
+                    quantityOverride: false,
+                    quantitySource: 'takeoff',
+                    quantitySyncStatus: 'synced',
+                    lastSyncedTakeoffQuantity: line.quantity,
+                    catalogSyncStatus: line.catalogItemId ? 'synced' : 'detached',
+                    updatedAt: new Date().toISOString()
+                };
+            });
+            items.push(...(manualByGroupName.get(groupName) || []));
+            manualByGroupName.delete(groupName);
+            return {
+                id: groupId,
+                takeoffGroupId: String(takeoffGroup.id || groupIndex),
+                source: 'takeoff',
+                type: 'group',
+                name: groupName,
+                expanded: takeoffGroup.isExpanded !== false,
+                sortOrder: groupIndex,
+                items
+            };
         });
+
+        // Manual estimating items remain intact. Empty and takeoff-only legacy groups
+        // intentionally disappear so deleted/renamed Takeoff folders cannot accumulate.
+        manualByGroupName.forEach((items, name) => {
+            if (!items.length) return;
+            const previous = currentGroups.find(group => group.name === name && (group.items || []).some(item => !item.takeoffLayerId));
+            projectedGroups.push({
+                ...(previous || {}),
+                id: previous?.id || makeId('estgrp'),
+                name,
+                expanded: previous?.expanded !== false,
+                sortOrder: projectedGroups.length,
+                items
+            });
+        });
+
+        state.groups = projectedGroups;
+        if (activeEstimate) activeEstimate.groups = projectedGroups;
         try {
             localStorage.setItem(estimatingStoreKey(), JSON.stringify(state));
-            window.dispatchEvent(new CustomEvent('takeoff:estimating-lines-updated', { detail: { groups: state.groups } }));
+            window.dispatchEvent(new CustomEvent('takeoff:estimating-lines-updated', {
+                detail: {
+                    version: 2,
+                    projectId: String(window.ProjectState?.projectId || ''),
+                    authoritative: true,
+                    groups: projectedGroups,
+                    layerIds: Array.from(projectedLayerIds)
+                }
+            }));
         } catch (e) {
             console.warn('Estimating sync failed', e);
         }
