@@ -1657,6 +1657,14 @@
     color: #1f6fb2;
 }
 
+.pro-active-layer-toolbar button.active,
+.pro-active-layer-toolbar .pro-continuous-tool.active {
+    color: #fff;
+    background: #1f6fb2;
+    border-color: #1f6fb2;
+    box-shadow: 0 0 0 2px rgba(31, 111, 178, .18);
+}
+
 .pro-selection-bar {
     background: #eff6ff;
     border-bottom-color: #bfdbfe;
@@ -1812,6 +1820,13 @@
     background: #273449;
     border-color: #3b82f6;
     color: #bfdbfe;
+}
+
+[data-theme="dark"] .pro-active-layer-toolbar button.active,
+[data-theme="dark"] .pro-active-layer-toolbar .pro-continuous-tool.active {
+    color: #fff;
+    background: #2563eb;
+    border-color: #60a5fa;
 }
 
 [data-theme="dark"] .pro-selection-bar strong {

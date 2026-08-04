@@ -35,6 +35,28 @@
     color: #cbd5e1;
 }
 
+.takeoff-lock-btn {
+    width: 100%;
+    border: 1px solid #64748b;
+    border-radius: 7px;
+    padding: 8px 10px;
+    background: #334155;
+    color: #fff;
+    font-weight: 700;
+    cursor: pointer;
+}
+
+.takeoff-lock-btn.is-locked {
+    border-color: #f59e0b;
+    background: #78350f;
+    color: #fef3c7;
+}
+
+.takeoff-lock-btn:focus-visible {
+    outline: 3px solid rgba(59, 130, 246, .45);
+    outline-offset: 2px;
+}
+
 .takeoff-panel,
 .takeoff-props {
     position: absolute;

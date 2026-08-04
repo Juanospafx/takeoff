@@ -125,7 +125,9 @@
     const viewerState = {
         isGridVisible: false,
         isLayersPopoverOpen: false,
-        isFullscreen: false
+        isFullscreen: false,
+        continuousTool: false,
+        activeTool: 'smart'
     };
 
     const drawingState = {
@@ -324,7 +326,9 @@
 
     const selectionState = {
         selectedObjectIds: [],
-        activeLayerId: null
+        activeLayerId: null,
+        selectedGroupId: null,
+        selectedLayerIds: []
     };
 
     const historyState = [];
@@ -807,8 +811,9 @@
             if (!groupVisible) return '';
             const expanded = q ? true : group.isExpanded !== false;
             const groupCheckboxVisible = (group.layers || []).some(layer => layer.visible !== false) || !(group.layers || []).length;
+            const groupSelected = selectionState.selectedGroupId === group.id;
             return `<div class="pro-takeoff-group" data-group-id="${esc(group.id)}">
-                <div class="pro-tree-row pro-tree-folder ${takeoffState.activeGroupId === group.id ? 'active' : ''}" data-takeoff-group-row="${esc(group.id)}">
+                <div class="pro-tree-row pro-tree-folder ${takeoffState.activeGroupId === group.id ? 'active' : ''} ${groupSelected ? 'group-selected' : ''}" data-takeoff-group-row="${esc(group.id)}" role="button" tabindex="0" aria-selected="${groupSelected ? 'true' : 'false'}">
                     <button class="pro-tree-toggle" type="button" data-group-toggle="${esc(group.id)}"><i class="fas ${expanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i></button>
                     <input type="checkbox" ${groupCheckboxVisible ? 'checked' : ''} aria-label="Group visibility" data-group-visible="${esc(group.id)}">
                     <span class="pro-tree-name"><i class="fas fa-folder${expanded ? '-open' : ''}"></i> ${esc(group.name)}</span>
@@ -819,7 +824,7 @@
                     ${visibleLayers.map(layer => {
                         const isVisible = layer.visible !== false;
                         const metadata = layer.catalogItemId ? 'Linked to catalog' : (layer.category || layer.description || '');
-                        return `<div class="pro-tree-row pro-tree-item ${takeoffState.activeLayerId === layer.id ? 'active' : ''} ${isVisible ? '' : 'is-hidden'}" data-layer-row="${esc(layer.id)}">
+                        return `<div class="pro-tree-row pro-tree-item ${takeoffState.activeLayerId === layer.id || groupSelected ? 'active' : ''} ${groupSelected ? 'group-selected' : ''} ${isVisible ? '' : 'is-hidden'}" data-layer-row="${esc(layer.id)}" aria-selected="${groupSelected ? 'true' : 'false'}">
                             <button class="pro-visibility-btn ${isVisible ? '' : 'is-off'}" type="button" data-layer-visibility="${esc(layer.id)}" title="${isVisible ? 'Hide item' : 'Show item'}" aria-label="${isVisible ? 'Hide item' : 'Show item'}"><i class="fas ${isVisible ? 'fa-eye' : 'fa-eye-slash'}"></i></button>
                             <input class="pro-layer-active-check" type="checkbox" ${takeoffState.activeLayerId === layer.id ? 'checked' : ''} aria-label="Set active layer" data-layer-active="${esc(layer.id)}">
                             <span class="pro-layer-symbol" style="color:${esc(layer.color)}">${symbolGlyph(layer)}</span>
@@ -875,10 +880,13 @@
     function bindTakeoffTreeEvents() {
         document.querySelectorAll('[data-takeoff-group-row]').forEach(row => {
             row.addEventListener('click', event => {
-                if (event.target.closest('button')) return;
-                takeoffState.activeGroupId = row.dataset.takeoffGroupRow;
-                saveTakeoffState();
-                renderTakeoffPanel();
+                if (event.target.closest('button, input')) return;
+                toggleGroupSelection(row.dataset.takeoffGroupRow);
+            });
+            row.addEventListener('keydown', event => {
+                if (event.key !== 'Enter' && event.key !== ' ') return;
+                event.preventDefault();
+                toggleGroupSelection(row.dataset.takeoffGroupRow);
             });
         });
         document.querySelectorAll('[data-group-toggle]').forEach(button => {
@@ -1519,6 +1527,15 @@
         renderActiveLayerToolbar();
     }
 
+    function selectTakeoffContext(layerId, rerender = true) {
+        const layer = findLayer(layerId);
+        if (!layer) return;
+        takeoffState.activeLayerId = layer.id;
+        takeoffState.activeGroupId = layer.groupId;
+        if (rerender) renderTakeoffPanel();
+        renderActiveLayerToolbar();
+    }
+
     function clearActiveTakeoffLayer(rerender = true) {
         takeoffState.activeLayerId = null;
         callEditor('projectTakeoffClearActiveLayer');
@@ -1578,7 +1595,9 @@
             if (!layer) return;
             layer.shapes = remote.shapes || [];
             layer.takeoffObjects = remote.shapes || [];
-            layer.visible = remote.visible !== false;
+            // Canvas snapshots report current state, but selection/state events
+            // must never act as visibility commands. Only explicit eye/checkbox
+            // actions are allowed to mutate layer.visible.
             if (remote.unit_of_measure || remote.uom) layer.uom = remote.unit_of_measure || remote.uom;
         });
         applyAggregatedCanvasQuantities();
@@ -1728,11 +1747,17 @@
             <span class="pro-active-layer-dot" style="background:${esc(layer.color)}"></span>
             <strong>${esc(layer.name)}</strong>
             <small>${esc(layer.type)} · ${esc(quantityLabel(layer))}</small>
-            <div>${tools}</div>
+            <div>${tools}<button type="button" class="pro-continuous-tool ${viewerState.continuousTool ? 'active' : ''}" data-continuous-tool aria-pressed="${viewerState.continuousTool ? 'true' : 'false'}" title="Keep the drawing tool active after creating an element"><i class="fas fa-repeat"></i> Continuous</button></div>
         `;
         toolbar.querySelectorAll('[data-layer-tool]').forEach(button => {
             button.addEventListener('click', () => runLayerTool(button.dataset.layerTool));
         });
+        toolbar.querySelector('[data-continuous-tool]')?.addEventListener('click', () => {
+            viewerState.continuousTool = !viewerState.continuousTool;
+            callEditor('projectTakeoffSetContinuous', viewerState.continuousTool);
+            renderActiveLayerToolbar();
+        });
+        setActiveTool(viewerState.activeTool);
     }
 
     function renderSelectionBar() {
@@ -1749,6 +1774,9 @@
             <strong>${count} element(s) selected</strong>
             <button type="button" data-selection-action="copy"><i class="fas fa-copy"></i> Copy</button>
             <button type="button" data-selection-action="move"><i class="fas fa-folder-tree"></i> Move To</button>
+            <button type="button" data-selection-action="properties"><i class="fas fa-sliders"></i> Properties</button>
+            <button type="button" data-selection-action="lock"><i class="fas fa-lock"></i> Lock</button>
+            <button type="button" data-selection-action="unlock"><i class="fas fa-lock-open"></i> Unlock</button>
             <button type="button" data-selection-action="delete"><i class="fas fa-trash"></i> Delete</button>
             <button type="button" class="icon" data-selection-action="clear" aria-label="Clear selection"><i class="fas fa-times"></i></button>
         `;
@@ -1760,6 +1788,29 @@
     function setSelectedObjects(ids = [], layerId = null) {
         selectionState.selectedObjectIds = Array.from(new Set(ids.map(String).filter(Boolean)));
         selectionState.activeLayerId = layerId || selectionState.activeLayerId || takeoffState.activeLayerId;
+        selectionState.selectedGroupId = null;
+        selectionState.selectedLayerIds = layerId ? [String(layerId)] : [];
+        renderSelectionBar();
+        renderInspector();
+    }
+
+    function toggleGroupSelection(groupId) {
+        const group = findGroup(groupId);
+        if (!group) return;
+        if (selectionState.selectedGroupId === group.id) {
+            selectionState.selectedGroupId = null;
+            selectionState.selectedLayerIds = [];
+            selectionState.selectedObjectIds = [];
+            callEditor('projectTakeoffClearSelection');
+        } else {
+            takeoffState.activeGroupId = group.id;
+            selectionState.selectedGroupId = group.id;
+            selectionState.selectedLayerIds = (group.layers || []).map(layer => String(layer.id));
+            const selectedIds = callEditor('projectTakeoffSelectGroup', selectionState.selectedLayerIds);
+            selectionState.selectedObjectIds = Array.isArray(selectedIds) ? selectedIds : [];
+            selectionState.activeLayerId = group.layers?.[0]?.id || null;
+        }
+        renderTakeoffPanel();
         renderSelectionBar();
         renderInspector();
     }
@@ -1773,12 +1824,30 @@
         if (!selectionState.selectedObjectIds.length) return showPrepared('Select one or more takeoff objects first.');
         pushTakeoffHistory(`selection-${action}`);
         if (action === 'copy') {
-            const copied = callEditor('projectTakeoffCopySelection', selectionState.selectedObjectIds) || callEditor('copySelected');
+            const copied = callEditor('projectTakeoffCopySelection', selectionState.selectedObjectIds);
             if (!copied) showPrepared('Copy selection is ready to be connected.');
+            else if (Array.isArray(copied)) selectionState.selectedObjectIds = copied;
         }
         if (action === 'delete') {
-            const deleted = callEditor('projectTakeoffDeleteSelection', selectionState.selectedObjectIds) || callEditor('deleteSelected');
+            const deleted = callEditor('projectTakeoffDeleteSelection', selectionState.selectedObjectIds);
             if (!deleted) showPrepared('Delete selection is ready to be connected.');
+            else {
+                selectionState.selectedObjectIds = [];
+                selectionState.selectedGroupId = null;
+                selectionState.selectedLayerIds = [];
+            }
+        }
+        if (action === 'lock' || action === 'unlock') {
+            const changed = callEditor('projectTakeoffSetSelectionLocked', selectionState.selectedObjectIds, action === 'lock');
+            if (!changed) showPrepared(`Unable to ${action} the selected elements.`);
+        }
+        if (action === 'properties') {
+            const multiplier = prompt('Multiplier for all selected elements', '1');
+            if (multiplier === null) return;
+            const numeric = Number(multiplier);
+            if (!Number.isFinite(numeric) || numeric < 0) return showPrepared('Enter a valid multiplier of 0 or greater.');
+            const changed = callEditor('projectTakeoffUpdateSelection', selectionState.selectedObjectIds, { multiplier: numeric });
+            if (!changed) showPrepared('Unlock selected elements before changing their properties.');
         }
         if (action === 'move') {
             const names = allLayers().map(layer => layer.name).join(', ');
@@ -1998,8 +2067,18 @@
     }
 
     function setActiveTool(command) {
+        viewerState.activeTool = command;
         document.querySelectorAll('[data-tool-command]').forEach(button => {
             button.classList.toggle('active', button.dataset.toolCommand === command);
+        });
+        const layerToolMap = {
+            count: ['count-point'],
+            linear: ['linear-straight', 'linear-angled'],
+            area: ['area-polygon'],
+            freehand: ['linear-freehand']
+        };
+        document.querySelectorAll('[data-layer-tool]').forEach(button => {
+            button.classList.toggle('active', (layerToolMap[command] || []).includes(button.dataset.layerTool));
         });
     }
 
@@ -2089,14 +2168,16 @@
         if (command === 'delete') return runSelectionAction('delete');
         if (command === 'more') return toggleMoreToolsPanel();
         if (command === 'transform') {
-            callEditor('projectTakeoffSetTool', 'transform');
+            const activated = callEditor('projectTakeoffSetTool', 'transform');
             setActiveTool(command);
-            return showPrepared('Transform / Scale tool is ready to be connected.');
+            if (!activated) showPrepared('Select an item before transforming it.');
+            return;
         }
         if (command === 'vertices') {
-            callEditor('projectTakeoffSetTool', 'vertices');
+            const activated = callEditor('projectTakeoffSetTool', 'vertices');
             setActiveTool(command);
-            return showPrepared('Edit vertices tool is ready to be connected.');
+            if (!activated) showPrepared('Select a line or area before editing vertices.');
+            return;
         }
     }
 
@@ -2587,7 +2668,15 @@
             if (event.data?.type === 'project-takeoff-selection') {
                 const payload = event.data.payload || {};
                 setSelectedObjects(payload.ids || payload.selectedObjectIds || [], payload.layerId || null);
-                if (payload.layerId && findLayer(payload.layerId)) setActiveTakeoffLayer(payload.layerId);
+                if (payload.layerId && findLayer(payload.layerId)) selectTakeoffContext(payload.layerId);
+                return;
+            }
+            if (event.data?.type === 'project-takeoff-tool-state') {
+                const payload = event.data.payload || {};
+                viewerState.continuousTool = Boolean(payload.continuous);
+                const map = { takeoff_count: 'count', takeoff_linear: 'linear', takeoff_area: 'area', smart: 'smart', select: 'smart' };
+                setActiveTool(map[payload.tool] || payload.tool || 'smart');
+                renderActiveLayerToolbar();
                 return;
             }
             if (event.data?.type !== 'takeoff-editor-ready') return;
@@ -2736,6 +2825,14 @@
             if (event.target.id === 'takeoffLayerModal') closeLayerModal();
         });
         document.addEventListener('keydown', event => {
+            if (event.key === 'Escape') {
+                viewerState.continuousTool = false;
+                callEditor('projectTakeoffSetContinuous', false);
+                callEditor('projectTakeoffSetTool', 'select');
+                setActiveTool('smart');
+                renderActiveLayerToolbar();
+                return;
+            }
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
                 event.preventDefault();
                 undoTakeoff();

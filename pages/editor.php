@@ -70,7 +70,7 @@ if ($filePath !== '') {
     <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 
     <link rel="stylesheet" href="../assets/editor/editor.css?v=takeoff-editor-20260611-4">
-    <link rel="stylesheet" href="../assets/editor/takeoff.css?v=takeoff-polyline-20260730-1">
+    <link rel="stylesheet" href="../assets/editor/takeoff.css?v=takeoff-locking-20260804-1">
 
     <style>
         :root {
@@ -2444,7 +2444,10 @@ if ($filePath !== '') {
     async function renderPage(num, loadAnnotations = true) {
         updatePageListUI(num);
         if(!pdfDoc) return;
-        showDrawingLoading(true);
+        const isBackgroundRefresh = !loadAnnotations && !!canvas.backgroundImage;
+        // Zoom only refreshes the PDF bitmap resolution. Keep the current
+        // background visible and reserve the loader for real document/page loads.
+        if (!isBackgroundRefresh) showDrawingLoading(true);
         try {
             await waitForWrapperSize();
             renderToken++;
@@ -2463,6 +2466,7 @@ if ($filePath !== '') {
         } catch (error) {
             if (error?.name === 'RenderingCancelledException') return;
             console.error(error);
+            if (isBackgroundRefresh) return;
             showDrawingError('Unable to load this sheet');
             showToast("Error rendering PDF page", "error");
         }
@@ -3493,7 +3497,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-polyline-20260730-1"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-continuous-tool-20260804-1"></script>
 </body>
 </html>
 

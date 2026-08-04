@@ -19,6 +19,8 @@
         createLayerMode: null,
         createLayerGroup: 'Ungrouped',
         selectedElement: null,
+        selectedObjectUids: new Set(),
+        continuousTool: false,
         draftLine: null,
         draftArea: null,
         projectControlled: false,
@@ -121,6 +123,32 @@
         delete copy.labelNode;
         delete copy.handles;
         return copy;
+    }
+
+    function persistLayerCostSnapshot(layer) {
+        if (!layer) return layer;
+        layer.metadata_json = {
+            ...(layer.metadata_json || {}),
+            project_layer_id: layer.metadata_json?.project_layer_id || layer.client_uid,
+            unit_cost: num(layer.unit_cost || 0),
+            unit_labor_time: num(layer.unit_labor_time || layer.labor_hours || 0),
+            cost_code: layer.cost_code || '',
+            catalog_item_id: layer.catalog_item_id || null
+        };
+        return layer;
+    }
+
+    function restoreLayerCostSnapshot(layer) {
+        const metadata = layer?.metadata_json || {};
+        const hasSnapshotCost = Object.prototype.hasOwnProperty.call(metadata, 'unit_cost');
+        const hasSnapshotLabor = Object.prototype.hasOwnProperty.call(metadata, 'unit_labor_time');
+        return {
+            ...layer,
+            unit_cost: num(hasSnapshotCost ? metadata.unit_cost : (layer.unit_cost ?? 0)),
+            unit_labor_time: num(hasSnapshotLabor ? metadata.unit_labor_time : (layer.unit_labor_time ?? layer.labor_hours ?? 0)),
+            cost_code: metadata.cost_code || layer.cost_code || '',
+            catalog_item_id: layer.catalog_item_id || metadata.catalog_item_id || null
+        };
     }
 
     function snapshot() {
@@ -397,12 +425,51 @@
         }
     }
 
+    function isElementLocked(ref) {
+        return Number(ref?.locked || 0) === 1;
+    }
+
+    function applyMarkerLockVisual(marker) {
+        if (!marker.node) return;
+        const locked = isElementLocked(marker);
+        marker.node.draggable(!locked);
+        marker.node.opacity(locked ? 0.55 : 1);
+        const existing = marker.node.findOne('.takeoff-object-lock');
+        if (existing) existing.destroy();
+        if (locked) marker.node.add(new Konva.Text({
+            name: 'takeoff-object-lock',
+            x: 12,
+            y: 9,
+            text: 'LOCKED',
+            fill: '#fbbf24',
+            fontSize: 9,
+            fontStyle: 'bold',
+            listening: false
+        }));
+    }
+
+    function applySegmentLockVisual(segment) {
+        if (!segment.node) return;
+        const locked = isElementLocked(segment);
+        segment.node.draggable(!locked);
+        segment.node.opacity(locked ? 0.55 : (String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area' ? 0.28 : 1));
+        segment.node.dash(locked ? [8, 6] : []);
+        (segment.handles || []).forEach(handle => {
+            handle.draggable(!locked);
+            handle.visible(!locked && state.selectedElement?.ref === segment && segment.page_number === pageNum);
+        });
+    }
+
     function createMarkerNode(marker) {
         if (!ensureKonva()) return;
-        const group = new Konva.Group({ x: num(marker.x), y: num(marker.y), draggable: true, visible: marker.page_number === pageNum });
+        const group = new Konva.Group({ x: num(marker.x), y: num(marker.y), draggable: !isElementLocked(marker), visible: marker.page_number === pageNum });
         drawSymbol(group, marker.symbol || 'circle', marker.color || '#2563eb', marker.symbol_size || marker.size);
         group.add(new Konva.Text({ x: 12, y: -10, text: marker.label || String(marker.quantity || ''), fill: marker.color || '#2563eb', fontSize: 14, fontStyle: 'bold' }));
-        group.on('click tap', () => selectElement('marker', marker));
+        group.on('click tap', event => {
+            event.cancelBubble = true;
+            setTool('smart');
+            selectElement('marker', marker);
+        });
         group.on('dragend', () => {
             snapshot();
             marker.x = group.x();
@@ -413,6 +480,7 @@
         });
         konvaLayer.add(group);
         marker.node = group;
+        applyMarkerLockVisual(marker);
         konvaLayer.batchDraw();
     }
 
@@ -457,12 +525,12 @@
             hitStrokeWidth: 16,
             lineCap: 'round',
             lineJoin: 'round',
-            draggable: true,
+            draggable: !isElementLocked(segment),
             visible,
         });
         const label = new Konva.Text({ fill: segment.color || '#22c55e', fontSize: 16, padding: 4, visible, listening: false });
         const handles = (segment.points_json || []).map((point, index) => {
-            const handle = new Konva.Circle({ x: point.x, y: point.y, radius: 5, fill: '#fff', stroke: segment.color || '#2563eb', strokeWidth: 2, draggable: true, visible: false });
+            const handle = new Konva.Circle({ x: point.x, y: point.y, radius: 5, fill: '#fff', stroke: segment.color || '#2563eb', strokeWidth: 2, draggable: !isElementLocked(segment), visible: false });
             handle.on('dragmove', () => {
                 segment.points_json[index] = handle.position();
                 refreshSegment(segment);
@@ -480,10 +548,18 @@
                 selectElement('segment', segment);
                 markDirty();
             });
+            handle.on('click tap', event => {
+                event.cancelBubble = true;
+                selectElement('segment', segment);
+            });
             konvaLayer.add(handle);
             return handle;
         });
-        line.on('click tap', () => selectElement('segment', segment));
+        line.on('click tap', event => {
+            event.cancelBubble = true;
+            setTool('smart');
+            selectElement('segment', segment);
+        });
         line.on('dragend', () => {
             snapshot();
             const dx = line.x();
@@ -496,10 +572,12 @@
             markDirty();
         });
         konvaLayer.add(line, label);
+        handles.forEach(handle => handle.moveToTop());
         segment.node = line;
         segment.labelNode = label;
         segment.handles = handles;
         refreshSegment(segment);
+        applySegmentLockVisual(segment);
     }
 
     function clearNodes() {
@@ -523,14 +601,16 @@
             const isVisible = s.page_number === pg && Number(layer?.visible ?? 1);
             if (s.node) s.node.visible(isVisible);
             if (s.labelNode) s.labelNode.visible(isVisible);
-            (s.handles || []).forEach(h => h.visible(isVisible && state.selectedElement?.ref === s));
+            (s.handles || []).forEach(h => h.visible(isVisible && !isElementLocked(s) && state.selectedElement?.ref === s));
         });
         if (konvaLayer) konvaLayer.batchDraw();
     }
 
     function selectElement(type, ref) {
         state.selectedElement = { type, ref };
-        state.segments.forEach(s => (s.handles || []).forEach(h => h.visible(type === 'segment' && ref === s)));
+        state.selectedObjectUids = new Set(ref?.client_uid ? [String(ref.client_uid)] : []);
+        state.segments.forEach(s => (s.handles || []).forEach(h => h.visible(type === 'segment' && ref === s && !isElementLocked(s))));
+        applyObjectSelectionVisuals();
         renderProperties();
         if (konvaLayer) konvaLayer.batchDraw();
         emitSelectionState();
@@ -539,13 +619,16 @@
     function emitSelectionState() {
         if (!state.projectControlled) return;
         try {
-            const selected = state.selectedElement;
+            const selectedTargets = Array.from(state.selectedObjectUids).map(findTakeoffObjectByUid).filter(Boolean);
+            const layerIds = Array.from(new Set(selectedTargets.map(target => String(target.ref.layer_client_uid || '')).filter(Boolean)));
+            const objectTypes = Array.from(new Set(selectedTargets.map(target => target.type)));
             window.parent?.postMessage({
                 type: 'project-takeoff-selection',
                 payload: {
-                    ids: selected?.ref?.client_uid ? [selected.ref.client_uid] : [],
-                    layerId: selected?.ref?.layer_client_uid || null,
-                    objectType: selected?.type || null
+                    ids: selectedTargets.map(target => String(target.ref.client_uid)),
+                    layerId: layerIds.length === 1 ? layerIds[0] : null,
+                    layerIds,
+                    objectType: objectTypes.length === 1 ? objectTypes[0] : (objectTypes.length ? 'mixed' : null)
                 }
             }, '*');
         } catch (e) {}
@@ -553,11 +636,32 @@
 
     function clearTakeoffSelection() {
         state.selectedElement = null;
+        state.selectedObjectUids.clear();
         state.segments.forEach(s => (s.handles || []).forEach(h => h.visible(false)));
+        applyObjectSelectionVisuals();
         renderProperties();
         if (konvaLayer) konvaLayer.batchDraw();
         emitSelectionState();
         return true;
+    }
+
+    function applyObjectSelectionVisuals() {
+        state.markers.forEach(marker => {
+            if (!marker.node) return;
+            const selected = state.selectedObjectUids.has(String(marker.client_uid));
+            marker.node.scale({ x: selected ? 1.18 : 1, y: selected ? 1.18 : 1 });
+            marker.node.shadowEnabled(selected);
+            marker.node.shadowColor('#38bdf8');
+            marker.node.shadowBlur(selected ? 10 : 0);
+        });
+        state.segments.forEach(segment => {
+            if (!segment.node) return;
+            const selected = state.selectedObjectUids.has(String(segment.client_uid));
+            segment.node.shadowEnabled(selected);
+            segment.node.shadowColor('#38bdf8');
+            segment.node.shadowBlur(selected ? 10 : 0);
+        });
+        konvaLayer?.batchDraw();
     }
 
     function findTakeoffObjectByUid(objectUid) {
@@ -612,6 +716,22 @@
         createMarkerNode(marker);
         selectElement('marker', marker);
         markDirty();
+        finishToolUse();
+    }
+
+    function emitToolState() {
+        if (!state.projectControlled) return;
+        try {
+            window.parent?.postMessage({
+                type: 'project-takeoff-tool-state',
+                payload: { tool: state.tool, continuous: state.continuousTool }
+            }, '*');
+        } catch (e) {}
+    }
+
+    function finishToolUse() {
+        if (!state.continuousTool) setTool('smart');
+        else emitToolState();
     }
 
     function addLinearPoint(pos) {
@@ -726,6 +846,7 @@
         selectElement('segment', segment);
         markDirty();
         updateDrawingStatus();
+        finishToolUse();
         return true;
     }
 
@@ -831,6 +952,7 @@
         createSegmentNode(segment);
         selectElement('segment', segment);
         markDirty();
+        finishToolUse();
     }
 
     function clearDrafts() {
@@ -843,6 +965,10 @@
 
     function deleteSelected() {
         if (!state.selectedElement) return;
+        if (isElementLocked(state.selectedElement.ref)) {
+            showToast('Unlock the element before deleting it.', 'warning');
+            return;
+        }
         snapshot();
         const { type, ref } = state.selectedElement;
         if (type === 'marker') {
@@ -853,7 +979,9 @@
             state.segments = state.segments.filter(s => s !== ref);
         }
         state.selectedElement = null;
+        state.selectedObjectUids.clear();
         renderProperties();
+        applyObjectSelectionVisuals();
         markDirty();
         emitSelectionState();
     }
@@ -1320,6 +1448,7 @@
         }
         document.querySelectorAll('[data-takeoff-tool]').forEach(btn => btn.classList.toggle('active', btn.dataset.takeoffTool === tool));
         updateDrawingStatus();
+        emitToolState();
     }
 
     function updateDrawingStatus(pointer) {
@@ -2069,32 +2198,69 @@
             return;
         }
         const { type, ref } = state.selectedElement;
+        const locked = isElementLocked(ref);
+        const isArea = type === 'segment' && String(ref.takeoff_type || ref.type || '').toLowerCase() === 'area';
+        const measuredLabel = type === 'marker' ? 'Quantity' : (isArea ? 'Area' : 'Length');
+        const measuredValue = type === 'marker' ? num(ref.quantity) : (isArea ? num(ref.total_area) : num(ref.total_length));
         el.innerHTML = `
             <div class="takeoff-panel-header"><div class="takeoff-title">Properties</div><span class="takeoff-list-meta">${type}</span></div>
             <div class="takeoff-panel-section">
-                <div class="takeoff-field"><label>Label</label><input id="takeoffPropLabel" value="${escapeHtml(ref.label || '')}"></div>
+                <button class="takeoff-lock-btn ${locked ? 'is-locked' : ''}" type="button" id="takeoffPropLock">${locked ? 'Unlock element' : 'Lock element'}</button>
+                <div class="takeoff-list-meta">${locked ? 'Locked elements cannot be moved, resized, or edited.' : 'Editable element'}</div>
+                <div class="takeoff-field"><label>Label</label><input id="takeoffPropLabel" value="${escapeHtml(ref.label || '')}" ${locked ? 'disabled' : ''}></div>
                 <div class="takeoff-grid-2">
-                    <div class="takeoff-field"><label>Multiplier</label><input id="takeoffPropMultiplier" type="number" step="0.01" value="${escapeHtml(ref.multiplier || 1)}"></div>
-                    <div class="takeoff-field"><label>${type === 'marker' ? 'Quantity' : 'Length'}</label><input disabled value="${type === 'marker' ? num(ref.quantity).toFixed(2) : num(ref.total_length).toFixed(2)}"></div>
+                    <div class="takeoff-field"><label>Multiplier</label><input id="takeoffPropMultiplier" type="number" step="0.01" value="${escapeHtml(ref.multiplier || 1)}" ${locked ? 'disabled' : ''}></div>
+                    <div class="takeoff-field"><label>${measuredLabel}</label><input disabled value="${measuredValue.toFixed(2)} ${escapeHtml(ref.unit || (type === 'marker' ? 'ea' : (isArea ? 'sq ft' : 'ft')))}"></div>
                 </div>
-                <div class="takeoff-field"><label>Notes</label><textarea id="takeoffPropNotes" rows="3">${escapeHtml(ref.notes || '')}</textarea></div>
+                ${type === 'marker' ? `<div class="takeoff-field"><label>Symbol size</label><select id="takeoffPropSize" ${locked ? 'disabled' : ''}><option value="Small">Small</option><option value="Medium">Medium</option><option value="Large">Large</option></select></div>` : `
+                    <div class="takeoff-grid-2">
+                        <div class="takeoff-field"><label>Stroke width</label><input id="takeoffPropStroke" type="number" min="1" max="20" step="1" value="${num(ref.stroke_width || (isArea ? 3 : 4))}" ${locked ? 'disabled' : ''}></div>
+                        <div class="takeoff-field"><label>Points</label><input disabled value="${(ref.points_json || []).length}"></div>
+                    </div>`}
+                <div class="takeoff-field"><label>Notes</label><textarea id="takeoffPropNotes" rows="3" ${locked ? 'disabled' : ''}>${escapeHtml(ref.notes || '')}</textarea></div>
             </div>`;
+        if (type === 'marker') document.getElementById('takeoffPropSize').value = ref.symbol_size || ref.size || 'Medium';
         const update = () => {
+            if (isElementLocked(ref)) return;
             snapshot();
             ref.label = document.getElementById('takeoffPropLabel').value;
             ref.multiplier = num(document.getElementById('takeoffPropMultiplier').value || 1);
             ref.notes = document.getElementById('takeoffPropNotes').value;
             if (type === 'marker') {
+                const nextSize = document.getElementById('takeoffPropSize').value;
+                const sizeChanged = nextSize !== (ref.symbol_size || ref.size || 'Medium');
+                ref.symbol_size = nextSize;
+                ref.size = nextSize;
                 ref.quantity = calculateCountQuantity(ref);
-                ref.node?.findOne('Text')?.text(ref.label || String(ref.quantity || ''));
+                if (sizeChanged) {
+                    ref.node?.destroy();
+                    delete ref.node;
+                    createMarkerNode(ref);
+                    selectElement('marker', ref);
+                } else {
+                    ref.node?.findOne('Text')?.text(ref.label || String(ref.quantity || ''));
+                }
             } else {
+                ref.stroke_width = Math.max(1, Math.min(20, num(document.getElementById('takeoffPropStroke').value || 4)));
+                ref.node?.strokeWidth(ref.stroke_width);
                 calculateLinearLength(ref);
                 refreshSegment(ref);
             }
             markDirty();
             renderProperties();
         };
-        ['takeoffPropLabel', 'takeoffPropMultiplier', 'takeoffPropNotes'].forEach(id => document.getElementById(id).addEventListener('change', update));
+        ['takeoffPropLabel', 'takeoffPropMultiplier', 'takeoffPropNotes', type === 'marker' ? 'takeoffPropSize' : 'takeoffPropStroke']
+            .forEach(id => document.getElementById(id).addEventListener('change', update));
+        document.getElementById('takeoffPropLock').addEventListener('click', () => {
+            snapshot();
+            ref.locked = isElementLocked(ref) ? 0 : 1;
+            ref.updatedAt = timestamp();
+            ref.updated_at = ref.updatedAt;
+            if (type === 'marker') applyMarkerLockVisual(ref);
+            else applySegmentLockVisual(ref);
+            markDirty();
+            renderProperties();
+        });
     }
 
     function renderSummary() {
@@ -2132,16 +2298,20 @@
     }
 
     function saveTakeoff(silent = false) {
-        state.layers.forEach(layer => {
-            layer.metadata_json = { ...(layer.metadata_json || {}), project_layer_id: layer.metadata_json?.project_layer_id || layer.client_uid };
-        });
+        state.layers.forEach(persistLayerCostSnapshot);
         persistLocalTakeoffState();
         return request('save_state', {
             drawing_id: fileId,
             project_id: typeof projectId !== 'undefined' ? projectId : 0,
             layers: state.layers,
-            markers: state.markers.map(stripNodes),
-            segments: state.segments.map(stripNodes),
+            markers: state.markers.map(marker => ({
+                ...stripNodes(marker),
+                metadata_json: { ...(marker.metadata_json || {}), element_locked: isElementLocked(marker) ? 1 : 0 }
+            })),
+            segments: state.segments.map(segment => ({
+                ...stripNodes(segment),
+                metadata_json: { ...(segment.metadata_json || {}), element_locked: isElementLocked(segment) ? 1 : 0 }
+            })),
             summary: calculateTakeoffSummary(),
         }).then(res => {
             if (res.status !== 'success') throw new Error(res.msg || 'Save failed');
@@ -2170,20 +2340,20 @@
                     const metadata = l.metadata_json || {};
                     const stableUid = String(metadata.project_layer_id || l.client_uid || l.id);
                     dbLayerIdMap.set(String(l.id), stableUid);
-                    return { ...l, client_uid: stableUid, metadata_json: { ...metadata, project_layer_id: stableUid } };
+                    return restoreLayerCostSnapshot({ ...l, client_uid: stableUid, metadata_json: { ...metadata, project_layer_id: stableUid } });
                 });
-                state.markers = (data.markers || []).map(m => ({ ...m, client_uid: m.client_uid || String(m.id), layer_client_uid: dbLayerIdMap.get(String(m.layer_id)) || String(m.layer_id), metadata_json: m.metadata_json || {} }));
-                state.segments = (data.segments || []).map(s => ({ ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: dbLayerIdMap.get(String(s.layer_id)) || String(s.layer_id), points_json: s.points_json || [], metadata_json: s.metadata_json || {} }));
+                state.markers = (data.markers || []).map(m => ({ ...m, client_uid: m.client_uid || String(m.id), layer_client_uid: dbLayerIdMap.get(String(m.layer_id)) || String(m.layer_id), metadata_json: m.metadata_json || {}, locked: Number(m.locked ?? m.metadata_json?.element_locked ?? 0) }));
+                state.segments = (data.segments || []).map(s => ({ ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: dbLayerIdMap.get(String(s.layer_id)) || String(s.layer_id), points_json: s.points_json || [], metadata_json: s.metadata_json || {}, locked: Number(s.locked ?? s.metadata_json?.element_locked ?? 0) }));
             }
             const local = readLocalTakeoffState();
             if (local && ((local.markers || []).length || (local.segments || []).length)) {
                 state.layers = (local.layers || []).map(layer => {
                     const stableUid = String(layer.client_uid || layer.metadata_json?.project_layer_id || layer.id || uid());
-                    return {
+                    return restoreLayerCostSnapshot({
                         ...layer,
                         client_uid: stableUid,
                         metadata_json: { ...(layer.metadata_json || {}), project_layer_id: stableUid }
-                    };
+                    });
                 });
                 state.markers = (local.markers || []).map(marker => ({ ...marker, client_uid: marker.client_uid || uid(), layer_client_uid: String(marker.layer_client_uid || marker.layer_id || '') }));
                 state.segments = (local.segments || []).map(segment => ({ ...segment, client_uid: segment.client_uid || uid(), layer_client_uid: String(segment.layer_client_uid || segment.layer_id || ''), points_json: segment.points_json || [] }));
@@ -2216,13 +2386,20 @@
             };
         }
         window.addEventListener('keydown', e => {
+            if (e.key === 'Escape') {
+                e.preventDefault();
+                state.continuousTool = false;
+                clearDrafts();
+                setTool('smart');
+                return;
+            }
             if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
             if (state.draftLine && e.key === 'Backspace') {
                 e.preventDefault();
                 undoLinearPoint();
                 return;
             }
-            if (state.draftLine && (e.key === 'Enter' || e.key === 'Escape')) {
+            if (state.draftLine && e.key === 'Enter') {
                 e.preventDefault();
                 finishLinear();
                 return;
@@ -2394,14 +2571,99 @@
     window.projectTakeoffSetTool = function (tool) {
         const normalized = String(tool || '').toLowerCase();
         if (normalized === 'select' || normalized === 'smart') return setTool('smart');
+        if (normalized === 'transform' || normalized === 'vertices') {
+            setTool('smart');
+            if (isElementLocked(state.selectedElement?.ref)) return false;
+            if (state.selectedElement?.type === 'segment') {
+                (state.selectedElement.ref.handles || []).forEach(handle => handle.visible(true));
+                konvaLayer?.batchDraw();
+            }
+            return normalized === 'vertices'
+                ? state.selectedElement?.type === 'segment'
+                : Boolean(state.selectedElement);
+        }
         if (normalized === 'linear') return setTool('takeoff_linear');
         if (normalized === 'area') return setTool('takeoff_area');
         if (normalized === 'count') return setTool('takeoff_count');
         return setTool('smart');
     };
 
+    window.projectTakeoffSetContinuous = function (enabled) {
+        state.continuousTool = Boolean(enabled);
+        emitToolState();
+        return state.continuousTool;
+    };
+
     window.projectTakeoffClearSelection = function () {
         return clearTakeoffSelection();
+    };
+
+    window.projectTakeoffSelectGroup = function (layerIds) {
+        const allowed = new Set((Array.isArray(layerIds) ? layerIds : []).map(String));
+        const targets = [
+            ...state.markers.filter(marker => allowed.has(String(marker.layer_client_uid))).map(marker => ({ type: 'marker', ref: marker })),
+            ...state.segments.filter(segment => allowed.has(String(segment.layer_client_uid))).map(segment => ({ type: 'segment', ref: segment }))
+        ];
+        state.selectedObjectUids = new Set(targets.map(target => String(target.ref.client_uid)));
+        state.selectedElement = targets.length === 1 ? targets[0] : null;
+        state.segments.forEach(segment => (segment.handles || []).forEach(handle => handle.visible(false)));
+        applyObjectSelectionVisuals();
+        renderProperties();
+        return targets.map(target => String(target.ref.client_uid));
+    };
+
+    window.projectTakeoffSetSelectionLocked = function (objectIds, locked) {
+        const targets = (Array.isArray(objectIds) ? objectIds : []).map(findTakeoffObjectByUid).filter(Boolean);
+        if (!targets.length) return false;
+        snapshot();
+        targets.forEach(({ type, ref }) => {
+            ref.locked = locked ? 1 : 0;
+            ref.updatedAt = timestamp();
+            ref.updated_at = ref.updatedAt;
+            if (type === 'marker') applyMarkerLockVisual(ref);
+            else applySegmentLockVisual(ref);
+        });
+        markDirty();
+        applyObjectSelectionVisuals();
+        return true;
+    };
+
+    window.projectTakeoffUpdateSelection = function (objectIds, patch) {
+        const targets = (Array.isArray(objectIds) ? objectIds : []).map(findTakeoffObjectByUid).filter(Boolean);
+        if (!targets.length || !patch || typeof patch !== 'object') return false;
+        if (targets.some(target => isElementLocked(target.ref))) {
+            showToast('Unlock selected elements before editing their properties.', 'warning');
+            return false;
+        }
+        snapshot();
+        targets.forEach(({ type, ref }) => {
+            if (patch.multiplier !== undefined) ref.multiplier = Math.max(0, num(patch.multiplier));
+            if (patch.notes !== undefined) ref.notes = String(patch.notes);
+            if (type === 'marker') ref.quantity = calculateCountQuantity(ref);
+            else refreshSegment(ref);
+            ref.updatedAt = timestamp();
+            ref.updated_at = ref.updatedAt;
+        });
+        markDirty();
+        return true;
+    };
+
+    window.projectTakeoffMoveSelectionToLayer = function (objectIds, targetLayer) {
+        if (!targetLayer?.id) return false;
+        const targets = (Array.isArray(objectIds) ? objectIds : []).map(findTakeoffObjectByUid).filter(Boolean);
+        if (!targets.length || targets.some(target => isElementLocked(target.ref))) {
+            if (targets.some(target => isElementLocked(target.ref))) showToast('Unlock selected elements before moving them.', 'warning');
+            return false;
+        }
+        snapshot();
+        targets.forEach(({ ref }) => {
+            ref.layer_client_uid = String(targetLayer.id);
+            ref.catalog_item_id = targetLayer.catalog_item_id || targetLayer.catalogItemId || ref.catalog_item_id || null;
+            ref.updatedAt = timestamp();
+            ref.updated_at = ref.updatedAt;
+        });
+        markDirty();
+        return true;
     };
 
     window.projectTakeoffDeleteSelection = function (objectIds) {
@@ -2409,6 +2671,10 @@
         const targets = ids.map(findTakeoffObjectByUid).filter(Boolean);
         if (!targets.length && state.selectedElement) targets.push(state.selectedElement);
         if (!targets.length) return false;
+        if (targets.some(target => isElementLocked(target.ref))) {
+            showToast('Unlock selected elements before deleting them.', 'warning');
+            return false;
+        }
         snapshot();
         targets.forEach(({ type, ref }) => {
             if (type === 'marker') {
@@ -2420,7 +2686,9 @@
             }
         });
         state.selectedElement = null;
+        state.selectedObjectUids.clear();
         renderProperties();
+        applyObjectSelectionVisuals();
         markDirty();
         emitSelectionState();
         return true;
@@ -2428,26 +2696,37 @@
 
     window.projectTakeoffCopySelection = function (objectIds) {
         const ids = Array.isArray(objectIds) ? objectIds : [];
-        const target = ids.map(findTakeoffObjectByUid).filter(Boolean)[0] || state.selectedElement;
-        if (!target?.ref) return false;
+        const targets = ids.map(findTakeoffObjectByUid).filter(Boolean);
+        if (!targets.length && state.selectedElement) targets.push(state.selectedElement);
+        if (!targets.length) return false;
         snapshot();
-        if (target.type === 'marker') {
-            const copy = { ...stripNodes(target.ref), client_uid: uid(), x: num(target.ref.x) + 16, y: num(target.ref.y) + 16, createdAt: timestamp(), updatedAt: timestamp() };
+        const copies = targets.map(target => {
+            const copy = {
+                ...stripNodes(target.ref),
+                client_uid: uid(),
+                createdAt: timestamp(),
+                updatedAt: timestamp()
+            };
             copy.created_at = copy.createdAt;
             copy.updated_at = copy.updatedAt;
-            state.markers.push(copy);
-            createMarkerNode(copy);
-            selectElement('marker', copy);
-        } else {
-            const copy = { ...stripNodes(target.ref), client_uid: uid(), points_json: (target.ref.points_json || []).map(p => ({ x: p.x + 16, y: p.y + 16 })), createdAt: timestamp(), updatedAt: timestamp() };
-            copy.created_at = copy.createdAt;
-            copy.updated_at = copy.updatedAt;
-            state.segments.push(copy);
-            createSegmentNode(copy);
-            selectElement('segment', copy);
-        }
+            if (target.type === 'marker') {
+                copy.x = num(target.ref.x) + 16;
+                copy.y = num(target.ref.y) + 16;
+                state.markers.push(copy);
+                createMarkerNode(copy);
+            } else {
+                copy.points_json = (target.ref.points_json || []).map(point => ({ x: point.x + 16, y: point.y + 16 }));
+                state.segments.push(copy);
+                createSegmentNode(copy);
+            }
+            return copy;
+        });
+        state.selectedElement = null;
+        state.selectedObjectUids = new Set(copies.map(copy => String(copy.client_uid)));
+        applyObjectSelectionVisuals();
+        renderProperties();
         markDirty();
-        return true;
+        return copies.map(copy => String(copy.client_uid));
     };
 
     window.projectTakeoffSetZoom = function (percent) {
