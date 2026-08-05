@@ -1253,6 +1253,7 @@ if ($filePath !== '') {
             r.label.fontSize(16 * invScale);
             r.label.padding(4 * invScale);
         });
+        window.syncTakeoffInteractionScale?.(invScale);
         konvaLayer.batchDraw();
     }
 
@@ -3530,7 +3531,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-selection-lock-20260805-1"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-vertex-editing-20260805-1"></script>
 </body>
 </html>
 

@@ -435,6 +435,20 @@
         return Number(layer?.locked || 0) === 1;
     }
 
+    function isTakeoffDrawingToolActive() {
+        return ['takeoff_count', 'takeoff_linear', 'takeoff_area'].includes(state.tool);
+    }
+
+    function applyTakeoffDrawingInteractivity() {
+        const listening = !isTakeoffDrawingToolActive();
+        state.markers.forEach(marker => marker.node?.listening(listening));
+        state.segments.forEach(segment => {
+            segment.node?.listening(listening);
+            (segment.handles || []).forEach(handle => handle.listening(listening));
+        });
+        konvaLayer?.batchDraw();
+    }
+
     function applyMarkerLockVisual(marker) {
         if (!marker.node) return;
         const locked = isElementLocked(marker);
@@ -468,7 +482,7 @@
 
     function createMarkerNode(marker) {
         if (!ensureKonva()) return;
-        const group = new Konva.Group({ x: num(marker.x), y: num(marker.y), draggable: !isElementLocked(marker), visible: marker.page_number === pageNum });
+        const group = new Konva.Group({ x: num(marker.x), y: num(marker.y), draggable: !isElementLocked(marker), listening: !isTakeoffDrawingToolActive(), visible: marker.page_number === pageNum });
         drawSymbol(group, marker.symbol || 'circle', marker.color || '#2563eb', marker.symbol_size || marker.size);
         group.add(new Konva.Text({ x: 12, y: -10, text: marker.label || String(marker.quantity || ''), fill: marker.color || '#2563eb', fontSize: 14, fontStyle: 'bold' }));
         group.on('click tap', event => {
@@ -509,6 +523,24 @@
         konvaLayer.batchDraw();
     }
 
+    function syncTakeoffHandleScale(inverseScale) {
+        const viewportScale = Number(canvas?.viewportTransform?.[0] || 1);
+        const factor = Number.isFinite(Number(inverseScale)) && Number(inverseScale) > 0
+            ? Number(inverseScale)
+            : (viewportScale > 0 ? 1 / viewportScale : 1);
+        state.segments.forEach(segment => {
+            (segment.handles || []).forEach(handle => {
+                // Vertex controls are UI affordances, not drawing geometry.
+                // Keep their visible and hit size usable while the PDF is fit
+                // to screen and the world layer is heavily scaled down.
+                handle.radius(6 * factor);
+                handle.strokeWidth(2 * factor);
+                handle.hitStrokeWidth(14 * factor);
+            });
+        });
+        konvaLayer?.batchDraw();
+    }
+
     function destroySegmentNodes(segment) {
         if (segment.node) segment.node.destroy();
         if (segment.labelNode) segment.labelNode.destroy();
@@ -533,17 +565,22 @@
             lineCap: 'round',
             lineJoin: 'round',
             draggable: !isElementLocked(segment),
+            listening: !isTakeoffDrawingToolActive(),
             visible,
         });
         const label = new Konva.Text({ fill: segment.color || '#22c55e', fontSize: 16, padding: 4, visible, listening: false });
         const handles = (segment.points_json || []).map((point, index) => {
-            const handle = new Konva.Circle({ x: point.x, y: point.y, radius: 5, fill: '#fff', stroke: segment.color || '#2563eb', strokeWidth: 2, draggable: !isElementLocked(segment), visible: false });
+            const handle = new Konva.Circle({ x: point.x, y: point.y, radius: 5, fill: '#fff', stroke: segment.color || '#2563eb', strokeWidth: 2, draggable: !isElementLocked(segment), listening: !isTakeoffDrawingToolActive(), visible: false });
+            handle.on('dragstart', () => snapshot());
             handle.on('dragmove', () => {
-                segment.points_json[index] = handle.position();
+                const position = handle.position();
+                segment.points_json[index] = { x: position.x, y: position.y };
                 refreshSegment(segment);
             });
             handle.on('dragend', () => {
-                snapshot();
+                segment.updatedAt = timestamp();
+                segment.updated_at = segment.updatedAt;
+                refreshSegment(segment);
                 markDirty();
             });
             handle.on('dblclick dbltap', () => {
@@ -587,6 +624,7 @@
         segment.handles = handles;
         refreshSegment(segment);
         applySegmentLockVisual(segment);
+        syncTakeoffHandleScale();
     }
 
     function clearNodes() {
@@ -1472,6 +1510,7 @@
         if (leavingLinear && state.draftLine) finishLinear();
         state.tool = tool;
         window.__takeoffDrawingActive = ['takeoff_count', 'takeoff_linear', 'takeoff_area'].includes(tool);
+        applyTakeoffDrawingInteractivity();
         if (tool === 'takeoff_count' || tool === 'takeoff_linear' || tool === 'takeoff_area') {
             if (typeof setMode === 'function') setMode('smart');
             ensureKonva();
@@ -2536,6 +2575,8 @@
         calculateLaborHours,
         calculateTakeoffSummary,
     };
+
+    window.syncTakeoffInteractionScale = syncTakeoffHandleScale;
 
     window.projectTakeoffActivateLayer = function (payload) {
         if (!payload?.id) return null;
