@@ -1368,7 +1368,7 @@ if ($filePath !== '') {
     }
 
     function updateKonvaInteractivity() {
-        const allowEdit = (currentMode === 'smart');
+        const allowEdit = (currentMode === 'smart' && !pendingPlacementTool);
         konvaRulers.forEach(r => {
             r.group.draggable(allowEdit);
             r.a1.draggable(allowEdit);
@@ -1868,6 +1868,9 @@ if ($filePath !== '') {
         if (!panContainer._takeoffPanPointerBound) {
             panContainer._takeoffPanPointerBound = true;
             panContainer.addEventListener('pointerdown', evt => {
+                // Annotation placement owns the complete first gesture, even if
+                // the previously selected tool was Hand/Pan.
+                if (pendingPlacementTool) return;
                 const panActive = konvaPanMode || konvaTemporaryPan
                     || Boolean(window.projectTakeoffIsPanModeActive?.());
                 if (!panActive || (evt.button !== 0 && evt.button !== 1 && evt.button !== 2)) return;
@@ -1986,10 +1989,9 @@ if ($filePath !== '') {
         window.addEventListener('blur', releaseCanvasPointerState);
 
         konvaStage.on('mousedown touchstart', (e) => {
-            const target = e.target;
-            const isEmpty = !target || target === konvaStage;
             const pos = konvaStage.getPointerPosition();
-            if (pendingPlacementTool && isEmpty) {
+            // Placement must also work over the PDF and existing annotations.
+            if (pendingPlacementTool) {
                 if (!pos) return;
                 const nativeEvent = e.evt;
                 const stageContainer = konvaStage.container();
@@ -2006,7 +2008,8 @@ if ($filePath !== '') {
                     height: 1,
                     stroke: '#22c55e',
                     strokeWidth: 1.5,
-                    dash: [6, 4]
+                    dash: [6, 4],
+                    listening: false
                 });
                 konvaLayer.add(pendingPlacementPreview);
                 konvaLayer.batchDraw();
@@ -3231,6 +3234,9 @@ if ($filePath !== '') {
 
     function startPlacementTool(tool) {
         setMode('smart');
+        // Synchronize the takeoff controller too; otherwise its stale pan flag
+        // can consume this pointerdown in the native capture phase.
+        try { window.projectTakeoffSetTool?.('select'); } catch (e) {}
         pendingPlacementTool = tool;
         konvaPanMode = false;
         konvaTemporaryPan = false;
@@ -3252,6 +3258,7 @@ if ($filePath !== '') {
             if (konvaLayer) konvaLayer.batchDraw();
         }
         if (konvaStage && konvaStage.container()) konvaStage.container().style.cursor = 'default';
+        updateKonvaInteractivity();
         if (clearedTool) {
             try {
                 window.parent?.postMessage({

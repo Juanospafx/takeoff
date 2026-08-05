@@ -60,3 +60,39 @@ test('Select, Pan, and Escape cancel pending annotation placement and restore th
     const clear = section(editor, 'function clearPlacementTool', 'function addText');
     assert.match(clear, /style\.cursor = 'default'/);
 });
+
+test('the first placement gesture starts over the background or an existing Konva node', () => {
+    const downStart = editor.indexOf("konvaStage.on('mousedown touchstart'", editor.indexOf('pendingPlacementTool'));
+    assert.notEqual(downStart, -1);
+    const downEnd = editor.indexOf("konvaStage.on('mousemove touchmove'", downStart);
+    assert.notEqual(downEnd, -1);
+    const pointerDown = editor.slice(downStart, downEnd);
+    assert.match(pointerDown, /if \(pendingPlacementTool\)/);
+    assert.doesNotMatch(pointerDown, /pendingPlacementTool\s*&&\s*isEmpty/,
+        'an existing annotation/takeoff node must not consume the first placement click');
+    assert.match(pointerDown, /e\.cancelBubble = true/);
+    assert.match(pointerDown, /pendingPlacementStart = screenToWorld\(pos\)/);
+});
+
+test('one pointerdown/up cycle creates exactly one requested note or cloud', () => {
+    const upStart = editor.indexOf("konvaStage.on('mouseup touchend', () =>", editor.indexOf('pendingPlacementStart'));
+    assert.notEqual(upStart, -1);
+    const upEnd = editor.indexOf("if (!konvaDrawing) return", upStart);
+    assert.notEqual(upEnd, -1);
+    const pointerUp = editor.slice(upStart, upEnd);
+    assert.equal((pointerUp.match(/createKonvaNote\(/g) || []).length, 1);
+    assert.equal((pointerUp.match(/createKonvaCloud\(/g) || []).length, 1);
+    assert.match(pointerUp, /pendingPlacementTool === 'note'[\s\S]*clearPlacementTool\(\)[\s\S]*startInlineNoteEdit/);
+    assert.match(pointerUp, /pendingPlacementTool === 'cloud'[\s\S]*createKonvaCloud[\s\S]*clearPlacementTool\(\)/);
+});
+
+test('activation arms pending placement after smart-mode reset and tool-state cannot cancel it', () => {
+    const start = section(editor, 'function startPlacementTool', 'function clearPlacementTool');
+    assert.match(start, /setMode\('smart'\)[\s\S]*pendingPlacementTool = tool/,
+        'smart reset must happen before arming placement');
+    assert.doesNotMatch(start, /pendingPlacementTool = tool[\s\S]*setMode\('smart'\)/,
+        'arming before setMode immediately clears the tool');
+    const toolState = section(parent, "if (event.data?.type === 'project-takeoff-tool-state')", "if (event.data?.type === 'project-annotation-tool-state')");
+    assert.match(toolState, /annotationPlacementActive/);
+    assert.match(toolState, /reportedTool === 'smart' && annotationPlacementActive[\s\S]*viewerState\.activeTool/);
+});
