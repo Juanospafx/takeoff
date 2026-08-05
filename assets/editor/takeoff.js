@@ -21,6 +21,7 @@
         selectedElement: null,
         selectedObjectUids: new Set(),
         continuousTool: false,
+        annotationPlacement: false,
         panMode: false,
         temporaryPan: false,
         selectionDrag: null,
@@ -445,7 +446,7 @@
 
     function applyTakeoffDrawingInteractivity() {
         const panning = state.panMode || state.temporaryPan;
-        const listening = !isTakeoffDrawingToolActive() && !panning;
+        const listening = !isTakeoffDrawingToolActive() && !panning && !state.annotationPlacement;
         state.markers.forEach(marker => {
             marker.node?.listening(listening);
             marker.node?.draggable(listening && !panning && !isElementLocked(marker));
@@ -2890,6 +2891,12 @@
         applyTakeoffDrawingInteractivity();
         window.setTakeoffPanMode?.(state.temporaryPan, true);
         return state.temporaryPan;
+    };
+
+    window.projectTakeoffSetAnnotationPlacement = function (enabled) {
+        state.annotationPlacement = Boolean(enabled);
+        applyTakeoffDrawingInteractivity();
+        return state.annotationPlacement;
     };
 
     window.projectTakeoffIsDrawingToolActive = function () {

@@ -28,12 +28,14 @@ test('Notes and Cloud have distinct toolbar buttons and activate their placement
     assert.match(cloudBranch, /callEditor\('addCloud'\)/);
 });
 
-test('drag placement creates the requested annotation, persists it, and clears pending state', () => {
-    assert.match(editor, /konvaStage\.on\('mousedown touchstart'[\s\S]*pendingPlacementTool[\s\S]*pendingPlacementStart = screenToWorld\(pos\)/);
+test('two-click placement tracks an anchor and only then creates/persists the annotation', () => {
+    assert.match(editor, /konvaStage\.on\('mousedown touchstart'[\s\S]*pendingPlacementTool[\s\S]*pendingPlacementStart = world/);
     assert.match(editor, /pendingPlacementPreview = new Konva\.Rect/);
-    assert.match(editor, /pendingPlacementTool === 'note'[\s\S]*createKonvaNote[\s\S]*startInlineNoteEdit\(note/);
-    assert.match(editor, /pendingPlacementTool === 'cloud'[\s\S]*createKonvaCloud/);
-    assert.match(editor, /clearPlacementTool\(\)[\s\S]*saveCurrentPageAnnotations\(\)/);
+    assert.match(editor, /if \(pendingPlacementStart\)[\s\S]*completePendingPlacement\(world\)[\s\S]*pendingPlacementStart = world/);
+    const complete = section(editor, 'function completePendingPlacement', 'function initKonvaRuler');
+    assert.match(complete, /tool === 'note'[\s\S]*createKonvaNote[\s\S]*startInlineNoteEdit\(note/);
+    assert.match(complete, /tool === 'cloud'[\s\S]*createKonvaCloud/);
+    assert.match(complete, /clearPlacementTool\(\)[\s\S]*saveCurrentPageAnnotations\(\)/);
     const clear = section(editor, 'function clearPlacementTool', 'function addText');
     assert.match(clear, /pendingPlacementTool = null/);
     assert.match(clear, /pendingPlacementStart = null/);
@@ -61,7 +63,7 @@ test('Select, Pan, and Escape cancel pending annotation placement and restore th
     assert.match(clear, /style\.cursor = 'default'/);
 });
 
-test('the first placement gesture starts over the background or an existing Konva node', () => {
+test('the first click only anchors placement over the background or an existing Konva node', () => {
     const downStart = editor.indexOf("konvaStage.on('mousedown touchstart'", editor.indexOf('pendingPlacementTool'));
     assert.notEqual(downStart, -1);
     const downEnd = editor.indexOf("konvaStage.on('mousemove touchmove'", downStart);
@@ -71,19 +73,25 @@ test('the first placement gesture starts over the background or an existing Konv
     assert.doesNotMatch(pointerDown, /pendingPlacementTool\s*&&\s*isEmpty/,
         'an existing annotation/takeoff node must not consume the first placement click');
     assert.match(pointerDown, /e\.cancelBubble = true/);
-    assert.match(pointerDown, /pendingPlacementStart = screenToWorld\(pos\)/);
+    assert.match(pointerDown, /const world = screenToWorld\(pos\)/);
+    assert.match(pointerDown, /if \(pendingPlacementStart\)[\s\S]*completePendingPlacement\(world\)[\s\S]*return[\s\S]*pendingPlacementStart = world/,
+        'an existing anchor confirms; otherwise this click only stores the anchor');
 });
 
-test('one pointerdown/up cycle creates exactly one requested note or cloud', () => {
+test('first pointerup cannot create, while second click creates exactly one requested annotation', () => {
     const upStart = editor.indexOf("konvaStage.on('mouseup touchend', () =>", editor.indexOf('pendingPlacementStart'));
     assert.notEqual(upStart, -1);
     const upEnd = editor.indexOf("if (!konvaDrawing) return", upStart);
     assert.notEqual(upEnd, -1);
     const pointerUp = editor.slice(upStart, upEnd);
-    assert.equal((pointerUp.match(/createKonvaNote\(/g) || []).length, 1);
-    assert.equal((pointerUp.match(/createKonvaCloud\(/g) || []).length, 1);
-    assert.match(pointerUp, /pendingPlacementTool === 'note'[\s\S]*clearPlacementTool\(\)[\s\S]*startInlineNoteEdit/);
-    assert.match(pointerUp, /pendingPlacementTool === 'cloud'[\s\S]*createKonvaCloud[\s\S]*clearPlacementTool\(\)/);
+    assert.equal((pointerUp.match(/createKonva(?:Note|Cloud)\(/g) || []).length, 0,
+        'the release paired with the first click only keeps the preview alive');
+    assert.match(pointerUp, /if \(pendingPlacementTool && pendingPlacementStart\)[\s\S]*return/);
+    const complete = section(editor, 'function completePendingPlacement', 'function initKonvaRuler');
+    assert.equal((complete.match(/createKonvaNote\(/g) || []).length, 1);
+    assert.equal((complete.match(/createKonvaCloud\(/g) || []).length, 1);
+    assert.match(complete, /tool === 'note'[\s\S]*clearPlacementTool\(\)[\s\S]*startInlineNoteEdit/);
+    assert.match(complete, /tool === 'cloud'[\s\S]*createKonvaCloud[\s\S]*clearPlacementTool\(\)/);
 });
 
 test('activation arms pending placement after smart-mode reset and tool-state cannot cancel it', () => {
@@ -92,6 +100,13 @@ test('activation arms pending placement after smart-mode reset and tool-state ca
         'smart reset must happen before arming placement');
     assert.doesNotMatch(start, /pendingPlacementTool = tool[\s\S]*setMode\('smart'\)/,
         'arming before setMode immediately clears the tool');
+    assert.match(start, /projectTakeoffSetAnnotationPlacement\?\.\(true\)[\s\S]*pendingPlacementTool = tool/,
+        'existing takeoff nodes must stop listening before the first placement click');
+    const clear = section(editor, 'function clearPlacementTool', 'function addText');
+    assert.match(clear, /projectTakeoffSetAnnotationPlacement\?\.\(false\)/,
+        'takeoff node interaction must be restored when placement ends or is cancelled');
+    assert.match(fs.readFileSync(path.join(__dirname, '..', 'assets', 'editor', 'takeoff.js'), 'utf8'),
+        /annotationPlacement[\s\S]*const listening = !isTakeoffDrawingToolActive\(\) && !panning && !state\.annotationPlacement/);
     const toolState = section(parent, "if (event.data?.type === 'project-takeoff-tool-state')", "if (event.data?.type === 'project-annotation-tool-state')");
     assert.match(toolState, /annotationPlacementActive/);
     assert.match(toolState, /reportedTool === 'smart' && annotationPlacementActive[\s\S]*viewerState\.activeTool/);

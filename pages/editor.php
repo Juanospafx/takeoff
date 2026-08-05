@@ -1798,6 +1798,44 @@ if ($filePath !== '') {
         konvaEditingTextarea.addEventListener('blur', onBlur);
     }
 
+    function completePendingPlacement(end) {
+        if (!pendingPlacementTool || !pendingPlacementStart || !end) return false;
+        const tool = pendingPlacementTool;
+        const minX = Math.min(pendingPlacementStart.x, end.x);
+        const minY = Math.min(pendingPlacementStart.y, end.y);
+        const width = Math.max(10, Math.abs(end.x - pendingPlacementStart.x));
+        const height = Math.max(10, Math.abs(end.y - pendingPlacementStart.y));
+        const cx = minX + (width / 2);
+        const cy = minY + (height / 2);
+
+        if (pendingPlacementPreview) {
+            pendingPlacementPreview.destroy();
+            pendingPlacementPreview = null;
+        }
+
+        if (tool === 'note') {
+            const note = createKonvaNote({ x: minX, y: minY }, 'annotation');
+            const baseW = Math.max(1, note.label.width());
+            const baseH = Math.max(1, note.label.height());
+            note.group.scaleX(Math.max(0.35, width / baseW));
+            note.group.scaleY(Math.max(0.35, height / baseH));
+            if (konvaTransformer) konvaTransformer.nodes([note.group]);
+            konvaSelectedNode = { type: 'note', ref: note };
+            konvaSelectedNote = note;
+            clearPlacementTool();
+            startInlineNoteEdit(note, { selectAll: true, isNew: true });
+        } else if (tool === 'cloud') {
+            const cloud = createKonvaCloud({ x: cx, y: cy });
+            cloud.group.scaleX(Math.max(0.35, width / 180));
+            cloud.group.scaleY(Math.max(0.35, height / 120));
+            if (konvaTransformer) konvaTransformer.nodes([cloud.group]);
+            konvaSelectedNode = { type: 'cloud', ref: cloud };
+            clearPlacementTool();
+            saveCurrentPageAnnotations();
+        }
+        return true;
+    }
+
     function initKonvaRuler() {
         if (!useKonvaRuler || konvaStage) return;
         const w = document.getElementById('canvas-wrapper');
@@ -1993,13 +2031,19 @@ if ($filePath !== '') {
             // Placement must also work over the PDF and existing annotations.
             if (pendingPlacementTool) {
                 if (!pos) return;
+                const world = screenToWorld(pos);
+                if (pendingPlacementStart) {
+                    completePendingPlacement(world);
+                    e.cancelBubble = true;
+                    return;
+                }
                 const nativeEvent = e.evt;
                 const stageContainer = konvaStage.container();
                 if (nativeEvent?.pointerId !== undefined && stageContainer?.setPointerCapture) {
                     try { stageContainer.setPointerCapture(nativeEvent.pointerId); } catch (err) {}
                 }
                 e.cancelBubble = true;
-                pendingPlacementStart = screenToWorld(pos);
+                pendingPlacementStart = world;
                 if (pendingPlacementPreview) pendingPlacementPreview.destroy();
                 pendingPlacementPreview = new Konva.Rect({
                     x: pendingPlacementStart.x,
@@ -2049,43 +2093,8 @@ if ($filePath !== '') {
 
         konvaStage.on('mouseup touchend', () => {
             if (pendingPlacementTool && pendingPlacementStart) {
-                const pos = konvaStage.getPointerPosition();
-                const end = pos ? screenToWorld(pos) : pendingPlacementStart;
-                const minX = Math.min(pendingPlacementStart.x, end.x);
-                const minY = Math.min(pendingPlacementStart.y, end.y);
-                const width = Math.max(10, Math.abs(end.x - pendingPlacementStart.x));
-                const height = Math.max(10, Math.abs(end.y - pendingPlacementStart.y));
-                const cx = minX + (width / 2);
-                const cy = minY + (height / 2);
-
-                if (pendingPlacementPreview) {
-                    pendingPlacementPreview.destroy();
-                    pendingPlacementPreview = null;
-                }
-
-                if (pendingPlacementTool === 'note') {
-                    const note = createKonvaNote({ x: minX, y: minY }, 'annotation');
-                    const baseW = Math.max(1, note.label.width());
-                    const baseH = Math.max(1, note.label.height());
-                    note.group.scaleX(Math.max(0.35, width / baseW));
-                    note.group.scaleY(Math.max(0.35, height / baseH));
-                    if (konvaTransformer) konvaTransformer.nodes([note.group]);
-                    konvaSelectedNode = { type: 'note', ref: note };
-                    konvaSelectedNote = note;
-                    clearPlacementTool();
-                    startInlineNoteEdit(note, { selectAll: true, isNew: true });
-                } else if (pendingPlacementTool === 'cloud') {
-                    const cloud = createKonvaCloud({ x: cx, y: cy });
-                    cloud.group.scaleX(Math.max(0.35, width / 180));
-                    cloud.group.scaleY(Math.max(0.35, height / 120));
-                    if (konvaTransformer) konvaTransformer.nodes([cloud.group]);
-                    konvaSelectedNode = { type: 'cloud', ref: cloud };
-                }
-
-                if (pendingPlacementTool) {
-                    clearPlacementTool();
-                    saveCurrentPageAnnotations();
-                }
+                // Two-click placement: releasing the first click keeps the
+                // preview alive; the next pointer-down confirms it.
                 return;
             }
 
@@ -3237,6 +3246,7 @@ if ($filePath !== '') {
         // Synchronize the takeoff controller too; otherwise its stale pan flag
         // can consume this pointerdown in the native capture phase.
         try { window.projectTakeoffSetTool?.('select'); } catch (e) {}
+        try { window.projectTakeoffSetAnnotationPlacement?.(true); } catch (e) {}
         pendingPlacementTool = tool;
         konvaPanMode = false;
         konvaTemporaryPan = false;
@@ -3252,6 +3262,7 @@ if ($filePath !== '') {
         const clearedTool = pendingPlacementTool;
         pendingPlacementTool = null;
         pendingPlacementStart = null;
+        try { window.projectTakeoffSetAnnotationPlacement?.(false); } catch (e) {}
         if (pendingPlacementPreview) {
             pendingPlacementPreview.destroy();
             pendingPlacementPreview = null;
@@ -3684,7 +3695,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-interactions-20260805-2"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-interactions-20260805-3"></script>
 </body>
 </html>
 
