@@ -3530,7 +3530,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-delete-rules-20260805-1"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-selection-lock-20260805-1"></script>
 </body>
 </html>
 

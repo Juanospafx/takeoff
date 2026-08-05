@@ -429,6 +429,7 @@
                 size: layer.symbol_size || 'Medium',
                 color: layer.color || '#111827',
                 visible: layer.visible !== false,
+                locked: Number(layer.locked || 0) === 1,
                 quantity: Number(layer.quantity || layer.count || layer.measurement_count || 0),
                 baseQuantity: Number(layer.baseQuantity ?? layer.quantity ?? layer.count ?? layer.measurement_count ?? 0),
                 catalogItemId: layer.catalog_item_id || layer.catalogItemId || null,
@@ -477,6 +478,7 @@
                 size: layer.size || 'Medium',
                 color: layer.color || '#111827',
                 visible: layer.visible !== false,
+                locked: Number(layer.locked || 0) === 1,
                 quantity: Number(layer.quantity || 0),
                 baseQuantity: Number(layer.baseQuantity ?? layer.seedQuantity ?? 0),
                 catalogItemId: layer.catalogItemId || layer.catalog_item_id || null,
@@ -752,7 +754,8 @@
             spacing: layer.spacing || 0,
             height: layer.height || 0,
             depth: layer.depth || 0,
-            visible: layer.visible !== false
+            visible: layer.visible !== false,
+            locked: Boolean(layer.locked)
         };
     }
 
@@ -810,26 +813,29 @@
             const groupVisible = !q || group.name.toLowerCase().includes(q) || visibleLayers.length > 0;
             if (!groupVisible) return '';
             const expanded = q ? true : group.isExpanded !== false;
-            const groupCheckboxVisible = (group.layers || []).some(layer => layer.visible !== false) || !(group.layers || []).length;
             const groupSelected = selectionState.selectedGroupId === group.id;
             return `<div class="pro-takeoff-group" data-group-id="${esc(group.id)}">
                 <div class="pro-tree-row pro-tree-folder ${takeoffState.activeGroupId === group.id ? 'active' : ''} ${groupSelected ? 'group-selected' : ''}" data-takeoff-group-row="${esc(group.id)}" role="button" tabindex="0" aria-selected="${groupSelected ? 'true' : 'false'}">
                     <button class="pro-tree-toggle" type="button" data-group-toggle="${esc(group.id)}"><i class="fas ${expanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i></button>
-                    <input type="checkbox" ${groupCheckboxVisible ? 'checked' : ''} aria-label="Group visibility" data-group-visible="${esc(group.id)}">
+                    <input type="checkbox" ${groupSelected ? 'checked' : ''} aria-label="Select all items in group" data-group-select="${esc(group.id)}">
                     <span class="pro-tree-name"><i class="fas fa-folder${expanded ? '-open' : ''}"></i> ${esc(group.name)}</span>
                     <span class="pro-tree-qty">${group.layers.length}</span>
+                    <button class="pro-visibility-btn" type="button" data-group-visibility="${esc(group.id)}" title="Show or hide group" aria-label="Show or hide group"><i class="fas ${group.layers.some(layer => layer.visible !== false) ? 'fa-eye' : 'fa-eye-slash'}"></i></button>
                     <button class="pro-row-menu-btn" type="button" data-group-menu="${esc(group.id)}"><i class="fas fa-ellipsis-vertical"></i></button>
                 </div>
                 <div class="pro-tree-children" ${expanded ? '' : 'hidden'}>
                     ${visibleLayers.map(layer => {
                         const isVisible = layer.visible !== false;
+                        const editorLockState = callEditor('projectTakeoffGetLayerLockState', layer.id) || {};
+                        const isLocked = Boolean(layer.locked || editorLockState.locked);
                         const metadata = layer.catalogItemId ? 'Linked to catalog' : (layer.category || layer.description || '');
                         return `<div class="pro-tree-row pro-tree-item ${takeoffState.activeLayerId === layer.id || groupSelected ? 'active' : ''} ${groupSelected ? 'group-selected' : ''} ${isVisible ? '' : 'is-hidden'}" data-layer-row="${esc(layer.id)}" aria-selected="${groupSelected ? 'true' : 'false'}">
                             <button class="pro-visibility-btn ${isVisible ? '' : 'is-off'}" type="button" data-layer-visibility="${esc(layer.id)}" title="${isVisible ? 'Hide item' : 'Show item'}" aria-label="${isVisible ? 'Hide item' : 'Show item'}"><i class="fas ${isVisible ? 'fa-eye' : 'fa-eye-slash'}"></i></button>
-                            <input class="pro-layer-active-check" type="checkbox" ${takeoffState.activeLayerId === layer.id ? 'checked' : ''} aria-label="Set active layer" data-layer-active="${esc(layer.id)}">
+                            <input class="pro-layer-active-check" type="checkbox" ${selectionState.selectedLayerIds.includes(String(layer.id)) ? 'checked' : ''} aria-label="Select item" data-layer-select="${esc(layer.id)}">
                             <span class="pro-layer-symbol" style="color:${esc(layer.color)}">${symbolGlyph(layer)}</span>
                             <span class="pro-tree-name" title="${esc(layer.name)}">${esc(layer.name)}</span>
                             <span class="pro-tree-qty">${esc(quantityLabel(layer))}</span>
+                            <button class="pro-layer-lock-btn ${isLocked ? 'is-locked' : ''}" type="button" data-layer-lock="${esc(layer.id)}" title="${isLocked ? 'Unlock item' : 'Lock item'}" aria-label="${isLocked ? 'Unlock item' : 'Lock item'}" aria-pressed="${isLocked ? 'true' : 'false'}"><i class="fas fa-${isLocked ? 'lock' : 'lock-open'}"></i></button>
                             <button class="pro-row-menu-btn" type="button" data-layer-menu="${esc(layer.id)}"><i class="fas fa-ellipsis-vertical"></i></button>
                             <small class="pro-layer-meta ${layer.catalogItemId ? 'pro-catalog-linked' : ''}">${esc(metadata)}</small>
                         </div>`;
@@ -898,9 +904,16 @@
                 renderTakeoffPanel();
             });
         });
-        document.querySelectorAll('[data-group-visible]').forEach(box => {
+        document.querySelectorAll('[data-group-select]').forEach(box => {
             box.addEventListener('click', event => event.stopPropagation());
-            box.addEventListener('change', () => toggleGroupVisibility(box.dataset.groupVisible, box.checked));
+            box.addEventListener('change', () => setGroupSelection(box.dataset.groupSelect, box.checked));
+        });
+        document.querySelectorAll('[data-group-visibility]').forEach(button => {
+            button.addEventListener('click', event => {
+                event.stopPropagation();
+                const group = findGroup(button.dataset.groupVisibility);
+                if (group) toggleGroupVisibility(group.id, !(group.layers || []).some(layer => layer.visible !== false));
+            });
         });
         document.querySelectorAll('[data-layer-row]').forEach(row => {
             row.addEventListener('click', event => {
@@ -916,12 +929,14 @@
                 if (layer) toggleLayerVisibility(layer.id, layer.visible === false);
             });
         });
-        document.querySelectorAll('[data-layer-active]').forEach(box => {
+        document.querySelectorAll('[data-layer-select]').forEach(box => {
             box.addEventListener('click', event => event.stopPropagation());
-            box.addEventListener('change', () => {
-                if (box.checked) setActiveTakeoffLayer(box.dataset.layerActive);
-                else if (takeoffState.activeLayerId === box.dataset.layerActive) clearActiveTakeoffLayer();
-                else renderTakeoffPanel();
+            box.addEventListener('change', () => toggleLayerSelection(box.dataset.layerSelect, box.checked));
+        });
+        document.querySelectorAll('[data-layer-lock]').forEach(button => {
+            button.addEventListener('click', event => {
+                event.stopPropagation();
+                toggleLayerLock(button.dataset.layerLock);
             });
         });
         document.querySelectorAll('[data-group-menu]').forEach(button => {
@@ -1599,6 +1614,7 @@
             // must never act as visibility commands. Only explicit eye/checkbox
             // actions are allowed to mutate layer.visible.
             if (remote.unit_of_measure || remote.uom) layer.uom = remote.unit_of_measure || remote.uom;
+            if (remote.locked !== undefined) layer.locked = Boolean(remote.locked);
         });
         applyAggregatedCanvasQuantities();
         if (snapshot.activeLayerId && findLayer(snapshot.activeLayerId)) {
@@ -1770,13 +1786,16 @@
             bar.innerHTML = '';
             return;
         }
+        const lockState = callEditor('projectTakeoffGetSelectionLockState') || {};
+        const lockAction = lockState.anyLocked ? 'unlock' : 'lock';
+        const lockLabel = lockState.anyLocked ? 'Unlock' : 'Lock';
+        const lockIcon = lockState.anyLocked ? 'fa-lock-open' : 'fa-lock';
         bar.innerHTML = `
             <strong>${count} element(s) selected</strong>
             <button type="button" data-selection-action="copy"><i class="fas fa-copy"></i> Copy</button>
             <button type="button" data-selection-action="move"><i class="fas fa-folder-tree"></i> Move To</button>
             <button type="button" data-selection-action="properties"><i class="fas fa-sliders"></i> Properties</button>
-            <button type="button" data-selection-action="lock"><i class="fas fa-lock"></i> Lock</button>
-            <button type="button" data-selection-action="unlock"><i class="fas fa-lock-open"></i> Unlock</button>
+            <button type="button" data-selection-action="${lockAction}"><i class="fas ${lockIcon}"></i> ${lockLabel}</button>
             <button type="button" data-selection-action="delete"><i class="fas fa-trash"></i> Delete</button>
             <button type="button" class="icon" data-selection-action="clear" aria-label="Clear selection"><i class="fas fa-times"></i></button>
         `;
@@ -1795,9 +1814,13 @@
     }
 
     function toggleGroupSelection(groupId) {
+        setGroupSelection(groupId, selectionState.selectedGroupId !== groupId);
+    }
+
+    function setGroupSelection(groupId, selected) {
         const group = findGroup(groupId);
         if (!group) return;
-        if (selectionState.selectedGroupId === group.id) {
+        if (!selected) {
             selectionState.selectedGroupId = null;
             selectionState.selectedLayerIds = [];
             selectionState.selectedObjectIds = [];
@@ -1813,6 +1836,35 @@
         renderTakeoffPanel();
         renderSelectionBar();
         renderInspector();
+    }
+
+    function toggleLayerSelection(layerId, selected) {
+        const layer = findLayer(layerId);
+        if (!layer) return;
+        const ids = new Set(selectionState.selectedLayerIds.map(String));
+        if (selected) ids.add(String(layer.id));
+        else ids.delete(String(layer.id));
+        selectionState.selectedLayerIds = Array.from(ids);
+        const group = findGroup(layer.groupId);
+        const groupLayerIds = (group?.layers || []).map(item => String(item.id));
+        selectionState.selectedGroupId = groupLayerIds.length && groupLayerIds.every(id => ids.has(id)) ? group.id : null;
+        selectionState.activeLayerId = selected ? layer.id : (selectionState.selectedLayerIds[0] || null);
+        const selectedIds = callEditor('projectTakeoffSelectGroup', selectionState.selectedLayerIds);
+        selectionState.selectedObjectIds = Array.isArray(selectedIds) ? selectedIds : [];
+        renderTakeoffPanel();
+        renderSelectionBar();
+        renderInspector();
+    }
+
+    function toggleLayerLock(layerId) {
+        const layer = findLayer(layerId);
+        if (!layer) return;
+        const editorState = callEditor('projectTakeoffGetLayerLockState', layer.id) || {};
+        layer.locked = !Boolean(layer.locked || editorState.locked);
+        pushTakeoffHistory(layer.locked ? 'lock-layer' : 'unlock-layer');
+        callEditor('projectTakeoffSetLayerLocked', layer.id, layer.locked);
+        saveTakeoffState();
+        renderTakeoffPanel();
     }
 
     function runSelectionAction(action) {

@@ -425,8 +425,14 @@
         }
     }
 
-    function isElementLocked(ref) {
+    function isObjectIndividuallyLocked(ref) {
         return Number(ref?.locked || 0) === 1;
+    }
+
+    function isElementLocked(ref) {
+        if (isObjectIndividuallyLocked(ref)) return true;
+        const layer = state.layers.find(row => String(row.client_uid) === String(ref?.layer_client_uid));
+        return Number(layer?.locked || 0) === 1;
     }
 
     function applyMarkerLockVisual(marker) {
@@ -1115,6 +1121,7 @@
             symbol: layer.symbol || 'circle',
             symbol_size: layer.symbol_size || 'Medium',
             visible: Number(layer.visible ?? 1) !== 0,
+            locked: Number(layer.locked || 0) === 1,
             quantity: layerQuantity(layer),
             catalog_item_id: layer.catalog_item_id || null,
             unit_cost: num(layer.unit_cost || 0),
@@ -2374,11 +2381,11 @@
             layers: state.layers,
             markers: state.markers.map(marker => ({
                 ...stripNodes(marker),
-                metadata_json: { ...(marker.metadata_json || {}), element_locked: isElementLocked(marker) ? 1 : 0 }
+                metadata_json: { ...(marker.metadata_json || {}), element_locked: isObjectIndividuallyLocked(marker) ? 1 : 0 }
             })),
             segments: state.segments.map(segment => ({
                 ...stripNodes(segment),
-                metadata_json: { ...(segment.metadata_json || {}), element_locked: isElementLocked(segment) ? 1 : 0 }
+                metadata_json: { ...(segment.metadata_json || {}), element_locked: isObjectIndividuallyLocked(segment) ? 1 : 0 }
             })),
             summary: calculateTakeoffSummary(),
         }).then(res => {
@@ -2414,7 +2421,10 @@
                 state.segments = (data.segments || []).map(s => ({ ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: dbLayerIdMap.get(String(s.layer_id)) || String(s.layer_id), points_json: s.points_json || [], metadata_json: s.metadata_json || {}, locked: Number(s.locked ?? s.metadata_json?.element_locked ?? 0) }));
             }
             const local = readLocalTakeoffState();
-            if (local && ((local.markers || []).length || (local.segments || []).length)) {
+            const serverRows = [...state.layers, ...state.markers, ...state.segments];
+            const serverUpdatedAt = Math.max(0, ...serverRows.map(row => Date.parse(row.updated_at || row.updatedAt || row.created_at || '') || 0));
+            const localIsNewer = Number(local?.savedAt || 0) > serverUpdatedAt;
+            if (localIsNewer && ((local.markers || []).length || (local.segments || []).length)) {
                 state.layers = (local.layers || []).map(layer => {
                     const stableUid = String(layer.client_uid || layer.metadata_json?.project_layer_id || layer.id || uid());
                     return restoreLayerCostSnapshot({
@@ -2423,8 +2433,8 @@
                         metadata_json: { ...(layer.metadata_json || {}), project_layer_id: stableUid }
                     });
                 });
-                state.markers = (local.markers || []).map(marker => ({ ...marker, client_uid: marker.client_uid || uid(), layer_client_uid: String(marker.layer_client_uid || marker.layer_id || '') }));
-                state.segments = (local.segments || []).map(segment => ({ ...segment, client_uid: segment.client_uid || uid(), layer_client_uid: String(segment.layer_client_uid || segment.layer_id || ''), points_json: segment.points_json || [] }));
+                state.markers = (local.markers || []).map(marker => ({ ...marker, client_uid: marker.client_uid || uid(), layer_client_uid: String(marker.layer_client_uid || marker.layer_id || ''), locked: Number(marker.locked ?? marker.metadata_json?.element_locked ?? 0) }));
+                state.segments = (local.segments || []).map(segment => ({ ...segment, client_uid: segment.client_uid || uid(), layer_client_uid: String(segment.layer_client_uid || segment.layer_id || ''), points_json: segment.points_json || [], locked: Number(segment.locked ?? segment.metadata_json?.element_locked ?? 0) }));
             }
             if (!state.selectedItemId && state.catalog.items[0]) state.selectedItemId = state.catalog.items[0].id;
             const onlyLegacyDefault = state.layers.length === 1
@@ -2698,6 +2708,50 @@
         markDirty();
         applyObjectSelectionVisuals();
         return true;
+    };
+
+    window.projectTakeoffSetLayerLocked = function (layerId, locked) {
+        const layer = state.layers.find(row => String(row.client_uid) === String(layerId) || String(row.metadata_json?.project_layer_id) === String(layerId));
+        if (!layer) return false;
+        snapshot();
+        layer.locked = locked ? 1 : 0;
+        layer.updated_at = timestamp();
+        state.markers.filter(marker => String(marker.layer_client_uid) === String(layer.client_uid)).forEach(marker => {
+            marker.locked = locked ? 1 : 0;
+            marker.updated_at = timestamp();
+            applyMarkerLockVisual(marker);
+        });
+        state.segments.filter(segment => String(segment.layer_client_uid) === String(layer.client_uid)).forEach(segment => {
+            segment.locked = locked ? 1 : 0;
+            segment.updated_at = timestamp();
+            applySegmentLockVisual(segment);
+        });
+        markDirty();
+        applyObjectSelectionVisuals();
+        return true;
+    };
+
+    window.projectTakeoffGetLayerLockState = function (layerId) {
+        const layer = state.layers.find(row => String(row.client_uid) === String(layerId) || String(row.metadata_json?.project_layer_id) === String(layerId));
+        if (!layer) return { locked: false, layerLocked: false, objectCount: 0 };
+        const objects = [
+            ...state.markers.filter(marker => String(marker.layer_client_uid) === String(layer.client_uid)),
+            ...state.segments.filter(segment => String(segment.layer_client_uid) === String(layer.client_uid))
+        ];
+        return {
+            locked: Number(layer.locked || 0) === 1 || objects.some(isObjectIndividuallyLocked),
+            layerLocked: Number(layer.locked || 0) === 1,
+            objectCount: objects.length
+        };
+    };
+
+    window.projectTakeoffGetSelectionLockState = function () {
+        const targets = selectedTakeoffObjectIds().map(findTakeoffObjectByUid).filter(Boolean);
+        return {
+            count: targets.length,
+            anyLocked: targets.some(target => isElementLocked(target.ref)),
+            allLocked: targets.length > 0 && targets.every(target => isElementLocked(target.ref))
+        };
     };
 
     window.projectTakeoffUpdateSelection = function (objectIds, patch) {

@@ -574,7 +574,7 @@ $state = [
         }
     </style>
     <link rel="stylesheet" href="../assets/project_overview.css">
-    <link rel="stylesheet" href="../assets/project_takeoff.css?v=workspace-takeoff-20260804-1">
+    <link rel="stylesheet" href="../assets/project_takeoff.css?v=workspace-takeoff-20260805-1">
     <link rel="stylesheet" href="../assets/project_estimating.css?v=estimating-workspace-20260730-1">
     <link rel="stylesheet" href="../assets/project_proposal.css">
 </head>
@@ -1350,7 +1350,7 @@ $state = [
 </script>
 <script src="../assets/project_overview.js"></script>
 <script src="../assets/takeoff_estimating_sync_service.js?v=takeoff-estimating-sync-20260803-1"></script>
-<script src="../assets/project_takeoff.js?v=workspace-takeoff-20260805-1"></script>
+<script src="../assets/project_takeoff.js?v=workspace-takeoff-20260805-2"></script>
 <script src="../assets/estimate_calculation_service.js"></script>
 <script src="../assets/project_estimating.js?v=estimating-workspace-20260803-1"></script>
 <script src="../assets/project_proposal.js"></script>
