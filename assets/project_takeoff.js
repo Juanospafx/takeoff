@@ -2162,6 +2162,7 @@
             return;
         }
         if (command === 'smart' || command === 'pan') {
+            callEditor('clearPlacementTool');
             callEditor('projectTakeoffSetTool', command === 'pan' ? 'pan' : 'select');
             setActiveTool(command);
             // Fabric has no independent pan mode here. Konva owns navigation
@@ -2215,14 +2216,21 @@
             return;
         }
         if (command === 'text') {
-            const added = callEditor('projectTakeoffSetTool', 'text') || callEditor('addText');
+            // Notes are annotations, not a Takeoff drawing type. Explicitly
+            // leave the quantity tool, then arm the annotation placement API.
+            callEditor('projectTakeoffSetTool', 'select');
+            const added = callEditor('addText');
             setActiveTool(command);
             if (!added) showPrepared('Click the drawing to add a text annotation.');
             return;
         }
         if (command === 'cloud') {
-            callEditor('addCloud');
+            // Annotation clouds are independent from Takeoff areas. Stop any
+            // active quantity tool before arming the one-shot cloud placement.
+            callEditor('projectTakeoffSetTool', 'select');
+            const activated = callEditor('addCloud');
             setActiveTool(command);
+            if (!activated) showPrepared('Click or drag on the drawing to place a cloud annotation.');
             return;
         }
         if (command === 'stamp') {
@@ -2745,11 +2753,19 @@
                 const reportedTool = map[payload.tool] || payload.tool || 'smart';
                 const explicitPanActive = viewerState.activeTool === 'pan'
                     && document.querySelector('.pro-canvas-shell')?.classList.contains('is-panning');
+                const annotationPlacementActive = viewerState.activeTool === 'cloud' || viewerState.activeTool === 'text';
                 // The editor implements hand/pan on top of its internal smart
                 // mode, so its `smart` report must not visually reselect Pointer
                 // while the parent is actively panning.
-                setActiveTool(explicitPanActive && reportedTool === 'smart' ? 'pan' : reportedTool);
+                setActiveTool(reportedTool === 'smart' && annotationPlacementActive
+                    ? viewerState.activeTool
+                    : (explicitPanActive && reportedTool === 'smart' ? 'pan' : reportedTool));
                 renderActiveLayerToolbar();
+                return;
+            }
+            if (event.data?.type === 'project-annotation-tool-state') {
+                if (event.source !== takeoffWindow()) return;
+                setActiveTool(event.data?.payload?.tool || 'smart');
                 return;
             }
             if (event.data?.type === 'project-takeoff-pan-state') {
@@ -2933,8 +2949,10 @@
             }
             if (event.key === 'Escape') {
                 viewerState.continuousTool = false;
+                callEditor('clearPlacementTool');
                 callEditor('projectTakeoffSetContinuous', false);
                 callEditor('projectTakeoffSetTool', 'select');
+                callEditor('setMode', 'smart');
                 setActiveTool('smart');
                 renderActiveLayerToolbar();
                 return;

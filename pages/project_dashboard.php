@@ -1023,7 +1023,8 @@ $state = [
                             <button class="pro-tool-btn" type="button" data-tool-command="area" title="Area"><i class="fas fa-draw-polygon"></i></button>
                             <button class="pro-tool-btn" type="button" data-tool-command="measure" title="Measure"><i class="fas fa-ruler-horizontal"></i></button>
                             <button class="pro-tool-btn" type="button" data-tool-command="freehand" title="Freehand"><i class="fas fa-signature"></i></button>
-                            <button class="pro-tool-btn" type="button" data-tool-command="text" title="Text"><i class="fas fa-font"></i></button>
+                            <button class="pro-tool-btn" type="button" data-tool-command="text" title="Note"><i class="fas fa-note-sticky"></i></button>
+                            <button class="pro-tool-btn" type="button" data-tool-command="cloud" title="Cloud"><i class="fas fa-cloud"></i></button>
                             <button class="pro-tool-btn" type="button" data-tool-command="pin" title="Pin"><i class="fas fa-location-dot"></i></button>
                             <div class="pro-tool-separator"></div>
                             <button class="pro-tool-btn" type="button" data-tool-command="undo" title="Undo"><i class="fas fa-rotate-left"></i></button>
@@ -1350,7 +1351,7 @@ $state = [
 </script>
 <script src="../assets/project_overview.js"></script>
 <script src="../assets/takeoff_estimating_sync_service.js?v=takeoff-estimating-sync-20260803-1"></script>
-<script src="../assets/project_takeoff.js?v=workspace-takeoff-20260805-8"></script>
+<script src="../assets/project_takeoff.js?v=workspace-takeoff-20260805-9"></script>
 <script src="../assets/estimate_calculation_service.js"></script>
 <script src="../assets/project_estimating.js?v=estimating-workspace-20260803-1"></script>
 <script src="../assets/project_proposal.js"></script>
