@@ -3647,7 +3647,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-zoom-notify-20260805-1"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-interactions-20260805-2"></script>
 </body>
 </html>
 

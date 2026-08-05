@@ -23,6 +23,7 @@
         continuousTool: false,
         panMode: false,
         temporaryPan: false,
+        selectionDrag: null,
         draftLine: null,
         draftArea: null,
         projectControlled: false,
@@ -36,6 +37,7 @@
     const money = (v) => '$' + num(v).toFixed(2);
     let takeoffAutosaveTimer = null;
     let missingScaleWarningShown = false;
+    let selectionRectDraft = null;
 
     function warnMissingScale() {
         if (hasPlanScale()) {
@@ -438,7 +440,7 @@
     }
 
     function isTakeoffDrawingToolActive() {
-        return ['takeoff_count', 'takeoff_linear', 'takeoff_area'].includes(state.tool);
+        return ['takeoff_count', 'takeoff_linear', 'takeoff_area', 'multi-select'].includes(state.tool);
     }
 
     function applyTakeoffDrawingInteractivity() {
@@ -476,6 +478,74 @@
         }));
     }
 
+    function beginTakeoffSelectionDrag(type, ref) {
+        if (!ref?.node) return false;
+        if (!state.selectedObjectUids.has(String(ref.client_uid))) selectElement(type, ref);
+        const targets = selectedTakeoffObjectIds().map(findTakeoffObjectByUid).filter(Boolean);
+        if (!targets.length || targets.some(target => isElementLocked(target.ref))) {
+            ref.node.stopDrag?.();
+            if (type === 'marker') ref.node.position({ x: num(ref.x), y: num(ref.y) });
+            else ref.node.position({ x: 0, y: 0 });
+            showToast('Unlock all selected elements before moving them.', 'warning');
+            return false;
+        }
+        snapshot();
+        state.selectionDrag = {
+            anchor: ref,
+            start: { x: ref.node.x(), y: ref.node.y() },
+            targets: targets.map(target => ({
+                ...target,
+                markerX: target.type === 'marker' ? num(target.ref.x) : null,
+                markerY: target.type === 'marker' ? num(target.ref.y) : null,
+                points: target.type === 'segment' ? (target.ref.points_json || []).map(point => ({ ...point })) : null,
+                nodePosition: target.ref.node?.position() || { x: 0, y: 0 },
+                labelPosition: target.ref.labelNode?.position() || null,
+                handlePositions: (target.ref.handles || []).map(handle => handle.position())
+            }))
+        };
+        return true;
+    }
+
+    function updateTakeoffSelectionDrag(ref) {
+        const drag = state.selectionDrag;
+        if (!drag || drag.anchor !== ref) return;
+        const dx = ref.node.x() - drag.start.x;
+        const dy = ref.node.y() - drag.start.y;
+        drag.targets.forEach(target => {
+            if (target.ref !== ref) target.ref.node?.position({ x: target.nodePosition.x + dx, y: target.nodePosition.y + dy });
+            if (target.type !== 'segment') return;
+            target.ref.labelNode?.position({ x: target.labelPosition.x + dx, y: target.labelPosition.y + dy });
+            (target.ref.handles || []).forEach((handle, index) => {
+                const origin = target.handlePositions[index];
+                if (origin) handle.position({ x: origin.x + dx, y: origin.y + dy });
+            });
+        });
+        konvaLayer?.batchDraw();
+    }
+
+    function finishTakeoffSelectionDrag(ref) {
+        const drag = state.selectionDrag;
+        if (!drag || drag.anchor !== ref) return false;
+        const dx = ref.node.x() - drag.start.x;
+        const dy = ref.node.y() - drag.start.y;
+        drag.targets.forEach(target => {
+            if (target.type === 'marker') {
+                target.ref.x = target.markerX + dx;
+                target.ref.y = target.markerY + dy;
+                target.ref.node?.position({ x: target.ref.x, y: target.ref.y });
+            } else {
+                target.ref.points_json = target.points.map(point => ({ x: point.x + dx, y: point.y + dy }));
+                target.ref.node?.position({ x: 0, y: 0 });
+                refreshSegment(target.ref);
+            }
+            target.ref.updatedAt = timestamp();
+            target.ref.updated_at = target.ref.updatedAt;
+        });
+        state.selectionDrag = null;
+        markDirty();
+        return true;
+    }
+
     function applySegmentLockVisual(segment) {
         if (!segment.node) return;
         const locked = isElementLocked(segment);
@@ -499,14 +569,9 @@
             selectElement('marker', marker);
         });
         group.on('contextmenu', event => openObjectContextMenu(event, 'marker', marker));
-        group.on('dragend', () => {
-            snapshot();
-            marker.x = group.x();
-            marker.y = group.y();
-            marker.updatedAt = timestamp();
-            marker.updated_at = marker.updatedAt;
-            markDirty();
-        });
+        group.on('dragstart', () => beginTakeoffSelectionDrag('marker', marker));
+        group.on('dragmove', () => updateTakeoffSelectionDrag(marker));
+        group.on('dragend', () => finishTakeoffSelectionDrag(marker));
         konvaLayer.add(group);
         marker.node = group;
         applyMarkerLockVisual(marker);
@@ -614,17 +679,9 @@
             selectElement('segment', segment);
         });
         line.on('contextmenu', event => openObjectContextMenu(event, 'segment', segment));
-        line.on('dragend', () => {
-            snapshot();
-            const dx = line.x();
-            const dy = line.y();
-            segment.points_json = segment.points_json.map(p => ({ x: p.x + dx, y: p.y + dy }));
-            segment.updatedAt = timestamp();
-            segment.updated_at = segment.updatedAt;
-            line.position({ x: 0, y: 0 });
-            refreshSegment(segment);
-            markDirty();
-        });
+        line.on('dragstart', () => beginTakeoffSelectionDrag('segment', segment));
+        line.on('dragmove', () => updateTakeoffSelectionDrag(segment));
+        line.on('dragend', () => finishTakeoffSelectionDrag(segment));
         konvaLayer.add(line, label);
         handles.forEach(handle => handle.moveToTop());
         segment.node = line;
@@ -1514,6 +1571,11 @@
     function setTool(tool) {
         if (tool === 'select') tool = 'smart';
         window.releaseTakeoffPointerState?.();
+        if (tool !== 'multi-select' && selectionRectDraft) {
+            selectionRectDraft.node?.destroy();
+            selectionRectDraft = null;
+            konvaLayer?.batchDraw();
+        }
         const leavingLinear = state.tool === 'takeoff_linear' && tool !== 'takeoff_linear';
         if (leavingLinear && state.draftLine) finishLinear();
         state.tool = tool;
@@ -1570,6 +1632,89 @@
     function bindKonva() {
         if (!ensureKonva() || konvaStage._takeoffBound) return;
         konvaStage._takeoffBound = true;
+        const finishRectangleSelection = () => {
+            if (!selectionRectDraft) return false;
+            const rect = selectionRectDraft.node.getClientRect({ relativeTo: konvaLayer });
+            selectionRectDraft.node.destroy();
+            selectionRectDraft = null;
+            if (rect.width < 3 && rect.height < 3) {
+                konvaLayer.batchDraw();
+                return false;
+            }
+            const targets = [
+                ...state.markers.filter(marker => marker.page_number === pageNum && marker.node?.visible())
+                    .filter(marker => Konva.Util.haveIntersection(rect, marker.node.getClientRect({ relativeTo: konvaLayer })))
+                    .map(marker => ({ type: 'marker', ref: marker })),
+                ...state.segments.filter(segment => segment.page_number === pageNum && segment.node?.visible())
+                    .filter(segment => Konva.Util.haveIntersection(rect, segment.node.getClientRect({ relativeTo: konvaLayer })))
+                    .map(segment => ({ type: 'segment', ref: segment }))
+            ];
+            state.selectedObjectUids = new Set(targets.map(target => String(target.ref.client_uid)));
+            state.selectedElement = targets.length === 1 ? targets[0] : null;
+            state.segments.forEach(segment => (segment.handles || []).forEach(handle => handle.visible(false)));
+            applyObjectSelectionVisuals();
+            renderProperties();
+            emitSelectionState();
+            // Rectangle selection is a one-shot gesture. Return to Pointer so
+            // the selected set can immediately be dragged, deleted, or edited.
+            setTool('smart');
+            konvaLayer.batchDraw();
+            return true;
+        };
+
+        konvaStage.on('mousedown touchstart', evt => {
+            if (state.tool !== 'multi-select') return;
+            const nativeEvent = evt.evt;
+            if (nativeEvent?.button != null && nativeEvent.button !== 0) return;
+            const pos = konvaStage.getPointerPosition();
+            if (!pos) return;
+            evt.cancelBubble = true;
+            const start = screenToWorld(pos);
+            const node = new Konva.Rect({
+                x: start.x,
+                y: start.y,
+                width: 0,
+                height: 0,
+                fill: 'rgba(56, 189, 248, 0.14)',
+                stroke: '#38bdf8',
+                strokeWidth: 1.5,
+                dash: [7, 5],
+                listening: false
+            });
+            selectionRectDraft = { start, node };
+            konvaLayer.add(node);
+            node.moveToTop();
+            konvaLayer.batchDraw();
+        });
+
+        konvaStage.on('mousemove touchmove', evt => {
+            if (state.tool !== 'multi-select' || !selectionRectDraft) return;
+            const pos = konvaStage.getPointerPosition();
+            if (!pos) return;
+            evt.cancelBubble = true;
+            const current = screenToWorld(pos);
+            selectionRectDraft.node.position({
+                x: Math.min(selectionRectDraft.start.x, current.x),
+                y: Math.min(selectionRectDraft.start.y, current.y)
+            });
+            selectionRectDraft.node.size({
+                width: Math.abs(current.x - selectionRectDraft.start.x),
+                height: Math.abs(current.y - selectionRectDraft.start.y)
+            });
+            konvaLayer.batchDraw();
+        });
+
+        konvaStage.on('mouseup touchend', evt => {
+            if (state.tool !== 'multi-select' || !selectionRectDraft) return;
+            evt.cancelBubble = true;
+            finishRectangleSelection();
+        });
+        window.addEventListener('mouseup', () => {
+            if (state.tool === 'multi-select' && selectionRectDraft) finishRectangleSelection();
+        });
+        window.addEventListener('touchend', () => {
+            if (state.tool === 'multi-select' && selectionRectDraft) finishRectangleSelection();
+        }, { passive: true });
         konvaStage.on('click tap', evt => {
             if (state.tool === 'smart') {
                 if (evt.target === konvaStage || evt.target === konvaLayer) clearTakeoffSelection();
@@ -2712,6 +2857,14 @@
         window.setTakeoffPanMode?.(false, true);
         if (normalized === 'select' || normalized === 'smart') {
             setTool('smart');
+            applyTakeoffDrawingInteractivity();
+            return true;
+        }
+        if (normalized === 'multi-select' || normalized === 'select-rect') {
+            setTool('multi-select');
+            if (typeof setMode === 'function') setMode('smart');
+            if (typeof setKonvaActive === 'function') setKonvaActive(true);
+            if (konvaStage?.container()) konvaStage.container().style.cursor = 'crosshair';
             applyTakeoffDrawingInteractivity();
             return true;
         }

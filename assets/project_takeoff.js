@@ -2189,9 +2189,8 @@
         }
         if (command === 'multi-select') {
             callEditor('projectTakeoffSetTool', 'multi-select');
-            callEditor('setMode', 'select-rect');
             setActiveTool(command);
-            return showPrepared('Drag a rectangle to select takeoff objects.');
+            return;
         }
         if (command === 'snapshot') {
             takeoffState.snapshots.push({
