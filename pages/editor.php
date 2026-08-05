@@ -823,6 +823,8 @@ if ($filePath !== '') {
     let konvaSelectedNode = null;
     let konvaDrawing = null;
     let konvaIsPanning = false;
+    let konvaPanMode = false;
+    let konvaTemporaryPan = false;
     const isMobileViewport = window.innerWidth <= 768;
     const dpr = window.devicePixelRatio || 1;
     const PDF_PADDING = isMobileViewport ? 18 : 36;
@@ -1806,18 +1808,33 @@ if ($filePath !== '') {
                 canvas.defaultCursor = 'default';
                 canvas.setCursor('default');
             }
-            if (konvaStage?.container()) konvaStage.container().style.cursor = 'default';
+            if (konvaStage?.container()) {
+                konvaStage.container().style.cursor = (konvaPanMode || konvaTemporaryPan) ? 'grab' : 'default';
+            }
         };
         window.releaseTakeoffPointerState = releaseCanvasPointerState;
+        window.setTakeoffPanMode = (enabled, temporary = false) => {
+            releaseCanvasPointerState();
+            if (temporary) konvaTemporaryPan = Boolean(enabled);
+            else konvaPanMode = Boolean(enabled);
+            if (konvaStage?.container()) {
+                konvaStage.container().style.cursor = (konvaPanMode || konvaTemporaryPan) ? 'grab' : 'default';
+            }
+        };
         konvaStage.on('mousedown', (e) => {
             const evt = e.evt;
             const target = e.target;
             const isEmpty = !target || target === konvaStage;
             if (pendingPlacementTool) return;
-            const explicitPan = evt && (evt.altKey || (evt.button === 2 && isEmpty));
+            const explicitPan = evt && (evt.altKey || evt.button === 2);
             const takeoffDrawing = Boolean(window.projectTakeoffIsDrawingToolActive?.());
-            const smartPan = currentMode === 'smart' && isEmpty && !takeoffDrawing;
-            if (evt && (explicitPan || smartPan)) {
+            // Modifier navigation only starts on the plan background. When a
+            // takeoff node owns the gesture, its object/vertex drag wins.
+            const requestedPan = konvaPanMode || konvaTemporaryPan || (explicitPan && isEmpty);
+            // Space temporarily suspends placement without discarding its
+            // draft, so navigation remains available while drawing.
+            if (evt && requestedPan && (!takeoffDrawing || konvaTemporaryPan)) {
+                e.cancelBubble = true;
                 panStart = { x: evt.clientX, y: evt.clientY };
                 konvaIsPanning = true;
                 konvaStage.container().style.cursor = 'grabbing';
@@ -3531,7 +3548,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-vertex-editing-20260805-1"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-pan-exclusion-20260805-1"></script>
 </body>
 </html>
 

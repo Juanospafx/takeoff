@@ -21,6 +21,8 @@
         selectedElement: null,
         selectedObjectUids: new Set(),
         continuousTool: false,
+        panMode: false,
+        temporaryPan: false,
         draftLine: null,
         draftArea: null,
         projectControlled: false,
@@ -440,11 +442,17 @@
     }
 
     function applyTakeoffDrawingInteractivity() {
-        const listening = !isTakeoffDrawingToolActive();
-        state.markers.forEach(marker => marker.node?.listening(listening));
+        const panning = state.panMode || state.temporaryPan;
+        const listening = !isTakeoffDrawingToolActive() && !panning;
+        state.markers.forEach(marker => {
+            marker.node?.listening(listening);
+            marker.node?.draggable(listening && !panning && !isElementLocked(marker));
+        });
         state.segments.forEach(segment => {
             segment.node?.listening(listening);
+            segment.node?.draggable(listening && !panning && !isElementLocked(segment));
             (segment.handles || []).forEach(handle => handle.listening(listening));
+            (segment.handles || []).forEach(handle => handle.draggable(listening && !panning && !isElementLocked(segment)));
         });
         konvaLayer?.batchDraw();
     }
@@ -2691,7 +2699,22 @@
 
     window.projectTakeoffSetTool = function (tool) {
         const normalized = String(tool || '').toLowerCase();
-        if (normalized === 'select' || normalized === 'smart') return setTool('smart');
+        if (normalized === 'pan') {
+            setTool('smart');
+            state.panMode = true;
+            applyTakeoffDrawingInteractivity();
+            window.setTakeoffPanMode?.(true, false);
+            return true;
+        }
+        state.panMode = false;
+        state.temporaryPan = false;
+        window.setTakeoffPanMode?.(false, false);
+        window.setTakeoffPanMode?.(false, true);
+        if (normalized === 'select' || normalized === 'smart') {
+            setTool('smart');
+            applyTakeoffDrawingInteractivity();
+            return true;
+        }
         if (normalized === 'transform' || normalized === 'vertices') {
             setTool('smart');
             if (isElementLocked(state.selectedElement?.ref)) return false;
@@ -2707,6 +2730,13 @@
         if (normalized === 'area') return setTool('takeoff_area');
         if (normalized === 'count') return setTool('takeoff_count');
         return setTool('smart');
+    };
+
+    window.projectTakeoffSetTemporaryPan = function (enabled) {
+        state.temporaryPan = Boolean(enabled);
+        applyTakeoffDrawingInteractivity();
+        window.setTakeoffPanMode?.(state.temporaryPan, true);
+        return state.temporaryPan;
     };
 
     window.projectTakeoffIsDrawingToolActive = function () {

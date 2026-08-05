@@ -129,6 +129,7 @@
         continuousTool: false,
         activeTool: 'smart'
     };
+    let temporaryPanPreviousTool = null;
 
     const drawingState = {
         documents: [],
@@ -2162,7 +2163,9 @@
         if (command === 'smart' || command === 'pan') {
             callEditor('projectTakeoffSetTool', command === 'pan' ? 'pan' : 'select');
             setActiveTool(command);
-            callEditor('setMode', command === 'pan' ? 'pan' : 'smart');
+            // Fabric has no independent pan mode here. Konva owns navigation
+            // and mutually excludes object dragging while the hand is active.
+            callEditor('setMode', 'smart');
             document.querySelector('.pro-canvas-shell')?.classList.toggle('is-panning', command === 'pan');
             return;
         }
@@ -2739,7 +2742,13 @@
                 const payload = event.data.payload || {};
                 viewerState.continuousTool = Boolean(payload.continuous);
                 const map = { takeoff_count: 'count', takeoff_linear: 'linear', takeoff_area: 'area', smart: 'smart', select: 'smart' };
-                setActiveTool(map[payload.tool] || payload.tool || 'smart');
+                const reportedTool = map[payload.tool] || payload.tool || 'smart';
+                const explicitPanActive = viewerState.activeTool === 'pan'
+                    && document.querySelector('.pro-canvas-shell')?.classList.contains('is-panning');
+                // The editor implements hand/pan on top of its internal smart
+                // mode, so its `smart` report must not visually reselect Pointer
+                // while the parent is actively panning.
+                setActiveTool(explicitPanActive && reportedTool === 'smart' ? 'pan' : reportedTool);
                 renderActiveLayerToolbar();
                 return;
             }
@@ -2909,14 +2918,20 @@
                 return;
             }
             if (event.code === 'Space' && !event.repeat && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {
+                temporaryPanPreviousTool = viewerState.activeTool;
                 callEditor('projectTakeoffSetTemporaryPan', true);
+                setActiveTool('pan');
                 document.querySelector('.pro-canvas-shell')?.classList.add('is-panning');
             }
         });
         document.addEventListener('keyup', event => {
             if (event.code === 'Space') {
                 callEditor('projectTakeoffSetTemporaryPan', false);
-                if (!document.querySelector('[data-tool-command="pan"]')?.classList.contains('active')) {
+                if (temporaryPanPreviousTool === null) return;
+                const restoreTool = temporaryPanPreviousTool || 'smart';
+                temporaryPanPreviousTool = null;
+                setActiveTool(restoreTool);
+                if (restoreTool !== 'pan') {
                     document.querySelector('.pro-canvas-shell')?.classList.remove('is-panning');
                 }
             }
