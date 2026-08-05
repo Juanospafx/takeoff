@@ -3497,7 +3497,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-continuous-tool-20260804-1"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-continuous-tool-20260804-2"></script>
 </body>
 </html>
 

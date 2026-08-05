@@ -730,8 +730,18 @@
     }
 
     function finishToolUse() {
-        if (!state.continuousTool) setTool('smart');
-        else emitToolState();
+        if (state.continuousTool) {
+            emitToolState();
+            return;
+        }
+        // Let Konva finish the current click/tap before changing interactivity.
+        // Switching layers synchronously can leave the pointer captured by the
+        // drawing overlay, making the cursor appear frozen over the plan.
+        requestAnimationFrame(() => {
+            if (state.continuousTool) return;
+            if (!['takeoff_count', 'takeoff_linear', 'takeoff_area'].includes(state.tool)) return;
+            setTool('smart');
+        });
     }
 
     function addLinearPoint(pos) {
