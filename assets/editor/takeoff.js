@@ -2941,6 +2941,7 @@
         const zoomEl = document.getElementById('zoom-disp');
         if (zoomEl) zoomEl.innerText = zoomText;
         if (typeof schedulePdfRerender === 'function') schedulePdfRerender();
+        window.notifyTakeoffZoomChanged?.('parent-api');
         return Math.round(zoom * 100);
     };
 

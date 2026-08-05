@@ -838,10 +838,30 @@ if ($filePath !== '') {
     let renderToken = 0;
     let activePdfRenderTask = null;
     let pdfRerenderTimer = null;
+    let zoomNotificationFrame = null;
+    let pendingZoomNotification = null;
     const pdfBitmapCache = new Map();
     const PDF_BITMAP_CACHE_LIMIT = 8;
     const drawingLoading = document.getElementById('drawingLoading');
-    
+
+    function notifyTakeoffZoomChanged(source = 'editor') {
+        const zoom = Number(canvas?.getZoom?.() || 1);
+        const percent = Math.round(zoom * 100);
+        const zoomEl = document.getElementById('zoom-disp');
+        if (zoomEl) zoomEl.innerText = percent + '%';
+        pendingZoomNotification = { zoom, percent, source };
+        if (zoomNotificationFrame !== null) return;
+        zoomNotificationFrame = requestAnimationFrame(() => {
+            zoomNotificationFrame = null;
+            const payload = pendingZoomNotification;
+            pendingZoomNotification = null;
+            try {
+                window.parent?.postMessage({ type: 'project-takeoff-zoom-changed', payload }, '*');
+            } catch (e) {}
+        });
+    }
+    window.notifyTakeoffZoomChanged = notifyTakeoffZoomChanged;
+
     // STATES
     let pixelsPerFoot = 0;
     let currentMode = 'smart';
@@ -1792,7 +1812,7 @@ if ($filePath !== '') {
             const rect = konvaStage.container().getBoundingClientRect();
             const point = new fabric.Point(e.clientX - rect.left, e.clientY - rect.top);
             canvas.zoomToPoint(point, zoom);
-            document.getElementById('zoom-disp').innerText = Math.round(zoom * 100) + '%';
+            notifyTakeoffZoomChanged('wheel');
             updateTextScales(zoom);
             syncKonvaToFabric();
             schedulePdfRerender();
@@ -2309,8 +2329,7 @@ if ($filePath !== '') {
                     // Zoom hacia el punto central de los dedos
                     const point = new fabric.Point(currentClientX, currentClientY);
                     canvas.zoomToPoint(point, newZoom);
-                    
-                    document.getElementById('zoom-disp').innerText = Math.round(newZoom * 100) + '%';
+                    notifyTakeoffZoomChanged('pinch');
                     updateTextScales(newZoom);
                     if (useKonvaRuler) syncKonvaToFabric();
                     schedulePdfRerender();
@@ -2461,7 +2480,7 @@ if ($filePath !== '') {
         const left = Math.max(PDF_PADDING, (w.clientWidth - pdfWorldWidth * zoom) / 2);
         const top = Math.max(PDF_PADDING, (w.clientHeight - pdfWorldHeight * zoom) / 2);
         canvas.setViewportTransform([zoom, 0, 0, zoom, left, top]);
-        document.getElementById('zoom-disp').innerText = Math.round(zoom * 100) + '%';
+        notifyTakeoffZoomChanged('fit');
         if (useKonvaRuler) syncKonvaToFabric();
         updateTextScales(zoom);
         canvas.requestRenderAll();
@@ -3608,7 +3627,7 @@ if ($filePath !== '') {
         let delta = opt.e.deltaY; let zoom = canvas.getZoom() * (0.999 ** delta);
         if (zoom > 20) zoom = 20; if (zoom < 0.05) zoom = 0.05;
         canvas.zoomToPoint({ x: opt.e.offsetX, y: opt.e.offsetY }, zoom);
-        document.getElementById('zoom-disp').innerText = Math.round(zoom * 100) + '%';
+        notifyTakeoffZoomChanged('wheel');
         if (useKonvaRuler) syncKonvaToFabric();
         updateTextScales(zoom);
         schedulePdfRerender();
@@ -3628,7 +3647,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-pan-pointer-20260805-2"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-zoom-notify-20260805-1"></script>
 </body>
 </html>
 

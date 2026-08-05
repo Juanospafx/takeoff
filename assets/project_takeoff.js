@@ -2770,6 +2770,16 @@
                 }
                 return;
             }
+            if (event.data?.type === 'project-takeoff-zoom-changed') {
+                if (event.source !== takeoffWindow()) return;
+                const reportedPercent = Number(event.data?.payload?.percent);
+                if (!Number.isFinite(reportedPercent)) return;
+                // Editor-originated wheel, trackpad, pinch, and fit changes only
+                // update controls here. Do not call setZoom(), which would send
+                // the same value back into the iframe and create a feedback loop.
+                updateZoomUi(Math.round(Math.max(25, Math.min(400, reportedPercent))));
+                return;
+            }
             if (event.data?.type !== 'takeoff-editor-ready') return;
             const doc = activeDrawingDoc();
             if (doc && Number(event.data.fileId) === Number(doc.id)) {
