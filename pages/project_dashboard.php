@@ -337,6 +337,20 @@ if (!$selectedDoc) {
     }
 }
 
+// The Takeoff editor currently persists annotations against the legacy `files`
+// record. A project_document can be previewed in Documents, but cannot be passed
+// to editor.php by its unrelated id. Never leave the Takeoff iframe hidden/blank:
+// fall back to the first compatible uploaded drawing for this project.
+if ($activeTab === 'takeoff' && (!$selectedDoc || $selectedDoc['source'] !== 'legacy_file')) {
+    foreach ($documents as $doc) {
+        if ($doc['source'] === 'legacy_file' && in_array($doc['extension'], ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'heic'], true)) {
+            $selectedDoc = $doc;
+            $selectedDocumentId = (int)$doc['id'];
+            break;
+        }
+    }
+}
+
 $state = [
     'projectId' => $projectId,
     'isDraftProject' => $isDraftProject,
@@ -1152,6 +1166,23 @@ $state = [
             history.pushState({ ...ProjectState }, '', url.toString());
         }
         if (tab === 'takeoff') {
+            let drawing = selectedDocument();
+            if (!drawing || drawing.source !== 'legacy_file') {
+                drawing = ProjectState.documents.find(doc => doc.source === 'legacy_file' && ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'heic'].includes(String(doc.extension || '').toLowerCase()));
+                if (drawing) {
+                    ProjectState.selectedDocumentId = Number(drawing.id);
+                    ProjectState.selectedDrawingId = Number(drawing.id);
+                    docButtons.forEach(button => button.classList.toggle('active', Number(button.dataset.docId) === Number(drawing.id)));
+                }
+            }
+            if (drawing && takeoffFrame) {
+                const expectedSrc = 'editor.php?id=' + encodeURIComponent(drawing.id) + '&embedded=1';
+                if (!takeoffFrame.getAttribute('src') || !takeoffFrame.getAttribute('src').includes('id=' + encodeURIComponent(drawing.id))) {
+                    takeoffFrame.src = expectedSrc;
+                }
+                takeoffFrame.style.display = 'block';
+                if (takeoffEmpty) takeoffEmpty.style.display = 'none';
+            }
             requestAnimationFrame(() => {
                 const frame = document.getElementById('takeoffFrame');
                 frame?.contentWindow?.postMessage({ type: 'takeoff-visible' }, '*');
