@@ -29,6 +29,13 @@ test('runtime pointer movement changes the viewport and always releases capture'
     assert.match(shell, /addEventListener\('pointerup',\s*finishPointerPan[\s\S]*?addEventListener\('pointercancel',\s*finishPointerPan/);
 });
 
+test('background drag activates Hand only after threshold and never claims object or drawing gestures', () => {
+    assert.match(shell, /primaryBackgroundGesture\s*=\s*evt[\s\S]*?evt\.button === 0[\s\S]*?currentMode === 'smart'[\s\S]*?isEmpty[\s\S]*?!takeoffDrawing[\s\S]*?!pendingPlacementTool/);
+    assert.match(shell, /if \(!konvaIsPanning && backgroundPanCandidate\)[\s\S]*?Math\.hypot[\s\S]*?distance >= 5[\s\S]*?backgroundPanGestureActive\s*=\s*true[\s\S]*?emitBackgroundPanState\(true\)/);
+    assert.match(shell, /releaseCanvasPointerState[\s\S]*?backgroundPanCandidate\s*=\s*null[\s\S]*?backgroundPanGestureActive\s*=\s*false[\s\S]*?emitBackgroundPanState\(false\)/);
+    assert.match(dashboard, /project-takeoff-pan-state[\s\S]*?setActiveTool\('pan'\)[\s\S]*?setActiveTool\(restoreTool\)/);
+});
+
 test('pan mode and takeoff object dragging are mutually exclusive', () => {
     assert.match(editor, /const listening = !isTakeoffDrawingToolActive\(\) && !panning/);
     assert.match(editor, /window\.projectTakeoffSetTemporaryPan = function \(enabled\)/);

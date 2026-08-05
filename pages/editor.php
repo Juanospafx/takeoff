@@ -834,6 +834,7 @@ if ($filePath !== '') {
     let pdfWorldHeight = 0;
     let pdfFitZoom = 1;
     let currentPdfRenderZoom = 0;
+    let currentPdfRenderScale = 0;
     let renderToken = 0;
     let activePdfRenderTask = null;
     let pdfRerenderTimer = null;
@@ -1799,9 +1800,22 @@ if ($filePath !== '') {
 
         // Pan desde Konva -> Fabric (ALT o botón derecho)
         let panStart = null;
+        let backgroundPanCandidate = null;
+        let backgroundPanGestureActive = false;
+        const emitBackgroundPanState = (active) => {
+            try {
+                window.parent?.postMessage({
+                    type: 'project-takeoff-pan-state',
+                    payload: { active: Boolean(active), source: 'background-gesture' }
+                }, '*');
+            } catch (e) {}
+        };
         const releaseCanvasPointerState = () => {
+            const notifyGestureEnd = backgroundPanGestureActive;
             konvaIsPanning = false;
             panStart = null;
+            backgroundPanCandidate = null;
+            backgroundPanGestureActive = false;
             if (canvas) {
                 canvas.isDragging = false;
                 canvas.selection = currentMode === 'smart';
@@ -1811,6 +1825,7 @@ if ($filePath !== '') {
             if (konvaStage?.container()) {
                 konvaStage.container().style.cursor = (konvaPanMode || konvaTemporaryPan) ? 'grab' : 'default';
             }
+            if (notifyGestureEnd) emitBackgroundPanState(false);
         };
         window.releaseTakeoffPointerState = releaseCanvasPointerState;
         window.setTakeoffPanMode = (enabled, temporary = false) => {
@@ -1871,6 +1886,12 @@ if ($filePath !== '') {
                 panStart = { x: evt.clientX, y: evt.clientY };
                 konvaIsPanning = true;
                 konvaStage.container().style.cursor = 'grabbing';
+                return;
+            }
+            const primaryBackgroundGesture = evt && evt.button === 0 && currentMode === 'smart'
+                && isEmpty && !takeoffDrawing && !pendingPlacementTool;
+            if (primaryBackgroundGesture) {
+                backgroundPanCandidate = { x: evt.clientX, y: evt.clientY };
             }
         });
         konvaStage.on('click tap', (e) => {
@@ -1904,8 +1925,22 @@ if ($filePath !== '') {
         });
         konvaStage.on('mousemove', (e) => {
             if (pendingPlacementTool) return;
-            if (!konvaIsPanning || !panStart) return;
             const evt = e.evt;
+            if (!konvaIsPanning && backgroundPanCandidate) {
+                const distance = Math.hypot(
+                    evt.clientX - backgroundPanCandidate.x,
+                    evt.clientY - backgroundPanCandidate.y
+                );
+                if (distance >= 5) {
+                    panStart = { ...backgroundPanCandidate };
+                    backgroundPanCandidate = null;
+                    backgroundPanGestureActive = true;
+                    konvaIsPanning = true;
+                    konvaStage.container().style.cursor = 'grabbing';
+                    emitBackgroundPanState(true);
+                }
+            }
+            if (!konvaIsPanning || !panStart) return;
             const vpt = canvas.viewportTransform;
             vpt[4] += evt.clientX - panStart.x;
             vpt[5] += evt.clientY - panStart.y;
@@ -2433,11 +2468,14 @@ if ($filePath !== '') {
     }
 
     function pdfRenderScaleForZoom(zoom) {
-        return Math.min(MAX_PDF_RENDER_SCALE, Math.max(1, Math.round((Number(zoom) || 1) * 4) / 4));
+        // Never round down: a bitmap slightly below the viewport zoom is
+        // immediately blurred by Fabric. Quarter-step ceilings balance crisp
+        // line work with cache reuse while DPR supplies display density.
+        return Math.min(MAX_PDF_RENDER_SCALE, Math.max(1, Math.ceil((Number(zoom) || 1) * 4) / 4));
     }
 
     function pdfBitmapCacheKey(num, zoom) {
-        return `${num}@${pdfRenderScaleForZoom(zoom)}`;
+        return `${num}@${pdfRenderScaleForZoom(zoom)}@${dpr}`;
     }
 
     function touchPdfBitmapCache(key, bitmap) {
@@ -2502,7 +2540,9 @@ if ($filePath !== '') {
                     bitmapWidth: renderCanvas.width,
                     bitmapHeight: renderCanvas.height,
                     worldWidth: baseViewport.width,
-                    worldHeight: baseViewport.height
+                    worldHeight: baseViewport.height,
+                    renderScale: viewportScale,
+                    requestedZoom: Number(zoom) || 1
                 });
             }, 'image/png');
         });
@@ -2514,9 +2554,15 @@ if ($filePath !== '') {
         fabric.Image.fromURL(bitmap.url, img => {
             if (token !== renderToken) return;
             setBg(img, bitmap.worldWidth, bitmap.worldHeight);
-            currentPdfRenderZoom = canvas.getZoom();
+            currentPdfRenderZoom = bitmap.requestedZoom;
+            currentPdfRenderScale = bitmap.renderScale;
             showDrawingLoading(false);
             if (loadAnnotations) loadPageAnnotations(pageNum);
+            // The user may have continued zooming while PDF.js rendered. Keep
+            // this bitmap visible, then silently refine again if necessary.
+            if (pdfRenderScaleForZoom(canvas.getZoom()) > currentPdfRenderScale) {
+                schedulePdfRerender();
+            }
         });
     }
 
@@ -2556,7 +2602,8 @@ if ($filePath !== '') {
         clearTimeout(pdfRerenderTimer);
         pdfRerenderTimer = setTimeout(() => {
             const z = canvas.getZoom();
-            if (Math.abs(z - currentPdfRenderZoom) > 0.12) {
+            const desiredScale = pdfRenderScaleForZoom(z);
+            if (desiredScale > currentPdfRenderScale || Math.abs(z - currentPdfRenderZoom) > 0.5) {
                 renderPage(pageNum, false);
             }
         }, 180);

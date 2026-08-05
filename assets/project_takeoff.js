@@ -130,6 +130,7 @@
         activeTool: 'smart'
     };
     let temporaryPanPreviousTool = null;
+    let gesturePanPreviousTool = null;
 
     const drawingState = {
         documents: [],
@@ -2750,6 +2751,23 @@
                 // while the parent is actively panning.
                 setActiveTool(explicitPanActive && reportedTool === 'smart' ? 'pan' : reportedTool);
                 renderActiveLayerToolbar();
+                return;
+            }
+            if (event.data?.type === 'project-takeoff-pan-state') {
+                const payload = event.data.payload || {};
+                if (payload.source !== 'background-gesture') return;
+                if (payload.active) {
+                    if (viewerState.activeTool !== 'pan') gesturePanPreviousTool = viewerState.activeTool;
+                    setActiveTool('pan');
+                    document.querySelector('.pro-canvas-shell')?.classList.add('is-panning');
+                } else {
+                    const restoreTool = gesturePanPreviousTool || 'smart';
+                    gesturePanPreviousTool = null;
+                    setActiveTool(restoreTool);
+                    if (restoreTool !== 'pan') {
+                        document.querySelector('.pro-canvas-shell')?.classList.remove('is-panning');
+                    }
+                }
                 return;
             }
             if (event.data?.type !== 'takeoff-editor-ready') return;
