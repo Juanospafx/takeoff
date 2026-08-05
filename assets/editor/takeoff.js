@@ -1048,7 +1048,9 @@
             .filter(segment => segment.layer_client_uid === layer.client_uid && String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area')
             .reduce((sum, segment) => sum + calculateAreaQuantity(segment), 0);
         const measured = countQty + linearQty + areaQty;
-        const base = num(layer.seed_quantity ?? layer.quantity ?? 0);
+        // `layer.quantity` may already be the persisted aggregate for this
+        // layer. Only an explicit seed is additive to measured geometry.
+        const base = num(layer.seed_quantity ?? layer.seedQuantity ?? layer.baseQuantity ?? 0);
         return base + measured;
     }
 

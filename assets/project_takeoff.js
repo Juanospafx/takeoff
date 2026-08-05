@@ -431,7 +431,11 @@
                 visible: layer.visible !== false,
                 locked: Number(layer.locked || 0) === 1,
                 quantity: Number(layer.quantity || layer.count || layer.measurement_count || 0),
-                baseQuantity: Number(layer.baseQuantity ?? layer.quantity ?? layer.count ?? layer.measurement_count ?? 0),
+                // `quantity`, `count`, and `measurement_count` are calculated
+                // takeoff totals returned by the API. Treating one of them as
+                // a seed makes every saved shape count twice after reload and
+                // causes the next canvas event to jump the displayed total.
+                baseQuantity: Number(layer.baseQuantity ?? layer.seedQuantity ?? layer.seed_quantity ?? 0),
                 catalogItemId: layer.catalog_item_id || layer.catalogItemId || null,
                 catalog_item_id: layer.catalog_item_id || layer.catalogItemId || null,
                 unitCost: Number(layer.unit_cost || layer.unitCost || 0),
@@ -1849,6 +1853,10 @@
         const groupLayerIds = (group?.layers || []).map(item => String(item.id));
         selectionState.selectedGroupId = groupLayerIds.length && groupLayerIds.every(id => ids.has(id)) ? group.id : null;
         selectionState.activeLayerId = selected ? layer.id : (selectionState.selectedLayerIds[0] || null);
+        // Checking an item is also the user's placement-layer choice. Keep the
+        // multi-layer/object selection below, but activate this specific layer
+        // in the editor so the next drawing uses its type and catalog data.
+        if (selected) setActiveTakeoffLayer(layer.id, false);
         const selectedIds = callEditor('projectTakeoffSelectGroup', selectionState.selectedLayerIds);
         selectionState.selectedObjectIds = Array.isArray(selectedIds) ? selectedIds : [];
         renderTakeoffPanel();

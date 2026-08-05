@@ -1350,7 +1350,7 @@ $state = [
 </script>
 <script src="../assets/project_overview.js"></script>
 <script src="../assets/takeoff_estimating_sync_service.js?v=takeoff-estimating-sync-20260803-1"></script>
-<script src="../assets/project_takeoff.js?v=workspace-takeoff-20260805-2"></script>
+<script src="../assets/project_takeoff.js?v=workspace-takeoff-20260805-3"></script>
 <script src="../assets/estimate_calculation_service.js"></script>
 <script src="../assets/project_estimating.js?v=estimating-workspace-20260803-1"></script>
 <script src="../assets/project_proposal.js"></script>
