@@ -1432,9 +1432,11 @@
 
     function setTool(tool) {
         if (tool === 'select') tool = 'smart';
+        window.releaseTakeoffPointerState?.();
         const leavingLinear = state.tool === 'takeoff_linear' && tool !== 'takeoff_linear';
         if (leavingLinear && state.draftLine) finishLinear();
         state.tool = tool;
+        window.__takeoffDrawingActive = ['takeoff_count', 'takeoff_linear', 'takeoff_area'].includes(tool);
         if (tool === 'takeoff_count' || tool === 'takeoff_linear' || tool === 'takeoff_area') {
             if (typeof setMode === 'function') setMode('smart');
             ensureKonva();
@@ -2596,6 +2598,10 @@
         if (normalized === 'area') return setTool('takeoff_area');
         if (normalized === 'count') return setTool('takeoff_count');
         return setTool('smart');
+    };
+
+    window.projectTakeoffIsDrawingToolActive = function () {
+        return ['takeoff_count', 'takeoff_linear', 'takeoff_area'].includes(state.tool);
     };
 
     window.projectTakeoffSetContinuous = function (enabled) {

@@ -1796,14 +1796,30 @@ if ($filePath !== '') {
 
         // Pan desde Konva -> Fabric (ALT o botón derecho)
         let panStart = null;
+        const releaseCanvasPointerState = () => {
+            konvaIsPanning = false;
+            panStart = null;
+            if (canvas) {
+                canvas.isDragging = false;
+                canvas.selection = currentMode === 'smart';
+                canvas.defaultCursor = 'default';
+                canvas.setCursor('default');
+            }
+            if (konvaStage?.container()) konvaStage.container().style.cursor = 'default';
+        };
+        window.releaseTakeoffPointerState = releaseCanvasPointerState;
         konvaStage.on('mousedown', (e) => {
             const evt = e.evt;
             const target = e.target;
             const isEmpty = !target || target === konvaStage;
             if (pendingPlacementTool) return;
-            if (evt && ((evt.altKey || evt.button === 2) || (currentMode === 'smart' && isEmpty))) {
+            const explicitPan = evt && (evt.altKey || evt.button === 2);
+            const takeoffDrawing = Boolean(window.projectTakeoffIsDrawingToolActive?.());
+            const smartPan = currentMode === 'smart' && isEmpty && !takeoffDrawing;
+            if (evt && (explicitPan || smartPan)) {
                 panStart = { x: evt.clientX, y: evt.clientY };
                 konvaIsPanning = true;
+                konvaStage.container().style.cursor = 'grabbing';
             }
         });
         konvaStage.on('click tap', (e) => {
@@ -1846,10 +1862,14 @@ if ($filePath !== '') {
             canvas.requestRenderAll();
             syncKonvaToFabric();
         });
-        konvaStage.on('mouseup', () => {
-            konvaIsPanning = false;
-            panStart = null;
-        });
+        konvaStage.on('mouseup touchend', releaseCanvasPointerState);
+        konvaStage.container().addEventListener('mouseleave', releaseCanvasPointerState);
+        konvaStage.container().addEventListener('pointercancel', releaseCanvasPointerState);
+        window.addEventListener('pointerup', releaseCanvasPointerState);
+        window.addEventListener('mouseup', releaseCanvasPointerState);
+        window.addEventListener('touchend', releaseCanvasPointerState, { passive: true });
+        window.addEventListener('touchcancel', releaseCanvasPointerState, { passive: true });
+        window.addEventListener('blur', releaseCanvasPointerState);
 
         konvaStage.on('mousedown touchstart', (e) => {
             const target = e.target;
@@ -3497,7 +3517,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-continuous-tool-20260804-2"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-pointer-release-20260804-1"></script>
 </body>
 </html>
 
