@@ -1821,7 +1821,11 @@
             callEditor('projectTakeoffClearSelection');
             return;
         }
-        if (!selectionState.selectedObjectIds.length) return showPrepared('Select one or more takeoff objects first.');
+        if (!selectionState.selectedObjectIds.length) {
+            const editorIds = callEditor('projectTakeoffGetSelectionIds');
+            if (Array.isArray(editorIds)) selectionState.selectedObjectIds = editorIds;
+        }
+        if (!selectionState.selectedObjectIds.length && action !== 'delete') return showPrepared('Select one or more takeoff objects first.');
         pushTakeoffHistory(`selection-${action}`);
         if (action === 'copy') {
             const copied = callEditor('projectTakeoffCopySelection', selectionState.selectedObjectIds);
@@ -1830,7 +1834,7 @@
         }
         if (action === 'delete') {
             const deleted = callEditor('projectTakeoffDeleteSelection', selectionState.selectedObjectIds);
-            if (!deleted) showPrepared('Delete selection is ready to be connected.');
+            if (!deleted) showPrepared('Select an unlocked element before deleting.');
             else {
                 selectionState.selectedObjectIds = [];
                 selectionState.selectedGroupId = null;
@@ -2825,6 +2829,12 @@
             if (event.target.id === 'takeoffLayerModal') closeLayerModal();
         });
         document.addEventListener('keydown', event => {
+            if (event.key === 'Delete' && !event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey
+                && !event.target?.matches?.('input, textarea, select, option, [contenteditable="true"], [role="textbox"]')) {
+                event.preventDefault();
+                runSelectionAction('delete');
+                return;
+            }
             if (event.key === 'Escape') {
                 viewerState.continuousTool = false;
                 callEditor('projectTakeoffSetContinuous', false);

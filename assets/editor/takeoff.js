@@ -470,6 +470,7 @@
             setTool('smart');
             selectElement('marker', marker);
         });
+        group.on('contextmenu', event => openObjectContextMenu(event, 'marker', marker));
         group.on('dragend', () => {
             snapshot();
             marker.x = group.x();
@@ -552,6 +553,7 @@
                 event.cancelBubble = true;
                 selectElement('segment', segment);
             });
+            handle.on('contextmenu', event => openObjectContextMenu(event, 'segment', segment));
             konvaLayer.add(handle);
             return handle;
         });
@@ -560,6 +562,7 @@
             setTool('smart');
             selectElement('segment', segment);
         });
+        line.on('contextmenu', event => openObjectContextMenu(event, 'segment', segment));
         line.on('dragend', () => {
             snapshot();
             const dx = line.x();
@@ -973,27 +976,50 @@
         konvaLayer?.batchDraw();
     }
 
-    function deleteSelected() {
-        if (!state.selectedElement) return;
-        if (isElementLocked(state.selectedElement.ref)) {
-            showToast('Unlock the element before deleting it.', 'warning');
-            return;
+    function selectedTakeoffObjectIds() {
+        const ids = new Set(Array.from(state.selectedObjectUids || []).map(String));
+        if (state.selectedElement?.ref?.client_uid) ids.add(String(state.selectedElement.ref.client_uid));
+        return Array.from(ids);
+    }
+
+    function deleteTakeoffSelection(objectIds = null) {
+        const localIds = selectedTakeoffObjectIds();
+        const requestedIds = localIds.length
+            ? localIds
+            : (Array.isArray(objectIds) ? objectIds.map(String) : []);
+        const targets = Array.from(new Set(requestedIds)).map(findTakeoffObjectByUid).filter(Boolean);
+        if (!targets.length) {
+            if (state.draftLine || state.draftArea) {
+                clearDrafts();
+                return true;
+            }
+            return false;
+        }
+        if (targets.some(target => isElementLocked(target.ref))) {
+            showToast('Unlock selected elements before deleting them.', 'warning');
+            return false;
         }
         snapshot();
-        const { type, ref } = state.selectedElement;
-        if (type === 'marker') {
-            if (ref.node) ref.node.destroy();
-            state.markers = state.markers.filter(m => m !== ref);
-        } else {
-            destroySegmentNodes(ref);
-            state.segments = state.segments.filter(s => s !== ref);
-        }
+        targets.forEach(({ type, ref }) => {
+            if (type === 'marker') {
+                if (ref.node) ref.node.destroy();
+                state.markers = state.markers.filter(marker => marker !== ref);
+            } else {
+                destroySegmentNodes(ref);
+                state.segments = state.segments.filter(segment => segment !== ref);
+            }
+        });
         state.selectedElement = null;
         state.selectedObjectUids.clear();
         renderProperties();
         applyObjectSelectionVisuals();
         markDirty();
         emitSelectionState();
+        return true;
+    }
+
+    function deleteSelected() {
+        return deleteTakeoffSelection();
     }
 
     function markDirty() {
@@ -2080,6 +2106,36 @@
         }
     }
 
+    function openObjectContextMenu(event, type, ref) {
+        const nativeEvent = event?.evt || event;
+        nativeEvent?.preventDefault?.();
+        nativeEvent?.stopPropagation?.();
+        if (event) event.cancelBubble = true;
+        window.releaseTakeoffPointerState?.();
+        const refId = String(ref?.client_uid || '');
+        if (!state.selectedObjectUids.has(refId)) {
+            setTool('smart');
+            selectElement(type, ref);
+        }
+        const selectedIds = selectedTakeoffObjectIds();
+        const count = selectedIds.length || 1;
+        const anchor = {
+            getBoundingClientRect: () => ({
+                left: Number(nativeEvent?.clientX || 0),
+                bottom: Number(nativeEvent?.clientY || 0)
+            })
+        };
+        openTakeoffMenu(anchor, [{
+            label: count > 1 ? `Delete ${count} selected elements` : 'Delete',
+            icon: 'fas fa-trash',
+            action: 'delete-object-selection',
+            run: () => {
+                if (count > 1 && !confirm(`Delete all ${count} selected elements?`)) return;
+                deleteTakeoffSelection(selectedIds);
+            }
+        }]);
+    }
+
     function openActionsMenu(anchor) {
         openTakeoffMenu(anchor, [
             { label: 'Save Takeoff', icon: 'fas fa-save', action: 'save', run: saveTakeoff },
@@ -2683,31 +2739,25 @@
     };
 
     window.projectTakeoffDeleteSelection = function (objectIds) {
-        const ids = Array.isArray(objectIds) ? objectIds : [];
-        const targets = ids.map(findTakeoffObjectByUid).filter(Boolean);
-        if (!targets.length && state.selectedElement) targets.push(state.selectedElement);
-        if (!targets.length) return false;
-        if (targets.some(target => isElementLocked(target.ref))) {
-            showToast('Unlock selected elements before deleting them.', 'warning');
-            return false;
-        }
-        snapshot();
-        targets.forEach(({ type, ref }) => {
-            if (type === 'marker') {
-                if (ref.node) ref.node.destroy();
-                state.markers = state.markers.filter(marker => marker !== ref);
-            } else {
-                destroySegmentNodes(ref);
-                state.segments = state.segments.filter(segment => segment !== ref);
-            }
-        });
-        state.selectedElement = null;
-        state.selectedObjectUids.clear();
-        renderProperties();
-        applyObjectSelectionVisuals();
-        markDirty();
-        emitSelectionState();
-        return true;
+        return deleteTakeoffSelection(objectIds);
+    };
+
+    window.projectTakeoffDeleteCurrentSelection = function () {
+        return deleteTakeoffSelection();
+    };
+
+    window.projectTakeoffGetSelectionIds = function () {
+        return selectedTakeoffObjectIds();
+    };
+
+    window.projectTakeoffHandleDeleteKey = function (event) {
+        if (!event || (event.key !== 'Delete' && event.key !== 'Backspace')) return false;
+        const target = event.target;
+        if (target?.matches?.('input, textarea, select, option, [contenteditable="true"], [role="textbox"]')) return false;
+        if (event.ctrlKey || event.metaKey || event.altKey || event.repeat) return false;
+        if (event.key === 'Backspace' && state.draftLine) return undoLinearPoint();
+        if (!selectedTakeoffObjectIds().length && !state.draftLine && !state.draftArea) return false;
+        return deleteTakeoffSelection();
     };
 
     window.projectTakeoffCopySelection = function (objectIds) {
@@ -2774,8 +2824,6 @@
         }
         return null;
     };
-
-    window.deleteSelected = deleteSelected;
 
     function init() {
         renderShell();

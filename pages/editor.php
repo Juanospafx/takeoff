@@ -1813,7 +1813,7 @@ if ($filePath !== '') {
             const target = e.target;
             const isEmpty = !target || target === konvaStage;
             if (pendingPlacementTool) return;
-            const explicitPan = evt && (evt.altKey || evt.button === 2);
+            const explicitPan = evt && (evt.altKey || (evt.button === 2 && isEmpty));
             const takeoffDrawing = Boolean(window.projectTakeoffIsDrawingToolActive?.());
             const smartPan = currentMode === 'smart' && isEmpty && !takeoffDrawing;
             if (evt && (explicitPan || smartPan)) {
@@ -2134,6 +2134,14 @@ if ($filePath !== '') {
 
     // --- DELETE FUNCTIONALITY ---
     function deleteSelected() {
+        const takeoffSelectionIds = window.projectTakeoffGetSelectionIds?.() || [];
+        if (window.projectTakeoffDeleteCurrentSelection?.()) {
+            showToast("Selection deleted", "success");
+            return;
+        }
+        // A locked Takeoff selection is still authoritative. Do not fall through
+        // and accidentally delete an unrelated Fabric annotation.
+        if (takeoffSelectionIds.length) return;
         if (useKonvaRuler && deleteKonvaSelection()) {
             showToast("Selection deleted", "success");
             return;
@@ -3486,9 +3494,14 @@ if ($filePath !== '') {
         if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); }
         if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); redo(); }
         if(e.key === 'Delete' || e.key === 'Backspace') {
+            if (window.projectTakeoffHandleDeleteKey?.(e)) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+                return;
+            }
             const activeObj = canvas.getActiveObject();
             if (activeObj && activeObj.isEditing) return; 
-            if (e.target.tagName === 'INPUT' || e.target.tagName === 'TEXTAREA') return;
+            if (e.target?.matches?.('input, textarea, select, option, [contenteditable="true"], [role="textbox"]')) return;
             e.preventDefault(); deleteSelected(); 
         }
     });
@@ -3517,7 +3530,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-pointer-release-20260804-1"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-delete-rules-20260805-1"></script>
 </body>
 </html>
 
