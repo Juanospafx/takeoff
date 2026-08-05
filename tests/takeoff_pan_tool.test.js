@@ -23,6 +23,12 @@ test('permanent and temporary hand modes drive the real Konva pan state', () => 
     assert.match(shell, /const requestedPan\s*=\s*konvaPanMode\s*\|\|\s*konvaTemporaryPan[\s\S]*?requestedPan\s*&&\s*\(!takeoffDrawing\s*\|\|\s*konvaTemporaryPan\)/);
 });
 
+test('runtime pointer movement changes the viewport and always releases capture', () => {
+    assert.match(shell, /addEventListener\('pointerdown'[\s\S]*?panActive[\s\S]*?setPointerCapture\(evt\.pointerId\)/);
+    assert.match(shell, /addEventListener\('pointermove'[\s\S]*?vpt\[4\]\s*\+=\s*evt\.clientX\s*-\s*panStart\.x[\s\S]*?vpt\[5\]\s*\+=\s*evt\.clientY\s*-\s*panStart\.y[\s\S]*?syncKonvaToFabric\(\)/);
+    assert.match(shell, /addEventListener\('pointerup',\s*finishPointerPan[\s\S]*?addEventListener\('pointercancel',\s*finishPointerPan/);
+});
+
 test('pan mode and takeoff object dragging are mutually exclusive', () => {
     assert.match(editor, /const listening = !isTakeoffDrawingToolActive\(\) && !panning/);
     assert.match(editor, /window\.projectTakeoffSetTemporaryPan = function \(enabled\)/);

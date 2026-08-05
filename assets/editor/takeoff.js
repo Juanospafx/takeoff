@@ -2743,6 +2743,10 @@
         return ['takeoff_count', 'takeoff_linear', 'takeoff_area'].includes(state.tool);
     };
 
+    window.projectTakeoffIsPanModeActive = function () {
+        return state.panMode || state.temporaryPan;
+    };
+
     window.projectTakeoffSetContinuous = function (enabled) {
         state.continuousTool = Boolean(enabled);
         emitToolState();

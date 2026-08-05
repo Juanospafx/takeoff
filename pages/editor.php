@@ -1821,6 +1821,39 @@ if ($filePath !== '') {
                 konvaStage.container().style.cursor = (konvaPanMode || konvaTemporaryPan) ? 'grab' : 'default';
             }
         };
+        const panContainer = konvaStage.container();
+        if (!panContainer._takeoffPanPointerBound) {
+            panContainer._takeoffPanPointerBound = true;
+            panContainer.addEventListener('pointerdown', evt => {
+                const panActive = konvaPanMode || konvaTemporaryPan
+                    || Boolean(window.projectTakeoffIsPanModeActive?.());
+                if (!panActive || (evt.button !== 0 && evt.button !== 1 && evt.button !== 2)) return;
+                evt.preventDefault();
+                evt.stopImmediatePropagation();
+                panStart = { x: evt.clientX, y: evt.clientY };
+                konvaIsPanning = true;
+                panContainer.style.cursor = 'grabbing';
+                try { panContainer.setPointerCapture(evt.pointerId); } catch (e) {}
+            }, true);
+            panContainer.addEventListener('pointermove', evt => {
+                if (!konvaIsPanning || !panStart) return;
+                evt.preventDefault();
+                evt.stopImmediatePropagation();
+                const vpt = canvas.viewportTransform;
+                vpt[4] += evt.clientX - panStart.x;
+                vpt[5] += evt.clientY - panStart.y;
+                panStart = { x: evt.clientX, y: evt.clientY };
+                canvas.requestRenderAll();
+                syncKonvaToFabric();
+            }, true);
+            const finishPointerPan = evt => {
+                if (!konvaIsPanning) return;
+                try { panContainer.releasePointerCapture(evt.pointerId); } catch (e) {}
+                releaseCanvasPointerState();
+            };
+            panContainer.addEventListener('pointerup', finishPointerPan, true);
+            panContainer.addEventListener('pointercancel', finishPointerPan, true);
+        }
         konvaStage.on('mousedown', (e) => {
             const evt = e.evt;
             const target = e.target;
@@ -3548,7 +3581,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-pan-exclusion-20260805-1"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-pan-pointer-20260805-2"></script>
 </body>
 </html>
 
