@@ -6,6 +6,7 @@ const vm = require('node:vm');
 
 const takeoff = fs.readFileSync(path.join(__dirname, '..', 'assets', 'project_takeoff.js'), 'utf8');
 const proposal = fs.readFileSync(path.join(__dirname, '..', 'assets', 'project_proposal.js'), 'utf8');
+const sharedFooter = fs.readFileSync(path.join(__dirname, '..', 'assets', 'project_estimate_footer.js'), 'utf8');
 
 function takeoffFooterRuntime(savedState) {
     const start = takeoff.indexOf('function estimatingStoreKey');
@@ -20,7 +21,7 @@ function takeoffFooterRuntime(savedState) {
         $: id => id === 'takeoffEstimateTypesFooter' ? footer : null,
         esc: value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch]))
     };
-    vm.runInNewContext(`${takeoff.slice(start, end)}; renderTakeoffEstimateFooter();`, sandbox);
+    vm.runInNewContext(`${sharedFooter}\n${takeoff.slice(start, end)}; renderTakeoffEstimateFooter();`, sandbox);
     return footer.innerHTML;
 }
 
@@ -35,10 +36,12 @@ function proposalFooterRuntime(savedState) {
         footer,
         localStorage: { getItem: () => JSON.stringify(savedState), setItem: () => {} }
     };
+    sandbox.window = sandbox;
     vm.runInNewContext(`
         const estimatingKey = 'takeoff.estimating.module.2';
         const estimateFooter = footer;
         const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch]));
+        ${sharedFooter}
         ${proposal.slice(start, end)}
         renderEstimateFooter();
     `, sandbox);
@@ -58,7 +61,7 @@ function assertFooterParity(html, idAttribute) {
     assert.match(html, new RegExp(`${idAttribute}="est-1"`));
     assert.match(html, new RegExp(`est-version-tab active[^>]*${idAttribute}="est-2"`));
     assert.match(html, /Base &lt;Estimate&gt;/);
-    assert.match(html, /Draft · 1 items/);
+    assert.match(html, /Draft · 1 item/);
     assert.match(html, /Approved · 2 items/);
     assert.match(html, /fa-lock/);
     assert.match(html, /New estimate/);

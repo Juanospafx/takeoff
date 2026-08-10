@@ -832,7 +832,7 @@
     }
 
     function renderVersionBar(summary) {
-        return `<footer class="est-version-bar"><span class="est-pill">${state.estimates.length} estimates</span>${state.estimates.map(est => `<button class="est-version-tab ${est.id === state.activeEstimateId ? 'active' : ''}" data-version="${esc(est.id)}"><span><strong>${esc(est.name)}</strong><small>${esc(est.status)} · ${est.groups.reduce((sum, group) => sum + group.items.length, 0)} items</small></span>${est.isLocked ? '<i class="fas fa-lock"></i>' : ''}</button>`).join('')}<button class="est-btn est-new-estimate" data-est-action="new-estimate"><i class="fas fa-plus"></i><span>New estimate</span></button><button class="est-btn" data-est-action="compare-estimates" ${state.estimates.length < 2 ? 'disabled' : ''}><i class="fas fa-code-compare"></i><span>Compare</span></button></footer>`;
+        return `<footer class="est-version-bar">${window.ProjectEstimateFooter.render({ estimates: state.estimates, activeEstimateId: state.activeEstimateId })}</footer>`;
     }
 
     function renderModals() {

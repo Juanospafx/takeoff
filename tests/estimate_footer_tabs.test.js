@@ -9,6 +9,7 @@ const page = read('pages/project_dashboard.php');
 const takeoff = read('assets/project_takeoff.js');
 const proposal = read('assets/project_proposal.js');
 const estimating = read('assets/project_estimating.js');
+const sharedFooter = read('assets/project_estimate_footer.js');
 const calculation = read('assets/estimate_calculation_service.js');
 const takeoffCss = read('assets/project_takeoff.css');
 
@@ -30,10 +31,10 @@ expect(takeoff, /takeoff:active-estimate-changed/, 'Takeoff must publish estimat
 expect(proposal, /takeoff:active-estimate-changed/, 'Proposal must react to estimate changes.');
 expect(takeoff, /takeoff:estimating-state-updated/, 'Takeoff must react after asynchronous estimating load.');
 expect(proposal, /takeoff:estimating-state-updated/, 'Proposal must react after asynchronous estimating load.');
-expect(takeoff, /data-takeoff-estimating-action="new-estimate"/, 'Takeoff must expose New estimate in its footer.');
-expect(takeoff, /data-takeoff-estimating-action="compare-estimates"/, 'Takeoff must expose Compare in its footer.');
-expect(proposal, /data-proposal-estimating-action="new-estimate"/, 'Proposal must expose New estimate in its footer.');
-expect(proposal, /data-proposal-estimating-action="compare-estimates"/, 'Proposal must expose Compare in its footer.');
+expect(sharedFooter, /actionAttribute[\s\S]*new-estimate/, 'The shared footer must expose New estimate.');
+expect(sharedFooter, /actionAttribute[\s\S]*compare-estimates/, 'The shared footer must expose Compare.');
+expect(takeoff, /actionAttribute:\s*'data-takeoff-estimating-action'/, 'Takeoff must connect shared footer actions.');
+expect(proposal, /actionAttribute:\s*'data-proposal-estimating-action'/, 'Proposal must connect shared footer actions.');
 expect(takeoff, /sourceTab:\s*'takeoff'/, 'Takeoff footer actions must identify their originating tab.');
 expect(proposal, /sourceTab:\s*'proposal'/, 'Proposal footer actions must identify their originating tab.');
 expect(estimating, /data-estimating-modal-portal/, 'Estimating must portal shared modals over the active workspace tab.');
@@ -60,6 +61,7 @@ dom.window.localStorage.setItem('takeoff.estimating.module.2', JSON.stringify({
         { id: 'alternate', name: 'Lighting Alternate', status: 'Ready', groups: [] }
     ]
 }));
+dom.window.eval(sharedFooter);
 dom.window.eval(takeoff);
 dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
 const renderedFooter = dom.window.document.getElementById('takeoffEstimateTypesFooter');
@@ -102,6 +104,7 @@ estimatingDom.window.localStorage.setItem('takeoff.estimating.module.draft', JSO
     ]
 }));
 estimatingDom.window.eval(calculation);
+estimatingDom.window.eval(sharedFooter);
 estimatingDom.window.eval(estimating);
 let estimatingTabClicks = 0;
 estimatingDom.window.document.querySelector('[data-tab="estimating"]').addEventListener('click', () => { estimatingTabClicks += 1; });

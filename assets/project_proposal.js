@@ -195,12 +195,12 @@
         const estimating = readEstimatingModule();
         const estimates = Array.isArray(estimating.estimates) ? estimating.estimates : [];
         const activeId = String(estimating.activeEstimateId || estimates[0]?.id || '');
-        estimateFooter.innerHTML = `<span class="est-pill">${estimates.length} estimates</span>${estimates.length ? estimates.map(estimate => {
-            const id = String(estimate.id || '');
-            const active = id === activeId;
-            const itemCount = (estimate.groups || []).reduce((sum, group) => sum + (group.items || []).length, 0);
-            return `<button type="button" class="est-version-tab${active ? ' active' : ''}" data-proposal-estimate-id="${esc(id)}" aria-pressed="${active}"><span><strong>${esc(estimate.name || 'Estimate')}</strong><small>${esc(estimate.status || 'Draft')} · ${itemCount} items</small></span>${estimate.isLocked ? '<i class="fas fa-lock" aria-label="Locked"></i>' : ''}</button>`;
-        }).join('') : '<span class="est-pill">No estimates available</span>'}<button type="button" class="est-btn est-new-estimate" data-proposal-estimating-action="new-estimate"><i class="fas fa-plus"></i><span>New estimate</span></button><button type="button" class="est-btn" data-proposal-estimating-action="compare-estimates" ${estimates.length < 2 ? 'disabled' : ''}><i class="fas fa-code-compare"></i><span>Compare</span></button>`;
+        estimateFooter.innerHTML = window.ProjectEstimateFooter.render({
+            estimates,
+            activeEstimateId: activeId,
+            selectAttribute: 'data-proposal-estimate-id',
+            actionAttribute: 'data-proposal-estimating-action'
+        });
     }
 
     function activateEstimate(estimateId) {
