@@ -611,11 +611,12 @@
         const state = loadEstimatingStateForSync();
         const estimates = Array.isArray(state?.estimates) ? state.estimates : [];
         const activeId = String(state?.activeEstimateId || estimates[0]?.id || '');
-        footer.innerHTML = `<span class="project-estimate-footer-title">Estimates</span>${estimates.length ? estimates.map(estimate => {
+        footer.innerHTML = `<span class="project-estimate-footer-title">${estimates.length} estimates</span>${estimates.length ? estimates.map(estimate => {
             const id = String(estimate.id || '');
             const active = id === activeId;
-            return `<button type="button" class="project-estimate-option${active ? ' is-active' : ''}" data-takeoff-estimate-id="${esc(id)}" aria-pressed="${active}"><span>${esc(estimate.name || 'Estimate')}</span><span class="project-estimate-status">${esc(estimate.status || 'Draft')}</span></button>`;
-        }).join('') : '<span class="project-estimate-footer-empty">No estimates available</span>'}`;
+            const itemCount = (estimate.groups || []).reduce((sum, group) => sum + (group.items || []).length, 0);
+            return `<button type="button" class="project-estimate-option${active ? ' is-active' : ''}" data-takeoff-estimate-id="${esc(id)}" aria-pressed="${active}"><span><strong>${esc(estimate.name || 'Estimate')}</strong><small>${esc(estimate.status || 'Draft')} · ${itemCount} items</small></span>${estimate.isLocked ? '<i class="fas fa-lock" aria-label="Locked"></i>' : ''}</button>`;
+        }).join('') : '<span class="project-estimate-footer-empty">No estimates available</span>'}<span class="project-estimate-footer-actions"><button type="button" class="project-estimate-action" data-takeoff-estimating-action="new-estimate"><i class="fas fa-plus"></i> New estimate</button><button type="button" class="project-estimate-action" data-takeoff-estimating-action="compare-estimates" ${estimates.length < 2 ? 'disabled' : ''}><i class="fas fa-code-compare"></i> Compare</button></span>`;
     }
 
     function activateEstimate(estimateId) {
@@ -2925,6 +2926,8 @@
         $('takeoffEstimateTypesFooter')?.addEventListener('click', event => {
             const button = event.target.closest('[data-takeoff-estimate-id]');
             if (button) activateEstimate(button.dataset.takeoffEstimateId);
+            const action = event.target.closest('[data-takeoff-estimating-action]')?.dataset.takeoffEstimatingAction;
+            if (action) window.dispatchEvent(new CustomEvent('takeoff:estimating-action-requested', { detail: { action } }));
         });
         window.addEventListener('storage', event => {
             if (event.key === estimatingStoreKey()) renderTakeoffEstimateFooter();

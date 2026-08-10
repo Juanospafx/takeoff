@@ -195,11 +195,12 @@
         const estimating = readEstimatingModule();
         const estimates = Array.isArray(estimating.estimates) ? estimating.estimates : [];
         const activeId = String(estimating.activeEstimateId || estimates[0]?.id || '');
-        estimateFooter.innerHTML = `<span class="project-estimate-footer-title">Estimates</span>${estimates.length ? estimates.map(estimate => {
+        estimateFooter.innerHTML = `<span class="project-estimate-footer-title">${estimates.length} estimates</span>${estimates.length ? estimates.map(estimate => {
             const id = String(estimate.id || '');
             const active = id === activeId;
-            return `<button type="button" class="project-estimate-option${active ? ' is-active' : ''}" data-proposal-estimate-id="${esc(id)}" aria-pressed="${active}"><span>${esc(estimate.name || 'Estimate')}</span><span class="project-estimate-status">${esc(estimate.status || 'Draft')}</span></button>`;
-        }).join('') : '<span class="project-estimate-footer-empty">No estimates available</span>'}`;
+            const itemCount = (estimate.groups || []).reduce((sum, group) => sum + (group.items || []).length, 0);
+            return `<button type="button" class="project-estimate-option${active ? ' is-active' : ''}" data-proposal-estimate-id="${esc(id)}" aria-pressed="${active}"><span><strong>${esc(estimate.name || 'Estimate')}</strong><small>${esc(estimate.status || 'Draft')} · ${itemCount} items</small></span>${estimate.isLocked ? '<i class="fas fa-lock" aria-label="Locked"></i>' : ''}</button>`;
+        }).join('') : '<span class="project-estimate-footer-empty">No estimates available</span>'}<span class="project-estimate-footer-actions"><button type="button" class="project-estimate-action" data-proposal-estimating-action="new-estimate"><i class="fas fa-plus"></i> New estimate</button><button type="button" class="project-estimate-action" data-proposal-estimating-action="compare-estimates" ${estimates.length < 2 ? 'disabled' : ''}><i class="fas fa-code-compare"></i> Compare</button></span>`;
     }
 
     function activateEstimate(estimateId) {
@@ -434,6 +435,8 @@
     estimateFooter?.addEventListener('click', event => {
         const button = event.target.closest('[data-proposal-estimate-id]');
         if (button) activateEstimate(button.dataset.proposalEstimateId);
+        const action = event.target.closest('[data-proposal-estimating-action]')?.dataset.proposalEstimatingAction;
+        if (action) window.dispatchEvent(new CustomEvent('takeoff:estimating-action-requested', { detail: { action } }));
     });
     document.querySelector('[data-tab="proposal"]')?.addEventListener('click', () => window.setTimeout(() => { renderPreview(); renderEstimateFooter(); }, 0));
     renderAll();

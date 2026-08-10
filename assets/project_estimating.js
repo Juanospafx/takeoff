@@ -360,7 +360,31 @@
             window.ProjectState.estimateItems = allItems(estimate);
         }
         window.dispatchEvent(new CustomEvent('takeoff:estimate-summary-updated', { detail: summary }));
+        window.dispatchEvent(new CustomEvent('takeoff:estimating-state-updated', {
+            detail: {
+                projectId: String(projectId || ''),
+                activeEstimateId: String(state.activeEstimateId || ''),
+                estimates: state.estimates.map(estimate => ({
+                    id: String(estimate.id),
+                    name: estimate.name,
+                    status: estimate.status,
+                    isLocked: Boolean(estimate.isLocked)
+                }))
+            }
+        }));
         if ((state.dirty || options.forceServer) && serverReady && projectId) scheduleServerSave(Boolean(options.immediate));
+    }
+
+    function selectEstimate(estimateId) {
+        const next = state.estimates.find(estimate => String(estimate.id) === String(estimateId));
+        if (!next || String(state.activeEstimateId) === String(next.id)) return false;
+        state.activeEstimateId = next.id;
+        state.selected = [];
+        state.dirty = true;
+        changeRevision += 1;
+        setSyncState(projectId ? 'pending' : 'local', projectId ? 'Active estimate waiting to save' : 'Saved on this device');
+        render();
+        return true;
     }
 
     function scheduleServerSave(immediate = false) {
@@ -821,8 +845,8 @@
         root.querySelector('#estSearch')?.addEventListener('input', e => { state.search = e.target.value; render(); });
         root.querySelectorAll('[data-menu-toggle]').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); const menu = root.querySelector(`#estMenu-${btn.dataset.menuToggle}`); menu?.classList.toggle('open'); btn.setAttribute('aria-expanded', String(Boolean(menu?.classList.contains('open')))); }));
         root.querySelectorAll('[data-est-action]').forEach(btn => btn.addEventListener('click', e => { e.stopPropagation(); handleAction(btn.dataset.estAction); }));
-        root.querySelector('[data-estimate-select]')?.addEventListener('change', e => { state.activeEstimateId = e.target.value; state.selected = []; render(); });
-        root.querySelectorAll('[data-version]').forEach(btn => btn.addEventListener('click', () => { state.activeEstimateId = btn.dataset.version; state.selected = []; render(); }));
+        root.querySelector('[data-estimate-select]')?.addEventListener('change', e => selectEstimate(e.target.value));
+        root.querySelectorAll('[data-version]').forEach(btn => btn.addEventListener('click', () => selectEstimate(btn.dataset.version)));
         root.querySelectorAll('[data-toggle-group]').forEach(btn => btn.addEventListener('click', () => { const group = activeEstimate().groups.find(g => g.id === btn.dataset.toggleGroup); if (group) group.expanded = group.expanded === false; markDirty(); render(); }));
         root.querySelectorAll('[data-add-item]').forEach(btn => btn.addEventListener('click', () => addManualItem(btn.dataset.addItem)));
         root.querySelectorAll('[data-select-item]').forEach(box => box.addEventListener('change', () => { state.selected = box.checked ? [...new Set([...state.selected, box.dataset.selectItem])] : state.selected.filter(row => row !== box.dataset.selectItem); render(); }));
@@ -928,6 +952,15 @@
         if (action === 'export-summary') return exportSummary();
         if (action === 'export-proposal') return showProposal();
     }
+
+    window.addEventListener('takeoff:estimating-action-requested', event => {
+        const action = String(event.detail?.action || '');
+        if (!['new-estimate', 'compare-estimates'].includes(action)) return;
+        document.querySelector('[data-tab="estimating"]')?.click();
+        const run = () => handleAction(action);
+        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
+        else setTimeout(run, 0);
+    });
 
     function createGroup() {
         const name = prompt('Group name', 'New Group');
@@ -1506,6 +1539,12 @@
         } catch (e) {
             console.warn('Unable to refresh estimating from Takeoff', e);
         }
+    });
+
+    window.addEventListener('takeoff:active-estimate-changed', event => {
+        const detail = event.detail || {};
+        if (detail.projectId && String(detail.projectId) !== String(projectId)) return;
+        selectEstimate(detail.estimateId);
     });
 
     render();
