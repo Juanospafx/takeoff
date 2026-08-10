@@ -20,7 +20,8 @@ expect(page, /id="takeoffEstimateTypesFooter"/, 'Takeoff must expose an estimate
 expect(page, /id="proposalEstimateTypesFooter"/, 'Proposal must expose an estimate footer.');
 expect(page, /id="takeoffEstimateTypesFooter"[\s\S]*?Loading estimates/, 'Takeoff footer must have a no-JS fallback.');
 expect(page, /id="proposalEstimateTypesFooter"[\s\S]*?Loading estimates/, 'Proposal footer must have a no-JS fallback.');
-expect(takeoffCss, /\.project-estimate-footer\s*\{[\s\S]*grid-column:\s*1\s*\/\s*-1/, 'The footer must span the workspace.');
+expect(page, /class="est-version-bar" id="takeoffEstimateTypesFooter"/, 'Takeoff must reuse the Estimating footer design.');
+expect(page, /class="est-version-bar" id="proposalEstimateTypesFooter"/, 'Proposal must reuse the Estimating footer design.');
 expect(takeoff, /data-takeoff-estimate-id/, 'Takeoff must render estimate choices.');
 expect(proposal, /data-proposal-estimate-id/, 'Proposal must render estimate choices.');
 expect(takeoff, /state\.activeEstimateId\s*=\s*estimateId/, 'Takeoff must persist the active estimate.');
@@ -66,12 +67,12 @@ if (!renderedFooter.textContent.includes('Primary Estimate') || !renderedFooter.
     throw new Error('Takeoff footer must render visible estimate names from storage.');
 }
 const activeButton = renderedFooter.querySelector('[data-takeoff-estimate-id="alternate"]');
-if (!activeButton?.classList.contains('is-active') || activeButton.getAttribute('aria-pressed') !== 'true') {
+if (!activeButton?.classList.contains('active') || activeButton.getAttribute('aria-pressed') !== 'true') {
     throw new Error('Takeoff footer must visibly identify the active estimate.');
 }
 renderedFooter.querySelector('[data-takeoff-estimate-id="primary"]').click();
 const savedState = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.2'));
-if (savedState.activeEstimateId !== 'primary' || !renderedFooter.querySelector('[data-takeoff-estimate-id="primary"]')?.classList.contains('is-active')) {
+if (savedState.activeEstimateId !== 'primary' || !renderedFooter.querySelector('[data-takeoff-estimate-id="primary"]')?.classList.contains('active')) {
     throw new Error('Clicking a visible footer option must persist and display the new active estimate.');
 }
 let requestedAction = '';

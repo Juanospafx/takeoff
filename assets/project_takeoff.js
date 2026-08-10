@@ -611,12 +611,12 @@
         const state = loadEstimatingStateForSync();
         const estimates = Array.isArray(state?.estimates) ? state.estimates : [];
         const activeId = String(state?.activeEstimateId || estimates[0]?.id || '');
-        footer.innerHTML = `<span class="project-estimate-footer-title">${estimates.length} estimates</span>${estimates.length ? estimates.map(estimate => {
+        footer.innerHTML = `<span class="est-pill">${estimates.length} estimates</span>${estimates.length ? estimates.map(estimate => {
             const id = String(estimate.id || '');
             const active = id === activeId;
             const itemCount = (estimate.groups || []).reduce((sum, group) => sum + (group.items || []).length, 0);
-            return `<button type="button" class="project-estimate-option${active ? ' is-active' : ''}" data-takeoff-estimate-id="${esc(id)}" aria-pressed="${active}"><span><strong>${esc(estimate.name || 'Estimate')}</strong><small>${esc(estimate.status || 'Draft')} · ${itemCount} items</small></span>${estimate.isLocked ? '<i class="fas fa-lock" aria-label="Locked"></i>' : ''}</button>`;
-        }).join('') : '<span class="project-estimate-footer-empty">No estimates available</span>'}<span class="project-estimate-footer-actions"><button type="button" class="project-estimate-action" data-takeoff-estimating-action="new-estimate"><i class="fas fa-plus"></i> New estimate</button><button type="button" class="project-estimate-action" data-takeoff-estimating-action="compare-estimates" ${estimates.length < 2 ? 'disabled' : ''}><i class="fas fa-code-compare"></i> Compare</button></span>`;
+            return `<button type="button" class="est-version-tab${active ? ' active' : ''}" data-takeoff-estimate-id="${esc(id)}" aria-pressed="${active}"><span><strong>${esc(estimate.name || 'Estimate')}</strong><small>${esc(estimate.status || 'Draft')} · ${itemCount} items</small></span>${estimate.isLocked ? '<i class="fas fa-lock" aria-label="Locked"></i>' : ''}</button>`;
+        }).join('') : '<span class="est-pill">No estimates available</span>'}<button type="button" class="est-btn est-new-estimate" data-takeoff-estimating-action="new-estimate"><i class="fas fa-plus"></i><span>New estimate</span></button><button type="button" class="est-btn" data-takeoff-estimating-action="compare-estimates" ${estimates.length < 2 ? 'disabled' : ''}><i class="fas fa-code-compare"></i><span>Compare</span></button>`;
     }
 
     function activateEstimate(estimateId) {

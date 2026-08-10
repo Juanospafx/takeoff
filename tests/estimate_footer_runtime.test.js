@@ -56,7 +56,7 @@ const sharedState = {
 function assertFooterParity(html, idAttribute) {
     assert.match(html, /2 estimates/);
     assert.match(html, new RegExp(`${idAttribute}="est-1"`));
-    assert.match(html, new RegExp(`project-estimate-option is-active[^>]*${idAttribute}="est-2"`));
+    assert.match(html, new RegExp(`est-version-tab active[^>]*${idAttribute}="est-2"`));
     assert.match(html, /Base &lt;Estimate&gt;/);
     assert.match(html, /Draft · 1 items/);
     assert.match(html, /Approved · 2 items/);
