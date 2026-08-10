@@ -586,7 +586,7 @@
     function loadEstimatingStateForSync() {
         try {
             const parsed = JSON.parse(localStorage.getItem(estimatingStoreKey()) || 'null');
-            if (parsed && Array.isArray(parsed.groups)) return parsed;
+            if (parsed && (Array.isArray(parsed.groups) || Array.isArray(parsed.estimates))) return parsed;
         } catch (e) {}
         return {
             search: '',
@@ -603,6 +603,30 @@
             preTaxMarkups: [],
             postTaxMarkups: []
         };
+    }
+
+    function renderTakeoffEstimateFooter() {
+        const footer = $('takeoffEstimateTypesFooter');
+        if (!footer) return;
+        const state = loadEstimatingStateForSync();
+        const estimates = Array.isArray(state?.estimates) ? state.estimates : [];
+        const activeId = String(state?.activeEstimateId || estimates[0]?.id || '');
+        footer.innerHTML = `<span class="project-estimate-footer-title">Estimates</span>${estimates.length ? estimates.map(estimate => {
+            const id = String(estimate.id || '');
+            const active = id === activeId;
+            return `<button type="button" class="project-estimate-option${active ? ' is-active' : ''}" data-takeoff-estimate-id="${escapeHtml(id)}" aria-pressed="${active}"><span>${escapeHtml(estimate.name || 'Estimate')}</span><span class="project-estimate-status">${escapeHtml(estimate.status || 'Draft')}</span></button>`;
+        }).join('') : '<span class="project-estimate-footer-empty">No estimates available</span>'}`;
+    }
+
+    function activateEstimate(estimateId) {
+        const state = loadEstimatingStateForSync();
+        if (!state || !Array.isArray(state.estimates) || !state.estimates.some(estimate => String(estimate.id) === String(estimateId))) return;
+        state.activeEstimateId = estimateId;
+        const active = state.estimates.find(estimate => String(estimate.id) === String(estimateId));
+        if (active && Array.isArray(active.groups)) state.groups = active.groups;
+        localStorage.setItem(estimatingStoreKey(), JSON.stringify(state));
+        renderTakeoffEstimateFooter();
+        window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', { detail: { projectId: String(window.ProjectState?.projectId || ''), estimateId } }));
     }
 
     function estimateLineFromLayer(layer) {
@@ -2897,6 +2921,16 @@
 
         $('takeoffZoomSlider')?.addEventListener('input', event => setZoom(event.target.value));
         initTakeoffState();
+        renderTakeoffEstimateFooter();
+        $('takeoffEstimateTypesFooter')?.addEventListener('click', event => {
+            const button = event.target.closest('[data-takeoff-estimate-id]');
+            if (button) activateEstimate(button.dataset.takeoffEstimateId);
+        });
+        window.addEventListener('storage', event => {
+            if (event.key === estimatingStoreKey()) renderTakeoffEstimateFooter();
+        });
+        window.addEventListener('takeoff:active-estimate-changed', renderTakeoffEstimateFooter);
+        window.addEventListener('takeoff:estimating-lines-updated', renderTakeoffEstimateFooter);
         ensureViewerLayersPopover();
         bindDrawingDropdown();
         bindScalePanel();

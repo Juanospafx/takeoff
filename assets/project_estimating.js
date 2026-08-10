@@ -369,6 +369,18 @@
         saveTimer = setTimeout(flushServerSave, immediate ? 0 : saveDelay);
     }
 
+    function estimateItemIds(candidate) {
+        return new Set((candidate?.estimates || []).flatMap(estimate =>
+            (estimate?.groups || []).flatMap(group => (group?.items || []).map(item => String(item.id)))
+        ));
+    }
+
+    function serverStateContainsSavedItems(sent, remote) {
+        if (!remote || !Array.isArray(remote.estimates)) return false;
+        const remoteIds = estimateItemIds(remote);
+        return [...estimateItemIds(sent)].every(itemId => remoteIds.has(itemId));
+    }
+
     async function flushServerSave() {
         clearTimeout(saveTimer);
         saveTimer = null;
@@ -379,12 +391,13 @@
         saveInFlight = true;
         setSyncState('saving', 'Saving to server…');
         const savedRevision = changeRevision;
+        const sentState = serializableState();
         try {
             const response = await fetch(estimatingApi, {
                 method: 'POST',
                 headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
                 keepalive: true,
-                body: JSON.stringify({ action: 'save', project_id: projectId, state: serializableState() })
+                body: JSON.stringify({ action: 'save', project_id: projectId, state: sentState })
             });
             const result = await response.json().catch(() => null);
             if (response.status === 409) {
@@ -395,12 +408,13 @@
             if (!response.ok || result?.success === false) throw new Error(result?.error?.message || result?.message || `HTTP ${response.status}`);
             if (savedRevision === changeRevision) {
                 const remote = result?.state || result?.data?.state;
-                if (remote && Array.isArray(remote.estimates)) {
-                    const hydrated = migrateState(remote);
-                    Object.keys(state).forEach(key => delete state[key]);
-                    Object.assign(state, hydrated);
-                    localStorage.setItem(storageKey, JSON.stringify(serializableState()));
+                if (!serverStateContainsSavedItems(sentState, remote)) {
+                    throw new Error('Server save response omitted estimate items; local draft retained');
                 }
+                const hydrated = migrateState(remote);
+                Object.keys(state).forEach(key => delete state[key]);
+                Object.assign(state, hydrated);
+                localStorage.setItem(storageKey, JSON.stringify(serializableState()));
                 state.dirty = false;
                 setSyncState('saved', 'Saved to server');
             }

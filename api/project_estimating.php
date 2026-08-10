@@ -68,9 +68,50 @@ function pew_state_row(PDO $pdo, $estimateId) {
     $stmt->execute(array($estimateId));
     return $stmt->fetch(PDO::FETCH_ASSOC);
 }
+function pew_relational_groups(PDO $pdo, $estimateId) {
+    $stmt = $pdo->prepare('SELECT * FROM estimate_items WHERE estimate_id = ? AND deleted_at IS NULL ORDER BY sort_order ASC, id ASC');
+    $stmt->execute(array($estimateId));
+    $groups = array();
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+        $meta = pew_decode(isset($row['metadata_json']) ? $row['metadata_json'] : null);
+        $item = isset($meta['workspace']) && is_array($meta['workspace']) ? $meta['workspace'] : array();
+        $clientId = !empty($meta['workspaceClientId']) ? (string)$meta['workspaceClientId'] : 'db-item-' . (int)$row['id'];
+        $item['id'] = $clientId;
+        $item['estimateItemId'] = (int)$row['id'];
+        if (!isset($item['name'])) $item['name'] = (string)$row['name'];
+        if (!isset($item['description'])) $item['description'] = (string)$row['description'];
+        if (!isset($item['quantity'])) $item['quantity'] = (float)$row['quantity'];
+        if (!isset($item['uom'])) $item['uom'] = (string)$row['unit_of_measure'];
+        if (!isset($item['unitMaterialCost'])) $item['unitMaterialCost'] = (float)$row['unit_cost'];
+        if (!isset($item['quantitySource'])) $item['quantitySource'] = (string)$row['source_type'];
+        if (!isset($item['takeoffLayerId']) && !empty($row['source_layer_key'])) $item['takeoffLayerId'] = (string)$row['source_layer_key'];
+        $groupName = trim((string)(isset($row['group_name']) ? $row['group_name'] : '')) ?: 'Default Group';
+        if (!isset($groups[$groupName])) {
+            $groups[$groupName] = array(
+                'id' => 'db-group-' . substr(sha1($groupName), 0, 12),
+                'name' => $groupName,
+                'parentId' => null,
+                'expanded' => true,
+                'sortOrder' => count($groups),
+                'source' => 'recovered',
+                'takeoffMirror' => false,
+                'items' => array()
+            );
+        }
+        $groups[$groupName]['items'][] = $item;
+    }
+    return array_values($groups);
+}
 function pew_load_one(PDO $pdo, array $estimate) {
     $state = pew_state_row($pdo, (int)$estimate['id']);
     $snapshot = $state ? pew_decode($state['state_json']) : array();
+    // Relational rows are the durable integration layer. Recover them when a
+    // legacy/malformed workspace snapshot has no group payload instead of
+    // rendering an empty estimate after refresh.
+    if (!isset($snapshot['groups']) || !is_array($snapshot['groups']) || !$snapshot['groups']) {
+        $recoveredGroups = pew_relational_groups($pdo, (int)$estimate['id']);
+        if ($recoveredGroups) $snapshot['groups'] = $recoveredGroups;
+    }
     $snapshot['id'] = $state && $state['client_estimate_id'] !== '' ? $state['client_estimate_id'] : (string)$estimate['id'];
     $snapshot['estimateItemId'] = (int)$estimate['id'];
     $snapshot['dbEstimateId'] = (int)$estimate['id'];
@@ -105,6 +146,17 @@ function pew_takeoff_layer_id(PDO $pdo, $projectId, $layerKey) {
     $stmt->execute(array($layerKey, pew_int($layerKey), $projectId, $projectId));
     $id = (int)$stmt->fetchColumn();
     return $id > 0 ? $id : null;
+}
+function pew_catalog_item_id(PDO $pdo, $value) {
+    static $cache = array();
+    $id = pew_int($value);
+    if ($id < 1) return null;
+    if (array_key_exists($id, $cache)) return $cache[$id];
+    $stmt = $pdo->prepare('SELECT id FROM catalog_items WHERE id=? AND deleted_at IS NULL LIMIT 1');
+    $stmt->execute(array($id));
+    $found = (int)$stmt->fetchColumn();
+    $cache[$id] = $found > 0 ? $found : null;
+    return $cache[$id];
 }
 function pew_save_items(PDO $pdo, $projectId, $estimateId, array $groups) {
     $existing = pew_existing_items($pdo, $estimateId);
@@ -142,7 +194,7 @@ function pew_save_items(PDO $pdo, $projectId, $estimateId, array $groups) {
             $subtotal = pew_num(isset($item['totalCost']) ? $item['totalCost'] : ($materialCost + $laborCost + $equipmentCost));
             $values = array(
                 $takeoffLayerId,
-                !empty($item['catalogItemId']) ? pew_int($item['catalogItemId']) : null,
+                pew_catalog_item_id($pdo, isset($item['catalogItemId']) ? $item['catalogItemId'] : null),
                 $sourceLayerKey, $source, $source === 'manual' ? 1 : 0, $source === 'takeoff' && empty($item['quantityOverride']) ? 1 : 0,
                 !empty($item['isAssembly']) ? 'assembly' : 'line_item', $groupName,
                 pew_text(isset($item['budgetCode']) ? $item['budgetCode'] : '', 100),

@@ -15,9 +15,12 @@
     min-height: 0;
     display: grid;
     grid-template-columns: minmax(300px, 340px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) auto;
     background: #e7edf4;
     color: #172033;
 }
+
+.proposal-shell > .project-estimate-footer { grid-column: 1 / -1; }
 
 .proposal-settings {
     min-height: 0;

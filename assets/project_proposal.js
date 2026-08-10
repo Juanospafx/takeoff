@@ -13,6 +13,7 @@
     const exportMenu = document.getElementById('proposalExportMenu');
     const exportToggle = root.querySelector('[data-proposal-export-toggle]');
     const banner = document.getElementById('proposalFeatureBanner');
+    const estimateFooter = document.getElementById('proposalEstimateTypesFooter');
 
     const defaultIncluded = new Set(['Furnish and install listed materials', 'Labor during normal business hours', 'Coordination with project drawings']);
     const defaultExcluded = new Set(['Permit fees unless noted', 'Utility company charges', 'Work not shown in documents']);
@@ -106,12 +107,15 @@
         try {
             const parsed = JSON.parse(localStorage.getItem(estimatingKey) || 'null');
             if (!parsed || typeof parsed !== 'object') return {};
-            const scopeText = textFromHtml(parsed.scope || '');
+            const activeEstimate = Array.isArray(parsed.estimates) ? parsed.estimates.find(estimate => String(estimate.id) === String(parsed.activeEstimateId)) : null;
+            const notes = activeEstimate?.notes || parsed;
+            const scopeValue = notes.scope || '';
+            const scopeText = textFromHtml(scopeValue);
             return {
-                scope: scopeText && scopeText !== defaultScope ? cleanHtml(parsed.scope) : '',
-                included: Array.isArray(parsed.included) ? parsed.included.map((item) => String(item || '').trim()).filter((item) => item && !defaultIncluded.has(item)) : [],
-                excluded: Array.isArray(parsed.excluded) ? parsed.excluded.map((item) => String(item || '').trim()).filter((item) => item && !defaultExcluded.has(item)) : [],
-                projectNotes: cleanHtml(parsed.projectNotes || '')
+                scope: scopeText && scopeText !== defaultScope ? cleanHtml(scopeValue) : '',
+                included: Array.isArray(notes.included) ? notes.included.map((item) => String(item || '').trim()).filter((item) => item && !defaultIncluded.has(item)) : [],
+                excluded: Array.isArray(notes.excluded) ? notes.excluded.map((item) => String(item || '').trim()).filter((item) => item && !defaultExcluded.has(item)) : [],
+                projectNotes: cleanHtml(notes.projectNotes || '')
             };
         } catch (error) {
             return {};
@@ -179,10 +183,35 @@
     }
 
     function realItems() {
-        if (Array.isArray(state.estimateItems) && state.estimateItems.length) return state.estimateItems.map(itemFromEstimate);
         const estimating = readEstimatingModule();
-        const groups = Array.isArray(estimating.groups) ? estimating.groups : [];
-        return groups.flatMap(group => (group.items || []).map(item => itemFromEstimate({ ...item, groupName: group.name })));
+        const activeEstimate = Array.isArray(estimating.estimates) ? estimating.estimates.find(estimate => String(estimate.id) === String(estimating.activeEstimateId)) : null;
+        const groups = Array.isArray(activeEstimate?.groups) ? activeEstimate.groups : (Array.isArray(estimating.groups) ? estimating.groups : []);
+        if (groups.length) return groups.flatMap(group => (group.items || []).map(item => itemFromEstimate({ ...item, groupName: group.name })));
+        return Array.isArray(state.estimateItems) ? state.estimateItems.map(itemFromEstimate) : [];
+    }
+
+    function renderEstimateFooter() {
+        if (!estimateFooter) return;
+        const estimating = readEstimatingModule();
+        const estimates = Array.isArray(estimating.estimates) ? estimating.estimates : [];
+        const activeId = String(estimating.activeEstimateId || estimates[0]?.id || '');
+        estimateFooter.innerHTML = `<span class="project-estimate-footer-title">Estimates</span>${estimates.length ? estimates.map(estimate => {
+            const id = String(estimate.id || '');
+            const active = id === activeId;
+            return `<button type="button" class="project-estimate-option${active ? ' is-active' : ''}" data-proposal-estimate-id="${esc(id)}" aria-pressed="${active}"><span>${esc(estimate.name || 'Estimate')}</span><span class="project-estimate-status">${esc(estimate.status || 'Draft')}</span></button>`;
+        }).join('') : '<span class="project-estimate-footer-empty">No estimates available</span>'}`;
+    }
+
+    function activateEstimate(estimateId) {
+        const estimating = readEstimatingModule();
+        if (!Array.isArray(estimating.estimates) || !estimating.estimates.some(estimate => String(estimate.id) === String(estimateId))) return;
+        estimating.activeEstimateId = estimateId;
+        const active = estimating.estimates.find(estimate => String(estimate.id) === String(estimateId));
+        if (active && Array.isArray(active.groups)) estimating.groups = active.groups;
+        localStorage.setItem(estimatingKey, JSON.stringify(estimating));
+        renderEstimateFooter();
+        renderPreview();
+        window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', { detail: { projectId: String(projectId), estimateId } }));
     }
 
     function totals(items) {
@@ -336,6 +365,7 @@
     function renderAll() {
         renderSettings();
         renderPreview();
+        renderEstimateFooter();
     }
 
     function showToast(message) {
@@ -393,12 +423,17 @@
     }
 
     window.addEventListener('storage', (event) => {
-        if (event.key === estimatingKey) renderPreview();
+        if (event.key === estimatingKey) { renderPreview(); renderEstimateFooter(); }
     });
+    window.addEventListener('takeoff:active-estimate-changed', () => { renderPreview(); renderEstimateFooter(); });
     window.addEventListener('takeoff:estimate-summary-updated', (event) => {
         if (window.ProjectState) window.ProjectState.estimateSummary = event.detail || {};
         renderPreview();
     });
-    document.querySelector('[data-tab="proposal"]')?.addEventListener('click', () => window.setTimeout(renderPreview, 0));
+    estimateFooter?.addEventListener('click', event => {
+        const button = event.target.closest('[data-proposal-estimate-id]');
+        if (button) activateEstimate(button.dataset.proposalEstimateId);
+    });
+    document.querySelector('[data-tab="proposal"]')?.addEventListener('click', () => window.setTimeout(() => { renderPreview(); renderEstimateFooter(); }, 0));
     renderAll();
 })();
