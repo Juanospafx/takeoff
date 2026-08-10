@@ -436,7 +436,7 @@
         const button = event.target.closest('[data-proposal-estimate-id]');
         if (button) activateEstimate(button.dataset.proposalEstimateId);
         const action = event.target.closest('[data-proposal-estimating-action]')?.dataset.proposalEstimatingAction;
-        if (action) window.dispatchEvent(new CustomEvent('takeoff:estimating-action-requested', { detail: { action } }));
+        if (action) window.dispatchEvent(new CustomEvent('takeoff:estimating-action-requested', { detail: { action, sourceTab: 'proposal' } }));
     });
     document.querySelector('[data-tab="proposal"]')?.addEventListener('click', () => window.setTimeout(() => { renderPreview(); renderEstimateFooter(); }, 0));
     renderAll();

@@ -33,6 +33,13 @@ expect(takeoff, /data-takeoff-estimating-action="new-estimate"/, 'Takeoff must e
 expect(takeoff, /data-takeoff-estimating-action="compare-estimates"/, 'Takeoff must expose Compare in its footer.');
 expect(proposal, /data-proposal-estimating-action="new-estimate"/, 'Proposal must expose New estimate in its footer.');
 expect(proposal, /data-proposal-estimating-action="compare-estimates"/, 'Proposal must expose Compare in its footer.');
+expect(takeoff, /sourceTab:\s*'takeoff'/, 'Takeoff footer actions must identify their originating tab.');
+expect(proposal, /sourceTab:\s*'proposal'/, 'Proposal footer actions must identify their originating tab.');
+expect(estimating, /data-estimating-modal-portal/, 'Estimating must portal shared modals over the active workspace tab.');
+expect(estimating, /portal\?\.querySelector\('#copyEstimateName'\)/, 'Estimate creation must read values from the shared modal portal.');
+if (/estimating-action-requested[\s\S]{0,500}data-tab="estimating"/.test(estimating)) {
+    throw new Error('Footer estimating actions must not change the active workspace tab.');
+}
 expect(proposal, /activeEstimate\?\.groups/, 'Proposal data must come from the active estimate.');
 expect(estimating, /takeoff:active-estimate-changed[\s\S]*selectEstimate\(detail\.estimateId\)/, 'Estimating must consume external active-estimate changes.');
 expect(estimating, /takeoff:estimating-state-updated[\s\S]*estimates:\s*state\.estimates\.map/, 'Estimating must publish its estimate catalog.');
@@ -78,7 +85,11 @@ dom.window.dispatchEvent(new dom.window.CustomEvent('takeoff:estimating-state-up
 if (!renderedFooter.textContent.includes('Change Order')) throw new Error('Takeoff footer must display estimates created in Estimating without a reload.');
 dom.window.close();
 
-const estimatingDom = new JSDOM('<!doctype html><div id="estimatingModule" data-project-id="0"></div>', {
+const estimatingDom = new JSDOM(`<!doctype html>
+    <button data-tab="takeoff" class="active">Takeoff</button>
+    <button data-tab="estimating">Estimating</button>
+    <button data-tab="proposal">Proposal</button>
+    <div id="estimatingModule" data-project-id="0"></div>`, {
     url: 'https://takeoff.test/project/draft', runScripts: 'outside-only', pretendToBeVisual: true
 });
 estimatingDom.window.ProjectState = { projectId: 0, estimateItems: [], projectMeta: {}, projectInfo: { name: 'Contract test' } };
@@ -91,6 +102,8 @@ estimatingDom.window.localStorage.setItem('takeoff.estimating.module.draft', JSO
 }));
 estimatingDom.window.eval(calculation);
 estimatingDom.window.eval(estimating);
+let estimatingTabClicks = 0;
+estimatingDom.window.document.querySelector('[data-tab="estimating"]').addEventListener('click', () => { estimatingTabClicks += 1; });
 estimatingDom.window.dispatchEvent(new estimatingDom.window.CustomEvent('takeoff:active-estimate-changed', {
     detail: { projectId: '', estimateId: 'alternate' }
 }));
@@ -100,13 +113,52 @@ if (estimatingState.activeEstimateId !== 'alternate' || estimatingDom.window.doc
 }
 let catalogEvent = null;
 estimatingDom.window.addEventListener('takeoff:estimating-state-updated', event => { catalogEvent = event.detail; });
-estimatingDom.window.document.querySelector('[data-est-action="new-estimate"]').click();
-estimatingDom.window.document.getElementById('copyEstimateName').value = 'New Bid Option';
-estimatingDom.window.document.querySelector('[data-est-action="create-estimate-copy"]').click();
-estimatingState = JSON.parse(estimatingDom.window.localStorage.getItem('takeoff.estimating.module.draft'));
-if (!estimatingState.estimates.some(estimate => estimate.name === 'New Bid Option') || !catalogEvent?.estimates?.some(estimate => estimate.name === 'New Bid Option')) {
-    throw new Error('Creating an estimate must persist it and publish the updated catalog.');
+estimatingDom.window.dispatchEvent(new estimatingDom.window.CustomEvent('takeoff:estimating-action-requested', {
+    detail: { action: 'new-estimate', sourceTab: 'takeoff' }
+}));
+if (estimatingTabClicks !== 0 || !estimatingDom.window.document.querySelector('[data-tab="takeoff"]').classList.contains('active')) {
+    throw new Error('New estimate from Takeoff must not activate or navigate to the Estimating tab.');
 }
+const createPortal = estimatingDom.window.document.querySelector('[data-estimating-modal-portal]');
+const createDialog = createPortal?.querySelector('[role="dialog"][aria-labelledby="copyEstimateTitle"]');
+const createName = createPortal?.querySelector('#copyEstimateName');
+const createModes = [...(createPortal?.querySelectorAll('input[name="copyEstimateMode"]') || [])].map(input => input.value);
+if (!createDialog || !createName || !['all', 'structure', 'blank'].every(mode => createModes.includes(mode))) {
+    throw new Error('New estimate must open a visible global dialog with a name and all copy modes.');
+}
+createName.value = 'New Bid Option';
+createPortal.querySelector('input[name="copyEstimateMode"][value="blank"]').checked = true;
+createPortal.querySelector('[data-est-action="create-estimate-copy"]').click();
+estimatingState = JSON.parse(estimatingDom.window.localStorage.getItem('takeoff.estimating.module.draft'));
+const createdEstimate = estimatingState.estimates.find(estimate => estimate.name === 'New Bid Option');
+if (!createdEstimate || createdEstimate.groups.length !== 0 || !catalogEvent?.estimates?.some(estimate => estimate.name === 'New Bid Option')) {
+    throw new Error('Confirming New estimate must honor the selected mode, persist it, and publish the updated catalog.');
+}
+if (!estimatingDom.window.document.querySelector('.est-version-bar')?.textContent.includes('New Bid Option')) {
+    throw new Error('A newly created estimate must immediately appear in the estimate footer.');
+}
+
+estimatingDom.window.dispatchEvent(new estimatingDom.window.CustomEvent('takeoff:estimating-action-requested', {
+    detail: { action: 'compare-estimates', sourceTab: 'takeoff' }
+}));
+if (estimatingTabClicks !== 0 || !estimatingDom.window.document.querySelector('[data-estimating-modal-portal]')?.textContent.includes('Compare Estimates')) {
+    throw new Error('Compare from Takeoff must open globally without navigating to Estimating.');
+}
+estimatingDom.window.document.querySelector('[data-modal-close="compareOpen"]')?.click();
+if (estimatingDom.window.document.querySelector('[data-estimating-modal-portal]')) {
+    throw new Error('Closing a portaled comparison must remove the global modal and update Estimating state.');
+}
+estimatingDom.window.document.querySelector('[data-tab="takeoff"]').classList.remove('active');
+estimatingDom.window.document.querySelector('[data-tab="proposal"]').classList.add('active');
+estimatingDom.window.dispatchEvent(new estimatingDom.window.CustomEvent('takeoff:estimating-action-requested', {
+    detail: { action: 'compare-estimates', sourceTab: 'proposal' }
+}));
+if (estimatingTabClicks !== 0 || !estimatingDom.window.document.querySelector('[data-tab="proposal"]').classList.contains('active') || !estimatingDom.window.document.querySelector('[data-estimating-modal-portal]')?.textContent.includes('Compare Estimates')) {
+    throw new Error('Compare from Proposal must keep Proposal active and show the comparison dialog.');
+}
+const proposalPortal = estimatingDom.window.document.querySelector('[data-estimating-modal-portal]');
+proposalPortal.querySelector('button').dispatchEvent(new estimatingDom.window.KeyboardEvent('keydown', { key: 'Escape', bubbles: true }));
+if (estimatingDom.window.document.querySelector('[data-estimating-modal-portal]')) throw new Error('Escape must close a global estimating modal.');
 estimatingDom.window.close();
 
 console.log('Estimate footer integration checks passed.');

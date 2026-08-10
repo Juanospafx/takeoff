@@ -19,6 +19,7 @@
     let localCacheFound = false;
     let syncState = projectId ? 'loading' : 'local';
     let syncMessage = projectId ? 'Loading server data' : 'Saved on this device';
+    const modalPortalId = 'estimatingModalPortal';
 
     const money = value => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(Number(value || 0));
     const number = (value, digits = 2) => Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: digits, minimumFractionDigits: digits });
@@ -569,6 +570,7 @@
     }
 
     function render() {
+        document.getElementById(modalPortalId)?.remove();
         const estimate = activeEstimate();
         const summary = Calc.calculateSummary(estimate.groups, estimate.settings);
         root.classList.toggle('est-fullscreen', Boolean(state.fullscreen));
@@ -630,7 +632,37 @@
             <div class="est-row-menu" id="estRowMenu" hidden></div>
         `;
         bindEvents();
+        portalActiveModal();
         persist();
+    }
+
+    function portalActiveModal() {
+        const modal = root.querySelector('.est-modal-backdrop');
+        if (!modal) return;
+        const portal = document.createElement('div');
+        portal.id = modalPortalId;
+        portal.className = 'estimating-page est-modal-portal';
+        portal.setAttribute('data-estimating-modal-portal', '');
+        portal.appendChild(modal);
+        document.body.appendChild(portal);
+        const closePortal = () => {
+            const stateKey = portal.querySelector('[data-modal-close]')?.dataset.modalClose
+                || (portal.querySelector('[data-copy-estimate-backdrop]') ? 'copyEstimateOpen' : '');
+            if (stateKey) state[stateKey] = false;
+            portal.remove();
+            render();
+        };
+        portal.addEventListener('click', event => {
+            if (event.target.closest('[data-modal-close]')) closePortal();
+        });
+        portal.addEventListener('keydown', event => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                closePortal();
+            }
+        });
+        const focusTarget = portal.querySelector('#copyEstimateName, button, input, select');
+        if (focusTarget) setTimeout(() => focusTarget.focus(), 0);
     }
 
     function menuButton(idValue, label, items) {
@@ -956,10 +988,7 @@
     window.addEventListener('takeoff:estimating-action-requested', event => {
         const action = String(event.detail?.action || '');
         if (!['new-estimate', 'compare-estimates'].includes(action)) return;
-        document.querySelector('[data-tab="estimating"]')?.click();
-        const run = () => handleAction(action);
-        if (typeof requestAnimationFrame === 'function') requestAnimationFrame(run);
-        else setTimeout(run, 0);
+        handleAction(action);
     });
 
     function createGroup() {
@@ -990,12 +1019,13 @@
         render();
     }
 
-    function createEstimateCopy() {
+    function createEstimateCopy(input = null) {
         const current = activeEstimate();
-        const nameInput = root.querySelector('#copyEstimateName');
-        const modeInput = root.querySelector('input[name="copyEstimateMode"]:checked');
-        const name = String(nameInput?.value || '').trim();
-        const mode = modeInput?.value || 'all';
+        const portal = document.getElementById(modalPortalId);
+        const nameInput = portal?.querySelector('#copyEstimateName') || root.querySelector('#copyEstimateName');
+        const modeInput = portal?.querySelector('input[name="copyEstimateMode"]:checked') || root.querySelector('input[name="copyEstimateMode"]:checked');
+        const name = String(input?.name ?? nameInput?.value ?? '').trim();
+        const mode = input?.mode || modeInput?.value || 'all';
         if (!name) {
             nameInput?.focus();
             return toast('Enter an estimate name.');

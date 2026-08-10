@@ -2927,7 +2927,7 @@
             const button = event.target.closest('[data-takeoff-estimate-id]');
             if (button) activateEstimate(button.dataset.takeoffEstimateId);
             const action = event.target.closest('[data-takeoff-estimating-action]')?.dataset.takeoffEstimatingAction;
-            if (action) window.dispatchEvent(new CustomEvent('takeoff:estimating-action-requested', { detail: { action } }));
+            if (action) window.dispatchEvent(new CustomEvent('takeoff:estimating-action-requested', { detail: { action, sourceTab: 'takeoff' } }));
         });
         window.addEventListener('storage', event => {
             if (event.key === estimatingStoreKey()) renderTakeoffEstimateFooter();
