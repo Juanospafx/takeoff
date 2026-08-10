@@ -575,7 +575,7 @@ $state = [
     </style>
     <link rel="stylesheet" href="../assets/project_overview.css">
     <link rel="stylesheet" href="../assets/project_takeoff.css?v=workspace-takeoff-20260810-1">
-    <link rel="stylesheet" href="../assets/project_estimating.css?v=estimating-workspace-20260810-2">
+    <link rel="stylesheet" href="../assets/project_estimating.css?v=estimating-workspace-20260810-3">
     <link rel="stylesheet" href="../assets/project_proposal.css?v=proposal-workspace-20260810-1">
 </head>
 <body>

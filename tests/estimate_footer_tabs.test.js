@@ -12,6 +12,7 @@ const estimating = read('assets/project_estimating.js');
 const sharedFooter = read('assets/project_estimate_footer.js');
 const calculation = read('assets/estimate_calculation_service.js');
 const takeoffCss = read('assets/project_takeoff.css');
+const estimatingCss = read('assets/project_estimating.css');
 
 function expect(source, pattern, message) {
     if (!pattern.test(source)) throw new Error(message);
@@ -23,6 +24,8 @@ expect(page, /id="takeoffEstimateTypesFooter"[\s\S]*?Loading estimates/, 'Takeof
 expect(page, /id="proposalEstimateTypesFooter"[\s\S]*?Loading estimates/, 'Proposal footer must have a no-JS fallback.');
 expect(page, /class="est-version-bar" id="takeoffEstimateTypesFooter"/, 'Takeoff must reuse the Estimating footer design.');
 expect(page, /class="est-version-bar" id="proposalEstimateTypesFooter"/, 'Proposal must reuse the Estimating footer design.');
+expect(estimatingCss, /\.est-version-bar\s*\{[\s\S]*?--est-surface:\s*#ffffff;[\s\S]*?--est-primary-border:/, 'Shared footer must own its visual tokens outside Estimating.');
+expect(estimatingCss, /\[data-theme="dark"\]\s+\.est-version-bar\s*\{[\s\S]*?--est-surface:/, 'Shared footer must preserve Estimating parity in dark mode.');
 expect(takeoff, /data-takeoff-estimate-id/, 'Takeoff must render estimate choices.');
 expect(proposal, /data-proposal-estimate-id/, 'Proposal must render estimate choices.');
 expect(takeoff, /state\.activeEstimateId\s*=\s*estimateId/, 'Takeoff must persist the active estimate.');

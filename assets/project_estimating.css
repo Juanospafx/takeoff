@@ -1140,6 +1140,19 @@
 }
 
 .est-version-bar {
+    /* The shared footer also renders outside .estimating-page. */
+    --est-surface: #ffffff;
+    --est-surface-2: #f8fafc;
+    --est-line: #dbe1ea;
+    --est-text: #172033;
+    --est-text-soft: #2c3646;
+    --est-muted: #66738a;
+    --est-primary: #2563eb;
+    --est-primary-strong: #1d4fc4;
+    --est-primary-soft: #eaf1ff;
+    --est-primary-border: #b9d1fb;
+    --est-radius-sm: 6px;
+    --est-radius-md: 9px;
     grid-column: 1 / -1;
     display: flex;
     align-items: center;
@@ -1153,6 +1166,17 @@
     position: relative;
     z-index: 12;
     scrollbar-width: thin;
+}
+
+[data-theme="dark"] .est-version-bar {
+    --est-surface: #1e293b;
+    --est-surface-2: #172236;
+    --est-line: #32405a;
+    --est-text: #f1f5f9;
+    --est-text-soft: #e2e8f0;
+    --est-muted: #94a3b8;
+    --est-primary-soft: rgba(96, 165, 250, .16);
+    --est-primary-border: rgba(96, 165, 250, .4);
 }
 
 .est-copy-modal {
