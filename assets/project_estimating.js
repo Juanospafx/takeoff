@@ -483,6 +483,9 @@
                 render();
             }
             setSyncState(syncState, syncMessage);
+            window.dispatchEvent(new CustomEvent('takeoff:estimating-state-updated', {
+                detail: { projectId: String(projectId), activeEstimateId: String(state.activeEstimateId || '') }
+            }));
             if (state.dirty || startingRevision !== changeRevision) scheduleServerSave();
         }
     }

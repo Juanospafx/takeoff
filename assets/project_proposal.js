@@ -426,6 +426,7 @@
         if (event.key === estimatingKey) { renderPreview(); renderEstimateFooter(); }
     });
     window.addEventListener('takeoff:active-estimate-changed', () => { renderPreview(); renderEstimateFooter(); });
+    window.addEventListener('takeoff:estimating-state-updated', () => { renderPreview(); renderEstimateFooter(); });
     window.addEventListener('takeoff:estimate-summary-updated', (event) => {
         if (window.ProjectState) window.ProjectState.estimateSummary = event.detail || {};
         renderPreview();

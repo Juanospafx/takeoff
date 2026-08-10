@@ -614,7 +614,7 @@
         footer.innerHTML = `<span class="project-estimate-footer-title">Estimates</span>${estimates.length ? estimates.map(estimate => {
             const id = String(estimate.id || '');
             const active = id === activeId;
-            return `<button type="button" class="project-estimate-option${active ? ' is-active' : ''}" data-takeoff-estimate-id="${escapeHtml(id)}" aria-pressed="${active}"><span>${escapeHtml(estimate.name || 'Estimate')}</span><span class="project-estimate-status">${escapeHtml(estimate.status || 'Draft')}</span></button>`;
+            return `<button type="button" class="project-estimate-option${active ? ' is-active' : ''}" data-takeoff-estimate-id="${esc(id)}" aria-pressed="${active}"><span>${esc(estimate.name || 'Estimate')}</span><span class="project-estimate-status">${esc(estimate.status || 'Draft')}</span></button>`;
         }).join('') : '<span class="project-estimate-footer-empty">No estimates available</span>'}`;
     }
 
@@ -2931,6 +2931,7 @@
         });
         window.addEventListener('takeoff:active-estimate-changed', renderTakeoffEstimateFooter);
         window.addEventListener('takeoff:estimating-lines-updated', renderTakeoffEstimateFooter);
+        window.addEventListener('takeoff:estimating-state-updated', renderTakeoffEstimateFooter);
         ensureViewerLayersPopover();
         bindDrawingDropdown();
         bindScalePanel();

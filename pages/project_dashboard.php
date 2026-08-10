@@ -1034,7 +1034,10 @@ $state = [
                         <div class="pro-inspector-content" id="takeoffInspectorContent"></div>
                     </div>
                 </aside>
-                <footer class="project-estimate-footer" id="takeoffEstimateTypesFooter" aria-label="Available estimates"></footer>
+                <footer class="project-estimate-footer" id="takeoffEstimateTypesFooter" aria-label="Available estimates">
+                    <span class="project-estimate-footer-title">Estimates</span>
+                    <span class="project-estimate-footer-empty">Loading estimates&hellip;</span>
+                </footer>
             </div>
         </section>
 
@@ -1118,7 +1121,10 @@ $state = [
                     </div>
                     <div class="proposal-document" id="proposalDocument"></div>
                 </main>
-                <footer class="project-estimate-footer" id="proposalEstimateTypesFooter" aria-label="Available estimates"></footer>
+                <footer class="project-estimate-footer" id="proposalEstimateTypesFooter" aria-label="Available estimates">
+                    <span class="project-estimate-footer-title">Estimates</span>
+                    <span class="project-estimate-footer-empty">Loading estimates&hellip;</span>
+                </footer>
             </div>
         </section>
     </main>
@@ -1353,7 +1359,7 @@ $state = [
 </script>
 <script src="../assets/project_overview.js"></script>
 <script src="../assets/takeoff_estimating_sync_service.js?v=takeoff-estimating-sync-20260803-1"></script>
-<script src="../assets/project_takeoff.js?v=workspace-takeoff-20260810-1"></script>
+<script src="../assets/project_takeoff.js?v=workspace-takeoff-20260810-2"></script>
 <script src="../assets/estimate_calculation_service.js"></script>
 <script src="../assets/project_estimating.js?v=estimating-workspace-20260810-1"></script>
 <script src="../assets/project_proposal.js?v=proposal-workspace-20260810-1"></script>
