@@ -95,7 +95,7 @@
                 localStorage.removeItem('takeoff.projectDraft');
                 showToast('Project saved.');
                 if (Number(window.ProjectState?.projectId || 0) === 0) {
-                    migrateDraftDocuments(data.id);
+                    migrateDraftWorkspace(data.id);
                     window.location.href = `project_dashboard.php?id=${encodeURIComponent(data.id)}&tab=overview`;
                 } else {
                     window.ProjectState.projectId = data.id;
@@ -252,20 +252,44 @@
         return `takeoff.projectDocumentFolders.${id || 'draft'}`;
     }
 
-    function migrateDraftDocuments(projectId) {
-        const draftKey = 'takeoff.projectDocuments.draft';
-        const projectKey = `takeoff.projectDocuments.${projectId}`;
-        const draftDocs = localStorage.getItem(draftKey);
-        if (draftDocs) {
-            localStorage.setItem(projectKey, draftDocs);
+    function migrateDraftWorkspace(projectId) {
+        const numericProjectId = Number(projectId || 0);
+        if (numericProjectId < 1) return;
+        const prefixes = [
+            'takeoff.projectDocuments',
+            'takeoff.projectDocumentFolders',
+            'takeoff.quantification',
+            'takeoff.estimating.columns',
+            'takeoff.proposal.settings',
+            'takeoff.proposal.banner'
+        ];
+        prefixes.forEach(prefix => {
+            const draftKey = `${prefix}.draft`;
+            const value = localStorage.getItem(draftKey);
+            if (value === null) return;
+            localStorage.setItem(`${prefix}.${numericProjectId}`, value);
             localStorage.removeItem(draftKey);
-        }
-        const draftFolderKey = 'takeoff.projectDocumentFolders.draft';
-        const projectFolderKey = `takeoff.projectDocumentFolders.${projectId}`;
-        const draftFolders = localStorage.getItem(draftFolderKey);
-        if (draftFolders) {
-            localStorage.setItem(projectFolderKey, draftFolders);
-            localStorage.removeItem(draftFolderKey);
+        });
+
+        const estimatingDraftKey = 'takeoff.estimating.module.draft';
+        const rawEstimate = localStorage.getItem(estimatingDraftKey);
+        if (rawEstimate !== null) {
+            try {
+                const workspace = JSON.parse(rawEstimate);
+                workspace.projectId = numericProjectId;
+                workspace.estimates = (workspace.estimates || []).map(estimate => {
+                    const migrated = { ...estimate, projectId: numericProjectId, revision: 0 };
+                    delete migrated.dbEstimateId;
+                    delete migrated.estimateItemId;
+                    return migrated;
+                });
+                localStorage.setItem(`takeoff.estimating.module.${numericProjectId}`, JSON.stringify(workspace));
+            } catch (error) {
+                // Preserve even an older snapshot shape; migrateState will
+                // normalize it after the redirect.
+                localStorage.setItem(`takeoff.estimating.module.${numericProjectId}`, rawEstimate);
+            }
+            localStorage.removeItem(estimatingDraftKey);
         }
     }
 
