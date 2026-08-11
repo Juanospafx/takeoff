@@ -17,6 +17,7 @@
             marginMode: input.marginMode === 'markup' ? 'markup' : 'margin',
             globalLaborCost: numeric(input.globalLaborCost, 85),
             globalLaborSales: numeric(input.globalLaborSales, 110),
+            globalLaborMargin: numeric(input.globalLaborMargin),
             taxes: {
                 Materials: numeric(input.taxes?.Materials),
                 Labor: numeric(input.taxes?.Labor),
@@ -42,10 +43,17 @@
     function item(row = {}) {
         const takeoffLayerId = text(row.takeoffLayerId ?? row.takeoff_layer_id ?? row.sourceTakeoffId);
         const quantity = numeric(row.quantity ?? row.originalQuantity);
+        const itemType = text(row.itemType ?? row.item_type, row.isAssembly ? 'assembly' : 'part').toLowerCase();
+        const childRows = row.children ?? row.assemblyItems ?? row.components;
         return {
             id: text(row.id) || uid('item'),
             takeoffLayerId: takeoffLayerId || null,
             catalogItemId: row.catalogItemId ?? row.catalog_item_id ?? null,
+            itemType,
+            isAssembly: row.isAssembly === true || itemType === 'assembly',
+            parentItemId: text(row.parentItemId ?? row.parent_item_id ?? row.assemblyParentId) || null,
+            children: Array.isArray(childRows) ? childRows.map(item) : [],
+            childrenQuantitiesExtended: row.childrenQuantitiesExtended === true,
             name: text(row.name ?? row.catalog_item_name, 'Cost item'),
             description: text(row.description),
             budgetCode: text(row.budgetCode ?? row.budget_code),
@@ -67,7 +75,8 @@
             laborUnitType: text(row.laborUnitType ?? row.laborUnit, 'mins'),
             laborRate: numeric(row.laborRate ?? row.labor_rate, 85),
             difficulty: numeric(row.difficulty ?? row.difficulty_factor, 1),
-            laborMargin: numeric(row.laborMargin ?? row.labor_margin_percentage),
+            laborMargin: row.laborMargin === '' || row.labor_margin_percentage === '' ? null
+                : (row.laborMargin ?? row.labor_margin_percentage ?? null),
             taxable: row.taxable !== false && Number(row.taxable ?? 1) !== 0,
             notes: text(row.notes),
             updatedAt: text(row.updatedAt ?? row.updated_at, now())

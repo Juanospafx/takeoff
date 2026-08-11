@@ -5,7 +5,7 @@
     }
 
     function clampMargin(value) {
-        return Math.min(99.9, Math.max(-999, num(value)));
+        return Math.min(99.999999, Math.max(-999, num(value)));
     }
 
     function salesFromCost(cost, rate, mode = 'margin') {
@@ -13,7 +13,7 @@
         const r = num(rate) / 100;
         if (!c) return 0;
         if (mode === 'markup') return c * (1 + r);
-        return r >= 0.999 ? c : c / (1 - r);
+        return r >= 1 ? c : c / (1 - r);
     }
 
     function emptyTotals() {
@@ -52,18 +52,31 @@
         return unit.includes('hr') ? value : value / 60;
     }
 
-    function calculateItem(item, settings = {}) {
+    function isAssembly(item) {
+        return item?.isAssembly === true || String(item?.itemType ?? item?.item_type ?? '').toLowerCase() === 'assembly';
+    }
+
+    function calculatePart(item, settings = {}) {
         const quantity = num(item.quantity);
         const wastePercent = Math.max(0, num(item.waste));
         const adjustedQuantity = quantity * (1 + wastePercent / 100);
         const materialCost = adjustedQuantity * num(item.unitMaterialCost ?? item.unitCost);
-        const materialSales = salesFromCost(materialCost, clampMargin(item.materialMargin ?? item.margin), settings.marginMode);
+        const materialMargin = num(item.materialMargin ?? item.margin);
+        const equipmentMargin = num(item.equipmentMargin);
+        const laborMargin = num(item.laborMargin ?? settings.globalLaborMargin);
+        const validation = [];
+        if (materialMargin >= 100) validation.push({ field: 'materialMargin', code: 'margin_must_be_below_100' });
+        if (equipmentMargin >= 100) validation.push({ field: 'equipmentMargin', code: 'margin_must_be_below_100' });
+        if (laborMargin >= 100) validation.push({ field: 'laborMargin', code: 'margin_must_be_below_100' });
+        const materialSales = salesFromCost(materialCost, materialMargin >= 100 ? 0 : clampMargin(materialMargin), settings.marginMode);
         const equipmentCost = num(item.equipmentQuantity) * num(item.unitEquipmentCost);
-        const equipmentSales = salesFromCost(equipmentCost, clampMargin(item.equipmentMargin), settings.marginMode);
-        const baseLaborHours = adjustedQuantity * unitLaborHours(item);
+        const equipmentSales = salesFromCost(equipmentCost, equipmentMargin >= 100 ? 0 : clampMargin(equipmentMargin), settings.marginMode);
+        // Waste is a material allowance. Labor follows the measured/base quantity;
+        // difficulty is the only multiplier applied to required labor time.
+        const baseLaborHours = quantity * unitLaborHours(item);
         const adjustedLaborHours = baseLaborHours * Math.max(0, num(item.difficulty, 1));
         const laborCost = adjustedLaborHours * num(item.laborRate ?? settings.globalLaborCost);
-        const laborSales = salesFromCost(laborCost, clampMargin(item.laborMargin), settings.marginMode);
+        const laborSales = salesFromCost(laborCost, laborMargin >= 100 ? 0 : clampMargin(laborMargin), settings.marginMode);
         const totalCost = materialCost + equipmentCost + laborCost;
         const totalSales = materialSales + equipmentSales + laborSales;
         const profit = totalSales - totalCost;
@@ -83,8 +96,49 @@
             totalCost,
             totalSales,
             profit,
-            marginPercent: totalSales ? (profit / totalSales) * 100 : 0
+            marginPercent: totalSales ? (profit / totalSales) * 100 : 0,
+            validation
         };
+    }
+
+    function calculateAssembly(item, settings = {}, explicitChildren) {
+        const children = Array.isArray(explicitChildren) ? explicitChildren
+            : (Array.isArray(item.children) ? item.children : (Array.isArray(item.assemblyItems) ? item.assemblyItems : []));
+        const assemblyQuantity = num(item.quantity);
+        let totals = emptyTotals();
+        const validation = [];
+        const childRows = children.map(child => {
+            // Catalog assembly component quantities are per assembly unit. A caller
+            // may mark already-extended children to avoid applying the multiplier.
+            const quantity = item.childrenQuantitiesExtended ? num(child.quantity) : num(child.quantity) * assemblyQuantity;
+            const extended = { ...child, quantity };
+            const calc = calculateItem(extended, settings);
+            validation.push(...(calc.validation || []).map(error => ({ ...error, childId: child.id || null })));
+            totals = addTotals(totals, calc);
+            return { item: extended, calc };
+        });
+        return {
+            ...totals,
+            baseQuantity: assemblyQuantity,
+            adjustedQuantity: assemblyQuantity,
+            wasteQuantity: 0,
+            unitMaterialCost: assemblyQuantity > 0 ? totals.materialCost / assemblyQuantity : 0,
+            unitMaterialSales: assemblyQuantity > 0 ? totals.materialSales / assemblyQuantity : 0,
+            isAssembly: true,
+            childRows,
+            validation
+        };
+    }
+
+    function calculateItem(item, settings = {}, explicitChildren) {
+        const embeddedChildren = Array.isArray(item?.children) ? item.children
+            : (Array.isArray(item?.assemblyItems) ? item.assemblyItems : []);
+        // Preserve legacy aggregate assembly rows that only contain unit cost/labor.
+        // They become a true roll-up as soon as component data is available.
+        if ((Array.isArray(explicitChildren) && explicitChildren.length) || embeddedChildren.length) {
+            return calculateAssembly(item, settings, explicitChildren);
+        }
+        return calculatePart(item, settings);
     }
 
     function markupValue(markup, baseMap) {
@@ -92,6 +146,49 @@
         const base = num(baseMap?.[markup?.base || 'subtotal_sales'] ?? baseMap?.subtotal_sales);
         if (markup?.type === 'fixed_amount') return num(markup.amount ?? markup.percent);
         return base * num(markup?.percent) / 100;
+    }
+
+    function componentTotals(calc, component) {
+        const result = emptyTotals();
+        if (component === 'Materials') {
+            result.baseQuantity = calc.baseQuantity;
+            result.wasteQuantity = calc.wasteQuantity;
+            result.adjustedQuantity = calc.adjustedQuantity;
+            result.materialCost = calc.materialCost;
+            result.materialSales = calc.materialSales;
+            result.totalCost = calc.materialCost;
+            result.totalSales = calc.materialSales;
+        } else if (component === 'Labor') {
+            result.baseLaborHours = calc.baseLaborHours;
+            result.adjustedLaborHours = calc.adjustedLaborHours;
+            result.laborCost = calc.laborCost;
+            result.laborSales = calc.laborSales;
+            result.totalCost = calc.laborCost;
+            result.totalSales = calc.laborSales;
+        } else {
+            result.equipmentCost = calc.equipmentCost;
+            result.equipmentSales = calc.equipmentSales;
+            result.totalCost = calc.equipmentCost;
+            result.totalSales = calc.equipmentSales;
+        }
+        result.profit = result.totalSales - result.totalCost;
+        result.marginPercent = result.totalSales ? result.profit / result.totalSales * 100 : 0;
+        return result;
+    }
+
+    function calculateMarkups(markups, initialBaseMap) {
+        let previousAdjustments = 0;
+        return (markups || []).map(markup => {
+            const baseMap = {
+                ...initialBaseMap,
+                previous_adjustments: previousAdjustments,
+                subtotal_plus_previous_adjustments: num(initialBaseMap.subtotal_sales) + previousAdjustments,
+                subtotal_with_adjustments: num(initialBaseMap.subtotal_sales) + previousAdjustments
+            };
+            const value = markupValue(markup, baseMap);
+            previousAdjustments += value;
+            return { ...markup, value };
+        });
     }
 
     function calculateSummary(groups = [], settings = {}) {
@@ -102,12 +199,24 @@
         };
         const rows = [];
         (groups || []).forEach(group => {
-            (group.items || []).forEach(item => {
-                const calc = calculateItem(item, settings);
+            const items = group.items || [];
+            const childrenByParent = new Map();
+            items.forEach(item => {
+                const parentId = item.parentItemId ?? item.parent_item_id ?? item.assemblyParentId;
+                if (parentId === null || parentId === undefined || String(parentId) === '') return;
+                const key = String(parentId);
+                if (!childrenByParent.has(key)) childrenByParent.set(key, []);
+                childrenByParent.get(key).push(item);
+            });
+            items.forEach(item => {
+                const parentId = item.parentItemId ?? item.parent_item_id ?? item.assemblyParentId;
+                if (parentId !== null && parentId !== undefined && String(parentId) !== '') return;
+                const flatChildren = childrenByParent.get(String(item.id)) || [];
+                const calc = calculateItem(item, settings, flatChildren.length ? flatChildren : undefined);
                 rows.push({ groupId: group.id, groupName: group.name, item, calc });
-                const type = String(item.costCategory || item.type || 'Materials');
-                const bucket = type.toLowerCase().includes('labor') ? 'Labor' : (type.toLowerCase().includes('equip') ? 'Equipment' : 'Materials');
-                byCategory[bucket] = addTotals(byCategory[bucket], calc);
+                byCategory.Materials = addTotals(byCategory.Materials, componentTotals(calc, 'Materials'));
+                byCategory.Labor = addTotals(byCategory.Labor, componentTotals(calc, 'Labor'));
+                byCategory.Equipment = addTotals(byCategory.Equipment, componentTotals(calc, 'Equipment'));
             });
         });
         const direct = Object.values(byCategory).reduce(addTotals, emptyTotals());
@@ -121,7 +230,7 @@
             equipment_sales: byCategory.Equipment.equipmentSales,
             subtotal_sales: direct.totalSales
         };
-        const preTaxMarkups = (settings.preTaxMarkups || []).map(markup => ({ ...markup, value: markupValue(markup, baseMap) }));
+        const preTaxMarkups = calculateMarkups(settings.preTaxMarkups, baseMap);
         const preTaxTotal = preTaxMarkups.reduce((sum, markup) => sum + markup.value, 0);
         const taxable = rows.reduce((sum, row) => {
             if (row.item.taxable === false) return sum;
@@ -138,7 +247,7 @@
         };
         const totalTax = taxes.Materials + taxes.Labor + taxes.Equipment;
         const postBaseMap = { ...baseMap, subtotal_sales: direct.totalSales + preTaxTotal + totalTax, total_cost: direct.totalCost };
-        const postTaxMarkups = (settings.postTaxMarkups || []).map(markup => ({ ...markup, value: markupValue(markup, postBaseMap) }));
+        const postTaxMarkups = calculateMarkups(settings.postTaxMarkups, postBaseMap);
         const postTaxTotal = postTaxMarkups.reduce((sum, markup) => sum + markup.value, 0);
         const estimateTotal = direct.totalSales + preTaxTotal + totalTax + postTaxTotal;
         const profit = estimateTotal - direct.totalCost;
@@ -160,7 +269,7 @@
         };
     }
 
-    const service = { num, salesFromCost, emptyTotals, addTotals, calculateItem, calculateSummary };
+    const service = { num, salesFromCost, emptyTotals, addTotals, isAssembly, calculatePart, calculateAssembly, calculateItem, calculateSummary };
     global.EstimateCalculationService = service;
     if (typeof module !== 'undefined') module.exports = service;
 })(typeof window !== 'undefined' ? window : globalThis);

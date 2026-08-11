@@ -13,6 +13,7 @@
 
     const $ = id => document.getElementById(id);
     const esc = value => String(value ?? '').replace(/[&<>"']/g, char => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[char]));
+    const selectorValue = value => String(value ?? '').replace(/\\/g, '\\\\').replace(/"/g, '\\"');
     const money = value => Number(value || 0).toLocaleString('en-US', { style: 'currency', currency: 'USD' });
     const number = (value, digits = 2) => Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: digits });
     const resolveProjectId = () => {
@@ -43,6 +44,10 @@
     function current() { return Workspace.active(state); }
     function summary() { return Calc.calculateSummary(current().groups, current().settings); }
     function allItems() { return current().groups.flatMap(group => group.items.map(item => ({ group, item }))); }
+    function calculationErrors() {
+        return allItems().flatMap(({ item }) => (Calc.calculateItem(item, current().settings).validation || [])
+            .map(error => ({ ...error, itemId: item.id, itemName: item.name })));
+    }
     function findItem(itemId) { return allItems().find(row => row.item.id === itemId) || null; }
     function saveLocal() {
         state.groups = current().groups;
@@ -72,6 +77,38 @@
         render();
     }
 
+    function reactiveChanged(target) {
+        Workspace.touch(state);
+        saveLocal();
+        scheduleSave();
+        renderPreservingInput(target);
+    }
+
+    function renderPreservingInput(target) {
+        const rowId = target.closest('[data-item-id]')?.dataset.itemId;
+        const identity = rowId && target.dataset.itemField
+            ? { rowId, key: 'itemField', value: target.dataset.itemField }
+            : ['setting', 'tax', 'markupValue'].map(key => target.dataset[key] !== undefined
+                ? { key, value: target.dataset[key] } : null).find(Boolean);
+        const start = target.selectionStart;
+        const end = target.selectionEnd;
+        const rawValue = target.value;
+        renderTable();
+        renderDetails();
+        renderFooter();
+        renderStatus();
+        if (!identity) return;
+        const scope = identity.rowId
+            ? root.querySelector(`[data-item-id="${selectorValue(identity.rowId)}"]`)
+            : root;
+        const replacement = scope?.querySelector(`[data-${identity.key.replace(/[A-Z]/g, char => `-${char.toLowerCase()}`)}="${selectorValue(identity.value)}"]`);
+        if (replacement && rawValue !== undefined) replacement.value = rawValue;
+        replacement?.focus();
+        if (replacement?.setSelectionRange && replacement.type !== 'number' && start !== null && end !== null) {
+            replacement.setSelectionRange(start, end);
+        }
+    }
+
     function scheduleSave() {
         if (!projectId) return;
         clearTimeout(ui.saveTimer);
@@ -89,6 +126,12 @@
 
     async function saveServer() {
         if (!projectId || ui.saving) return;
+        if (calculationErrors().length) {
+            ui.loadState = 'error';
+            ui.message = 'Cannot save: every margin must be below 100%.';
+            renderStatus();
+            return;
+        }
         ui.saving = true;
         ui.loadState = 'saving';
         ui.message = 'Saving…';
@@ -163,7 +206,8 @@
         ['name', 'Item'], ['description', 'Description'], ['costCategory', 'Category'], ['uom', 'UoM'],
         ['quantity', 'Qty'], ['unitMaterialCost', 'Material/unit'], ['waste', 'Waste %'],
         ['unitLabor', 'Labor/unit'], ['laborRate', 'Labor rate'], ['difficulty', 'Difficulty'],
-        ['materialMargin', 'Material margin %'], ['laborMargin', 'Labor margin %']
+        ['materialMargin', 'Material margin %'], ['laborMargin', 'Labor margin %'],
+        ['unitEquipmentCost', 'Equipment/unit'], ['equipmentQuantity', 'Equipment qty'], ['equipmentMargin', 'Equipment margin %']
     ];
 
     function renderTable() {
@@ -179,7 +223,8 @@
             if (!group.expanded) return;
             visible.forEach(item => {
                 const calc = Calc.calculateItem(item, current().settings);
-                html.push(`<tr class="est-item-row ${ui.selected.has(item.id) ? 'selected' : ''}" data-item-id="${esc(item.id)}">
+                const invalid = (calc.validation || []).length > 0;
+                html.push(`<tr class="est-item-row ${ui.selected.has(item.id) ? 'selected' : ''} ${invalid ? 'est-invalid-row' : ''}" data-item-id="${esc(item.id)}" ${invalid ? 'title="Margins must be below 100%"' : ''}>
                     <td><input type="checkbox" data-item-check="${esc(item.id)}" ${ui.selected.has(item.id) ? 'checked' : ''}></td>
                     ${columns.map(([key]) => cell(item, key)).join('')}
                     <td class="est-money">${money(calc.totalCost)}</td><td class="est-money">${money(calc.totalSales)}</td><td class="est-money">${money(calc.profit)}</td>
@@ -193,9 +238,11 @@
 
     function cell(item, key) {
         if (key === 'costCategory') return `<td><select data-item-field="${key}"><option ${item[key] === 'Materials' ? 'selected' : ''}>Materials</option><option ${item[key] === 'Labor' ? 'selected' : ''}>Labor</option><option ${item[key] === 'Equipment' ? 'selected' : ''}>Equipment</option></select></td>`;
-        const numericKeys = new Set(['quantity', 'unitMaterialCost', 'waste', 'unitLabor', 'laborRate', 'difficulty', 'materialMargin', 'laborMargin']);
+        const numericKeys = new Set(['quantity', 'unitMaterialCost', 'waste', 'unitLabor', 'laborRate', 'difficulty', 'materialMargin', 'laborMargin', 'unitEquipmentCost', 'equipmentQuantity', 'equipmentMargin']);
         const locked = key === 'quantity' && item.takeoffLayerId;
-        return `<td><input data-item-field="${key}" ${numericKeys.has(key) ? 'type="number" step="0.01"' : 'type="text"'} value="${esc(item[key])}" ${locked ? 'readonly title="Quantity is synchronized from Takeoff"' : ''}></td>`;
+        const margin = key.toLowerCase().includes('margin');
+        const invalid = margin && Number(item[key]) >= 100;
+        return `<td><input data-item-field="${key}" ${numericKeys.has(key) ? `type="number" step="0.01" ${margin ? 'max="99.99"' : ''}` : 'type="text"'} value="${esc(item[key])}" ${invalid ? 'aria-invalid="true" title="Margin must be below 100%"' : ''} ${locked ? 'readonly title="Quantity is synchronized from Takeoff"' : ''}></td>`;
     }
 
     function renderDetails() {
@@ -229,7 +276,7 @@
 
     function summaryHtml(total) {
         const settings = current().settings;
-        return `<div class="est-rate-grid"><label>Global labor cost<input type="number" step="0.01" data-setting="globalLaborCost" value="${settings.globalLaborCost}"></label><label>Global labor sales rate<input type="number" step="0.01" data-setting="globalLaborSales" value="${settings.globalLaborSales}"></label></div>
+        return `<div class="est-rate-grid"><label>Global labor cost<input type="number" step="0.01" min="0" data-setting="globalLaborCost" value="${settings.globalLaborCost}"></label><label>Global labor margin %<input type="number" step="0.01" max="99.99" data-setting="globalLaborMargin" value="${settings.globalLaborMargin}"></label></div>
             <div class="est-summary-grid">${['Materials', 'Labor', 'Equipment'].map(name => `<div><strong>${name}</strong><span>${money(total.byCategory[name].totalSales)}</span></div>`).join('')}<div><strong>Direct cost</strong><span>${money(total.direct.totalCost)}</span></div><div><strong>Direct sales</strong><span>${money(total.direct.totalSales)}</span></div><div><strong>Profit</strong><span>${money(total.profit)}</span></div></div>
             ${markupSection('preTaxMarkups', 'Pre-tax markups', total.preTaxMarkups)}
             <div class="est-summary-section"><div class="est-summary-title">Taxes</div>${['Materials', 'Labor', 'Equipment'].map(name => `<label class="est-markup-row"><span>${name}</span><input type="number" step="0.01" data-tax="${name}" value="${settings.taxes[name]}"><span>%</span><strong>${money(total.taxes[name])}</strong></label>`).join('')}</div>
@@ -238,7 +285,8 @@
     }
 
     function markupSection(key, title, rows) {
-        return `<div class="est-summary-section"><div class="est-summary-title"><span>${title}</span><button type="button" data-add-markup="${key}"><i class="fas fa-plus"></i></button></div>${rows.map(row => `<div class="est-markup-row"><input data-markup-name="${row.id}" value="${esc(row.name)}"><select data-markup-type="${row.id}"><option value="percentage" ${row.type === 'percentage' ? 'selected' : ''}>%</option><option value="fixed_amount" ${row.type === 'fixed_amount' ? 'selected' : ''}>$</option></select><input type="number" step="0.01" data-markup-value="${row.id}" value="${row.type === 'fixed_amount' ? row.amount : row.percent}"><strong>${money(row.value)}</strong><button type="button" data-delete-markup="${row.id}"><i class="fas fa-times"></i></button></div>`).join('')}</div>`;
+        const bases = [['subtotal_sales', 'Sales subtotal'], ['material_sales', 'Materials'], ['labor_sales', 'Labor'], ['equipment_sales', 'Equipment'], ['total_cost', 'Total cost'], ['previous_adjustments', 'Previous adjustments'], ['subtotal_plus_previous_adjustments', 'Subtotal + adjustments']];
+        return `<div class="est-summary-section"><div class="est-summary-title"><span>${title}</span><button type="button" data-add-markup="${key}"><i class="fas fa-plus"></i></button></div>${rows.map(row => `<div class="est-markup-row"><input data-markup-name="${row.id}" value="${esc(row.name)}"><select data-markup-type="${row.id}"><option value="percentage" ${row.type === 'percentage' ? 'selected' : ''}>%</option><option value="fixed_amount" ${row.type === 'fixed_amount' ? 'selected' : ''}>$</option></select><input type="number" step="0.01" data-markup-value="${row.id}" value="${row.type === 'fixed_amount' ? row.amount : row.percent}"><select data-markup-base="${row.id}" title="Calculation base">${bases.map(([value, label]) => `<option value="${value}" ${row.base === value ? 'selected' : ''}>${label}</option>`).join('')}</select><label class="est-markup-active" title="Active"><input type="checkbox" data-markup-active="${row.id}" ${row.active !== false ? 'checked' : ''}></label><strong>${money(row.value)}</strong><button type="button" data-delete-markup="${row.id}"><i class="fas fa-times"></i></button></div>`).join('')}</div>`;
     }
 
     function auditHtml(estimate) {
@@ -305,6 +353,31 @@
     root.addEventListener('input', event => {
         if (event.target.id === 'estSearch') { ui.search = event.target.value; renderTable(); return; }
         const estimate = current();
+        const itemRow = event.target.closest('[data-item-id]');
+        const itemField = event.target.dataset.itemField;
+        if (itemRow && itemField && event.target.type === 'number') {
+            const found = findItem(itemRow.dataset.itemId);
+            if (!found) return;
+            found.item[itemField] = Workspace.numeric(event.target.value);
+            found.item.updatedAt = Workspace.now();
+            reactiveChanged(event.target);
+            return;
+        }
+        if (event.target.dataset.setting) {
+            estimate.settings[event.target.dataset.setting] = Workspace.numeric(event.target.value);
+            reactiveChanged(event.target);
+            return;
+        }
+        if (event.target.dataset.tax) {
+            estimate.settings.taxes[event.target.dataset.tax] = Workspace.numeric(event.target.value);
+            reactiveChanged(event.target);
+            return;
+        }
+        if (event.target.dataset.markupValue) {
+            updateMarkupValue(event.target);
+            reactiveChanged(event.target);
+            return;
+        }
         if (event.target.dataset.noteField) {
             estimate.notes[event.target.dataset.noteField] = event.target.value;
             estimate.updatedAt = Workspace.now();
@@ -355,8 +428,16 @@
         if (!row) return;
         if (target.dataset.markupName) row.name = target.value;
         if (target.dataset.markupType) row.type = target.value;
-        if (target.dataset.markupValue) row[row.type === 'fixed_amount' ? 'amount' : 'percent'] = Number(target.value);
+        if (target.dataset.markupBase) row.base = target.value;
+        if (target.dataset.markupActive) row.active = target.checked;
+        if (target.dataset.markupValue) row[row.type === 'fixed_amount' ? 'amount' : 'percent'] = Workspace.numeric(target.value);
         changed('Updated markup');
+    }
+
+    function updateMarkupValue(target) {
+        const rows = [...current().settings.preTaxMarkups, ...current().settings.postTaxMarkups];
+        const row = rows.find(candidate => candidate.id === target.dataset.markupValue);
+        if (row) row[row.type === 'fixed_amount' ? 'amount' : 'percent'] = Workspace.numeric(target.value);
     }
 
     root.addEventListener('click', event => {

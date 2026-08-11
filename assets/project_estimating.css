@@ -1736,6 +1736,14 @@
 .est-summary-total { display: flex; justify-content: space-between; font-size: 1.1rem; padding: 14px 0 4px; border-top: 2px solid var(--est-line); }
 .est-free-row, .est-markup-row { display: grid; grid-template-columns: minmax(0, 1fr) auto; align-items: center; gap: 6px; }
 .est-markup-row { width: 100%; min-width: 0; grid-template-columns: minmax(0, 1fr) 52px 72px auto 28px; }
+.est-v2 .est-markup-row { grid-template-columns: minmax(0, 1fr) 44px 68px 28px; row-gap: 6px; }
+.est-v2 .est-markup-row > :nth-child(4) { grid-column: 1 / 3; }
+.est-v2 .est-markup-row > :nth-child(5) { grid-column: 3; }
+.est-v2 .est-markup-row > :nth-child(6) { grid-column: 4; justify-self: end; }
+.est-v2 .est-markup-row > :nth-child(7) { grid-column: 4; grid-row: 1; }
+.est-markup-active { display: grid; place-items: center; margin: 0; }
+.est-invalid-row { box-shadow: inset 3px 0 #dc2626; }
+.est-invalid-row input[aria-invalid="true"] { border-color: #dc2626; background: var(--est-danger-soft); }
 .est-markup-row > * { min-width: 0; max-width: 100%; }
 .est-markup-row input, .est-markup-row select { width: 100%; }
 .est-markup-row strong { white-space: nowrap; text-align: right; }
