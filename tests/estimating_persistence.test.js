@@ -32,6 +32,7 @@ test('a save response cannot replace the local estimate when it omitted an item'
 
 test('the exact snapshot sent to the API is the snapshot validated on response', () => {
     assert.match(client, /const sentState = serializableState\(\)/);
+    assert.match(client, /delete sentState\.pendingProjectCreationSync/);
     assert.match(client, /body: JSON\.stringify\(\{ action: 'save', project_id: projectId, state: sentState \}\)/);
     assert.match(client, /serverStateContainsSavedItems\(sentState, remote\)/);
     assert.match(client, /Server save response omitted estimate items; local draft retained/);

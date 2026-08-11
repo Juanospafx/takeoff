@@ -345,6 +345,7 @@
         const estimate = activeEstimate();
         const summary = publicEstimateSummary();
         return {
+            ...(state.pendingProjectCreationSync === true ? { pendingProjectCreationSync: true } : {}),
             activeEstimateId: state.activeEstimateId,
             estimates: state.estimates,
             selected: state.selected,
@@ -374,7 +375,13 @@
         const estimate = activeEstimate();
         const summary = publicEstimateSummary();
         const payload = serializableState();
-        localStorage.setItem(storageKey, JSON.stringify(payload));
+        // Keep the draft-to-project handoff marker in the local cache until the
+        // first server save succeeds. It is intentionally excluded from the API
+        // payload by serializableState().
+        const localPayload = state.pendingProjectCreationSync === true
+            ? { ...payload, pendingProjectCreationSync: true }
+            : payload;
+        localStorage.setItem(storageKey, JSON.stringify(localPayload));
         if (window.ProjectState) {
             window.ProjectState.estimateSummary = summary;
             window.ProjectState.estimateItems = allItems(estimate);
@@ -464,6 +471,7 @@
         setSyncState('saving', 'Saving to server…');
         const savedRevision = changeRevision;
         const sentState = serializableState();
+        delete sentState.pendingProjectCreationSync;
         try {
             const response = await fetch(estimatingApi, {
                 method: 'POST',
@@ -549,7 +557,8 @@
             // Changes made while the request was pending always win. Otherwise use
             // the newest copy so an unsent local draft is never silently discarded.
             const local = serializableState();
-            if (startingRevision === changeRevision && (!localCacheFound || newestStateTimestamp(remote) >= newestStateTimestamp(local))) {
+            const migratedDraftMustUpload = state.pendingProjectCreationSync === true;
+            if (startingRevision === changeRevision && !migratedDraftMustUpload && (!localCacheFound || newestStateTimestamp(remote) >= newestStateTimestamp(local))) {
                 const hydrated = migrateState(remote);
                 Object.keys(state).forEach(key => delete state[key]);
                 Object.assign(state, hydrated);
@@ -557,10 +566,10 @@
                 syncState = 'saved';
                 syncMessage = 'Loaded from server';
                 render();
-            } else if (startingRevision === changeRevision && localCacheFound && newestStateTimestamp(local) > newestStateTimestamp(remote)) {
+            } else if (startingRevision === changeRevision && localCacheFound && (migratedDraftMustUpload || newestStateTimestamp(local) > newestStateTimestamp(remote))) {
                 state.dirty = true;
                 syncState = 'pending';
-                syncMessage = 'Local draft waiting to sync';
+                syncMessage = migratedDraftMustUpload ? 'Migrated draft waiting for first save' : 'Local draft waiting to sync';
             }
         } catch (error) {
             syncState = 'error';

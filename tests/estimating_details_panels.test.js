@@ -22,7 +22,7 @@ test('details inspector can always be reopened and collapsed cards expose state'
 
 test('production dashboard requests the current details-panel assets', () => {
     assert.match(page, /project_estimating\.css\?v=estimating-workspace-20260811-2/);
-    assert.match(page, /project_estimating\.js\?v=estimating-workspace-20260811-7/);
+    assert.match(page, /project_estimating\.js\?v=estimating-workspace-20260811-8/);
 });
 
 test('notes persist edits, summary is calculated and audit rows are meaningful', () => {

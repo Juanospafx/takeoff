@@ -20,7 +20,7 @@ test('bridge is project-scoped, idempotent and reuses the physical PDF', () => {
     assert.match(api, /FROM files WHERE project_id=\? AND \(filepath=\? OR filepath=\?\)/);
     assert.match(api, /if \(!\$file\)[\s\S]*INSERT INTO files/);
     assert.match(api, /JSON_UNESCAPED_SLASHES/);
-    assert.match(page, /project_overview\.js\?v=project-workspace-migration-20260811-4/);
+    assert.match(page, /project_overview\.js\?v=project-workspace-migration-20260811-5/);
 });
 
 test('session PDFs are uploaded persistently before opening Takeoff', () => {

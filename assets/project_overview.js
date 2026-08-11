@@ -39,15 +39,31 @@
         isDirty = true;
     }
 
-    function request(action, payload = {}) {
-        return fetch(apiUrl, {
+    async function request(action, payload = {}) {
+        const response = await fetch(apiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action, ...payload })
-        }).then(r => r.json()).then(data => {
-            if (data.status !== 'success') throw new Error(data.msg || 'Project request failed');
-            return data;
         });
+
+        let data;
+        try {
+            data = await response.json();
+        } catch (error) {
+            throw new Error(response.ok
+                ? 'The project server returned an invalid response.'
+                : `Project request failed (${response.status}).`);
+        }
+        if (!response.ok || data?.status !== 'success') {
+            throw new Error(data?.msg || `Project request failed (${response.status}).`);
+        }
+        return data;
+    }
+
+    function savedProjectId(result) {
+        const value = result?.project_id ?? result?.id ?? result?.project?.id ?? result?.data?.project?.id;
+        const id = Number(value);
+        return Number.isSafeInteger(id) && id > 0 ? id : 0;
     }
 
     function collectProjectPayload() {
@@ -82,29 +98,47 @@
         };
     }
 
-    function saveProject() {
+    async function saveProject() {
         const payload = collectProjectPayload();
         if (!payload.name.trim()) {
             showToast('Estimate Name is required.');
             return;
         }
 
-        request('save', payload)
-            .then(data => {
-                isDirty = false;
-                localStorage.removeItem('takeoff.projectDraft');
-                showToast('Project saved.');
-                if (Number(window.ProjectState?.projectId || 0) === 0) {
-                    migrateDraftWorkspace(data.id);
-                    window.location.href = `project_dashboard.php?id=${encodeURIComponent(data.id)}&tab=overview`;
-                } else {
-                    window.ProjectState.projectId = data.id;
-                    window.ProjectState.projectInfo = data.data?.project || window.ProjectState.projectInfo;
-                    $('projectHeaderName').textContent = payload.name;
-                    renderProjectHeaderMeta();
-                }
-            })
-            .catch(err => showToast(err.message));
+        const saveButton = $('saveProjectBtn');
+        const previousLabel = saveButton?.textContent;
+        if (saveButton) {
+            saveButton.disabled = true;
+            saveButton.textContent = 'Saving...';
+        }
+
+        try {
+            const wasDraft = Number(window.ProjectState?.projectId || 0) === 0;
+            const result = await request('save', payload);
+            const projectId = savedProjectId(result);
+            if (!projectId) throw new Error('The project was saved without a valid project ID.');
+
+            isDirty = false;
+            localStorage.removeItem('takeoff.projectDraft');
+            showToast('Project saved.');
+            if (wasDraft) {
+                migrateDraftWorkspace(projectId);
+                window.location.href = `project_dashboard.php?id=${encodeURIComponent(projectId)}&tab=overview`;
+                return;
+            }
+
+            window.ProjectState.projectId = projectId;
+            window.ProjectState.projectInfo = result.project || result.data?.project || window.ProjectState.projectInfo;
+            if ($('projectHeaderName')) $('projectHeaderName').textContent = payload.name;
+            renderProjectHeaderMeta();
+        } catch (error) {
+            showToast(error instanceof Error ? error.message : 'Project save failed.');
+        } finally {
+            if (saveButton) {
+                saveButton.disabled = false;
+                saveButton.textContent = previousLabel || 'Save Project';
+            }
+        }
     }
 
     function normalizeStatus(value) {
@@ -276,13 +310,20 @@
         if (rawEstimate !== null) {
             try {
                 const workspace = JSON.parse(rawEstimate);
+                const migratedAt = new Date().toISOString();
                 workspace.projectId = numericProjectId;
+                workspace.pendingProjectCreationSync = true;
                 workspace.estimates = (workspace.estimates || []).map(estimate => {
-                    const migrated = { ...estimate, projectId: numericProjectId, revision: 0 };
+                    const migrated = { ...estimate, projectId: numericProjectId, revision: 0, updatedAt: migratedAt };
                     delete migrated.dbEstimateId;
                     delete migrated.estimateItemId;
                     return migrated;
                 });
+                const migratedIds = new Set(workspace.estimates.map(estimate => String(estimate.id)));
+                if (!migratedIds.has(String(workspace.activeEstimateId || ''))) {
+                    workspace.activeEstimateId = workspace.estimates[0]?.id || null;
+                }
+                workspace.clientUiUpdatedAt = migratedAt;
                 localStorage.setItem(`takeoff.estimating.module.${numericProjectId}`, JSON.stringify(workspace));
             } catch (error) {
                 // Preserve even an older snapshot shape; migrateState will

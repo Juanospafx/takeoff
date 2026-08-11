@@ -22,7 +22,7 @@ function documentsBrowser() {
     const requests = [];
     dom.window.fetch = async (_url, options) => {
         requests.push(JSON.parse(options.body));
-        return { json: async () => ({ status: 'success' }) };
+        return { ok: true, status: 200, json: async () => ({ status: 'success' }) };
     };
     dom.window.eval(client);
     dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));

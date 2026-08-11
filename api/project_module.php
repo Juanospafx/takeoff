@@ -215,7 +215,15 @@ try {
                 $id = (int)$pdo->lastInsertId();
             }
 
-            project_json(['status' => 'success', 'id' => $id, 'data' => project_payload($pdo, $id)]);
+            $payload = project_payload($pdo, $id);
+            if (empty($payload['project'])) project_json(['status' => 'error', 'msg' => 'Project could not be loaded after saving'], 500);
+            project_json([
+                'status' => 'success',
+                'id' => $id,
+                'project_id' => $id,
+                'project' => $payload['project'],
+                'data' => $payload,
+            ]);
 
         case 'copy':
             $id = project_int($input['id'] ?? 0);
