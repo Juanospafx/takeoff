@@ -38,13 +38,26 @@ test('legacy string false does not collapse estimating panels', () => {
 test('accordion remains interactive across innerHTML rerenders', () => {
     const dom = browserWithState();
     let button = dom.window.document.querySelector('[data-collapse-card="notesCollapsed"]');
-    button.click();
+    button.querySelector('i').click();
     button = dom.window.document.querySelector('[data-collapse-card="notesCollapsed"]');
     assert.equal(button.getAttribute('aria-expanded'), 'false');
     assert.equal(button.closest('.est-card').classList.contains('collapsed'), true);
-    button.click();
+    button.querySelector('small').click();
     button = dom.window.document.querySelector('[data-collapse-card="notesCollapsed"]');
     assert.equal(button.getAttribute('aria-expanded'), 'true');
     assert.equal(button.closest('.est-card').classList.contains('collapsed'), false);
+    dom.window.close();
+});
+
+test('one delegated listener handles every accordion from nested click targets', () => {
+    const dom = browserWithState();
+    for (const key of ['notesCollapsed', 'summaryCollapsed', 'auditCollapsed']) {
+        let button = dom.window.document.querySelector(`[data-collapse-card="${key}"]`);
+        button.querySelector('span').click();
+        button = dom.window.document.querySelector(`[data-collapse-card="${key}"]`);
+        assert.equal(button.getAttribute('aria-expanded'), 'false', `${key} must collapse from a nested target`);
+    }
+    assert.doesNotMatch(client, /querySelectorAll\('\[data-collapse-card\]'\)\.forEach/);
+    assert.match(client, /root\.addEventListener\('click',[\s\S]*closest\('\[data-collapse-card\]'\)/);
     dom.window.close();
 });

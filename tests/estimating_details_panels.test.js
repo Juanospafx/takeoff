@@ -6,6 +6,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const js = fs.readFileSync(path.join(root, 'assets', 'project_estimating.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'assets', 'project_estimating.css'), 'utf8');
+const page = fs.readFileSync(path.join(root, 'pages', 'project_dashboard.php'), 'utf8');
 
 test('details inspector can always be reopened and collapsed cards expose state', () => {
     assert.match(js, /data-est-action="toggle-details"[\s\S]*aria-controls="estDetailsPanel"/);
@@ -14,6 +15,14 @@ test('details inspector can always be reopened and collapsed cards expose state'
     assert.match(js, /data-collapse-card="summaryCollapsed" aria-expanded=/);
     assert.match(js, /data-collapse-card="auditCollapsed" aria-expanded=/);
     assert.match(css, /\.est-main\.details-collapsed\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\) 0/);
+    assert.match(css, /\.est-shell\s*\{[\s\S]*?grid-template-rows:\s*auto minmax\(0, 1fr\) 62px/);
+    assert.match(css, /\.est-shell\.has-sync-alert\s*\{\s*grid-template-rows:\s*auto auto minmax\(0, 1fr\) 62px/);
+    assert.match(js, /const syncAlert = takeoffAlert\(\)[\s\S]*has-sync-alert[\s\S]*\$\{syncAlert\}/);
+});
+
+test('production dashboard requests the current details-panel assets', () => {
+    assert.match(page, /project_estimating\.css\?v=estimating-workspace-20260811-2/);
+    assert.match(page, /project_estimating\.js\?v=estimating-workspace-20260811-7/);
 });
 
 test('notes persist edits, summary is calculated and audit rows are meaningful', () => {

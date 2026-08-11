@@ -575,7 +575,7 @@ $state = [
     </style>
     <link rel="stylesheet" href="../assets/project_overview.css">
     <link rel="stylesheet" href="../assets/project_takeoff.css?v=workspace-takeoff-20260810-1">
-    <link rel="stylesheet" href="../assets/project_estimating.css?v=estimating-workspace-20260811-1">
+    <link rel="stylesheet" href="../assets/project_estimating.css?v=estimating-workspace-20260811-2">
     <link rel="stylesheet" href="../assets/project_proposal.css?v=proposal-workspace-20260810-1">
 </head>
 <body>
@@ -1360,7 +1360,7 @@ $state = [
 <script src="../assets/project_estimate_footer.js?v=estimate-footer-20260810-1"></script>
 <script src="../assets/project_takeoff.js?v=workspace-takeoff-20260810-5"></script>
 <script src="../assets/estimate_calculation_service.js"></script>
-<script src="../assets/project_estimating.js?v=estimating-workspace-20260811-5"></script>
+<script src="../assets/project_estimating.js?v=estimating-workspace-20260811-7"></script>
 <script src="../assets/project_proposal.js?v=proposal-workspace-20260810-4"></script>
 <script src="../assets/global_tools.js"></script>
 </body>

@@ -43,6 +43,21 @@ test('server loading cannot overwrite edits made while its request was pending',
     assert.match(client, /state\.dirty \|\| startingRevision !== changeRevision[\s\S]*scheduleServerSave\(\)/);
 });
 
+test('panel visibility changes invalidate in-flight hydration and persist with their own timestamp', () => {
+    assert.match(client, /function markUiStateDirty\(\)[\s\S]*state\.clientUiUpdatedAt = new Date\(\)\.toISOString\(\)[\s\S]*changeRevision \+= 1/);
+    assert.match(client, /toggle-details'[\s\S]*state\.rightCollapsed = !state\.rightCollapsed; markUiStateDirty\(\)/);
+    assert.match(client, /state\[key\] = !state\[key\];\s*markUiStateDirty\(\);/);
+    assert.match(client, /clientUiUpdatedAt: state\.clientUiUpdatedAt \|\| ''/);
+    assert.match(client, /Date\.parse\(candidate\?\.clientUiUpdatedAt \|\| ''\)/);
+});
+
+test('notes and audit payloads survive migration and are included in the saved workspace', () => {
+    assert.match(client, /notes: \{ \.\.\.defaultEstimate\(\)\.notes, \.\.\.\(est\.notes \|\| \{\}\) \}/);
+    assert.match(client, /auditLog: Array\.isArray\(est\.auditLog\) \? est\.auditLog : \[\]/);
+    assert.match(client, /estimates: state\.estimates/);
+    assert.match(client, /data-note-field[\s\S]*markDirty\(\); persist\(\)/);
+});
+
 test('client diagnostics include safe API stage and correlation reference', () => {
     assert.match(client, /function apiErrorMessage\(result, response, fallback\)/);
     assert.match(client, /error\.code \? `code: \$\{error\.code\}`/);

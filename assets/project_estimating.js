@@ -23,6 +23,7 @@
     let serverEstimateIds = new Set();
     let staleEstimateRecoveryAttempted = false;
     const modalPortalId = 'estimatingModalPortal';
+    const collapsibleStateKeys = new Set(['notesCollapsed', 'summaryCollapsed', 'auditCollapsed']);
 
     const money = value => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(Number(value || 0));
     const number = (value, digits = 2) => Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: digits, minimumFractionDigits: digits });
@@ -316,6 +317,13 @@
         setSyncState(projectId ? 'pending' : 'local', projectId ? 'Changes waiting to save' : 'Saved on this device');
     }
 
+    function markUiStateDirty() {
+        state.clientUiUpdatedAt = new Date().toISOString();
+        state.dirty = true;
+        changeRevision += 1;
+        setSyncState(projectId ? 'pending' : 'local', projectId ? 'Layout waiting to save' : 'Saved on this device');
+    }
+
     function setSyncState(status, message) {
         syncState = status;
         syncMessage = message;
@@ -346,6 +354,7 @@
             notesCollapsed: state.notesCollapsed,
             summaryCollapsed: state.summaryCollapsed,
             auditCollapsed: state.auditCollapsed,
+            clientUiUpdatedAt: state.clientUiUpdatedAt || '',
             groups: estimate.groups,
             estimateSummary: summary,
             globalLaborCost: estimate.settings.globalLaborCost,
@@ -510,7 +519,10 @@
 
     function newestStateTimestamp(candidate) {
         const estimates = Array.isArray(candidate?.estimates) ? candidate.estimates : [];
-        return Math.max(0, ...estimates.map(estimate => Date.parse(estimate.updatedAt || estimate.updated_at || '') || 0));
+        return Math.max(
+            Date.parse(candidate?.clientUiUpdatedAt || '') || 0,
+            ...estimates.map(estimate => Date.parse(estimate.updatedAt || estimate.updated_at || '') || 0)
+        );
     }
 
     async function loadServerState() {
@@ -634,7 +646,9 @@
         document.getElementById(modalPortalId)?.remove();
         const estimate = activeEstimate();
         const summary = Calc.calculateSummary(estimate.groups, estimate.settings);
+        const syncAlert = takeoffAlert();
         root.classList.toggle('est-fullscreen', Boolean(state.fullscreen));
+        root.classList.toggle('has-sync-alert', Boolean(syncAlert));
         root.innerHTML = `
             <header class="est-header">
                 <div class="est-title-block">
@@ -669,7 +683,7 @@
                     ])}
                 </div>
             </header>
-            ${takeoffAlert()}
+            ${syncAlert}
             <main class="est-main ${state.rightCollapsed ? 'details-collapsed' : ''}">
                 <section class="est-left ${state.tableSettingsOpen ? 'has-table-settings' : ''}">
                     <div class="est-toolbar">
@@ -950,7 +964,6 @@
         root.querySelectorAll('[data-row-menu]').forEach(btn => btn.addEventListener('click', e => openRowMenu(e, btn.dataset.rowMenu)));
         root.querySelectorAll('[data-column-toggle]').forEach(box => box.addEventListener('change', () => { state.hiddenColumns = box.checked ? state.hiddenColumns.filter(col => col !== box.dataset.columnToggle) : [...new Set([...state.hiddenColumns, box.dataset.columnToggle])]; render(); }));
         root.querySelector('[data-column-search]')?.addEventListener('input', e => { state.columnSearch = e.target.value; render(); });
-        root.querySelectorAll('[data-collapse-card]').forEach(btn => btn.addEventListener('click', () => { state[btn.dataset.collapseCard] = !state[btn.dataset.collapseCard]; render(); }));
         root.querySelectorAll('[data-note-field]').forEach(editor => editor.addEventListener('input', () => { activeEstimate().notes[editor.dataset.noteField] = editor.innerHTML; markDirty(); persist(); }));
         root.querySelectorAll('[data-note-list]').forEach(input => input.addEventListener('change', () => { activeEstimate().notes[input.dataset.noteList][Number(input.dataset.noteIndex)] = input.value; markDirty(); render(); }));
         root.querySelectorAll('[data-note-add]').forEach(btn => btn.addEventListener('click', () => { activeEstimate().notes[btn.dataset.noteAdd].push(''); markDirty(); render(); }));
@@ -1027,7 +1040,7 @@
         if (action === 'columns-reset') { localStorage.removeItem(columnPrefKey); state.hiddenColumns = readColumnPreference(); return render(); }
         if (action === 'columns-save') { localStorage.setItem(columnPrefKey, JSON.stringify(state.hiddenColumns)); return toast('Column preference saved.'); }
         if (action === 'fullscreen') { state.fullscreen = !state.fullscreen; return render(); }
-        if (action === 'toggle-details') { state.rightCollapsed = !state.rightCollapsed; return render(); }
+        if (action === 'toggle-details') { state.rightCollapsed = !state.rightCollapsed; markUiStateDirty(); return render(); }
         if (action === 'add-catalog') return openCatalog();
         if (action === 'refresh-takeoff') return refreshTakeoffQuantities(true);
         if (action === 'refresh-catalog') return refreshCostsFromCatalog();
@@ -1587,6 +1600,14 @@
     });
 
     root.addEventListener('click', event => {
+        const collapse = event.target.closest('[data-collapse-card]');
+        if (collapse && collapsibleStateKeys.has(collapse.dataset.collapseCard)) {
+            const key = collapse.dataset.collapseCard;
+            state[key] = !state[key];
+            markUiStateDirty();
+            render();
+            return;
+        }
         const close = event.target.closest('[data-modal-close]');
         if (close) {
             state[close.dataset.modalClose] = false;

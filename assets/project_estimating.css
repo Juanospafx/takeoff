@@ -74,10 +74,12 @@
     min-height: 0;
     display: grid;
     grid-template-columns: 1fr;
-    grid-template-rows: auto auto minmax(0, 1fr) 62px;
+    grid-template-rows: auto minmax(0, 1fr) 62px;
     overflow: hidden;
     background: var(--est-bg);
 }
+
+.est-shell.has-sync-alert { grid-template-rows: auto auto minmax(0, 1fr) 62px; }
 
 .est-header {
     min-height: 60px;
