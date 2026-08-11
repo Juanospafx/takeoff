@@ -19,6 +19,7 @@
     let localCacheFound = false;
     let syncState = projectId ? 'loading' : 'local';
     let syncMessage = projectId ? 'Loading server data' : 'Saved on this device';
+    let retryOperation = 'save';
     const modalPortalId = 'estimatingModalPortal';
 
     const money = value => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(Number(value || 0));
@@ -316,12 +317,13 @@
         indicator.className = `est-save-state ${status}`;
         indicator.setAttribute('aria-label', message);
         indicator.querySelector('span').textContent = message;
-        const retry = indicator.querySelector('[data-est-action="retry-save"]');
+        const retry = indicator.querySelector('[data-est-retry]');
+        if (retry) retry.dataset.estAction = retryOperation === 'load' ? 'retry-load' : 'retry-save';
         if (retry) retry.hidden = status !== 'error' && status !== 'conflict';
     }
 
     function saveStateMarkup() {
-        return `<div class="est-save-state ${esc(syncState)}" data-save-state role="status" aria-live="polite" aria-label="${esc(syncMessage)}"><span>${esc(syncMessage)}</span><button type="button" data-est-action="retry-save" ${syncState === 'error' || syncState === 'conflict' ? '' : 'hidden'}>Retry</button></div>`;
+        return `<div class="est-save-state ${esc(syncState)}" data-save-state role="status" aria-live="polite" aria-label="${esc(syncMessage)}"><span>${esc(syncMessage)}</span><button type="button" data-est-retry data-est-action="${retryOperation === 'load' ? 'retry-load' : 'retry-save'}" ${syncState === 'error' || syncState === 'conflict' ? '' : 'hidden'}>Retry</button></div>`;
     }
 
     function serializableState() {
@@ -397,7 +399,7 @@
     function apiErrorMessage(result, response, fallback) {
         const error = result?.error || {};
         const message = error.message || result?.message || fallback || `HTTP ${response?.status || 500}`;
-        const diagnostic = [error.stage ? `stage: ${error.stage}` : '', error.request_id ? `ref: ${error.request_id}` : ''].filter(Boolean).join(', ');
+        const diagnostic = [error.code ? `code: ${error.code}` : '', error.stage ? `stage: ${error.stage}` : '', error.request_id ? `ref: ${error.request_id}` : ''].filter(Boolean).join(', ');
         return diagnostic ? `${message} (${diagnostic})` : message;
     }
 
@@ -421,6 +423,7 @@
             return;
         }
         saveInFlight = true;
+        retryOperation = 'save';
         setSyncState('saving', 'Saving to server…');
         const savedRevision = changeRevision;
         const sentState = serializableState();
@@ -453,7 +456,7 @@
         } catch (error) {
             state.dirty = true;
             if (error.isConflict) savePaused = true;
-            setSyncState(error.isConflict ? 'conflict' : 'error', error.isConflict ? error.message : 'Server save failed — draft kept locally');
+            setSyncState(error.isConflict ? 'conflict' : 'error', `${error.message} Draft kept locally.`);
             console.warn('Estimating server save failed; local cache retained.', error);
         } finally {
             saveInFlight = false;
@@ -472,6 +475,8 @@
     async function loadServerState() {
         if (!projectId) return;
         const startingRevision = changeRevision;
+        let loadFailure = '';
+        retryOperation = 'load';
         try {
             const response = await fetch(`${estimatingApi}?action=load&project_id=${encodeURIComponent(projectId)}`, {
                 headers: { Accept: 'application/json' }
@@ -482,7 +487,8 @@
             if (!remote || !Array.isArray(remote.estimates)) {
                 state.dirty = true;
                 syncState = 'error';
-                syncMessage = 'Invalid server response — using local draft';
+                loadFailure = 'Invalid server response. Using local draft.';
+                syncMessage = loadFailure;
                 return;
             }
 
@@ -504,7 +510,8 @@
             }
         } catch (error) {
             syncState = 'error';
-            syncMessage = 'Server unavailable — using local draft';
+            loadFailure = `${error.message} Using local draft.`;
+            syncMessage = loadFailure;
             console.warn('Estimating server load failed; using local cache.', error);
         } finally {
             serverReady = true;
@@ -514,11 +521,16 @@
                 markDirty();
                 render();
             }
+            if (loadFailure) {
+                syncState = 'error';
+                syncMessage = loadFailure;
+                retryOperation = 'load';
+            }
             setSyncState(syncState, syncMessage);
             window.dispatchEvent(new CustomEvent('takeoff:estimating-state-updated', {
                 detail: { projectId: String(projectId), activeEstimateId: String(state.activeEstimateId || '') }
             }));
-            if (state.dirty || startingRevision !== changeRevision) scheduleServerSave();
+            if (!loadFailure && (state.dirty || startingRevision !== changeRevision)) scheduleServerSave();
         }
     }
 
@@ -958,6 +970,7 @@
             return;
         }
         if (action === 'retry-save') { savePaused = false; scheduleServerSave(true); return; }
+        if (action === 'retry-load') { loadServerState(); return; }
         if (action === 'clear-search') { state.search = ''; render(); return; }
         if (action === 'create-group') return createGroup();
         if (action === 'create-item') return addManualItem(estimate.groups[0]?.id);

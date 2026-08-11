@@ -3,11 +3,32 @@
 -- Run with a migration/admin account that has ALTER and CREATE ROUTINE.
 -- The runtime GET endpoint is intentionally read-only and does not require
 -- either privilege after this migration has been deployed.
+
+-- Bootstrap installations that never ran the 2026-07-31 integration migration.
+-- Foreign keys are intentionally left to the canonical integration migration:
+-- legacy installations can differ in signedness, while this table must become
+-- usable before those constraints are reconciled.
+CREATE TABLE IF NOT EXISTS estimate_workspace_states (
+    estimate_id BIGINT UNSIGNED NOT NULL,
+    project_id BIGINT UNSIGNED NULL,
+    client_estimate_id VARCHAR(191) NULL,
+    state_json JSON NULL,
+    revision BIGINT UNSIGNED NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (estimate_id),
+    KEY idx_estimate_workspace_project (project_id),
+    KEY idx_estimate_workspace_client (client_estimate_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 DELIMITER $$
 DROP PROCEDURE IF EXISTS estimating_add_column_if_missing$$
 CREATE PROCEDURE estimating_add_column_if_missing(IN p_table VARCHAR(64), IN p_column VARCHAR(64), IN p_definition TEXT)
 BEGIN
-    IF NOT EXISTS (
+    IF EXISTS (
+        SELECT 1 FROM information_schema.TABLES
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table
+    ) AND NOT EXISTS (
         SELECT 1 FROM information_schema.COLUMNS
         WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table AND COLUMN_NAME = p_column
     ) THEN
@@ -17,6 +38,24 @@ BEGIN
         DEALLOCATE PREPARE estimating_stmt;
     END IF;
 END$$
+
+DROP PROCEDURE IF EXISTS estimating_add_lookup_index_if_missing$$
+CREATE PROCEDURE estimating_add_lookup_index_if_missing(IN p_table VARCHAR(64), IN p_index VARCHAR(64), IN p_column VARCHAR(64))
+BEGIN
+    IF EXISTS (
+        SELECT 1 FROM information_schema.COLUMNS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table AND COLUMN_NAME = p_column
+    ) AND NOT EXISTS (
+        SELECT 1 FROM information_schema.STATISTICS
+        WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = p_table AND COLUMN_NAME = p_column AND SEQ_IN_INDEX = 1
+    ) THEN
+        SET @estimating_sql = CONCAT('ALTER TABLE `', p_table, '` ADD INDEX `', p_index, '` (`', p_column, '`)');
+        PREPARE estimating_stmt FROM @estimating_sql;
+        EXECUTE estimating_stmt;
+        DEALLOCATE PREPARE estimating_stmt;
+    END IF;
+END$$
+
 DELIMITER ;
 
 CALL estimating_add_column_if_missing('estimates', 'settings_json', 'JSON NULL');
@@ -51,11 +90,14 @@ CALL estimating_add_column_if_missing('estimate_items', 'sort_order', 'INT NOT N
 CALL estimating_add_column_if_missing('estimate_items', 'metadata_json', 'JSON NULL');
 
 CALL estimating_add_column_if_missing('estimate_markups', 'metadata_json', 'JSON NULL');
+CALL estimating_add_column_if_missing('estimate_workspace_states', 'estimate_id', 'BIGINT UNSIGNED NULL');
 CALL estimating_add_column_if_missing('estimate_workspace_states', 'project_id', 'BIGINT UNSIGNED NULL');
 CALL estimating_add_column_if_missing('estimate_workspace_states', 'client_estimate_id', 'VARCHAR(191) NULL');
 CALL estimating_add_column_if_missing('estimate_workspace_states', 'state_json', 'JSON NULL');
 CALL estimating_add_column_if_missing('estimate_workspace_states', 'revision', 'BIGINT UNSIGNED NOT NULL DEFAULT 1');
 CALL estimating_add_column_if_missing('estimate_workspace_states', 'updated_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP');
+CALL estimating_add_column_if_missing('estimate_workspace_states', 'created_at', 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP');
+CALL estimating_add_lookup_index_if_missing('estimate_workspace_states', 'idx_estimate_workspace_estimate', 'estimate_id');
 
 UPDATE estimate_workspace_states ws
 INNER JOIN estimates e ON e.id = ws.estimate_id
@@ -67,3 +109,4 @@ SET client_estimate_id = CONCAT('db-estimate-', estimate_id)
 WHERE client_estimate_id IS NULL OR client_estimate_id = '';
 
 DROP PROCEDURE IF EXISTS estimating_add_column_if_missing;
+DROP PROCEDURE IF EXISTS estimating_add_lookup_index_if_missing;

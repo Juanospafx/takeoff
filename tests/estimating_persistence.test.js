@@ -45,9 +45,19 @@ test('server loading cannot overwrite edits made while its request was pending',
 
 test('client diagnostics include safe API stage and correlation reference', () => {
     assert.match(client, /function apiErrorMessage\(result, response, fallback\)/);
+    assert.match(client, /error\.code \? `code: \$\{error\.code\}`/);
     assert.match(client, /error\.stage \? `stage: \$\{error\.stage\}`/);
     assert.match(client, /error\.request_id \? `ref: \$\{error\.request_id\}`/);
     assert.match(client, /apiErrorMessage\(result, response, 'Unable to load estimating workspace\.'\)/);
+});
+
+test('load and save failures remain visible with an operation-specific retry', () => {
+    assert.match(client, /let retryOperation = 'save'/);
+    assert.match(client, /data-est-retry data-est-action="\$\{retryOperation === 'load' \? 'retry-load' : 'retry-save'\}"/);
+    assert.match(client, /if \(action === 'retry-load'\) \{ loadServerState\(\); return; \}/);
+    assert.match(client, /loadFailure = `\$\{error\.message\} Using local draft\.`/);
+    assert.match(client, /if \(!loadFailure && \(state\.dirty \|\| startingRevision !== changeRevision\)\) scheduleServerSave\(\)/);
+    assert.match(client, /`\$\{error\.message\} Draft kept locally\.`/);
 });
 
 test('API reconstructs active relational estimate items when a workspace snapshot is absent or empty', () => {
