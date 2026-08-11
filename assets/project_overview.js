@@ -369,7 +369,7 @@
         return (window.ProjectState?.documents || []).map(doc => ({
             id: `existing-${doc.source}-${doc.id}`,
             backendId: doc.id,
-            name: doc.filename || doc.title || 'Document',
+            name: doc.source === 'project_document' ? (doc.title || doc.filename || 'Document') : (doc.filename || doc.title || 'Document'),
             filename: doc.filename || doc.title || 'Document',
             category: inferCategory({ name: doc.filename || doc.title || '' }, null),
             size: '',
@@ -577,14 +577,15 @@
     }
 
     function bindDocumentListActions(root) {
-        root.querySelectorAll('[data-doc-upload]').forEach(button => {
-            button.addEventListener('click', () => openDocumentPicker(button.dataset.docUpload));
-        });
-        root.querySelectorAll('[data-doc-action]').forEach(button => {
-            button.addEventListener('click', event => {
-                event.stopPropagation();
-                handleDocumentAction(button.dataset.docAction, button.dataset.docId);
-            });
+        if (root.dataset.documentActionsBound === '1') return;
+        root.dataset.documentActionsBound = '1';
+        root.addEventListener('click', event => {
+            const upload = event.target.closest('[data-doc-upload]');
+            if (upload) return openDocumentPicker(upload.dataset.docUpload);
+            const button = event.target.closest('[data-doc-action]');
+            if (!button) return;
+            event.stopPropagation();
+            handleDocumentAction(button.dataset.docAction, button.dataset.docId, button);
         });
     }
 
@@ -592,7 +593,7 @@
         return allDocumentRows().find(row => row.id === id);
     }
 
-    function handleDocumentAction(action, id) {
+    async function handleDocumentAction(action, id, trigger = null) {
         if (action === 'menu') {
             document.querySelectorAll('.documents-menu.row-menu').forEach(menu => {
                 menu.classList.toggle('open', menu.dataset.docMenu === id && !menu.classList.contains('open'));
@@ -601,6 +602,7 @@
         }
         const doc = findDocumentById(id);
         if (!doc) return;
+        document.querySelectorAll('.documents-menu.row-menu').forEach(menu => menu.classList.remove('open'));
         if (action === 'select') {
             selectedDocumentsId = doc.id;
             if (doc.category === 'Drawings') {
@@ -619,7 +621,40 @@
                 link.click();
                 return;
             }
-            if (action === 'rename' || action === 'move' || action === 'delete') showToast('This document action is ready for the backend document API.');
+            const projectId = Number(window.ProjectState?.projectId || 0);
+            let payload = { project_id: projectId, id: doc.backendId, source: doc.originalSource, operation: action };
+            if (action === 'delete') {
+                if (!confirm(`Delete "${doc.name}"? This removes it from the project.`)) return;
+            } else if (action === 'rename') {
+                const name = prompt('Rename document', doc.name);
+                if (!name || name === doc.name) return;
+                payload.name = name;
+            } else if (action === 'move') {
+                const folder = prompt('Move to folder ID (leave blank for no folder)', doc.folderId || '');
+                if (folder === null) return;
+                if (folder.trim() && !/^\d+$/.test(folder.trim())) return showToast('Folder ID must be numeric.');
+                payload.folder_id = folder.trim() ? Number(folder) : null;
+            } else return;
+            if (trigger) trigger.disabled = true;
+            try {
+                await request('document_action', payload);
+                if (action === 'delete') {
+                    window.ProjectState.documents = (window.ProjectState.documents || []).filter(row => !(String(row.id) === String(doc.backendId) && row.source === doc.originalSource));
+                    if (selectedDocumentsId === id) selectedDocumentsId = null;
+                } else {
+                    window.ProjectState.documents = (window.ProjectState.documents || []).map(row => {
+                        if (String(row.id) !== String(doc.backendId) || row.source !== doc.originalSource) return row;
+                        if (action === 'rename') return { ...row, title: payload.name, filename: payload.name };
+                        return { ...row, folder_id: payload.folder_id };
+                    });
+                }
+                renderDocumentsPage();
+                window.projectTakeoffRefreshDrawings?.();
+                showToast(action === 'delete' ? 'Document deleted.' : action === 'rename' ? 'Document renamed.' : 'Document moved.');
+            } catch (error) {
+                showToast(error.message || 'Document action failed.');
+                if (trigger?.isConnected) trigger.disabled = false;
+            }
             return;
         }
         if (action === 'rename') {
@@ -708,7 +743,7 @@
         renderDocumentsPage();
     }
 
-    function startDocumentsTakeoff() {
+    async function startDocumentsTakeoff() {
         const drawings = drawingDocuments();
         if (!drawings.length) {
             showToast('Upload drawings before starting takeoff.');
@@ -716,15 +751,54 @@
         }
         const doc = findDocumentById(selectedDocumentsId) || drawings[0];
         selectedDocumentsId = doc.id;
-        window.ProjectState.selectedDocumentId = doc.backendId || doc.id;
-        window.ProjectState.selectedDrawingId = doc.backendId || doc.id;
+        let takeoffFileId = doc.backendId || doc.id;
+        if (doc.source === 'local') {
+            const file = sessionFiles.get(String(doc.id));
+            if (!file) {
+                showToast('Select this PDF again so it can be uploaded for Takeoff.');
+                return;
+            }
+            try {
+                const form = new FormData();
+                form.append('project_id', window.ProjectState?.projectId || '');
+                form.append('file', file, file.name);
+                const response = await fetch('../api/project_document_takeoff.php', { method: 'POST', body: form, headers: { Accept: 'application/json' } });
+                const result = await response.json().catch(() => null);
+                if (!response.ok || !result?.success || !result.file?.id) throw new Error(result?.message || `HTTP ${response.status}`);
+                takeoffFileId = Number(result.file.id);
+                const alias = { id: takeoffFileId, source: 'legacy_file', filename: result.file.filename, title: result.file.filename, path: `../${result.file.filepath}`, extension: doc.extension, mime_type: doc.type };
+                window.ProjectState.documents.push(alias);
+            } catch (error) {
+                showToast(error.message || 'Unable to upload this PDF for Takeoff.');
+                return;
+            }
+        }
+        if (doc.source === 'existing' && doc.originalSource === 'project_document') {
+            try {
+                const response = await fetch('../api/project_document_takeoff.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                    body: JSON.stringify({ document_id: doc.backendId, project_id: window.ProjectState?.projectId })
+                });
+                const result = await response.json().catch(() => null);
+                if (!response.ok || !result?.success || !result.file?.id) throw new Error(result?.message || `HTTP ${response.status}`);
+                takeoffFileId = Number(result.file.id);
+                const alias = { ...window.ProjectState.documents.find(row => row.source === 'project_document' && Number(row.id) === Number(doc.backendId)), id: takeoffFileId, source: 'legacy_file' };
+                if (!window.ProjectState.documents.some(row => row.source === 'legacy_file' && Number(row.id) === takeoffFileId)) window.ProjectState.documents.push(alias);
+            } catch (error) {
+                showToast(error.message || 'Unable to prepare this PDF for Takeoff.');
+                return;
+            }
+        }
+        window.ProjectState.selectedDocumentId = takeoffFileId;
+        window.ProjectState.selectedDrawingId = takeoffFileId;
         if (typeof window.setActiveTab === 'function') window.setActiveTab('takeoff');
         if (typeof window.projectTakeoffRefreshDrawings === 'function') window.projectTakeoffRefreshDrawings();
-        if (doc.path && doc.originalSource === 'legacy_file') {
+        if (doc.path && (doc.source === 'local' || doc.originalSource === 'legacy_file' || doc.originalSource === 'project_document')) {
             const frame = $('takeoffFrame');
             const empty = $('takeoffEmpty');
             if (frame) {
-                frame.src = `editor.php?id=${encodeURIComponent(doc.backendId)}&embedded=1`;
+                frame.src = `editor.php?id=${encodeURIComponent(takeoffFileId)}&embedded=1`;
                 frame.style.display = 'block';
             }
             if (empty) empty.style.display = 'none';

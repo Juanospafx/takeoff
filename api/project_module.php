@@ -60,6 +60,13 @@ function project_json_value($value): ?string
     return $encoded === false ? null : $encoded;
 }
 
+function project_table_exists(PDO $pdo, string $table): bool
+{
+    $stmt = $pdo->prepare('SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=? LIMIT 1');
+    $stmt->execute([$table]);
+    return (bool)$stmt->fetchColumn();
+}
+
 function project_ensure_schema(PDO $pdo): void
 {
     $pdo->exec("CREATE TABLE IF NOT EXISTS project_templates (
@@ -237,9 +244,70 @@ try {
             $stmt->execute([$id]);
             project_json(['status' => 'success', 'data' => project_payload($pdo)]);
 
+        case 'document_action':
+            $projectId = project_int($input['project_id'] ?? 0);
+            $documentId = project_int($input['id'] ?? 0);
+            $source = (string)($input['source'] ?? '');
+            $operation = (string)($input['operation'] ?? '');
+            if ($projectId < 1 || $documentId < 1) project_json(['status' => 'error', 'msg' => 'Invalid document reference'], 422);
+            $sources = [
+                'legacy_file' => ['table' => 'files', 'name' => 'filename', 'folder' => 'folder_id'],
+                'project_document' => ['table' => 'project_documents', 'name' => 'title', 'folder' => 'document_folder_id'],
+            ];
+            if (!isset($sources[$source]) || !in_array($operation, ['rename', 'move', 'delete'], true)) {
+                project_json(['status' => 'error', 'msg' => 'Unsupported document action'], 422);
+            }
+            $config = $sources[$source];
+            if (!project_table_exists($pdo, $config['table'])) project_json(['status' => 'error', 'msg' => 'Document storage is unavailable'], 503);
+            $owned = $pdo->prepare("SELECT * FROM {$config['table']} WHERE id=? AND project_id=? AND deleted_at IS NULL LIMIT 1");
+            $owned->execute([$documentId, $projectId]);
+            $ownedDocument = $owned->fetch(PDO::FETCH_ASSOC);
+            if (!$ownedDocument) project_json(['status' => 'error', 'msg' => 'Document not found'], 404);
+            $mirrorPaths = [];
+            if ($source === 'project_document') {
+                $storedPath = ltrim(str_replace('\\', '/', (string)($ownedDocument['storage_path'] ?? '')), '/');
+                if ($storedPath !== '') {
+                    $mirrorPaths[] = $storedPath;
+                    if (strpos($storedPath, 'api/') === 0) $mirrorPaths[] = substr($storedPath, 4);
+                }
+            }
+            $pdo->beginTransaction();
+            if ($operation === 'delete') {
+                $stmt = $pdo->prepare("UPDATE {$config['table']} SET deleted_at=CURRENT_TIMESTAMP WHERE id=? AND project_id=? AND deleted_at IS NULL");
+                $stmt->execute([$documentId, $projectId]);
+                if ($mirrorPaths && project_table_exists($pdo, 'files')) {
+                    $marks = implode(',', array_fill(0, count($mirrorPaths), '?'));
+                    $mirror = $pdo->prepare("UPDATE files SET deleted_at=CURRENT_TIMESTAMP WHERE project_id=? AND deleted_at IS NULL AND filepath IN ($marks)");
+                    $mirror->execute(array_merge([$projectId], $mirrorPaths));
+                }
+            } elseif ($operation === 'rename') {
+                $name = trim((string)($input['name'] ?? ''));
+                if ($name === '') project_json(['status' => 'error', 'msg' => 'Document name is required'], 422);
+                if ($source === 'project_document') {
+                    $title = pathinfo($name, PATHINFO_FILENAME) ?: $name;
+                    $stmt = $pdo->prepare('UPDATE project_documents SET title=?,original_filename=? WHERE id=? AND project_id=? AND deleted_at IS NULL');
+                    $stmt->execute([$title, $name, $documentId, $projectId]);
+                    if ($mirrorPaths && project_table_exists($pdo, 'files')) {
+                        $marks = implode(',', array_fill(0, count($mirrorPaths), '?'));
+                        $mirror = $pdo->prepare("UPDATE files SET filename=? WHERE project_id=? AND deleted_at IS NULL AND filepath IN ($marks)");
+                        $mirror->execute(array_merge([$name, $projectId], $mirrorPaths));
+                    }
+                } else {
+                    $stmt = $pdo->prepare("UPDATE {$config['table']} SET {$config['name']}=? WHERE id=? AND project_id=? AND deleted_at IS NULL");
+                    $stmt->execute([$name, $documentId, $projectId]);
+                }
+            } else {
+                $folderId = project_int($input['folder_id'] ?? 0) ?: null;
+                $stmt = $pdo->prepare("UPDATE {$config['table']} SET {$config['folder']}=? WHERE id=? AND project_id=? AND deleted_at IS NULL");
+                $stmt->execute([$folderId, $documentId, $projectId]);
+            }
+            $pdo->commit();
+            project_json(['status' => 'success', 'id' => $documentId, 'operation' => $operation]);
+
         default:
             project_json(['status' => 'error', 'msg' => 'Invalid action'], 404);
     }
 } catch (Throwable $e) {
+    if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
     project_json(['status' => 'error', 'msg' => $e->getMessage()], 500);
 }
