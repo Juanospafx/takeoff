@@ -763,16 +763,16 @@
             if (!marker.node) return;
             const selected = state.selectedObjectUids.has(String(marker.client_uid));
             marker.node.scale({ x: selected ? 1.18 : 1, y: selected ? 1.18 : 1 });
-            marker.node.shadowEnabled(selected);
-            marker.node.shadowColor('#38bdf8');
-            marker.node.shadowBlur(selected ? 10 : 0);
+            if (typeof marker.node.shadowEnabled === 'function') marker.node.shadowEnabled(selected);
+            if (typeof marker.node.shadowColor === 'function') marker.node.shadowColor('#38bdf8');
+            if (typeof marker.node.shadowBlur === 'function') marker.node.shadowBlur(selected ? 10 : 0);
         });
         state.segments.forEach(segment => {
             if (!segment.node) return;
             const selected = state.selectedObjectUids.has(String(segment.client_uid));
-            segment.node.shadowEnabled(selected);
-            segment.node.shadowColor('#38bdf8');
-            segment.node.shadowBlur(selected ? 10 : 0);
+            if (typeof segment.node.shadowEnabled === 'function') segment.node.shadowEnabled(selected);
+            if (typeof segment.node.shadowColor === 'function') segment.node.shadowColor('#38bdf8');
+            if (typeof segment.node.shadowBlur === 'function') segment.node.shadowBlur(selected ? 10 : 0);
         });
         konvaLayer?.batchDraw();
     }

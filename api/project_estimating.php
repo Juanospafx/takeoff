@@ -47,12 +47,58 @@ function pew_decode($json, $fallback = array()) {
     $decoded = json_decode((string)$json, true);
     return is_array($decoded) ? $decoded : $fallback;
 }
+function pew_table_columns(PDO $pdo, $table) {
+    static $cache = array();
+    if (isset($cache[$table])) return $cache[$table];
+    $allowed = array('estimates', 'estimate_items', 'estimate_markups', 'estimate_workspace_states');
+    if (!in_array($table, $allowed, true)) throw new RuntimeException('Unsupported schema table.');
+    $rows = $pdo->query('SHOW COLUMNS FROM `' . $table . '`')->fetchAll(PDO::FETCH_ASSOC);
+    $cache[$table] = array_fill_keys(array_map(function ($row) { return (string)$row['Field']; }, $rows), true);
+    return $cache[$table];
+}
+function pew_ensure_columns(PDO $pdo, $table, array $definitions) {
+    $columns = pew_table_columns($pdo, $table);
+    foreach ($definitions as $column => $definition) {
+        if (isset($columns[$column])) continue;
+        $pdo->exec('ALTER TABLE `' . $table . '` ADD COLUMN `' . $column . '` ' . $definition);
+        $columns[$column] = true;
+    }
+}
 function pew_assert_schema(PDO $pdo) {
     $stmt = $pdo->prepare('SHOW TABLES LIKE ?');
     $stmt->execute(array('estimate_workspace_states'));
     if (!$stmt->fetchColumn()) {
         pew_error('Estimating workspace migration has not been applied.', 503, 'migration_required');
     }
+    // Older Takeoff installations created a smaller estimate schema at runtime.
+    // Complete only the additive columns used by this API so load/save cannot
+    // fail with an opaque 500 while the durable migration is being deployed.
+    pew_ensure_columns($pdo, 'estimates', array(
+        'settings_json' => 'JSON NULL', 'notes_json' => 'JSON NULL', 'metadata_json' => 'JSON NULL',
+        'markup_total' => 'DECIMAL(18,4) NOT NULL DEFAULT 0', 'tax_total' => 'DECIMAL(18,4) NOT NULL DEFAULT 0',
+        'labor_hours_total' => 'DECIMAL(18,4) NOT NULL DEFAULT 0'
+    ));
+    pew_ensure_columns($pdo, 'estimate_items', array(
+        'takeoff_layer_id' => 'BIGINT UNSIGNED NULL', 'catalog_item_id' => 'BIGINT UNSIGNED NULL',
+        'source_layer_key' => 'VARCHAR(191) NULL', 'source_type' => "VARCHAR(50) NOT NULL DEFAULT 'manual'",
+        'is_manual' => 'TINYINT(1) NOT NULL DEFAULT 1', 'is_quantity_locked_from_takeoff' => 'TINYINT(1) NOT NULL DEFAULT 0',
+        'item_type' => "VARCHAR(50) NOT NULL DEFAULT 'line_item'", 'group_name' => 'VARCHAR(191) NULL',
+        'budget_code' => 'VARCHAR(100) NULL', 'cost_type' => 'VARCHAR(100) NULL', 'description' => 'TEXT NULL',
+        'unit_labor_time' => 'DECIMAL(18,4) NOT NULL DEFAULT 0', 'labor_hours' => 'DECIMAL(18,4) NOT NULL DEFAULT 0',
+        'material_cost' => 'DECIMAL(18,4) NOT NULL DEFAULT 0', 'labor_cost' => 'DECIMAL(18,4) NOT NULL DEFAULT 0',
+        'equipment_cost' => 'DECIMAL(18,4) NOT NULL DEFAULT 0', 'waste_percentage' => 'DECIMAL(9,4) NOT NULL DEFAULT 0',
+        'margin_percentage' => 'DECIMAL(9,4) NOT NULL DEFAULT 0', 'taxable' => 'TINYINT(1) NOT NULL DEFAULT 1',
+        'subtotal_cost' => 'DECIMAL(18,4) NOT NULL DEFAULT 0', 'total_cost' => 'DECIMAL(18,4) NOT NULL DEFAULT 0',
+        'sort_order' => 'INT NOT NULL DEFAULT 0', 'metadata_json' => 'JSON NULL'
+    ));
+    pew_ensure_columns($pdo, 'estimate_markups', array('metadata_json' => 'JSON NULL'));
+    pew_ensure_columns($pdo, 'estimate_workspace_states', array(
+        'project_id' => 'BIGINT UNSIGNED NULL', 'client_estimate_id' => 'VARCHAR(191) NULL',
+        'state_json' => 'JSON NULL', 'revision' => 'BIGINT UNSIGNED NOT NULL DEFAULT 1',
+        'updated_at' => 'TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP'
+    ));
+    $pdo->exec('UPDATE estimate_workspace_states ws INNER JOIN estimates e ON e.id=ws.estimate_id SET ws.project_id=e.project_id WHERE ws.project_id IS NULL');
+    $pdo->exec("UPDATE estimate_workspace_states SET client_estimate_id=CONCAT('db-estimate-', estimate_id) WHERE client_estimate_id IS NULL OR client_estimate_id=''");
 }
 function pew_owned_estimate(PDO $pdo, $estimateId, $projectId, $forUpdate = false) {
     $sql = 'SELECT * FROM estimates WHERE id = ? AND project_id = ? AND deleted_at IS NULL LIMIT 1';

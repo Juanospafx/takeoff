@@ -3718,7 +3718,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-interactions-20260805-3"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-interactions-20260811-1"></script>
 </body>
 </html>
 
