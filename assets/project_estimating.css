@@ -1656,6 +1656,35 @@
 .est-v2 .est-card { margin-bottom: 10px; overflow: hidden; box-shadow: var(--est-shadow-xs); }
 .est-v2 .est-card-header { min-height: 42px; }
 .est-v2 .est-card-body { max-height: none; }
+.est-v2 [data-note-field] {
+    display: block;
+    width: 100%;
+    min-height: 112px;
+    resize: vertical;
+    padding: 10px 11px;
+    border: 1px solid var(--est-line);
+    border-radius: var(--est-radius-sm);
+    background: var(--est-surface);
+    color: var(--est-text);
+    font: inherit;
+    line-height: 1.45;
+}
+.est-v2 [data-note-field]:focus,
+.est-v2 [data-note-list]:focus {
+    outline: 2px solid var(--est-primary-soft);
+    border-color: var(--est-primary);
+}
+.est-v2 [data-note-field]::placeholder,
+.est-v2 [data-note-list]::placeholder { color: var(--est-muted); }
+.est-v2 .est-free-list { display: grid; gap: 6px; }
+.est-v2 .est-free-row input {
+    width: 100%; min-width: 0; padding: 8px 9px; border: 1px solid var(--est-line);
+    border-radius: var(--est-radius-sm); background: var(--est-surface); color: var(--est-text);
+}
+.est-v2 .est-empty-note {
+    width: 100%; padding: 9px; border: 1px dashed var(--est-line); border-radius: var(--est-radius-sm);
+    background: transparent; color: var(--est-muted); cursor: pointer; text-align: left;
+}
 .est-v2 .est-total-box { margin: 0; border-radius: 0; padding: 15px 18px; min-height: 98px; }
 .est-v2 .est-total-value { font-size: 1.65rem; line-height: 1.1; }
 .est-v2 .est-total-label { color: #93a3c4; font-size: .68rem; font-weight: 800; letter-spacing: .06em; text-transform: uppercase; }

@@ -218,13 +218,13 @@
 
     function notesHtml(estimate) {
         const notes = estimate.notes;
-        return `<label class="est-field-block"><span class="est-label">Scope of Work</span><textarea data-note-field="scope">${esc(notes.scope)}</textarea></label>
+        return `<label class="est-field-block"><span class="est-label">Scope of Work</span><textarea data-note-field="scope" placeholder="Write the scope of work…">${esc(notes.scope)}</textarea></label>
             ${listEditor('included', 'Included', notes.included)}${listEditor('excluded', 'Excluded', notes.excluded)}
-            <label class="est-field-block"><span class="est-label">Project Notes</span><textarea data-note-field="projectNotes">${esc(notes.projectNotes)}</textarea></label>`;
+            <label class="est-field-block"><span class="est-label">Project Notes</span><textarea data-note-field="projectNotes" placeholder="Write a project note…">${esc(notes.projectNotes)}</textarea></label>`;
     }
 
     function listEditor(key, label, values) {
-        return `<div class="est-field-block"><div class="est-list-head"><span class="est-label">${label}</span><button type="button" class="est-small-btn" data-add-note-row="${key}"><i class="fas fa-plus"></i></button></div><div class="est-free-list">${values.map((value, index) => `<div class="est-free-row"><input data-note-list="${key}" data-index="${index}" value="${esc(value)}"><button type="button" data-remove-note-row="${key}" data-index="${index}"><i class="fas fa-times"></i></button></div>`).join('')}</div></div>`;
+        return `<div class="est-field-block"><div class="est-list-head"><span class="est-label">${label}</span><button type="button" class="est-small-btn" data-add-note-row="${key}" title="Add note"><i class="fas fa-plus"></i></button></div><div class="est-free-list">${values.map((value, index) => `<div class="est-free-row"><input data-note-list="${key}" data-index="${index}" value="${esc(value)}" placeholder="Write a note…"><button type="button" data-remove-note-row="${key}" data-index="${index}" title="Remove note"><i class="fas fa-times"></i></button></div>`).join('') || `<button type="button" class="est-empty-note" data-add-note-row="${key}">+ Add ${label.toLowerCase()} note</button>`}</div></div>`;
     }
 
     function summaryHtml(total) {
@@ -304,6 +304,20 @@
 
     root.addEventListener('input', event => {
         if (event.target.id === 'estSearch') { ui.search = event.target.value; renderTable(); return; }
+        const estimate = current();
+        if (event.target.dataset.noteField) {
+            estimate.notes[event.target.dataset.noteField] = event.target.value;
+            estimate.updatedAt = Workspace.now();
+            saveLocal();
+            scheduleSave();
+            return;
+        }
+        if (event.target.dataset.noteList) {
+            estimate.notes[event.target.dataset.noteList][Number(event.target.dataset.index)] = event.target.value;
+            estimate.updatedAt = Workspace.now();
+            saveLocal();
+            scheduleSave();
+        }
     });
 
     root.addEventListener('change', event => {

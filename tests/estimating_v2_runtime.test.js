@@ -45,3 +45,15 @@ test('manual edits persist locally and calculations rerender after change', () =
     assert.equal(state.estimates.find(row => row.id === state.activeEstimateId).groups[0].items[0].name, 'Manual disconnect');
     dom.window.close();
 });
+
+test('project notes persist while the user is typing without rerendering the editor', () => {
+    const dom = runtime();
+    const editor = dom.window.document.querySelector('[data-note-field="projectNotes"]');
+    editor.value = 'Coordinate shutdown with the owner.';
+    editor.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    assert.equal(dom.window.document.activeElement === editor || dom.window.document.contains(editor), true);
+    const state = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.draft'));
+    const estimate = state.estimates.find(row => row.id === state.activeEstimateId);
+    assert.equal(estimate.notes.projectNotes, 'Coordinate shutdown with the owner.');
+    dom.window.close();
+});
