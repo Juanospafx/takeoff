@@ -51,6 +51,15 @@ test('client diagnostics include safe API stage and correlation reference', () =
     assert.match(client, /apiErrorMessage\(result, response, 'Unable to load estimating workspace\.'\)/);
 });
 
+test('a 404 stale estimate reference is detached and retried without duplicating known server estimates', () => {
+    assert.match(client, /let serverEstimateIds = new Set\(\)/);
+    assert.match(client, /function recoverStaleEstimateReferences\(\)/);
+    assert.match(client, /!serverEstimateIds\.has\(dbId\)/);
+    assert.match(client, /delete estimate\.dbEstimateId/);
+    assert.match(client, /error\.code === 'estimate_not_found'[\s\S]*recoverStaleEstimateReferences\(\)[\s\S]*saveRequested = true/);
+    assert.match(client, /serverEstimateIds = new Set\(remote\.estimates\.map/);
+});
+
 test('load and save failures remain visible with an operation-specific retry', () => {
     assert.match(client, /let retryOperation = 'save'/);
     assert.match(client, /data-est-retry data-est-action="\$\{retryOperation === 'load' \? 'retry-load' : 'retry-save'\}"/);

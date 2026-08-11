@@ -20,6 +20,8 @@
     let syncState = projectId ? 'loading' : 'local';
     let syncMessage = projectId ? 'Loading server data' : 'Saved on this device';
     let retryOperation = 'save';
+    let serverEstimateIds = new Set();
+    let staleEstimateRecoveryAttempted = false;
     const modalPortalId = 'estimatingModalPortal';
 
     const money = value => new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD', maximumFractionDigits: 2 }).format(Number(value || 0));
@@ -403,6 +405,26 @@
         return diagnostic ? `${message} (${diagnostic})` : message;
     }
 
+    function recoverStaleEstimateReferences() {
+        const stale = (state.estimates || []).filter(estimate => {
+            const dbId = Number(estimate?.dbEstimateId || 0);
+            return dbId > 0 && serverEstimateIds.size > 0 && !serverEstimateIds.has(dbId);
+        });
+        if (!stale.length) return false;
+        const activeId = String(state.activeEstimateId || '');
+        stale.forEach((estimate, index) => {
+            const oldId = String(estimate.id || '');
+            estimate.id = `recovered-estimate-${Date.now()}-${index}`;
+            delete estimate.dbEstimateId;
+            delete estimate.estimateItemId;
+            estimate.revision = 0;
+            if (oldId === activeId) state.activeEstimateId = estimate.id;
+        });
+        localStorage.setItem(storageKey, JSON.stringify(serializableState()));
+        state.dirty = true;
+        return true;
+    }
+
     function estimateItemIds(candidate) {
         return new Set((candidate?.estimates || []).flatMap(estimate =>
             (estimate?.groups || []).flatMap(group => (group?.items || []).map(item => String(item.id)))
@@ -440,7 +462,11 @@
                 conflict.isConflict = true;
                 throw conflict;
             }
-            if (!response.ok || result?.success === false) throw new Error(apiErrorMessage(result, response, 'Unable to save estimate.'));
+            if (!response.ok || result?.success === false) {
+                const failure = new Error(apiErrorMessage(result, response, 'Unable to save estimate.'));
+                failure.code = result?.error?.code || '';
+                throw failure;
+            }
             if (savedRevision === changeRevision) {
                 const remote = result?.state || result?.data?.state;
                 if (!serverStateContainsSavedItems(sentState, remote)) {
@@ -451,11 +477,20 @@
                 Object.assign(state, hydrated);
                 localStorage.setItem(storageKey, JSON.stringify(serializableState()));
                 state.dirty = false;
+                staleEstimateRecoveryAttempted = false;
                 setSyncState('saved', 'Saved to server');
             }
         } catch (error) {
             state.dirty = true;
             if (error.isConflict) savePaused = true;
+            if (error.code === 'estimate_not_found' && !staleEstimateRecoveryAttempted) {
+                staleEstimateRecoveryAttempted = true;
+                if (recoverStaleEstimateReferences()) {
+                    saveRequested = true;
+                    setSyncState('pending', 'Recovering an outdated local estimate reference…');
+                    return;
+                }
+            }
             setSyncState(error.isConflict ? 'conflict' : 'error', `${error.message} Draft kept locally.`);
             console.warn('Estimating server save failed; local cache retained.', error);
         } finally {
@@ -491,6 +526,7 @@
                 syncMessage = loadFailure;
                 return;
             }
+            serverEstimateIds = new Set(remote.estimates.map(estimate => Number(estimate?.dbEstimateId || 0)).filter(Boolean));
 
             // Changes made while the request was pending always win. Otherwise use
             // the newest copy so an unsent local draft is never silently discarded.
