@@ -6,10 +6,12 @@
  * The JSON snapshot is the lossless UI representation; estimates,
  * estimate_items and estimate_markups remain the relational integration layer.
  */
-require_once __DIR__ . '/../core/db/connection.php';
-
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
+
+$pewRequestId = substr(sha1(uniqid('estimating-', true)), 0, 12);
+$pewStage = 'bootstrap';
+header('X-Request-ID: ' . $pewRequestId);
 
 $body = json_decode(file_get_contents('php://input'), true);
 if (!is_array($body)) $body = array();
@@ -64,15 +66,49 @@ function pew_ensure_columns(PDO $pdo, $table, array $definitions) {
         $columns[$column] = true;
     }
 }
-function pew_assert_schema(PDO $pdo) {
-    $stmt = $pdo->prepare('SHOW TABLES LIKE ?');
-    $stmt->execute(array('estimate_workspace_states'));
+function pew_best_effort($label, PDO $pdo, $callback) {
+    static $sequence = 0;
+    $savepoint = null;
+    if ($pdo->inTransaction()) {
+        $savepoint = 'pew_optional_' . (++$sequence);
+        $pdo->exec('SAVEPOINT ' . $savepoint);
+    }
+    try {
+        $callback();
+        if ($savepoint !== null) $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+        return true;
+    } catch (Throwable $e) {
+        if ($savepoint !== null && $pdo->inTransaction()) {
+            try {
+                $pdo->exec('ROLLBACK TO SAVEPOINT ' . $savepoint);
+                $pdo->exec('RELEASE SAVEPOINT ' . $savepoint);
+            } catch (Throwable $rollbackError) {
+                error_log('project_estimating.php savepoint rollback warning: ' . $rollbackError->getMessage());
+            }
+        }
+        error_log('project_estimating.php compatibility warning (' . $label . '): ' . $e->getMessage());
+        return false;
+    }
+}
+function pew_assert_schema(PDO $pdo, $repair = false) {
+    $stmt = $pdo->query("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='estimate_workspace_states' LIMIT 1");
     if (!$stmt->fetchColumn()) {
         pew_error('Estimating workspace migration has not been applied.', 503, 'migration_required');
     }
+    $workspaceColumns = pew_table_columns($pdo, 'estimate_workspace_states');
+    foreach (array('estimate_id', 'project_id', 'client_estimate_id', 'state_json', 'revision') as $requiredColumn) {
+        if (!isset($workspaceColumns[$requiredColumn])) {
+            pew_error('Estimating workspace migration is incomplete.', 503, 'migration_required');
+        }
+    }
+    // GET/list must remain read-only. Production application users commonly
+    // have DML privileges but no ALTER privilege; attempting repair on load
+    // made every request fail with 500 before any estimate was read.
+    if (!$repair) return;
     // Older Takeoff installations created a smaller estimate schema at runtime.
     // Complete only the additive columns used by this API so load/save cannot
     // fail with an opaque 500 while the durable migration is being deployed.
+    pew_best_effort('relational schema repair', $pdo, function () use ($pdo) {
     pew_ensure_columns($pdo, 'estimates', array(
         'settings_json' => 'JSON NULL', 'notes_json' => 'JSON NULL', 'metadata_json' => 'JSON NULL',
         'markup_total' => 'DECIMAL(18,4) NOT NULL DEFAULT 0', 'tax_total' => 'DECIMAL(18,4) NOT NULL DEFAULT 0',
@@ -99,6 +135,7 @@ function pew_assert_schema(PDO $pdo) {
     ));
     $pdo->exec('UPDATE estimate_workspace_states ws INNER JOIN estimates e ON e.id=ws.estimate_id SET ws.project_id=e.project_id WHERE ws.project_id IS NULL');
     $pdo->exec("UPDATE estimate_workspace_states SET client_estimate_id=CONCAT('db-estimate-', estimate_id) WHERE client_estimate_id IS NULL OR client_estimate_id=''");
+    });
 }
 function pew_owned_estimate(PDO $pdo, $estimateId, $projectId, $forUpdate = false) {
     $sql = 'SELECT * FROM estimates WHERE id = ? AND project_id = ? AND deleted_at IS NULL LIMIT 1';
@@ -110,12 +147,22 @@ function pew_owned_estimate(PDO $pdo, $estimateId, $projectId, $forUpdate = fals
     return $row;
 }
 function pew_state_row(PDO $pdo, $estimateId) {
-    $stmt = $pdo->prepare('SELECT client_estimate_id, revision, state_json, updated_at FROM estimate_workspace_states WHERE estimate_id = ?');
+    $columns = pew_table_columns($pdo, 'estimate_workspace_states');
+    $select = array(
+        isset($columns['client_estimate_id']) ? 'client_estimate_id' : "CONCAT('db-estimate-', estimate_id) AS client_estimate_id",
+        isset($columns['revision']) ? 'revision' : '0 AS revision',
+        isset($columns['state_json']) ? 'state_json' : 'NULL AS state_json',
+        isset($columns['updated_at']) ? 'updated_at' : 'NULL AS updated_at'
+    );
+    $stmt = $pdo->prepare('SELECT ' . implode(',', $select) . ' FROM estimate_workspace_states WHERE estimate_id = ?');
     $stmt->execute(array($estimateId));
     return $stmt->fetch(PDO::FETCH_ASSOC);
 }
 function pew_relational_groups(PDO $pdo, $estimateId) {
-    $stmt = $pdo->prepare('SELECT * FROM estimate_items WHERE estimate_id = ? AND deleted_at IS NULL ORDER BY sort_order ASC, id ASC');
+    $columns = pew_table_columns($pdo, 'estimate_items');
+    $active = isset($columns['deleted_at']) ? ' AND deleted_at IS NULL' : '';
+    $order = isset($columns['sort_order']) ? 'sort_order ASC, id ASC' : 'id ASC';
+    $stmt = $pdo->prepare('SELECT * FROM estimate_items WHERE estimate_id = ?' . $active . ' ORDER BY ' . $order);
     $stmt->execute(array($estimateId));
     $groups = array();
     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
@@ -129,7 +176,7 @@ function pew_relational_groups(PDO $pdo, $estimateId) {
         if (!isset($item['quantity'])) $item['quantity'] = (float)$row['quantity'];
         if (!isset($item['uom'])) $item['uom'] = (string)$row['unit_of_measure'];
         if (!isset($item['unitMaterialCost'])) $item['unitMaterialCost'] = (float)$row['unit_cost'];
-        if (!isset($item['quantitySource'])) $item['quantitySource'] = (string)$row['source_type'];
+        if (!isset($item['quantitySource'])) $item['quantitySource'] = isset($row['source_type']) ? (string)$row['source_type'] : 'manual';
         if (!isset($item['takeoffLayerId']) && !empty($row['source_layer_key'])) $item['takeoffLayerId'] = (string)$row['source_layer_key'];
         $groupName = trim((string)(isset($row['group_name']) ? $row['group_name'] : '')) ?: 'Default Group';
         if (!isset($groups[$groupName])) {
@@ -302,9 +349,17 @@ function pew_save_estimate(PDO $pdo, $projectId, array $estimate, array $summary
     if ($estimateId) {
         pew_owned_estimate($pdo, $estimateId, $projectId, true);
     } else {
-        $stmt = $pdo->prepare('INSERT INTO estimates (project_id,estimate_number,name,status,currency_code) VALUES (?,?,?,?,?)');
-        $stmt->execute(array($projectId, pew_text(isset($estimate['code']) ? $estimate['code'] : '', 100) ?: null,
-            pew_text(isset($estimate['name']) ? $estimate['name'] : 'Estimate'), pew_text(isset($estimate['status']) ? $estimate['status'] : 'draft', 50), 'USD'));
+        $createdExtended = pew_best_effort('extended estimate insert', $pdo, function () use ($pdo, $projectId, $estimate) {
+            $stmt = $pdo->prepare('INSERT INTO estimates (project_id,estimate_number,name,status,currency_code) VALUES (?,?,?,?,?)');
+            $stmt->execute(array($projectId, pew_text(isset($estimate['code']) ? $estimate['code'] : '', 100) ?: null,
+                pew_text(isset($estimate['name']) ? $estimate['name'] : 'Estimate'), pew_text(isset($estimate['status']) ? $estimate['status'] : 'draft', 50), 'USD'));
+        });
+        if (!$createdExtended) {
+            $pdo->prepare('INSERT INTO estimates (project_id,name,status) VALUES (?,?,?)')->execute(array(
+                $projectId, pew_text(isset($estimate['name']) ? $estimate['name'] : 'Estimate'),
+                pew_text(isset($estimate['status']) ? $estimate['status'] : 'draft', 50)
+            ));
+        }
         $estimateId = (int)$pdo->lastInsertId();
     }
     $current = pew_state_row($pdo, $estimateId);
@@ -312,20 +367,35 @@ function pew_save_estimate(PDO $pdo, $projectId, array $estimate, array $summary
         pew_error('The estimate was changed by another client.', 409, 'revision_conflict');
     }
     if (isset($estimate['estimateSummary']) && is_array($estimate['estimateSummary'])) $summary = $estimate['estimateSummary'];
-    $stmt = $pdo->prepare('UPDATE estimates SET estimate_number=?,name=?,status=?,subtotal_cost=?,markup_total=?,tax_total=?,total_cost=?,labor_hours_total=?,settings_json=?,notes_json=?,metadata_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND project_id=?');
-    $stmt->execute(array(pew_text(isset($estimate['code']) ? $estimate['code'] : '', 100) ?: null, pew_text(isset($estimate['name']) ? $estimate['name'] : 'Estimate'),
+    $extendedValues = array(pew_text(isset($estimate['code']) ? $estimate['code'] : '', 100) ?: null, pew_text(isset($estimate['name']) ? $estimate['name'] : 'Estimate'),
         pew_text(isset($estimate['status']) ? $estimate['status'] : 'draft', 50), pew_num(isset($summary['subtotal']) ? $summary['subtotal'] : 0),
         pew_num(isset($summary['preTaxMarkup']) ? $summary['preTaxMarkup'] : 0) + pew_num(isset($summary['postTaxMarkup']) ? $summary['postTaxMarkup'] : 0),
         pew_num(isset($summary['taxes']) ? $summary['taxes'] : 0), pew_num(isset($summary['total']) ? $summary['total'] : 0),
         pew_num(isset($summary['laborHours']) ? $summary['laborHours'] : 0),
         json_encode(isset($estimate['settings']) && is_array($estimate['settings']) ? $estimate['settings'] : array(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
         json_encode(isset($estimate['notes']) && is_array($estimate['notes']) ? $estimate['notes'] : array(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
-        json_encode(array('workspaceClientId' => $clientId), JSON_UNESCAPED_SLASHES), $estimateId, $projectId));
-    pew_save_items($pdo, $projectId, $estimateId, isset($estimate['groups']) && is_array($estimate['groups']) ? $estimate['groups'] : array());
-    pew_save_markups($pdo, $estimateId, isset($estimate['settings']) && is_array($estimate['settings']) ? $estimate['settings'] : array());
+        json_encode(array('workspaceClientId' => $clientId), JSON_UNESCAPED_SLASHES), $estimateId, $projectId);
+    $extendedSaved = pew_best_effort('extended estimate fields', $pdo, function () use ($pdo, $extendedValues) {
+        $stmt = $pdo->prepare('UPDATE estimates SET estimate_number=?,name=?,status=?,subtotal_cost=?,markup_total=?,tax_total=?,total_cost=?,labor_hours_total=?,settings_json=?,notes_json=?,metadata_json=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND project_id=?');
+        $stmt->execute($extendedValues);
+    });
+    if (!$extendedSaved) {
+        $pdo->prepare('UPDATE estimates SET name=?,status=?,updated_at=CURRENT_TIMESTAMP WHERE id=? AND project_id=?')->execute(array(
+            pew_text(isset($estimate['name']) ? $estimate['name'] : 'Estimate'),
+            pew_text(isset($estimate['status']) ? $estimate['status'] : 'draft', 50), $estimateId, $projectId
+        ));
+    }
+    // The JSON snapshot is lossless and authoritative. Store it before the
+    // optional relational mirror so legacy item/markup schemas cannot roll it back.
     $stmt = $pdo->prepare('INSERT INTO estimate_workspace_states (estimate_id,project_id,client_estimate_id,state_json,revision) VALUES (?,?,?,?,1)
         ON DUPLICATE KEY UPDATE client_estimate_id=VALUES(client_estimate_id),state_json=VALUES(state_json),revision=revision+1,updated_at=CURRENT_TIMESTAMP');
     $stmt->execute(array($estimateId, $projectId, $clientId, $encoded));
+    pew_best_effort('estimate items mirror', $pdo, function () use ($pdo, $projectId, $estimateId, $estimate) {
+        pew_save_items($pdo, $projectId, $estimateId, isset($estimate['groups']) && is_array($estimate['groups']) ? $estimate['groups'] : array());
+    });
+    pew_best_effort('estimate markups mirror', $pdo, function () use ($pdo, $estimateId, $estimate) {
+        pew_save_markups($pdo, $estimateId, isset($estimate['settings']) && is_array($estimate['settings']) ? $estimate['settings'] : array());
+    });
     $saved = pew_state_row($pdo, $estimateId);
     $result = pew_load_one($pdo, pew_owned_estimate($pdo, $estimateId, $projectId));
     $result['revision'] = (int)$saved['revision'];
@@ -333,11 +403,16 @@ function pew_save_estimate(PDO $pdo, $projectId, array $estimate, array $summary
 }
 
 try {
+    $pewStage = 'database_connection';
+    require __DIR__ . '/../core/db/connection.php';
+    $pewStage = 'schema_validation';
     pew_assert_schema($pdo);
     $projectId = pew_int(isset($_GET['project_id']) ? $_GET['project_id'] : (isset($body['project_id']) ? $body['project_id'] : 0));
+    $pewStage = 'project_validation';
     pew_project($pdo, $projectId);
 
     if ($action === 'list' || $action === 'load') {
+        $pewStage = 'workspace_load';
         pew_method('GET');
         $estimateId = pew_int(isset($_GET['estimate_id']) ? $_GET['estimate_id'] : 0);
         if ($estimateId) {
@@ -358,6 +433,7 @@ try {
     }
 
     if ($action === 'save') {
+        $pewStage = 'workspace_save';
         pew_method('POST');
         $workspace = isset($body['state']) && is_array($body['state']) ? $body['state'] : null;
         $incoming = $workspace && isset($workspace['estimates']) && is_array($workspace['estimates'])
@@ -393,6 +469,7 @@ try {
     }
 
     if ($action === 'delete') {
+        $pewStage = 'workspace_delete';
         pew_method('POST');
         $estimateId = pew_int(isset($body['estimate_id']) ? $body['estimate_id'] : 0);
         $pdo->beginTransaction();
@@ -404,6 +481,10 @@ try {
     pew_error('Unknown action.', 404, 'unknown_action');
 } catch (Throwable $e) {
     if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
-    error_log('project_estimating.php: ' . $e->getMessage());
-    pew_error('Unable to process estimating workspace request.', 500, 'server_error');
+    error_log(sprintf('project_estimating.php request=%s stage=%s type=%s message=%s',
+        $pewRequestId, $pewStage, get_class($e), $e->getMessage()));
+    pew_json(array('ok' => false, 'success' => false, 'error' => array(
+        'code' => 'server_error', 'message' => 'Unable to process estimating workspace request.',
+        'request_id' => $pewRequestId, 'stage' => $pewStage
+    )), 500);
 }

@@ -43,6 +43,13 @@ test('server loading cannot overwrite edits made while its request was pending',
     assert.match(client, /state\.dirty \|\| startingRevision !== changeRevision[\s\S]*scheduleServerSave\(\)/);
 });
 
+test('client diagnostics include safe API stage and correlation reference', () => {
+    assert.match(client, /function apiErrorMessage\(result, response, fallback\)/);
+    assert.match(client, /error\.stage \? `stage: \$\{error\.stage\}`/);
+    assert.match(client, /error\.request_id \? `ref: \$\{error\.request_id\}`/);
+    assert.match(client, /apiErrorMessage\(result, response, 'Unable to load estimating workspace\.'\)/);
+});
+
 test('API reconstructs active relational estimate items when a workspace snapshot is absent or empty', () => {
     assert.match(api, /function pew_relational_groups\(PDO \$pdo, \$estimateId\)/);
     assert.match(api, /estimate_items WHERE estimate_id = \? AND deleted_at IS NULL/);

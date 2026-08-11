@@ -394,6 +394,13 @@
         saveTimer = setTimeout(flushServerSave, immediate ? 0 : saveDelay);
     }
 
+    function apiErrorMessage(result, response, fallback) {
+        const error = result?.error || {};
+        const message = error.message || result?.message || fallback || `HTTP ${response?.status || 500}`;
+        const diagnostic = [error.stage ? `stage: ${error.stage}` : '', error.request_id ? `ref: ${error.request_id}` : ''].filter(Boolean).join(', ');
+        return diagnostic ? `${message} (${diagnostic})` : message;
+    }
+
     function estimateItemIds(candidate) {
         return new Set((candidate?.estimates || []).flatMap(estimate =>
             (estimate?.groups || []).flatMap(group => (group?.items || []).map(item => String(item.id)))
@@ -430,7 +437,7 @@
                 conflict.isConflict = true;
                 throw conflict;
             }
-            if (!response.ok || result?.success === false) throw new Error(result?.error?.message || result?.message || `HTTP ${response.status}`);
+            if (!response.ok || result?.success === false) throw new Error(apiErrorMessage(result, response, 'Unable to save estimate.'));
             if (savedRevision === changeRevision) {
                 const remote = result?.state || result?.data?.state;
                 if (!serverStateContainsSavedItems(sentState, remote)) {
@@ -470,7 +477,7 @@
                 headers: { Accept: 'application/json' }
             });
             const result = await response.json().catch(() => null);
-            if (!response.ok || result?.success === false) throw new Error(result?.message || `HTTP ${response.status}`);
+            if (!response.ok || result?.success === false) throw new Error(apiErrorMessage(result, response, 'Unable to load estimating workspace.'));
             const remote = result?.state || result?.data?.state || result?.data || (Array.isArray(result?.estimates) ? result : null);
             if (!remote || !Array.isArray(remote.estimates)) {
                 state.dirty = true;

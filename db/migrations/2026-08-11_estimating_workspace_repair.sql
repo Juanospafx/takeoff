@@ -1,5 +1,8 @@
 -- Repairs legacy Estimating schemas created by older Takeoff endpoints.
 -- Safe to run repeatedly; existing columns and data are preserved.
+-- Run with a migration/admin account that has ALTER and CREATE ROUTINE.
+-- The runtime GET endpoint is intentionally read-only and does not require
+-- either privilege after this migration has been deployed.
 DELIMITER $$
 DROP PROCEDURE IF EXISTS estimating_add_column_if_missing$$
 CREATE PROCEDURE estimating_add_column_if_missing(IN p_table VARCHAR(64), IN p_column VARCHAR(64), IN p_definition TEXT)
