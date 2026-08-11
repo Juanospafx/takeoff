@@ -160,6 +160,32 @@ function pew_owned_estimate_id(PDO $pdo, $estimateId, $projectId, $forUpdate = f
     $stmt->execute(array($estimateId, $projectId));
     return (int)$stmt->fetchColumn();
 }
+function pew_resolve_estimate_id(PDO $pdo, $projectId, $clientId, $hintEstimateId = 0) {
+    // Stable client identity wins over a numeric id cached by an older session.
+    $find = $pdo->prepare('SELECT ws.estimate_id FROM estimate_workspace_states ws
+        INNER JOIN estimates e ON e.id=ws.estimate_id AND e.project_id=? AND e.deleted_at IS NULL
+        WHERE ws.project_id=? AND ws.client_estimate_id=? ORDER BY ws.estimate_id ASC LIMIT 1 FOR UPDATE');
+    $find->execute(array($projectId, $projectId, $clientId));
+    $mapped = (int)$find->fetchColumn();
+    if ($mapped) return $mapped;
+
+    // Some earlier saves wrote the stable id only to estimates.metadata_json.
+    $estimateColumns = pew_table_columns($pdo, 'estimates');
+    if (isset($estimateColumns['metadata_json'])) {
+        pew_best_effort('estimate metadata recovery', $pdo, function () use ($pdo, $projectId, $clientId, &$mapped) {
+            $stmt = $pdo->prepare("SELECT id FROM estimates WHERE project_id=? AND deleted_at IS NULL AND JSON_UNQUOTE(JSON_EXTRACT(metadata_json, '$.workspaceClientId'))=? ORDER BY id ASC LIMIT 1 FOR UPDATE");
+            $stmt->execute(array($projectId, $clientId));
+            $mapped = (int)$stmt->fetchColumn();
+        });
+        if ($mapped) return $mapped;
+    }
+
+    $hintEstimateId = pew_owned_estimate_id($pdo, $hintEstimateId, $projectId, true);
+    if (!$hintEstimateId) return 0;
+    $hintState = pew_state_row($pdo, $hintEstimateId);
+    if ($hintState && (string)$hintState['client_estimate_id'] !== (string)$clientId) return 0;
+    return $hintEstimateId;
+}
 function pew_state_row(PDO $pdo, $estimateId) {
     $columns = pew_table_columns($pdo, 'estimate_workspace_states');
     $select = array(
@@ -175,6 +201,13 @@ function pew_state_row(PDO $pdo, $estimateId) {
 function pew_save_workspace_state(PDO $pdo, $estimateId, $projectId, $clientId, $encoded) {
     $columns = pew_table_columns($pdo, 'estimate_workspace_states');
     $touch = isset($columns['updated_at']) ? ',updated_at=CURRENT_TIMESTAMP' : '';
+    // Remove only mappings whose target no longer represents a live estimate.
+    // This prevents a stale unique (project_id, client_estimate_id) row from
+    // blocking recovery, while never stealing a mapping from a valid estimate.
+    $cleanup = $pdo->prepare('DELETE ws FROM estimate_workspace_states ws LEFT JOIN estimates e ON e.id=ws.estimate_id
+        WHERE ws.project_id=? AND ws.client_estimate_id=? AND ws.estimate_id<>?
+          AND (e.id IS NULL OR e.deleted_at IS NOT NULL OR e.project_id<>?)');
+    $cleanup->execute(array($projectId, $clientId, $estimateId, $projectId));
     // Do not depend on a legacy table having a uniqueness constraint.
     // The locked estimate row serializes saves for this id.
     $stmt = $pdo->prepare('UPDATE estimate_workspace_states SET project_id=?,client_estimate_id=?,state_json=?,revision=COALESCE(revision,0)+1' . $touch . ' WHERE estimate_id=?');
@@ -366,20 +399,9 @@ function pew_save_estimate(PDO $pdo, $projectId, array $estimate, array $summary
     $clientId = pew_text(isset($estimate['id']) ? $estimate['id'] : '', 191);
     if ($clientId === '') pew_error('Every estimate must have an id.', 422, 'invalid_estimate');
     // Local drafts can outlive a deleted/recreated server estimate. Treat a
-    // stale dbEstimateId as a cache hint, never as an authoritative foreign key.
-    $estimateId = pew_owned_estimate_id(
-        $pdo,
-        pew_int(isset($estimate['dbEstimateId']) ? $estimate['dbEstimateId'] : 0),
-        $projectId,
-        true
-    );
-    if (!$estimateId) {
-        $find = $pdo->prepare('SELECT ws.estimate_id FROM estimate_workspace_states ws
-            INNER JOIN estimates e ON e.id=ws.estimate_id AND e.project_id=ws.project_id AND e.deleted_at IS NULL
-            WHERE ws.project_id=? AND ws.client_estimate_id=? LIMIT 1 FOR UPDATE');
-        $find->execute(array($projectId, $clientId));
-        $estimateId = (int)$find->fetchColumn();
-    }
+    // stale dbEstimateId as a cache hint, never as authoritative identity.
+    $estimateId = pew_resolve_estimate_id($pdo, $projectId, $clientId,
+        pew_int(isset($estimate['dbEstimateId']) ? $estimate['dbEstimateId'] : 0));
     if (!$estimateId) {
         $createdExtended = pew_best_effort('extended estimate insert', $pdo, function () use ($pdo, $projectId, $estimate) {
             $stmt = $pdo->prepare('INSERT INTO estimates (project_id,estimate_number,name,status,currency_code) VALUES (?,?,?,?,?)');

@@ -202,6 +202,8 @@
     overflow: hidden;
 }
 
+.est-main.details-collapsed { grid-template-columns: minmax(0, 1fr) 0; }
+
 .est-sync-alert {
     min-height: 42px;
     display: flex;
@@ -836,6 +838,9 @@
 .est-card.collapsed .est-card-header {
     border-bottom-color: transparent;
 }
+
+.est-card-header i.fa-chevron-down { transition: transform .15s ease; }
+.est-card.collapsed .est-card-header i.fa-chevron-down { transform: rotate(-90deg); }
 
 .est-card-head {
     min-height: 44px;

@@ -75,10 +75,19 @@ test('a stale local dbEstimateId is recovered without updating another project o
     const start = api.indexOf('function pew_save_estimate');
     const save = api.slice(start, api.indexOf('\ntry {', start));
     assert.match(api, /function pew_owned_estimate_id\(PDO \$pdo, \$estimateId, \$projectId/);
-    assert.match(save, /\$estimateId = pew_owned_estimate_id\([\s\S]*?dbEstimateId[\s\S]*?\$projectId/);
-    assert.match(save, /INNER JOIN estimates e ON e\.id=ws\.estimate_id AND e\.project_id=ws\.project_id AND e\.deleted_at IS NULL/);
+    assert.match(save, /\$estimateId = pew_resolve_estimate_id\([\s\S]*?dbEstimateId/);
+    assert.match(api, /function pew_resolve_estimate_id[\s\S]*Stable client identity wins over a numeric id/);
+    assert.match(api, /JSON_UNQUOTE\(JSON_EXTRACT\(metadata_json, '\$\.workspaceClientId'\)\)/);
     assert.match(save, /if \(!\$estimateId\) \{[\s\S]*?INSERT INTO estimates/);
     assert.doesNotMatch(save, /if \(\$estimateId\) \{\s*pew_owned_estimate\(/);
+});
+
+test('stale client mappings are removed without stealing a live estimate mapping', () => {
+    const start = api.indexOf('function pew_save_workspace_state');
+    const fn = api.slice(start, api.indexOf('function pew_relational_groups', start));
+    assert.match(fn, /DELETE ws FROM estimate_workspace_states ws LEFT JOIN estimates e/);
+    assert.match(fn, /ws\.estimate_id<>\?[\s\S]*e\.id IS NULL OR e\.deleted_at IS NOT NULL OR e\.project_id<>\?/);
+    assert.ok(fn.indexOf('DELETE ws FROM') < fn.indexOf('UPDATE estimate_workspace_states'), 'orphan cleanup must precede workspace upsert');
 });
 
 test('Estimating 500 responses expose only a safe stage and correlation id', () => {

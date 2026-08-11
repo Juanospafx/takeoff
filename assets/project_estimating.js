@@ -28,6 +28,7 @@
     const number = (value, digits = 2) => Number(value || 0).toLocaleString('en-US', { maximumFractionDigits: digits, minimumFractionDigits: digits });
     const esc = value => String(value ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch]));
     const id = prefix => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
+    const stateBool = value => value === true || value === 1 || value === '1' || value === 'true';
 
     const columns = [
         ['select', '', true],
@@ -208,7 +209,10 @@
                 notes: { ...defaultEstimate().notes, ...(est.notes || {}) },
                 auditLog: Array.isArray(est.auditLog) ? est.auditLog : []
             }));
-            return { ...parsed, estimates, hiddenColumns, selected: [], search: parsed.search || '', columnSearch: '', dirty: false, catalogItems: [], catalogLoaded: false };
+            return { ...parsed, estimates, hiddenColumns, selected: [], search: parsed.search || '', columnSearch: '', dirty: false,
+                rightCollapsed: stateBool(parsed.rightCollapsed), notesCollapsed: stateBool(parsed.notesCollapsed),
+                summaryCollapsed: stateBool(parsed.summaryCollapsed), auditCollapsed: stateBool(parsed.auditCollapsed),
+                catalogItems: [], catalogLoaded: false };
         }
         const estimate = defaultEstimate('Primary Estimate');
         estimate.groups = (parsed?.groups || estimate.groups).map(normalizeGroup);
@@ -236,8 +240,9 @@
             dirty: false,
             tableSettingsOpen: false,
             rightCollapsed: false,
-            notesCollapsed: Boolean(parsed?.notesCollapsed),
-            summaryCollapsed: Boolean(parsed?.summaryCollapsed),
+            notesCollapsed: stateBool(parsed?.notesCollapsed),
+            summaryCollapsed: stateBool(parsed?.summaryCollapsed),
+            auditCollapsed: stateBool(parsed?.auditCollapsed),
             catalogItems: [],
             catalogLoaded: false,
             importPreview: null,
@@ -340,6 +345,7 @@
             rightCollapsed: state.rightCollapsed,
             notesCollapsed: state.notesCollapsed,
             summaryCollapsed: state.summaryCollapsed,
+            auditCollapsed: state.auditCollapsed,
             groups: estimate.groups,
             estimateSummary: summary,
             globalLaborCost: estimate.settings.globalLaborCost,
@@ -639,6 +645,7 @@
                     ${saveStateMarkup()}
                     <select class="est-estimate-select" data-estimate-select>${state.estimates.map(est => `<option value="${esc(est.id)}" ${est.id === estimate.id ? 'selected' : ''}>${esc(est.name)}</option>`).join('')}</select>
                     <button class="est-btn est-btn-primary" data-est-action="save"><i class="fas fa-floppy-disk"></i><span>Save</span></button>
+                    <button class="est-btn" data-est-action="toggle-details" aria-expanded="${!state.rightCollapsed}" aria-controls="estDetailsPanel"><i class="fas fa-table-columns"></i><span>${state.rightCollapsed ? 'Show details' : 'Hide details'}</span></button>
                     ${menuButton('actions', 'Actions', [
                         ['refresh-takeoff', 'Refresh Estimate Quantities from Takeoff'],
                         ['refresh-catalog', 'Refresh Costs from Global Cost Catalog'],
@@ -663,7 +670,7 @@
                 </div>
             </header>
             ${takeoffAlert()}
-            <main class="est-main">
+            <main class="est-main ${state.rightCollapsed ? 'details-collapsed' : ''}">
                 <section class="est-left ${state.tableSettingsOpen ? 'has-table-settings' : ''}">
                     <div class="est-toolbar">
                         <label class="est-search"><i class="fas fa-search"></i><input id="estSearch" value="${esc(state.search)}" type="search" placeholder="Search cost item"></label>
@@ -678,7 +685,7 @@
                     <div class="est-table-wrap" role="region" aria-label="Estimate cost items" tabindex="0"><table class="est-table"><caption class="est-sr-only">Cost items for ${esc(estimate.name)}</caption><thead>${renderTableHead()}</thead><tbody>${renderTableBody(summary)}</tbody></table></div>
                     <button class="est-create-bottom" data-est-action="create-group"><i class="fas fa-folder-plus"></i> Create new group</button>
                 </section>
-                <aside class="est-right ${state.rightCollapsed ? 'collapsed' : ''}">
+                <aside class="est-right ${state.rightCollapsed ? 'collapsed' : ''}" id="estDetailsPanel">
                     ${renderRightPanel(summary)}
                 </aside>
             </main>
@@ -846,7 +853,7 @@
     function renderRightPanel(summary) {
         return `<div class="est-right-scroll">
             <section class="est-card ${state.notesCollapsed ? 'collapsed' : ''}">
-                <button class="est-card-header" data-collapse-card="notesCollapsed"><span><i class="fas fa-chevron-down"></i> Notes</span><small>Autosaved · Current user</small></button>
+                <button class="est-card-header" data-collapse-card="notesCollapsed" aria-expanded="${!state.notesCollapsed}"><span><i class="fas fa-chevron-down"></i> Notes</span><small>Autosaved · Current user</small></button>
                 <div class="est-card-body">
                     <label class="est-field-block"><span>Scope of Work</span><div class="est-editor-toolbar"><button data-editor-cmd="bold"><i class="fas fa-bold"></i></button><button data-editor-cmd="italic"><i class="fas fa-italic"></i></button><button data-editor-cmd="insertUnorderedList"><i class="fas fa-list-ul"></i></button></div><div class="est-rich-editor" contenteditable="true" data-note-field="scope">${activeEstimate().notes.scope || ''}</div></label>
                     ${noteList('included', 'Included')}
@@ -855,7 +862,7 @@
                 </div>
             </section>
             <section class="est-card ${state.summaryCollapsed ? 'collapsed' : ''}">
-                <button class="est-card-header" data-collapse-card="summaryCollapsed"><span><i class="fas fa-chevron-down"></i> Summary</span><small>${activeSettings().marginMode}</small></button>
+                <button class="est-card-header" data-collapse-card="summaryCollapsed" aria-expanded="${!state.summaryCollapsed}"><span><i class="fas fa-chevron-down"></i> Summary</span><small>${activeSettings().marginMode} · ${money(summary.estimateTotal)}</small></button>
                 <div class="est-card-body">
                     <div class="est-rate-grid"><label>Global labor cost <input data-setting="globalLaborCost" type="number" step="0.01" value="${activeSettings().globalLaborCost}"></label><label>Global labor sales rate <input data-setting="globalLaborSales" type="number" step="0.01" value="${activeSettings().globalLaborSales}"></label><label>Margin mode <select data-setting="marginMode"><option ${activeSettings().marginMode === 'margin' ? 'selected' : ''}>margin</option><option ${activeSettings().marginMode === 'markup' ? 'selected' : ''}>markup</option></select></label></div>
                     ${summaryTable(summary)}
@@ -864,7 +871,7 @@
                     ${markupEditor('postTaxMarkups', 'Post-Tax Markups', summary.postTaxMarkups)}
                 </div>
             </section>
-            <section class="est-card"><button class="est-card-header"><span><i class="fas fa-clock"></i> Audit</span></button><div class="est-card-body est-audit-list">${activeEstimate().auditLog.slice(0, 8).map(log => `<div><strong>${esc(log.action)}</strong><span>${new Date(log.at).toLocaleString()}</span></div>`).join('') || '<span class="est-muted">No audit events yet.</span>'}</div></section>
+            <section class="est-card ${state.auditCollapsed ? 'collapsed' : ''}"><button class="est-card-header" data-collapse-card="auditCollapsed" aria-expanded="${!state.auditCollapsed}"><span><i class="fas fa-chevron-down"></i> Audit</span><small>${activeEstimate().auditLog.length} events</small></button><div class="est-card-body est-audit-list">${activeEstimate().auditLog.slice(0, 20).map(log => `<div><strong>${esc(log.action)}</strong><span>${esc(log.entity || 'estimate')} · ${esc(log.user || 'Current user')} · ${new Date(log.at).toLocaleString()}</span></div>`).join('') || '<span class="est-muted">No changes recorded yet. Edits to items, settings and estimates will appear here.</span>'}</div></section>
         </div>
         <div class="est-total-box"><span>Estimate Total</span><strong>${money(summary.estimateTotal)}</strong><small>Cost ${money(summary.direct.totalCost)} · Profit ${money(summary.profit)} · Margin ${number(summary.marginPercent)}%</small><small>Labor ${number(summary.direct.adjustedLaborHours)} hrs · Tax ${money(summary.totalTax)} · Markups ${money(summary.totalMarkups)}</small><small>${squareFootage > 0 ? `${money(summary.direct.totalCost / squareFootage)} cost/sq ft · ${money(summary.estimateTotal / squareFootage)} sales/sq ft` : 'No project square footage configured'}</small></div>`;
     }
@@ -962,7 +969,10 @@
         root.querySelector('#copyEstimateName')?.addEventListener('keydown', event => {
             if (event.key === 'Enter') createEstimateCopy();
         });
-        root.querySelectorAll('[data-editor-cmd]').forEach(btn => btn.addEventListener('click', () => document.execCommand(btn.dataset.editorCmd, false, null)));
+        root.querySelectorAll('[data-editor-cmd]').forEach(btn => {
+            btn.addEventListener('mousedown', event => event.preventDefault());
+            btn.addEventListener('click', () => document.execCommand(btn.dataset.editorCmd, false, null));
+        });
         document.addEventListener('click', closeFloatingMenus, { once: true });
     }
 
@@ -1017,6 +1027,7 @@
         if (action === 'columns-reset') { localStorage.removeItem(columnPrefKey); state.hiddenColumns = readColumnPreference(); return render(); }
         if (action === 'columns-save') { localStorage.setItem(columnPrefKey, JSON.stringify(state.hiddenColumns)); return toast('Column preference saved.'); }
         if (action === 'fullscreen') { state.fullscreen = !state.fullscreen; return render(); }
+        if (action === 'toggle-details') { state.rightCollapsed = !state.rightCollapsed; return render(); }
         if (action === 'add-catalog') return openCatalog();
         if (action === 'refresh-takeoff') return refreshTakeoffQuantities(true);
         if (action === 'refresh-catalog') return refreshCostsFromCatalog();
