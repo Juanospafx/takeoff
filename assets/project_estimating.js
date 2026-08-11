@@ -30,7 +30,8 @@
     let state = readLocal();
 
     if (!$('estTableHead')) {
-        root.innerHTML = `<section class="est-left"><div class="est-toolbar"><input id="estSearch" type="search" placeholder="Search cost item"><button type="button" data-est-action="create-group">Create group</button><button type="button" data-est-action="delete-selected" disabled>Delete</button></div><div class="est-table-wrap"><table class="est-table"><thead id="estTableHead"></thead><tbody id="estTableBody"></tbody></table></div></section><aside class="est-right"><div class="est-right-scroll"></div><div class="est-total-box"><div id="estimateTotal"></div><div id="estimateSqft"></div></div></aside><footer class="est-version-bar" id="versionBar"></footer>`;
+        root.classList.add('est-v2');
+        root.innerHTML = `<div class="est-main"><section class="est-left"><div class="est-toolbar"><input id="estSearch" type="search" placeholder="Search cost item"><button type="button" data-est-action="create-group">Create group</button><button type="button" data-est-action="delete-selected" disabled>Delete</button></div><div class="est-table-wrap"><table class="est-table"><thead id="estTableHead"></thead><tbody id="estTableBody"></tbody></table></div></section><aside class="est-right"><div class="est-right-scroll"></div><div class="est-total-box"><div id="estimateTotal"></div><div id="estimateSqft"></div></div></aside></div><footer class="est-version-bar" id="versionBar"></footer>`;
     }
 
     function readLocal() {

@@ -575,7 +575,7 @@ $state = [
     </style>
     <link rel="stylesheet" href="../assets/project_overview.css?v=project-document-menus-20260811-1">
     <link rel="stylesheet" href="../assets/project_takeoff.css?v=workspace-takeoff-20260810-1">
-    <link rel="stylesheet" href="../assets/project_estimating.css?v=estimating-v2-20260811-1">
+    <link rel="stylesheet" href="../assets/project_estimating.css?v=estimating-v2-20260811-2">
     <link rel="stylesheet" href="../assets/project_proposal.css?v=proposal-workspace-20260810-1">
 </head>
 <body>
@@ -1041,7 +1041,8 @@ $state = [
         </section>
 
         <section id="tab-estimating" class="tab-panel fullscreen estimating-page">
-            <div id="estimatingModule" class="est-shell" data-project-id="<?= (int)$projectId ?>">
+            <div id="estimatingModule" class="est-shell est-v2" data-project-id="<?= (int)$projectId ?>">
+                <div class="est-main">
                 <section class="est-left" aria-label="Estimate cost items">
                     <div class="est-toolbar">
                         <label class="est-search" for="estSearch">
@@ -1085,6 +1086,7 @@ $state = [
                     </div>
                     <div class="est-total-box"><div class="est-total-label">Estimate Total</div><div id="estimateTotal" class="est-total-value">$0.00</div><div id="estimateSqft" class="est-total-sub">--/sq ft</div></div>
                 </aside>
+                </div>
                 <div class="est-version-bar" id="versionBar"></div>
             </div>
         </section>
@@ -1361,7 +1363,7 @@ $state = [
 <script src="../assets/project_takeoff.js?v=workspace-takeoff-20260810-5"></script>
 <script src="../assets/estimate_calculation_service.js"></script>
 <script src="../assets/estimating_workspace_service.js?v=estimating-v2-20260811-1"></script>
-<script src="../assets/project_estimating.js?v=estimating-v2-20260811-1"></script>
+<script src="../assets/project_estimating.js?v=estimating-v2-20260811-2"></script>
 <script src="../assets/project_proposal.js?v=proposal-workspace-20260810-4"></script>
 <script src="../assets/global_tools.js"></script>
 </body>
