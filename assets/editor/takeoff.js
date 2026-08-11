@@ -50,6 +50,21 @@
         showToast('Drawing scale is not defined. Set the scale to calculate quantities.', 'warning');
     }
 
+    function requirePlanScale(measurement = 'linear') {
+        if (hasPlanScale()) {
+            missingScaleWarningShown = false;
+            return true;
+        }
+        warnMissingScale();
+        try {
+            window.parent?.postMessage({
+                type: 'project-takeoff-scale-required',
+                payload: { measurement, message: 'Set the drawing scale before adding linear items.' }
+            }, '*');
+        } catch (error) {}
+        return false;
+    }
+
     function localTakeoffKey() {
         const pid = typeof projectId !== 'undefined' ? projectId : 0;
         const fid = typeof fileId !== 'undefined' ? fileId : 'drawing';
@@ -858,7 +873,7 @@
     }
 
     function addLinearPoint(pos) {
-        warnMissingScale();
+        if (!requirePlanScale('linear')) return false;
         const layer = activeLayer();
         if (!layer) {
             showToast('Select a takeoff layer before drawing.', 'error');
@@ -926,6 +941,10 @@
 
     function finishLinear() {
         if (!state.draftLine) return false;
+        if (!requirePlanScale('linear')) {
+            cancelLinearDraft();
+            return false;
+        }
         if (state.draftLine.points.length < 2) {
             cancelLinearDraft();
             return false;
@@ -1571,6 +1590,7 @@
 
     function setTool(tool) {
         if (tool === 'select') tool = 'smart';
+        if (tool === 'takeoff_linear' && !requirePlanScale('linear')) return false;
         window.releaseTakeoffPointerState?.();
         if (tool !== 'multi-select' && selectionRectDraft) {
             selectionRectDraft.node?.destroy();
@@ -2278,12 +2298,20 @@
         state.selectedLayerUids = new Set([layer.client_uid]);
         const type = layerType(layer);
         if ((type === 'linear' || type === 'area') && !hasPlanScale()) {
+            if (type === 'linear') {
+                requirePlanScale('linear');
+                setTool('smart');
+                renderLayers();
+                emitProjectState();
+                return false;
+            }
             warnMissingScale();
         }
         setTool(type === 'linear' ? 'takeoff_linear' : (type === 'area' ? 'takeoff_area' : 'takeoff_count'));
         showToast(`${layer.name} active`, 'success');
         renderLayers();
         emitProjectState();
+        return true;
     }
 
     function openTakeoffMenu(anchor, items) {

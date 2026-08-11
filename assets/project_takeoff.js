@@ -2761,6 +2761,12 @@
             }, 120);
         });
         window.addEventListener('message', event => {
+            if (event.data?.type === 'project-takeoff-scale-required') {
+                if (event.source !== takeoffWindow()) return;
+                openScalePanel();
+                showPrepared(event.data?.payload?.message || 'Set the drawing scale before adding linear items.');
+                return;
+            }
             if (event.data?.type === 'project-takeoff-state') {
                 syncTakeoffFromCanvasSnapshot(event.data.payload);
                 return;
