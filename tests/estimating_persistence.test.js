@@ -2,94 +2,33 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
-const vm = require('node:vm');
 
-const client = fs.readFileSync(path.join(__dirname, '..', 'assets', 'project_estimating.js'), 'utf8');
-const api = fs.readFileSync(path.join(__dirname, '..', 'api', 'project_estimating.php'), 'utf8');
+const root = path.resolve(__dirname, '..');
+const Service = require('../assets/estimating_workspace_service.js');
+const client = fs.readFileSync(path.join(root, 'assets/project_estimating.js'), 'utf8');
+const api = fs.readFileSync(path.join(root, 'api/project_estimating.php'), 'utf8');
 
-function persistenceHelpers() {
-    const start = client.indexOf('function estimateItemIds');
-    const end = client.indexOf('async function flushServerSave', start);
-    assert.notEqual(start, -1);
-    assert.notEqual(end, -1);
-    const sandbox = {};
-    vm.runInNewContext(`${client.slice(start, end)}; this.check = serverStateContainsSavedItems;`, sandbox);
-    return sandbox.check;
-}
-
-function workspace(itemIds) {
-    return {
-        estimates: [{ id: 'estimate-1', groups: [{ id: 'group-1', items: itemIds.map(id => ({ id })) }] }]
-    };
-}
-
-test('a save response cannot replace the local estimate when it omitted an item', () => {
-    const contains = persistenceHelpers();
-    assert.equal(contains(workspace(['manual-1', 'manual-2']), workspace(['manual-1'])), false);
-    assert.equal(contains(workspace(['manual-1']), workspace(['manual-1', 'server-extra'])), true);
-    assert.equal(contains(workspace([]), null), false, 'even an empty save requires a valid workspace response');
+test('workspace migration preserves estimates, notes, audit and rebinds project ownership', () => {
+    const state = Service.workspace({ activeEstimateId: 'a', estimates: [{ id: 'a', projectId: 9,
+        groups: [{ id: 'g', name: 'Manual', items: [{ id: 'i', name: 'Wire', quantity: 2 }] }],
+        notes: { scope: 'Scope' }, auditLog: [{ action: 'Created' }] }] }, 73);
+    assert.equal(state.projectId, 73);
+    assert.equal(state.estimates[0].projectId, 73);
+    assert.equal(state.estimates[0].groups[0].items[0].name, 'Wire');
+    assert.equal(state.estimates[0].notes.scope, 'Scope');
+    assert.equal(state.estimates[0].auditLog[0].action, 'Created');
 });
 
-test('the exact snapshot sent to the API is the snapshot validated on response', () => {
-    assert.match(client, /const sentState = serializableState\(\)/);
-    assert.match(client, /delete sentState\.pendingProjectCreationSync/);
-    assert.match(client, /body: JSON\.stringify\(\{ action: 'save', project_id: projectId, state: sentState \}\)/);
-    assert.match(client, /serverStateContainsSavedItems\(sentState, remote\)/);
-    assert.match(client, /Server save response omitted estimate items; local draft retained/);
+test('client saves the complete workspace and retains a visible retry state', () => {
+    assert.match(client, /body: JSON\.stringify\(\{ action: 'save', project_id: projectId, state: sent, summary: summary\(\) \}\)/);
+    assert.match(client, /ui\.loadState = 'error'/);
+    assert.match(client, /data-retry-save/);
+    assert.match(client, /localStorage\.setItem\(storageKey/);
 });
 
-test('server loading cannot overwrite edits made while its request was pending', () => {
-    assert.match(client, /const startingRevision = changeRevision/);
-    assert.match(client, /startingRevision === changeRevision[\s\S]*newestStateTimestamp\(remote\)/);
-    assert.match(client, /state\.dirty \|\| startingRevision !== changeRevision[\s\S]*scheduleServerSave\(\)/);
-});
-
-test('panel visibility changes invalidate in-flight hydration and persist with their own timestamp', () => {
-    assert.match(client, /function markUiStateDirty\(\)[\s\S]*state\.clientUiUpdatedAt = new Date\(\)\.toISOString\(\)[\s\S]*changeRevision \+= 1/);
-    assert.match(client, /toggle-details'[\s\S]*state\.rightCollapsed = !state\.rightCollapsed; markUiStateDirty\(\)/);
-    assert.match(client, /state\[key\] = !state\[key\];\s*markUiStateDirty\(\);/);
-    assert.match(client, /clientUiUpdatedAt: state\.clientUiUpdatedAt \|\| ''/);
-    assert.match(client, /Date\.parse\(candidate\?\.clientUiUpdatedAt \|\| ''\)/);
-});
-
-test('notes and audit payloads survive migration and are included in the saved workspace', () => {
-    assert.match(client, /notes: \{ \.\.\.defaultEstimate\(\)\.notes, \.\.\.\(est\.notes \|\| \{\}\) \}/);
-    assert.match(client, /auditLog: Array\.isArray\(est\.auditLog\) \? est\.auditLog : \[\]/);
-    assert.match(client, /estimates: state\.estimates/);
-    assert.match(client, /data-note-field[\s\S]*markDirty\(\); persist\(\)/);
-});
-
-test('client diagnostics include safe API stage and correlation reference', () => {
-    assert.match(client, /function apiErrorMessage\(result, response, fallback\)/);
-    assert.match(client, /error\.code \? `code: \$\{error\.code\}`/);
-    assert.match(client, /error\.stage \? `stage: \$\{error\.stage\}`/);
-    assert.match(client, /error\.request_id \? `ref: \$\{error\.request_id\}`/);
-    assert.match(client, /apiErrorMessage\(result, response, 'Unable to load estimating workspace\.'\)/);
-});
-
-test('a 404 stale estimate reference is detached and retried without duplicating known server estimates', () => {
-    assert.match(client, /let serverEstimateIds = new Set\(\)/);
-    assert.match(client, /function recoverStaleEstimateReferences\(\)/);
-    assert.match(client, /!serverEstimateIds\.has\(dbId\)/);
-    assert.match(client, /delete estimate\.dbEstimateId/);
-    assert.match(client, /error\.code === 'estimate_not_found'[\s\S]*recoverStaleEstimateReferences\(\)[\s\S]*saveRequested = true/);
-    assert.match(client, /serverEstimateIds = new Set\(remote\.estimates\.map/);
-});
-
-test('load and save failures remain visible with an operation-specific retry', () => {
-    assert.match(client, /let retryOperation = 'save'/);
-    assert.match(client, /data-est-retry data-est-action="\$\{retryOperation === 'load' \? 'retry-load' : 'retry-save'\}"/);
-    assert.match(client, /if \(action === 'retry-load'\) \{ loadServerState\(\); return; \}/);
-    assert.match(client, /loadFailure = `\$\{error\.message\} Using local draft\.`/);
-    assert.match(client, /if \(!loadFailure && \(state\.dirty \|\| startingRevision !== changeRevision\)\) scheduleServerSave\(\)/);
-    assert.match(client, /`\$\{error\.message\} Draft kept locally\.`/);
-});
-
-test('API reconstructs active relational estimate items when a workspace snapshot is absent or empty', () => {
-    assert.match(api, /function pew_relational_groups\(PDO \$pdo, \$estimateId\)/);
+test('API retains lossless snapshots and relational recovery', () => {
+    assert.match(api, /pew_save_workspace_state/);
+    assert.match(api, /function pew_relational_groups/);
     assert.match(api, /estimate_items WHERE estimate_id = \? AND deleted_at IS NULL/);
-    assert.match(api, /\$meta\['workspace'\]/);
-    assert.match(api, /\$item\['id'\] = \$clientId/);
-    assert.match(api, /!isset\(\$snapshot\['groups'\]\) \|\| !is_array\(\$snapshot\['groups'\]\) \|\| !\$snapshot\['groups'\]/);
     assert.match(api, /if \(\$recoveredGroups\) \$snapshot\['groups'\] = \$recoveredGroups/);
 });

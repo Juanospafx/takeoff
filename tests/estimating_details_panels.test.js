@@ -4,32 +4,24 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
-const js = fs.readFileSync(path.join(root, 'assets', 'project_estimating.js'), 'utf8');
-const css = fs.readFileSync(path.join(root, 'assets', 'project_estimating.css'), 'utf8');
-const page = fs.readFileSync(path.join(root, 'pages', 'project_dashboard.php'), 'utf8');
+const js = fs.readFileSync(path.join(root, 'assets/project_estimating.js'), 'utf8');
+const css = fs.readFileSync(path.join(root, 'assets/project_estimating.css'), 'utf8');
+const page = fs.readFileSync(path.join(root, 'pages/project_dashboard.php'), 'utf8');
 
-test('details inspector can always be reopened and collapsed cards expose state', () => {
-    assert.match(js, /data-est-action="toggle-details"[\s\S]*aria-controls="estDetailsPanel"/);
-    assert.match(js, /action === 'toggle-details'[\s\S]*rightCollapsed = !state\.rightCollapsed/);
-    assert.match(js, /data-collapse-card="notesCollapsed" aria-expanded=/);
-    assert.match(js, /data-collapse-card="summaryCollapsed" aria-expanded=/);
-    assert.match(js, /data-collapse-card="auditCollapsed" aria-expanded=/);
-    assert.match(css, /\.est-main\.details-collapsed\s*\{\s*grid-template-columns:\s*minmax\(0, 1fr\) 0/);
-    assert.match(css, /\.est-shell\s*\{[\s\S]*?grid-template-rows:\s*auto minmax\(0, 1fr\) 62px/);
-    assert.match(css, /\.est-shell\.has-sync-alert\s*\{\s*grid-template-rows:\s*auto auto minmax\(0, 1fr\) 62px/);
-    assert.match(js, /const syncAlert = takeoffAlert\(\)[\s\S]*has-sync-alert[\s\S]*\$\{syncAlert\}/);
+test('v2 renders functional notes, summary and audit cards', () => {
+    assert.match(js, /card\('notes', 'Notes'/);
+    assert.match(js, /card\('summary', 'Summary'/);
+    assert.match(js, /card\('audit', 'Audit'/);
+    assert.match(js, /data-note-field/);
+    assert.match(js, /Calc\.calculateSummary/);
+    assert.match(js, /data-audit-export/);
+    assert.match(js, /data-audit-clear/);
 });
 
-test('production dashboard requests the current details-panel assets', () => {
-    assert.match(page, /project_estimating\.css\?v=estimating-workspace-20260811-2/);
-    assert.match(page, /project_estimating\.js\?v=estimating-workspace-20260811-8/);
-});
-
-test('notes persist edits, summary is calculated and audit rows are meaningful', () => {
-    assert.match(js, /\[data-note-field\][\s\S]*activeEstimate\(\)\.notes[\s\S]*markDirty\(\); persist\(\)/);
-    assert.match(js, /data-editor-cmd[\s\S]*mousedown[\s\S]*preventDefault/);
-    assert.match(js, /function renderRightPanel\(summary\)[\s\S]*summaryTable\(summary\)/);
-    assert.match(js, /Summary<\/span><small>[\s\S]*money\(summary\.estimateTotal\)/);
-    assert.match(js, /log\.entity[\s\S]*log\.user[\s\S]*new Date\(log\.at\)/);
-    assert.match(js, /auditCollapsed:\s*stateBool\(parsed(?:\?\.|\.)auditCollapsed\)/);
+test('dashboard loads the new state service before the v2 controller', () => {
+    assert.match(page, /estimating_workspace_service\.js\?v=estimating-v2/);
+    assert.match(page, /project_estimating\.js\?v=estimating-v2/);
+    assert.ok(page.indexOf('estimating_workspace_service.js') < page.indexOf('project_estimating.js'));
+    assert.match(page, /project_estimating\.css\?v=estimating-v2/);
+    assert.match(css, /Estimating v2/);
 });

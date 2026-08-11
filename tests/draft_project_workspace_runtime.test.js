@@ -9,6 +9,7 @@ const overview = fs.readFileSync(path.join(root, 'assets/project_overview.js'), 
 const estimating = fs.readFileSync(path.join(root, 'assets/project_estimating.js'), 'utf8');
 const calculation = fs.readFileSync(path.join(root, 'assets/estimate_calculation_service.js'), 'utf8');
 const footer = fs.readFileSync(path.join(root, 'assets/project_estimate_footer.js'), 'utf8');
+const workspace = fs.readFileSync(path.join(root, 'assets/estimating_workspace_service.js'), 'utf8');
 
 const draftWorkspace = {
     activeEstimateId: 'draft-estimate',
@@ -68,6 +69,7 @@ test('draft save migrates workspace and the reloaded Estimating module performs 
     };
     reloadDom.window.eval(calculation);
     reloadDom.window.eval(footer);
+    reloadDom.window.eval(workspace);
     reloadDom.window.eval(estimating);
     assert.equal(JSON.parse(reloadDom.window.localStorage.getItem('takeoff.estimating.module.42')).pendingProjectCreationSync, true,
         'initial render must retain the marker if navigation/load is interrupted');

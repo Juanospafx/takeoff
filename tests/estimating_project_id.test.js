@@ -8,6 +8,7 @@ const root = path.resolve(__dirname, '..');
 const client = fs.readFileSync(path.join(root, 'assets', 'project_estimating.js'), 'utf8');
 const calculation = fs.readFileSync(path.join(root, 'assets', 'estimate_calculation_service.js'), 'utf8');
 const footer = fs.readFileSync(path.join(root, 'assets', 'project_estimate_footer.js'), 'utf8');
+const workspace = fs.readFileSync(path.join(root, 'assets', 'estimating_workspace_service.js'), 'utf8');
 const api = fs.readFileSync(path.join(root, 'api', 'project_estimating.php'), 'utf8');
 
 test('Estimating resolves the project id from dashboard URL aliases when DOM state is absent', async () => {
@@ -22,6 +23,7 @@ test('Estimating resolves the project id from dashboard URL aliases when DOM sta
     };
     dom.window.eval(calculation);
     dom.window.eval(footer);
+    dom.window.eval(workspace);
     dom.window.eval(client);
     await new Promise(resolve => dom.window.setTimeout(resolve, 0));
     assert.ok(calls.some(url => url.includes('project_id=73')));
@@ -42,6 +44,7 @@ test('a local estimate snapshot is rebound to the authoritative dashboard projec
     dom.window.fetch = async () => new Promise(() => {});
     dom.window.eval(calculation);
     dom.window.eval(footer);
+    dom.window.eval(workspace);
     dom.window.eval(client);
     const saved = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.73'));
     assert.equal(saved.estimates[0].projectId, 73);

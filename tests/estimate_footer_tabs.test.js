@@ -11,6 +11,7 @@ const proposal = read('assets/project_proposal.js');
 const estimating = read('assets/project_estimating.js');
 const sharedFooter = read('assets/project_estimate_footer.js');
 const calculation = read('assets/estimate_calculation_service.js');
+const workspace = read('assets/estimating_workspace_service.js');
 const takeoffCss = read('assets/project_takeoff.css');
 const estimatingCss = read('assets/project_estimating.css');
 
@@ -41,12 +42,12 @@ expect(proposal, /actionAttribute:\s*'data-proposal-estimating-action'/, 'Propos
 expect(takeoff, /sourceTab:\s*'takeoff'/, 'Takeoff footer actions must identify their originating tab.');
 expect(proposal, /sourceTab:\s*'proposal'/, 'Proposal footer actions must identify their originating tab.');
 expect(estimating, /data-estimating-modal-portal/, 'Estimating must portal shared modals over the active workspace tab.');
-expect(estimating, /portal\?\.querySelector\('#copyEstimateName'\)/, 'Estimate creation must read values from the shared modal portal.');
+expect(estimating, /portal\.querySelector\('#copyEstimateName'\)/, 'Estimate creation must read values from the shared modal portal.');
 if (/estimating-action-requested[\s\S]{0,500}data-tab="estimating"/.test(estimating)) {
     throw new Error('Footer estimating actions must not change the active workspace tab.');
 }
 expect(proposal, /activeEstimate\?\.groups/, 'Proposal data must come from the active estimate.');
-expect(estimating, /takeoff:active-estimate-changed[\s\S]*selectEstimate\(detail\.estimateId\)/, 'Estimating must consume external active-estimate changes.');
+expect(estimating, /takeoff:active-estimate-changed[\s\S]*selectEstimate\(event\.detail\?\.estimateId\)/, 'Estimating must consume external active-estimate changes.');
 expect(estimating, /takeoff:estimating-state-updated[\s\S]*estimates:\s*state\.estimates\.map/, 'Estimating must publish its estimate catalog.');
 
 const dom = new JSDOM('<!doctype html><div id="takeoffWorkspace"><footer id="takeoffEstimateTypesFooter"></footer></div>', {
@@ -108,6 +109,7 @@ estimatingDom.window.localStorage.setItem('takeoff.estimating.module.draft', JSO
 }));
 estimatingDom.window.eval(calculation);
 estimatingDom.window.eval(sharedFooter);
+estimatingDom.window.eval(workspace);
 estimatingDom.window.eval(estimating);
 let estimatingTabClicks = 0;
 estimatingDom.window.document.querySelector('[data-tab="estimating"]').addEventListener('click', () => { estimatingTabClicks += 1; });
