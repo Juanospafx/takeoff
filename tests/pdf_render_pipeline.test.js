@@ -35,3 +35,14 @@ test('all editor zoom paths publish one authoritative zoom-change event', () => 
     assert.match(takeoffSource, /notifyTakeoffZoomChanged\?\.\('parent-api'\)/);
     assert.match(parentSource, /type === 'project-takeoff-zoom-changed'[\s\S]*?updateZoomUi\([^)]*Percent\)/);
 });
+
+test('PDF loading falls back from range requests and Retry restarts the document load', () => {
+    assert.match(source, /function loadPdfDocument\(forceFullDownload = false\)/);
+    assert.match(source, /disableRange:\s*forceFullDownload/);
+    assert.match(source, /disableStream:\s*forceFullDownload/);
+    assert.match(source, /if \(!forceFullDownload\)[\s\S]*loadPdfDocument\(true\)/,
+        'a failed ranged load must retry once using a complete download');
+    assert.match(source, /function retryPdfLoad\(\)[\s\S]*pdfDoc = null[\s\S]*loadPdfDocument\(true\)/);
+    assert.match(source, /onclick="retryPdfLoad\(\)"/,
+        'Retry must reload the PDF document instead of rendering with a null pdfDoc');
+});

@@ -2399,24 +2399,47 @@ if ($filePath !== '') {
     });
 
     // --- LOAD LOGIC ---
-    if(fileExt === 'pdf') {
-        const loadingTask = pdfjsLib.getDocument({
+    let pdfLoadingTask = null;
+
+    function loadPdfDocument(forceFullDownload = false) {
+        if (fileExt !== 'pdf') return;
+        showDrawingLoading(true);
+        if (pdfLoadingTask?.destroy) {
+            try { pdfLoadingTask.destroy(); } catch (e) {}
+        }
+        pdfLoadingTask = pdfjsLib.getDocument({
             url: fileUrl,
             rangeChunkSize: 262144,
-            disableStream: false,
-            disableAutoFetch: true
+            disableRange: forceFullDownload,
+            disableStream: forceFullDownload,
+            disableAutoFetch: !forceFullDownload
         });
-        loadingTask.promise.then(pdf => {
+        pdfLoadingTask.promise.then(pdf => {
             pdfDoc = pdf;
             document.getElementById('p-total').textContent = pdf.numPages;
             renderPageList(pdf.numPages);
             notifyTakeoffReady();
             renderPage(pageNum);
         }).catch(error => {
-            console.error(error);
+            console.error('PDF load failed', { forceFullDownload, fileUrl, error });
+            if (!forceFullDownload) {
+                // Some servers/proxies advertise byte ranges but fail while PDF.js
+                // requests later chunks. A full download is slower but reliable.
+                loadPdfDocument(true);
+                return;
+            }
             showDrawingError('Unable to load this sheet');
             showToast("Error loading PDF", "error");
         });
+    }
+
+    function retryPdfLoad() {
+        pdfDoc = null;
+        loadPdfDocument(true);
+    }
+
+    if(fileExt === 'pdf') {
+        loadPdfDocument(false);
     } else if (fileExt === 'heic') {
         document.getElementById('p-total').textContent = '1'; renderPageList(1);
         notifyTakeoffReady();
@@ -2462,7 +2485,7 @@ if ($filePath !== '') {
         if (!drawingLoading) return;
         drawingLoading.innerHTML = `<div class="text-center">
             <div class="mb-2"><i class="fas fa-triangle-exclamation me-2"></i>${message}</div>
-            <button type="button" class="btn btn-sm btn-light" onclick="renderPage(pageNum)">Retry</button>
+            <button type="button" class="btn btn-sm btn-light" onclick="retryPdfLoad()">Retry</button>
         </div>`;
         drawingLoading.classList.remove('hidden');
     }
