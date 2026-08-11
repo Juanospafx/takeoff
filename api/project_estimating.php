@@ -32,6 +32,19 @@ function pew_error($message, $status = 400, $code = 'invalid_request') {
     pew_json(array('ok' => false, 'success' => false, 'error' => $error), $status);
 }
 function pew_int($value) { return is_numeric($value) ? (int)$value : 0; }
+function pew_request_project_id(array $query, array $payload) {
+    foreach (array('project_id', 'projectId', 'id') as $key) {
+        if (isset($query[$key])) {
+            $id = pew_int($query[$key]);
+            if ($id > 0) return $id;
+        }
+        if (isset($payload[$key])) {
+            $id = pew_int($payload[$key]);
+            if ($id > 0) return $id;
+        }
+    }
+    return 0;
+}
 function pew_num($value) { return is_numeric($value) ? (float)$value : 0.0; }
 function pew_text($value, $max = 191) {
     $value = trim((string)($value === null ? '' : $value));
@@ -459,7 +472,7 @@ try {
     require __DIR__ . '/../core/db/connection.php';
     $pewStage = 'schema_validation';
     pew_assert_schema($pdo);
-    $projectId = pew_int(isset($_GET['project_id']) ? $_GET['project_id'] : (isset($body['project_id']) ? $body['project_id'] : 0));
+    $projectId = pew_request_project_id($_GET, $body);
     $pewStage = 'project_validation';
     pew_project($pdo, $projectId);
 

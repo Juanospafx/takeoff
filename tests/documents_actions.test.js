@@ -56,3 +56,9 @@ test('project document mutations keep the Takeoff files mirror consistent', () =
     assert.match(api, /UPDATE files SET filename=\? WHERE project_id=\?/);
     assert.match(api, /UPDATE files SET deleted_at=CURRENT_TIMESTAMP WHERE project_id=\?/);
 });
+
+test('row actions use a viewport-level menu so later PDF actions are not clipped', () => {
+    const css = fs.readFileSync(path.join(root, 'assets/project_overview.css'), 'utf8');
+    assert.match(css, /\.documents-menu\.row-menu\s*\{[\s\S]*position:\s*fixed;[\s\S]*z-index:\s*5000/);
+    assert.match(client, /positionFloatingMenu\(menu, trigger\)/);
+});

@@ -573,7 +573,7 @@ $state = [
             .totals-grid { grid-template-columns: 1fr; }
         }
     </style>
-    <link rel="stylesheet" href="../assets/project_overview.css">
+    <link rel="stylesheet" href="../assets/project_overview.css?v=project-document-menus-20260811-1">
     <link rel="stylesheet" href="../assets/project_takeoff.css?v=workspace-takeoff-20260810-1">
     <link rel="stylesheet" href="../assets/project_estimating.css?v=estimating-workspace-20260811-2">
     <link rel="stylesheet" href="../assets/project_proposal.css?v=proposal-workspace-20260810-1">
@@ -1355,7 +1355,7 @@ $state = [
 
     setActiveTab(ProjectState.activeTab || 'overview', false);
 </script>
-<script src="../assets/project_overview.js?v=project-workspace-migration-20260811-5"></script>
+<script src="../assets/project_overview.js?v=project-documents-persistence-20260811-6"></script>
 <script src="../assets/takeoff_estimating_sync_service.js?v=takeoff-estimating-sync-20260803-1"></script>
 <script src="../assets/project_estimate_footer.js?v=estimate-footer-20260810-1"></script>
 <script src="../assets/project_takeoff.js?v=workspace-takeoff-20260810-5"></script>

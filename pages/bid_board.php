@@ -20,7 +20,7 @@
             }
         })();
     </script>
-    <link rel="stylesheet" href="../assets/bid_board.css">
+    <link rel="stylesheet" href="../assets/bid_board.css?v=project-action-menu-20260811-1">
 </head>
 <body>
 <?php include __DIR__ . '/../views/global_tools_header.php'; ?>

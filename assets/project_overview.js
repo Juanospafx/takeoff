@@ -118,9 +118,13 @@
             const projectId = savedProjectId(result);
             if (!projectId) throw new Error('The project was saved without a valid project ID.');
 
+            const uploadResult = await persistPendingDocuments(projectId);
+
             isDirty = false;
             localStorage.removeItem('takeoff.projectDraft');
-            showToast('Project saved.');
+            showToast(uploadResult.failed
+                ? `Project saved. ${uploadResult.failed} document${uploadResult.failed === 1 ? '' : 's'} still need to be re-selected.`
+                : 'Project and documents saved.');
             if (wasDraft) {
                 migrateDraftWorkspace(projectId);
                 window.location.href = `project_dashboard.php?id=${encodeURIComponent(projectId)}&tab=overview`;
@@ -139,6 +143,43 @@
                 saveButton.textContent = previousLabel || 'Save Project';
             }
         }
+    }
+
+    async function persistPendingDocuments(projectId) {
+        const pending = localDocuments.filter(doc => sessionFiles.has(String(doc.id)));
+        let failed = 0;
+        for (const doc of pending) {
+            const file = sessionFiles.get(String(doc.id));
+            try {
+                const form = new FormData();
+                form.append('project_id', projectId);
+                form.append('file', file, file.name);
+                const response = await fetch('../api/project_document_takeoff.php', {
+                    method: 'POST', body: form, headers: { Accept: 'application/json' }
+                });
+                const result = await response.json().catch(() => null);
+                if (!response.ok || !result?.success || !result.file?.id) {
+                    throw new Error(result?.message || `HTTP ${response.status}`);
+                }
+                const stored = {
+                    id: Number(result.file.id), source: 'legacy_file', filename: result.file.filename,
+                    title: result.file.filename, path: `../${result.file.filepath}`,
+                    extension: doc.extension, mime_type: doc.type, uploaded_at: new Date().toISOString()
+                };
+                window.ProjectState.documents = (window.ProjectState.documents || [])
+                    .filter(row => !(row.source === 'local_metadata' && String(row.id) === String(doc.id)));
+                window.ProjectState.documents.push(stored);
+                localDocuments = localDocuments.filter(row => String(row.id) !== String(doc.id));
+                sessionFiles.delete(String(doc.id));
+                const objectUrl = sessionFileUrls.get(String(doc.id));
+                if (objectUrl) URL.revokeObjectURL(objectUrl);
+                sessionFileUrls.delete(String(doc.id));
+            } catch (error) {
+                failed += 1;
+            }
+        }
+        persistLocalDocuments();
+        return { uploaded: pending.length - failed, failed };
     }
 
     function normalizeStatus(value) {
@@ -663,6 +704,9 @@
             document.querySelectorAll('.documents-menu.row-menu').forEach(menu => {
                 menu.classList.toggle('open', menu.dataset.docMenu === id && !menu.classList.contains('open'));
             });
+            const menu = [...document.querySelectorAll('.documents-menu.row-menu')]
+                .find(candidate => candidate.dataset.docMenu === String(id));
+            if (menu?.classList.contains('open') && trigger) positionFloatingMenu(menu, trigger);
             return;
         }
         const doc = findDocumentById(id);
@@ -762,6 +806,16 @@
         }
     }
 
+    function positionFloatingMenu(menu, trigger) {
+        const rect = trigger.getBoundingClientRect();
+        const width = Math.max(180, menu.offsetWidth || 180);
+        const height = Math.max(190, menu.offsetHeight || 190);
+        const margin = 8;
+        menu.style.left = `${Math.max(margin, Math.min(window.innerWidth - width - margin, rect.right - width))}px`;
+        menu.style.right = 'auto';
+        menu.style.top = `${rect.bottom + height + margin <= window.innerHeight ? rect.bottom + 4 : Math.max(margin, rect.top - height - 4)}px`;
+    }
+
     function createDocumentFolder() {
         const name = prompt('Folder name');
         if (!name) return;
@@ -859,15 +913,13 @@
         window.ProjectState.selectedDrawingId = takeoffFileId;
         if (typeof window.setActiveTab === 'function') window.setActiveTab('takeoff');
         if (typeof window.projectTakeoffRefreshDrawings === 'function') window.projectTakeoffRefreshDrawings();
-        if (doc.path && (doc.source === 'local' || doc.originalSource === 'legacy_file' || doc.originalSource === 'project_document')) {
-            const frame = $('takeoffFrame');
-            const empty = $('takeoffEmpty');
-            if (frame) {
-                frame.src = `editor.php?id=${encodeURIComponent(takeoffFileId)}&embedded=1`;
-                frame.style.display = 'block';
-            }
-            if (empty) empty.style.display = 'none';
+        const frame = $('takeoffFrame');
+        const empty = $('takeoffEmpty');
+        if (frame) {
+            frame.src = `editor.php?id=${encodeURIComponent(takeoffFileId)}&embedded=1`;
+            frame.style.display = 'block';
         }
+        if (empty) empty.style.display = 'none';
     }
 
     function escapeHtml(value) {
@@ -990,6 +1042,12 @@
             });
             dropzone.addEventListener('drop', event => addFiles(event.dataTransfer?.files, null));
         }
+
+        const closeDocumentRowMenus = () => {
+            document.querySelectorAll('.documents-menu.row-menu.open').forEach(menu => menu.classList.remove('open'));
+        };
+        window.addEventListener('scroll', closeDocumentRowMenus, true);
+        window.addEventListener('resize', closeDocumentRowMenus);
 
         document.querySelectorAll('.overview-field input, .overview-field select, .overview-field textarea').forEach(input => {
             input.addEventListener('input', markDirty);

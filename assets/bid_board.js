@@ -315,12 +315,27 @@
                 event.stopPropagation();
                 openMenuId = openMenuId === button.dataset.rowMenu ? null : button.dataset.rowMenu;
                 renderTable();
+                const activeButton = [...document.querySelectorAll('[data-row-menu]')]
+                    .find(candidate => candidate.dataset.rowMenu === String(openMenuId || ''));
+                const panel = [...document.querySelectorAll('[data-menu-panel]')]
+                    .find(candidate => candidate.dataset.menuPanel === String(openMenuId || ''));
+                if (activeButton && panel) positionRowMenu(panel, activeButton);
             });
         });
         root.querySelectorAll('[data-project-action]').forEach(button => {
             button.addEventListener('click', () => runProjectAction(button.dataset.projectAction, button.dataset.projectId));
         });
         bindTooltips(root);
+    }
+
+    function positionRowMenu(panel, trigger) {
+        const rect = trigger.getBoundingClientRect();
+        const width = Math.max(148, panel.offsetWidth || 148);
+        const height = Math.max(130, panel.offsetHeight || 130);
+        const margin = 8;
+        panel.style.left = `${Math.max(margin, Math.min(window.innerWidth - width - margin, rect.right - width))}px`;
+        panel.style.right = 'auto';
+        panel.style.top = `${rect.bottom + height + margin <= window.innerHeight ? rect.bottom + 4 : Math.max(margin, rect.top - height - 4)}px`;
     }
 
     function displayDueDate(value) {
@@ -548,8 +563,15 @@
                 renderTable();
             }
         });
-        window.addEventListener('scroll', hideTooltip, true);
-        window.addEventListener('resize', hideTooltip);
+        const closeFloatingUi = () => {
+            hideTooltip();
+            if (openMenuId) {
+                openMenuId = null;
+                renderTable();
+            }
+        };
+        window.addEventListener('scroll', closeFloatingUi, true);
+        window.addEventListener('resize', closeFloatingUi);
         load();
     });
 })();

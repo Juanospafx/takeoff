@@ -18,7 +18,8 @@ try {
     if (!empty($_FILES['file']) && is_uploaded_file($_FILES['file']['tmp_name'])) {
         $original = basename((string)$_FILES['file']['name']);
         $extension = strtolower(pathinfo($original, PATHINFO_EXTENSION));
-        if (!in_array($extension, ['pdf', 'png', 'jpg', 'jpeg', 'webp'], true)) throw new RuntimeException('Unsupported drawing format.');
+        $allowedExtensions = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'dwg', 'dxf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt', 'rtf', 'ppt', 'pptx', 'zip'];
+        if (!$extension || !in_array($extension, $allowedExtensions, true)) throw new RuntimeException('Unsupported document format.');
         $targetDir = __DIR__ . '/../uploads/';
         if (!is_dir($targetDir) && !mkdir($targetDir, 0755, true)) throw new RuntimeException('Upload directory is unavailable.');
         $storedName = bin2hex(random_bytes(8)) . '_' . preg_replace('/[^A-Za-z0-9._-]/', '_', $original);

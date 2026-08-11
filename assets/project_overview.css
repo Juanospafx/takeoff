@@ -761,6 +761,11 @@ th {
     right: 0;
 }
 
+.documents-menu.row-menu {
+    position: fixed;
+    z-index: 5000;
+}
+
 .documents-menu.open {
     display: grid;
     gap: 2px;

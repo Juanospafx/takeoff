@@ -3,7 +3,32 @@
     if (!root) return;
 
     const Calc = window.EstimateCalculationService;
-    const projectId = Number(root.dataset.projectId || window.ProjectState?.projectId || 0);
+
+    function validProjectId(value) {
+        const candidate = typeof value === 'string' ? value.trim() : value;
+        if (candidate === '' || candidate === null || candidate === undefined) return 0;
+        const numeric = Number(candidate);
+        return Number.isSafeInteger(numeric) && numeric > 0 ? numeric : 0;
+    }
+
+    function resolveProjectId() {
+        const query = new URLSearchParams(window.location.search);
+        const candidates = [
+            root.dataset.projectId,
+            window.ProjectState?.projectId,
+            window.EstimateProjectId,
+            query.get('project_id'),
+            query.get('projectId'),
+            query.get('id')
+        ];
+        for (const candidate of candidates) {
+            const resolved = validProjectId(candidate);
+            if (resolved) return resolved;
+        }
+        return 0;
+    }
+
+    const projectId = resolveProjectId();
     const storageKey = `takeoff.estimating.module.${projectId || 'draft'}`;
     const columnPrefKey = `takeoff.estimating.columns.${projectId || 'draft'}`;
     const takeoffKey = `takeoff.quantification.${projectId || 'draft'}`;
@@ -205,6 +230,9 @@
             const estimates = parsed.estimates.map(est => ({
                 ...defaultEstimate(est.name || 'Estimate'),
                 ...est,
+                // The containing dashboard/API is authoritative. A copied or
+                // migrated browser snapshot must never retain another project.
+                projectId,
                 groups: (est.groups || parsed.groups || []).map(normalizeGroup),
                 settings: { ...defaultSettings(), ...(est.settings || {}) },
                 notes: { ...defaultEstimate().notes, ...(est.notes || {}) },
@@ -894,13 +922,13 @@
                     ${markupEditor('postTaxMarkups', 'Post-Tax Markups', summary.postTaxMarkups)}
                 </div>
             </section>
-            <section class="est-card ${state.auditCollapsed ? 'collapsed' : ''}"><button class="est-card-header" data-collapse-card="auditCollapsed" aria-expanded="${!state.auditCollapsed}"><span><i class="fas fa-chevron-down"></i> Audit</span><small>${activeEstimate().auditLog.length} events</small></button><div class="est-card-body est-audit-list">${activeEstimate().auditLog.slice(0, 20).map(log => `<div><strong>${esc(log.action)}</strong><span>${esc(log.entity || 'estimate')} · ${esc(log.user || 'Current user')} · ${new Date(log.at).toLocaleString()}</span></div>`).join('') || '<span class="est-muted">No changes recorded yet. Edits to items, settings and estimates will appear here.</span>'}</div></section>
+            <section class="est-card ${state.auditCollapsed ? 'collapsed' : ''}"><button type="button" class="est-card-header" data-collapse-card="auditCollapsed" aria-expanded="${!state.auditCollapsed}"><span><i class="fas fa-chevron-down"></i> Audit</span><small>${activeEstimate().auditLog.length} events</small></button><div class="est-card-body"><div class="est-audit-actions"><button type="button" class="est-small-btn" data-est-action="export-audit"><i class="fas fa-download"></i> Export</button><button type="button" class="est-small-btn" data-est-action="clear-audit" ${activeEstimate().auditLog.length ? '' : 'disabled'}><i class="fas fa-trash"></i> Clear</button></div><div class="est-audit-list">${activeEstimate().auditLog.slice(0, 50).map(log => `<div><strong>${esc(log.action)}</strong><span>${esc(log.entity || 'estimate')} · ${esc(log.user || 'Current user')} · ${new Date(log.at).toLocaleString()}</span></div>`).join('') || '<span class="est-muted">No changes recorded yet. Edits to items, settings and estimates will appear here.</span>'}</div></div></section>
         </div>
         <div class="est-total-box"><span>Estimate Total</span><strong>${money(summary.estimateTotal)}</strong><small>Cost ${money(summary.direct.totalCost)} · Profit ${money(summary.profit)} · Margin ${number(summary.marginPercent)}%</small><small>Labor ${number(summary.direct.adjustedLaborHours)} hrs · Tax ${money(summary.totalTax)} · Markups ${money(summary.totalMarkups)}</small><small>${squareFootage > 0 ? `${money(summary.direct.totalCost / squareFootage)} cost/sq ft · ${money(summary.estimateTotal / squareFootage)} sales/sq ft` : 'No project square footage configured'}</small></div>`;
     }
 
     function noteList(key, label) {
-        return `<div class="est-field-block"><div class="est-list-head"><span>${label}</span><button class="est-small-btn" data-note-add="${key}"><i class="fas fa-plus"></i></button></div>${activeEstimate().notes[key].map((value, index) => `<div class="est-note-row"><input class="est-note-input" value="${esc(value)}" data-note-list="${key}" data-note-index="${index}"><button class="est-icon-btn danger" data-note-remove="${key}:${index}"><i class="fas fa-times"></i></button></div>`).join('')}</div>`;
+        return `<div class="est-field-block"><div class="est-list-head"><span>${label}</span><button type="button" class="est-small-btn" data-note-add="${key}" aria-label="Add ${label} note"><i class="fas fa-plus"></i></button></div>${activeEstimate().notes[key].map((value, index) => `<div class="est-note-row"><input class="est-note-input" value="${esc(value)}" data-note-list="${key}" data-note-index="${index}"><button type="button" class="est-icon-btn danger" data-note-remove="${key}:${index}" aria-label="Remove ${label} note"><i class="fas fa-times"></i></button></div>`).join('')}</div>`;
     }
 
     function summaryTable(summary) {
@@ -909,7 +937,7 @@
     }
 
     function markupEditor(key, title, rows) {
-        return `<div class="est-summary-section"><div class="est-summary-title"><span>${title}</span><button data-markup-add="${key}"><i class="fas fa-plus"></i></button></div><div class="est-markup-list">${rows.map(row => `<div class="est-markup-row"><input value="${esc(row.name)}" data-markup-field="${key}:${row.id}:name"><select data-markup-field="${key}:${row.id}:type"><option ${row.type === 'percentage' ? 'selected' : ''}>percentage</option><option ${row.type === 'fixed_amount' ? 'selected' : ''}>fixed_amount</option></select><input type="number" step="0.01" value="${esc(row.percent ?? row.amount ?? 0)}" data-markup-field="${key}:${row.id}:percent"><select data-markup-field="${key}:${row.id}:base"><option ${row.base === 'subtotal_sales' ? 'selected' : ''}>subtotal_sales</option><option ${row.base === 'total_cost' ? 'selected' : ''}>total_cost</option><option ${row.base === 'material_cost' ? 'selected' : ''}>material_cost</option><option ${row.base === 'labor_cost' ? 'selected' : ''}>labor_cost</option><option ${row.base === 'equipment_cost' ? 'selected' : ''}>equipment_cost</option></select><strong>${money(row.value)}</strong><button class="est-icon-btn danger" data-markup-remove="${key}:${row.id}"><i class="fas fa-times"></i></button></div>`).join('')}</div></div>`;
+        return `<div class="est-summary-section"><div class="est-summary-title"><span>${title}</span><button type="button" data-markup-add="${key}" aria-label="Add ${title}"><i class="fas fa-plus"></i></button></div><div class="est-markup-list">${rows.map(row => { const valueField = row.type === 'fixed_amount' ? 'amount' : 'percent'; return `<div class="est-markup-row"><input value="${esc(row.name)}" data-markup-field="${key}:${row.id}:name"><select data-markup-field="${key}:${row.id}:type"><option ${row.type === 'percentage' ? 'selected' : ''}>percentage</option><option ${row.type === 'fixed_amount' ? 'selected' : ''}>fixed_amount</option></select><input type="number" step="0.01" value="${esc(row[valueField] ?? 0)}" data-markup-field="${key}:${row.id}:${valueField}"><select data-markup-field="${key}:${row.id}:base"><option ${row.base === 'subtotal_sales' ? 'selected' : ''}>subtotal_sales</option><option ${row.base === 'total_cost' ? 'selected' : ''}>total_cost</option><option ${row.base === 'material_cost' ? 'selected' : ''}>material_cost</option><option ${row.base === 'labor_cost' ? 'selected' : ''}>labor_cost</option><option ${row.base === 'equipment_cost' ? 'selected' : ''}>equipment_cost</option></select><strong>${money(row.value)}</strong><button type="button" class="est-icon-btn danger" data-markup-remove="${key}:${row.id}" aria-label="Remove markup"><i class="fas fa-times"></i></button></div>`; }).join('')}</div></div>`;
     }
 
     function taxEditor(summary) {
@@ -973,10 +1001,18 @@
         root.querySelectorAll('[data-row-menu]').forEach(btn => btn.addEventListener('click', e => openRowMenu(e, btn.dataset.rowMenu)));
         root.querySelectorAll('[data-column-toggle]').forEach(box => box.addEventListener('change', () => { state.hiddenColumns = box.checked ? state.hiddenColumns.filter(col => col !== box.dataset.columnToggle) : [...new Set([...state.hiddenColumns, box.dataset.columnToggle])]; render(); }));
         root.querySelector('[data-column-search]')?.addEventListener('input', e => { state.columnSearch = e.target.value; render(); });
-        root.querySelectorAll('[data-note-field]').forEach(editor => editor.addEventListener('input', () => { activeEstimate().notes[editor.dataset.noteField] = editor.innerHTML; markDirty(); persist(); }));
-        root.querySelectorAll('[data-note-list]').forEach(input => input.addEventListener('change', () => { activeEstimate().notes[input.dataset.noteList][Number(input.dataset.noteIndex)] = input.value; markDirty(); render(); }));
-        root.querySelectorAll('[data-note-add]').forEach(btn => btn.addEventListener('click', () => { activeEstimate().notes[btn.dataset.noteAdd].push(''); markDirty(); render(); }));
-        root.querySelectorAll('[data-note-remove]').forEach(btn => btn.addEventListener('click', () => { const [key, index] = btn.dataset.noteRemove.split(':'); activeEstimate().notes[key].splice(Number(index), 1); markDirty(); render(); }));
+        root.querySelectorAll('[data-note-field]').forEach(editor => {
+            editor.addEventListener('focus', () => { editor.dataset.originalValue = editor.innerHTML; });
+            editor.addEventListener('input', () => { activeEstimate().notes[editor.dataset.noteField] = editor.innerHTML; markDirty(); persist(); });
+            editor.addEventListener('blur', () => {
+                const before = editor.dataset.originalValue ?? '';
+                if (before !== editor.innerHTML) audit('Note edited', before, editor.innerHTML, editor.dataset.noteField);
+                persist();
+            });
+        });
+        root.querySelectorAll('[data-note-list]').forEach(input => input.addEventListener('change', () => { const list = activeEstimate().notes[input.dataset.noteList]; const index = Number(input.dataset.noteIndex); const before = list[index]; list[index] = input.value; audit('Note edited', before, input.value, input.dataset.noteList); markDirty(); render(); }));
+        root.querySelectorAll('[data-note-add]').forEach(btn => btn.addEventListener('click', () => { activeEstimate().notes[btn.dataset.noteAdd].push(''); audit('Note added', null, '', btn.dataset.noteAdd); markDirty(); render(); }));
+        root.querySelectorAll('[data-note-remove]').forEach(btn => btn.addEventListener('click', () => { const [key, index] = btn.dataset.noteRemove.split(':'); const removed = activeEstimate().notes[key].splice(Number(index), 1)[0]; audit('Note removed', removed, null, key); markDirty(); render(); }));
         root.querySelectorAll('[data-setting]').forEach(input => input.addEventListener('change', () => { activeSettings()[input.dataset.setting] = input.type === 'number' ? Number(input.value || 0) : input.value; markDirty(); render(); }));
         root.querySelectorAll('[data-tax-rate]').forEach(input => input.addEventListener('change', () => { activeSettings().taxes[input.dataset.taxRate] = Number(input.value || 0); markDirty(); render(); }));
         root.querySelectorAll('[data-markup-field]').forEach(input => input.addEventListener('change', () => updateMarkupField(input)));
@@ -1071,6 +1107,13 @@
         if (action === 'export-estimate') return exportTable('estimate');
         if (action === 'export-bom') return exportTable('bom');
         if (action === 'export-summary') return exportSummary();
+        if (action === 'export-audit') return exportAudit();
+        if (action === 'clear-audit') {
+            if (!estimate.auditLog.length || !confirm('Clear the audit history for this estimate?')) return;
+            estimate.auditLog = [];
+            markDirty();
+            return render();
+        }
         if (action === 'export-proposal') return showProposal();
     }
 
@@ -1198,9 +1241,34 @@
         const [key, rowId, field] = input.dataset.markupField.split(':');
         const row = activeSettings()[key].find(item => item.id === rowId);
         if (!row) return;
-        row[field] = field === 'percent' ? Number(input.value || 0) : input.value;
+        const before = { ...row };
+        row[field] = field === 'percent' || field === 'amount' ? Number(input.value || 0) : input.value;
+        if (field === 'type') {
+            if (input.value === 'fixed_amount') row.amount = Number(row.amount ?? row.percent ?? 0);
+            else row.percent = Number(row.percent ?? row.amount ?? 0);
+        }
+        audit('Markup edited', before, row, 'summary');
         markDirty();
         render();
+    }
+
+    function exportAudit() {
+        const estimate = activeEstimate();
+        const rows = estimate.auditLog.map(log => ({
+            timestamp: log.at,
+            user: log.user || 'Current user',
+            action: log.action,
+            entity: log.entity || 'estimate',
+            before: log.before ?? null,
+            after: log.after ?? null
+        }));
+        const blob = new Blob([JSON.stringify(rows, null, 2)], { type: 'application/json;charset=utf-8' });
+        const url = URL.createObjectURL(blob);
+        const link = document.createElement('a');
+        link.href = url;
+        link.download = `${String(estimate.name || 'estimate').replace(/[^a-z0-9_-]+/gi, '_')}-audit.json`;
+        link.click();
+        URL.revokeObjectURL(url);
     }
 
     function openRowMenu(event, token) {
