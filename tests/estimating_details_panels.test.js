@@ -22,7 +22,7 @@ test('dashboard loads the new state service before the v2 controller', () => {
     assert.match(page, /estimating_workspace_service\.js\?v=[^"']+/);
     assert.match(page, /project_estimating\.js\?v=[^"']+/);
     assert.ok(page.indexOf('estimating_workspace_service.js') < page.indexOf('project_estimating.js'));
-    assert.match(page, /project_estimating\.css\?v=estimating-calculation-audit/);
+    assert.match(page, /project_estimating\.css\?v=[^"']+/);
     assert.match(css, /Estimating v2/);
     assert.match(css, /\.est-v2 \.est-right-scroll\s*\{[\s\S]*?display:\s*block;[\s\S]*?overflow-y:\s*auto;/);
     assert.match(css, /\.est-v2 \.est-card-body\s*\{[\s\S]*?max-height:\s*none;[\s\S]*?overflow:\s*hidden;/);
