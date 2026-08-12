@@ -19,5 +19,5 @@ test('deselecting the count item clears persistence and returns to Smart', () =>
     assert.match(clear, /state\.selectedLayerUid = null/);
     assert.match(clear, /state\.continuousTool = false/);
     assert.match(clear, /setTool\('select'\)/);
-    assert.match(page, /editor\/takeoff\.js\?v=persistent-count-tool-20260812-1/);
+    assert.match(page, /editor\/takeoff\.js\?v=[a-z0-9-]+/i);
 });

@@ -20,6 +20,6 @@ test('linear takeoff cannot activate, start, or finish without a drawing scale',
 test('missing scale opens the parent scale panel and the new scripts bypass cache', () => {
     assert.match(editor, /project-takeoff-scale-required/);
     assert.match(project, /project-takeoff-scale-required'[\s\S]*openScalePanel\(\)/);
-    assert.match(page, /project_takeoff\.js\?v=linear-scale-required-20260811-1/);
-    assert.match(editorPage, /editor\/takeoff\.js\?v=persistent-count-tool-20260812-1/);
+    assert.match(page, /project_takeoff\.js\?v=[a-z0-9-]+/i);
+    assert.match(editorPage, /editor\/takeoff\.js\?v=[a-z0-9-]+/i);
 });

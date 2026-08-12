@@ -142,6 +142,8 @@
         delete copy.node;
         delete copy.labelNode;
         delete copy.handles;
+        delete copy.symbolNode;
+        delete copy.transformer;
         return copy;
     }
 
@@ -424,6 +426,8 @@
     }
 
     function symbolRadius(size) {
+        const numeric = Number(size);
+        if (Number.isFinite(numeric) && numeric > 0) return Math.max(4, Math.min(96, numeric));
         const raw = String(size || '').toLowerCase();
         if (raw === 'small') return 7;
         if (raw === 'large') return 12;
@@ -433,7 +437,10 @@
     function drawSymbol(group, symbol, color, size) {
         symbol = normalizeSymbol(symbol);
         const radius = symbolRadius(size);
-        const common = { stroke: '#fff', strokeWidth: 1.5, fill: color };
+        // Keep the outline crisp while allowing the drawing beneath a count
+        // marker to remain visible. `fillOpacity` affects only the fill, unlike
+        // group opacity which would also fade selection/lock affordances.
+        const common = { stroke: '#fff', strokeWidth: 1.5, fill: color, fillOpacity: 0.42 };
         if (symbol === 'square') group.add(new Konva.Rect({ x: -radius, y: -radius, width: radius * 2, height: radius * 2, ...common }));
         else if (symbol === 'triangle') group.add(new Konva.RegularPolygon({ sides: 3, radius: radius + 2, ...common }));
         else if (symbol === 'diamond') group.add(new Konva.RegularPolygon({ sides: 4, radius: radius + 2, rotation: 45, ...common }));
@@ -465,6 +472,7 @@
         state.markers.forEach(marker => {
             marker.node?.listening(listening);
             marker.node?.draggable(listening && !panning && !isElementLocked(marker));
+            marker.transformer?.listening(listening && !panning && !isElementLocked(marker));
         });
         state.segments.forEach(segment => {
             segment.node?.listening(listening);
@@ -480,6 +488,9 @@
         const locked = isElementLocked(marker);
         marker.node.draggable(!locked);
         marker.node.opacity(locked ? 0.55 : 1);
+        marker.transformer?.visible(!locked && state.selectedElement?.type === 'marker'
+            && state.selectedElement.ref === marker && state.selectedObjectUids.size === 1
+            && marker.page_number === pageNum);
         const existing = marker.node.findOne('.takeoff-object-lock');
         if (existing) existing.destroy();
         if (locked) marker.node.add(new Konva.Text({
@@ -576,20 +587,104 @@
 
     function createMarkerNode(marker) {
         if (!ensureKonva()) return;
+        const markerLayer = state.layers.find(layer => String(layer.client_uid) === String(marker.layer_client_uid));
+        const itemName = markerLayer?.name || marker.label || 'Takeoff item';
         const group = new Konva.Group({ x: num(marker.x), y: num(marker.y), draggable: !isElementLocked(marker), listening: !isTakeoffDrawingToolActive(), visible: marker.page_number === pageNum });
-        drawSymbol(group, marker.symbol || 'circle', marker.color || '#2563eb', marker.symbol_size || marker.size);
-        group.add(new Konva.Text({ x: 12, y: -10, text: marker.label || String(marker.quantity || ''), fill: marker.color || '#2563eb', fontSize: 14, fontStyle: 'bold' }));
+        const symbol = new Konva.Group({ name: 'takeoff-count-symbol' });
+        drawSymbol(symbol, marker.symbol || 'circle', marker.color || '#2563eb', marker.symbol_size || marker.size);
+        group.add(symbol);
+        // Quantity remains on the marker model and in layer roll-ups; it is not
+        // a visual label. Only render text explicitly entered by the user.
+        group.add(new Konva.Text({ x: 12, y: -10, text: marker.label || '', fill: marker.color || '#2563eb', fontSize: 14, fontStyle: 'bold' }));
+        const tooltip = new Konva.Label({ x: 0, y: -34, visible: false, listening: false, name: 'takeoff-marker-tooltip' });
+        tooltip.add(new Konva.Tag({ fill: '#0f172a', opacity: 0.94, cornerRadius: 4, pointerDirection: 'down', pointerWidth: 8, pointerHeight: 5 }));
+        tooltip.add(new Konva.Text({ text: itemName, fill: '#f8fafc', fontSize: 13, fontStyle: 'bold', padding: 7 }));
+        group.add(tooltip);
+        group.on('mouseenter', () => {
+            tooltip.visible(true);
+            tooltip.moveToTop();
+            document.body.style.cursor = 'pointer';
+            konvaLayer.batchDraw();
+        });
+        group.on('mouseleave', () => {
+            tooltip.visible(false);
+            document.body.style.cursor = '';
+            konvaLayer.batchDraw();
+        });
         group.on('click tap', event => {
             event.cancelBubble = true;
             setTool('smart');
             selectElement('marker', marker);
+        });
+        group.on('dblclick dbltap', event => {
+            event.cancelBubble = true;
+            setTool('smart');
+            selectElement('marker', marker);
+            if (!state.projectControlled || !marker.layer_client_uid) return;
+            window.parent?.postMessage({
+                type: 'project-takeoff-selection',
+                payload: {
+                    ids: [String(marker.client_uid)],
+                    layerId: String(marker.layer_client_uid),
+                    layerIds: [String(marker.layer_client_uid)],
+                    objectType: 'marker',
+                    activateLayer: true
+                }
+            }, '*');
         });
         group.on('contextmenu', event => openObjectContextMenu(event, 'marker', marker));
         group.on('dragstart', () => beginTakeoffSelectionDrag('marker', marker));
         group.on('dragmove', () => updateTakeoffSelectionDrag(marker));
         group.on('dragend', () => finishTakeoffSelectionDrag(marker));
         konvaLayer.add(group);
+        const transformer = new Konva.Transformer({
+            nodes: [symbol],
+            enabledAnchors: ['top-left', 'top-right', 'bottom-left', 'bottom-right'],
+            rotateEnabled: false,
+            keepRatio: true,
+            flipEnabled: false,
+            borderStroke: marker.color || '#38bdf8',
+            borderStrokeWidth: 1.5,
+            anchorFill: '#fff',
+            anchorStroke: marker.color || '#2563eb',
+            anchorStrokeWidth: 2,
+            anchorSize: 9,
+            visible: false,
+            boundBoxFunc: (oldBox, newBox) => {
+                const side = Math.max(Math.abs(newBox.width), Math.abs(newBox.height));
+                return side < 8 || side > 192 ? oldBox : newBox;
+            }
+        });
+        transformer.on('transformstart', () => {
+            if (isElementLocked(marker)) {
+                transformer.stopTransform?.();
+                return;
+            }
+            snapshot();
+        });
+        transformer.on('transformend', () => {
+            if (isElementLocked(marker)) return;
+            const scale = Math.max(Math.abs(symbol.scaleX()), Math.abs(symbol.scaleY()));
+            const nextRadius = Math.max(4, Math.min(96, symbolRadius(marker.symbol_size || marker.size) * scale));
+            symbol.scale({ x: 1, y: 1 });
+            marker.symbol_size = Number(nextRadius.toFixed(4));
+            marker.size = marker.symbol_size;
+            marker.metadata_json = { ...(marker.metadata_json || {}), symbol_size: marker.symbol_size };
+            marker.updatedAt = timestamp();
+            marker.updated_at = marker.updatedAt;
+            transformer.destroy();
+            group.destroy();
+            delete marker.node;
+            delete marker.symbolNode;
+            delete marker.transformer;
+            createMarkerNode(marker);
+            selectElement('marker', marker);
+            markDirty();
+        });
+        konvaLayer.add(transformer);
         marker.node = group;
+        marker.symbolNode = symbol;
+        marker.transformer = transformer;
         applyMarkerLockVisual(marker);
         konvaLayer.batchDraw();
     }
@@ -709,8 +804,16 @@
     }
 
     function clearNodes() {
-        state.markers.forEach(m => m.node && m.node.destroy());
+        state.markers.forEach(destroyMarkerNodes);
         state.segments.forEach(destroySegmentNodes);
+    }
+
+    function destroyMarkerNodes(marker) {
+        marker.transformer?.destroy();
+        marker.node?.destroy();
+        delete marker.transformer;
+        delete marker.symbolNode;
+        delete marker.node;
     }
 
     function renderNodes() {
@@ -723,6 +826,9 @@
         state.markers.forEach(m => {
             const layer = state.layers.find(l => l.client_uid === m.layer_client_uid);
             m.node && m.node.visible(m.page_number === pg && Number(layer?.visible ?? 1));
+            m.transformer?.visible(m.page_number === pg && Number(layer?.visible ?? 1) && !isElementLocked(m)
+                && state.selectedElement?.type === 'marker' && state.selectedElement.ref === m
+                && state.selectedObjectUids.size === 1);
         });
         state.segments.forEach(s => {
             const layer = state.layers.find(l => l.client_uid === s.layer_client_uid);
@@ -738,6 +844,7 @@
         state.selectedElement = { type, ref };
         state.selectedObjectUids = new Set(ref?.client_uid ? [String(ref.client_uid)] : []);
         state.segments.forEach(s => (s.handles || []).forEach(h => h.visible(type === 'segment' && ref === s && !isElementLocked(s))));
+        state.markers.forEach(marker => marker.transformer?.visible(type === 'marker' && ref === marker && !isElementLocked(marker)));
         applyObjectSelectionVisuals();
         renderProperties();
         if (konvaLayer) konvaLayer.batchDraw();
@@ -766,6 +873,7 @@
         state.selectedElement = null;
         state.selectedObjectUids.clear();
         state.segments.forEach(s => (s.handles || []).forEach(h => h.visible(false)));
+        state.markers.forEach(marker => marker.transformer?.visible(false));
         applyObjectSelectionVisuals();
         renderProperties();
         if (konvaLayer) konvaLayer.batchDraw();
@@ -777,7 +885,10 @@
         state.markers.forEach(marker => {
             if (!marker.node) return;
             const selected = state.selectedObjectUids.has(String(marker.client_uid));
-            marker.node.scale({ x: selected ? 1.18 : 1, y: selected ? 1.18 : 1 });
+            marker.node.scale({ x: 1, y: 1 });
+            marker.transformer?.visible(selected && state.selectedElement?.type === 'marker'
+                && state.selectedElement.ref === marker && state.selectedObjectUids.size === 1
+                && !isElementLocked(marker) && marker.page_number === pageNum);
             if (typeof marker.node.shadowEnabled === 'function') marker.node.shadowEnabled(selected);
             if (typeof marker.node.shadowColor === 'function') marker.node.shadowColor('#38bdf8');
             if (typeof marker.node.shadowBlur === 'function') marker.node.shadowBlur(selected ? 10 : 0);
@@ -1348,7 +1459,7 @@
     function deleteLayer(layer) {
         if (!layer || !confirm('Delete this takeoff layer and its measurements?')) return;
         snapshot();
-        state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).forEach(marker => marker.node && marker.node.destroy());
+        state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).forEach(destroyMarkerNodes);
         state.segments.filter(segment => segment.layer_client_uid === layer.client_uid).forEach(destroySegmentNodes);
         state.markers = state.markers.filter(marker => marker.layer_client_uid !== layer.client_uid);
         state.segments = state.segments.filter(segment => segment.layer_client_uid !== layer.client_uid);
@@ -1471,7 +1582,7 @@
 
     function clearIncompatibleMeasurements(layer, nextType) {
         if (nextType === 'linear') {
-            state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).forEach(marker => marker.node && marker.node.destroy());
+            state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).forEach(destroyMarkerNodes);
             state.markers = state.markers.filter(marker => marker.layer_client_uid !== layer.client_uid);
         } else if (nextType === 'count') {
             state.segments.filter(segment => segment.layer_client_uid === layer.client_uid).forEach(destroySegmentNodes);
@@ -1582,7 +1693,7 @@
             if (action === 'hide') layer.visible = 0;
             if (action === 'lock') layer.locked = 1;
             if (action === 'delete') {
-                state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).forEach(marker => marker.node && marker.node.destroy());
+                state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).forEach(destroyMarkerNodes);
                 state.segments.filter(segment => segment.layer_client_uid === layer.client_uid).forEach(destroySegmentNodes);
                 state.markers = state.markers.filter(marker => marker.layer_client_uid !== layer.client_uid);
                 state.segments = state.segments.filter(segment => segment.layer_client_uid !== layer.client_uid);
@@ -2230,7 +2341,7 @@
     }
 
     function deleteLayerWithoutConfirm(layer) {
-        state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).forEach(marker => marker.node && marker.node.destroy());
+        state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).forEach(destroyMarkerNodes);
         state.segments.filter(segment => segment.layer_client_uid === layer.client_uid).forEach(destroySegmentNodes);
         state.markers = state.markers.filter(marker => marker.layer_client_uid !== layer.client_uid);
         state.segments = state.segments.filter(segment => segment.layer_client_uid !== layer.client_uid);
@@ -2517,14 +2628,13 @@
                     <div class="takeoff-field"><label>Multiplier</label><input id="takeoffPropMultiplier" type="number" step="0.01" value="${escapeHtml(ref.multiplier || 1)}" ${locked ? 'disabled' : ''}></div>
                     <div class="takeoff-field"><label>${measuredLabel}</label><input disabled value="${measuredValue.toFixed(2)} ${escapeHtml(ref.unit || (type === 'marker' ? 'ea' : (isArea ? 'sq ft' : 'ft')))}"></div>
                 </div>
-                ${type === 'marker' ? `<div class="takeoff-field"><label>Symbol size</label><select id="takeoffPropSize" ${locked ? 'disabled' : ''}><option value="Small">Small</option><option value="Medium">Medium</option><option value="Large">Large</option></select></div>` : `
+                ${type === 'marker' ? `<div class="takeoff-field"><label>Symbol size</label><input id="takeoffPropSize" type="number" min="4" max="96" step="0.5" value="${symbolRadius(ref.symbol_size || ref.size)}" ${locked ? 'disabled' : ''}></div>` : `
                     <div class="takeoff-grid-2">
                         <div class="takeoff-field"><label>Stroke width</label><input id="takeoffPropStroke" type="number" min="1" max="20" step="1" value="${num(ref.stroke_width || (isArea ? 3 : 4))}" ${locked ? 'disabled' : ''}></div>
                         <div class="takeoff-field"><label>Points</label><input disabled value="${(ref.points_json || []).length}"></div>
                     </div>`}
                 <div class="takeoff-field"><label>Notes</label><textarea id="takeoffPropNotes" rows="3" ${locked ? 'disabled' : ''}>${escapeHtml(ref.notes || '')}</textarea></div>
             </div>`;
-        if (type === 'marker') document.getElementById('takeoffPropSize').value = ref.symbol_size || ref.size || 'Medium';
         const update = () => {
             if (isElementLocked(ref)) return;
             snapshot();
@@ -2532,18 +2642,18 @@
             ref.multiplier = num(document.getElementById('takeoffPropMultiplier').value || 1);
             ref.notes = document.getElementById('takeoffPropNotes').value;
             if (type === 'marker') {
-                const nextSize = document.getElementById('takeoffPropSize').value;
-                const sizeChanged = nextSize !== (ref.symbol_size || ref.size || 'Medium');
+                const nextSize = Math.max(4, Math.min(96, num(document.getElementById('takeoffPropSize').value || 9)));
+                const sizeChanged = nextSize !== symbolRadius(ref.symbol_size || ref.size);
                 ref.symbol_size = nextSize;
                 ref.size = nextSize;
+                ref.metadata_json = { ...(ref.metadata_json || {}), symbol_size: nextSize };
                 ref.quantity = calculateCountQuantity(ref);
                 if (sizeChanged) {
-                    ref.node?.destroy();
-                    delete ref.node;
+                    destroyMarkerNodes(ref);
                     createMarkerNode(ref);
                     selectElement('marker', ref);
                 } else {
-                    ref.node?.findOne('Text')?.text(ref.label || String(ref.quantity || ''));
+                    ref.node?.findOne('Text')?.text(ref.label || '');
                 }
             } else {
                 ref.stroke_width = Math.max(1, Math.min(20, num(document.getElementById('takeoffPropStroke').value || 4)));
@@ -2611,7 +2721,8 @@
             layers: state.layers,
             markers: state.markers.map(marker => ({
                 ...stripNodes(marker),
-                metadata_json: { ...(marker.metadata_json || {}), element_locked: isObjectIndividuallyLocked(marker) ? 1 : 0 }
+                metadata_json: { ...(marker.metadata_json || {}), element_locked: isObjectIndividuallyLocked(marker) ? 1 : 0,
+                    symbol_size: symbolRadius(marker.symbol_size || marker.size) }
             })),
             segments: state.segments.map(segment => ({
                 ...stripNodes(segment),
@@ -2647,7 +2758,7 @@
                     dbLayerIdMap.set(String(l.id), stableUid);
                     return restoreLayerCostSnapshot({ ...l, client_uid: stableUid, metadata_json: { ...metadata, project_layer_id: stableUid } });
                 });
-                state.markers = (data.markers || []).map(m => ({ ...m, client_uid: m.client_uid || String(m.id), layer_client_uid: dbLayerIdMap.get(String(m.layer_id)) || String(m.layer_id), metadata_json: m.metadata_json || {}, locked: Number(m.locked ?? m.metadata_json?.element_locked ?? 0) }));
+                state.markers = (data.markers || []).map(m => ({ ...m, client_uid: m.client_uid || String(m.id), layer_client_uid: dbLayerIdMap.get(String(m.layer_id)) || String(m.layer_id), metadata_json: m.metadata_json || {}, symbol_size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, locked: Number(m.locked ?? m.metadata_json?.element_locked ?? 0) }));
                 state.segments = (data.segments || []).map(s => ({ ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: dbLayerIdMap.get(String(s.layer_id)) || String(s.layer_id), points_json: s.points_json || [], metadata_json: s.metadata_json || {}, locked: Number(s.locked ?? s.metadata_json?.element_locked ?? 0) }));
             }
             const local = readLocalTakeoffState();
@@ -2663,7 +2774,7 @@
                         metadata_json: { ...(layer.metadata_json || {}), project_layer_id: stableUid }
                     });
                 });
-                state.markers = (local.markers || []).map(marker => ({ ...marker, client_uid: marker.client_uid || uid(), layer_client_uid: String(marker.layer_client_uid || marker.layer_id || ''), locked: Number(marker.locked ?? marker.metadata_json?.element_locked ?? 0) }));
+                state.markers = (local.markers || []).map(marker => ({ ...marker, client_uid: marker.client_uid || uid(), layer_client_uid: String(marker.layer_client_uid || marker.layer_id || ''), symbol_size: marker.symbol_size ?? marker.metadata_json?.symbol_size ?? marker.size, size: marker.symbol_size ?? marker.metadata_json?.symbol_size ?? marker.size, locked: Number(marker.locked ?? marker.metadata_json?.element_locked ?? 0) }));
                 state.segments = (local.segments || []).map(segment => ({ ...segment, client_uid: segment.client_uid || uid(), layer_client_uid: String(segment.layer_client_uid || segment.layer_id || ''), points_json: segment.points_json || [], locked: Number(segment.locked ?? segment.metadata_json?.element_locked ?? 0) }));
             }
             if (!state.selectedItemId && state.catalog.items[0]) state.selectedItemId = state.catalog.items[0].id;

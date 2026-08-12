@@ -2774,7 +2774,19 @@
             if (event.data?.type === 'project-takeoff-selection') {
                 const payload = event.data.payload || {};
                 setSelectedObjects(payload.ids || payload.selectedObjectIds || [], payload.layerId || null);
-                if (payload.layerId && findLayer(payload.layerId)) selectTakeoffContext(payload.layerId);
+                if (payload.layerId && findLayer(payload.layerId)) {
+                    if (payload.activateLayer === true) {
+                        const layer = findLayer(payload.layerId);
+                        const group = findGroup(layer.groupId);
+                        if (group) group.isExpanded = true;
+                        setActiveTakeoffLayer(payload.layerId);
+                        requestAnimationFrame(() => {
+                            [...document.querySelectorAll('[data-layer-row]')]
+                                .find(row => row.dataset.layerRow === String(layer.id))
+                                ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
+                        });
+                    } else selectTakeoffContext(payload.layerId);
+                }
                 return;
             }
             if (event.data?.type === 'project-takeoff-tool-state') {
