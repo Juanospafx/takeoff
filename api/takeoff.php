@@ -97,6 +97,36 @@ function ensure_takeoff_layer_columns(PDO $pdo): void
     takeoff_add_column($pdo, 'takeoff_layers', 'metadata_json', "ALTER TABLE takeoff_layers ADD COLUMN metadata_json JSON NULL");
 }
 
+function ensure_takeoff_geometry_tables(PDO $pdo): void
+{
+    $pdo->exec("CREATE TABLE IF NOT EXISTS takeoff_count_markers (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, client_uid VARCHAR(191) NULL,
+        layer_id BIGINT UNSIGNED NOT NULL, catalog_item_id BIGINT UNSIGNED NULL, assembly_id BIGINT UNSIGNED NULL,
+        page_number INT UNSIGNED NOT NULL DEFAULT 1, x DECIMAL(18,6) NOT NULL DEFAULT 0, y DECIMAL(18,6) NOT NULL DEFAULT 0,
+        symbol VARCHAR(50) NOT NULL DEFAULT 'circle', color VARCHAR(50) NOT NULL DEFAULT '#2563eb', label VARCHAR(191) NULL,
+        multiplier DECIMAL(18,6) NOT NULL DEFAULT 1, quantity DECIMAL(18,6) NOT NULL DEFAULT 1, notes TEXT NULL,
+        metadata_json JSON NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id), UNIQUE KEY uq_takeoff_count_marker_uid (layer_id, client_uid), KEY idx_takeoff_count_marker_page (layer_id, page_number)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS takeoff_linear_segments (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, client_uid VARCHAR(191) NULL,
+        layer_id BIGINT UNSIGNED NOT NULL, catalog_item_id BIGINT UNSIGNED NULL, assembly_id BIGINT UNSIGNED NULL,
+        page_number INT UNSIGNED NOT NULL DEFAULT 1, points_json JSON NOT NULL,
+        measured_length DECIMAL(18,6) NOT NULL DEFAULT 0, multiplier DECIMAL(18,6) NOT NULL DEFAULT 1,
+        total_length DECIMAL(18,6) NOT NULL DEFAULT 0, unit VARCHAR(50) NOT NULL DEFAULT 'ft',
+        color VARCHAR(50) NOT NULL DEFAULT '#2563eb', stroke_width DECIMAL(10,4) NOT NULL DEFAULT 4,
+        label VARCHAR(191) NULL, metadata_json JSON NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id), UNIQUE KEY uq_takeoff_linear_segment_uid (layer_id, client_uid), KEY idx_takeoff_linear_segment_page (layer_id, page_number)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS takeoff_measurement_summaries (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT, drawing_id BIGINT UNSIGNED NOT NULL,
+        summary_json JSON NOT NULL, created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        PRIMARY KEY (id), KEY idx_takeoff_summary_drawing_created (drawing_id, created_at)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
 function ensure_estimate_schema(PDO $pdo): void
 {
     $pdo->exec("CREATE TABLE IF NOT EXISTS estimates (
@@ -244,6 +274,28 @@ function ensure_project_estimate(PDO $pdo, int $projectId): int
     return (int)$pdo->lastInsertId();
 }
 
+function ensure_drawing_takeoff(PDO $pdo, int $projectId, int $drawingId): int
+{
+    $stmt = $pdo->prepare("SELECT id FROM takeoffs WHERE project_id = ? AND drawing_id = ? AND deleted_at IS NULL ORDER BY id LIMIT 1");
+    $stmt->execute([$projectId, $drawingId]);
+    $id = (int)$stmt->fetchColumn();
+    if ($id > 0) return $id;
+    try {
+        $stmt = $pdo->prepare("INSERT INTO takeoffs (project_id, drawing_id, name, status) VALUES (?, ?, ?, 'draft')");
+        $stmt->execute([$projectId, $drawingId, 'Drawing Takeoff']);
+    } catch (Throwable $e) {
+        // Some installations still constrain takeoffs.drawing_id to the newer
+        // drawings table, while editor.php identifies plans through files.id.
+        $stmt = $pdo->prepare("SELECT id FROM takeoffs WHERE project_id = ? AND deleted_at IS NULL ORDER BY id LIMIT 1");
+        $stmt->execute([$projectId]);
+        $existing = (int)$stmt->fetchColumn();
+        if ($existing > 0) return $existing;
+        $stmt = $pdo->prepare("INSERT INTO takeoffs (project_id, drawing_id, name, status) VALUES (?, NULL, ?, 'draft')");
+        $stmt->execute([$projectId, 'Project Takeoff']);
+    }
+    return (int)$pdo->lastInsertId();
+}
+
 function sync_estimate_items(PDO $pdo, int $estimateId, array $summary, array $layerMap): void
 {
     if (!$summary) return;
@@ -335,6 +387,7 @@ function state_payload(PDO $pdo, int $drawingId): array
 
 try {
     ensure_takeoff_layer_columns($pdo);
+    ensure_takeoff_geometry_tables($pdo);
     ensure_estimate_schema($pdo);
 
     switch ($action) {
@@ -402,6 +455,13 @@ try {
             $segments = is_array($input['segments'] ?? null) ? $input['segments'] : [];
             $summary = is_array($input['summary'] ?? null) ? $input['summary'] : [];
 
+            foreach (['takeoff_layers', 'takeoff_count_markers', 'takeoff_linear_segments', 'takeoff_measurement_summaries'] as $requiredTable) {
+                if (!takeoff_table_exists($pdo, $requiredTable)) {
+                    out_json(['status' => 'error', 'msg' => "Missing $requiredTable. Run db/migrations/2026-08-12_takeoff_shared_persistence.sql"], 503);
+                }
+            }
+            $takeoffId = ensure_drawing_takeoff($pdo, $projectId, $drawingId);
+
             $pdo->beginTransaction();
             $old = $pdo->prepare("SELECT id FROM takeoff_layers WHERE drawing_id = ?");
             $old->execute([$drawingId]);
@@ -417,8 +477,8 @@ try {
             $layerMap = [];
             $layerStmt = $pdo->prepare(
                 "INSERT INTO takeoff_layers
-                 (integration_key, drawing_id, page_number, name, type, takeoff_type, unit_of_measure, group_name, catalog_item_id, assembly_id, color, symbol, symbol_size, quantity, visible, locked, tag, estimate_item_id, metadata_json)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                 (takeoff_id, integration_key, drawing_id, page_number, name, type, takeoff_type, unit_of_measure, group_name, catalog_item_id, assembly_id, color, symbol, symbol_size, quantity, visible, locked, tag, estimate_item_id, metadata_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             );
             foreach ($layers as $layer) {
                 if (!is_array($layer)) continue;
@@ -435,6 +495,7 @@ try {
                     }
                 }
                 $layerStmt->execute([
+                    $takeoffId,
                     $layerClientId !== '' ? $layerClientId : null,
                     $drawingId,
                     i($layer['page_number'] ?? 1, 1),

@@ -28,6 +28,16 @@ test('sheet scale schema and API are isolated by drawing and page', () => {
     assert.match(api, /WHERE drawing_id = \? AND page_number = \?/);
 });
 
+test('geometry tables exist and every saved layer belongs to a persisted takeoff', () => {
+    assert.match(migration, /CREATE TABLE IF NOT EXISTS takeoff_count_markers/);
+    assert.match(migration, /CREATE TABLE IF NOT EXISTS takeoff_linear_segments/);
+    assert.match(migration, /CREATE TABLE IF NOT EXISTS takeoff_measurement_summaries/);
+    assert.match(api, /function ensure_takeoff_geometry_tables/);
+    assert.match(api, /ensure_drawing_takeoff\(\$pdo, \$projectId, \$drawingId\)/);
+    assert.match(api, /\(takeoff_id, integration_key, drawing_id/);
+    assert.match(api, /\$takeoffId,\s*\$layerClientId/);
+});
+
 test('editor loads and saves calibration through the shared API', () => {
     assert.match(shell, /takeoffScaleRequest\('scale', \{ drawing_id: fileId, page_number: requestedPage \}\)/);
     assert.match(shell, /takeoffScaleRequest\('save_scale'/);
