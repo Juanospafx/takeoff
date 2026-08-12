@@ -127,6 +127,30 @@ function ensure_takeoff_geometry_tables(PDO $pdo): void
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 }
 
+function ensure_takeoff_scale_table(PDO $pdo): void
+{
+    // Keep runtime bootstrapping self-contained. Deployments that restore an
+    // older database must not lose scale access merely because a migration
+    // file was not replayed after the code was updated.
+    $pdo->exec("CREATE TABLE IF NOT EXISTS takeoff_sheet_scales (
+        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+        project_id BIGINT UNSIGNED NULL,
+        drawing_id BIGINT UNSIGNED NOT NULL,
+        page_number INT UNSIGNED NOT NULL DEFAULT 1,
+        scale_name VARCHAR(100) NOT NULL,
+        pixels_per_unit DECIMAL(18,8) NOT NULL,
+        unit VARCHAR(50) NOT NULL DEFAULT 'ft',
+        calibration_json JSON NULL,
+        created_by BIGINT UNSIGNED NULL,
+        updated_by BIGINT UNSIGNED NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (id),
+        UNIQUE KEY uq_takeoff_sheet_scale (drawing_id, page_number),
+        KEY idx_takeoff_sheet_scales_project (project_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
 function ensure_estimate_schema(PDO $pdo): void
 {
     $pdo->exec("CREATE TABLE IF NOT EXISTS estimates (
@@ -388,6 +412,7 @@ function state_payload(PDO $pdo, int $drawingId): array
 try {
     ensure_takeoff_layer_columns($pdo);
     ensure_takeoff_geometry_tables($pdo);
+    ensure_takeoff_scale_table($pdo);
     ensure_estimate_schema($pdo);
 
     switch ($action) {
@@ -407,9 +432,6 @@ try {
             $drawingId = i($_GET['drawing_id'] ?? $input['drawing_id'] ?? 0);
             $pageNumber = max(1, i($_GET['page_number'] ?? $input['page_number'] ?? 1, 1));
             if ($drawingId <= 0) out_json(['status' => 'error', 'msg' => 'drawing_id is required'], 422);
-            if (!takeoff_table_exists($pdo, 'takeoff_sheet_scales')) {
-                out_json(['status' => 'error', 'msg' => 'Run db/migrations/2026-08-12_takeoff_shared_persistence.sql'], 503);
-            }
             $stmt = $pdo->prepare("SELECT id, project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_sheet_scales WHERE drawing_id = ? AND page_number = ? LIMIT 1");
             $stmt->execute([$drawingId, $pageNumber]);
             $rows = decode_json_fields(array_filter([$stmt->fetch(PDO::FETCH_ASSOC)]), ['calibration_json']);
@@ -421,9 +443,6 @@ try {
             $pixelsPerUnit = n($input['pixels_per_unit'] ?? 0);
             $scaleName = trim((string)($input['scale_name'] ?? 'Custom')) ?: 'Custom';
             if ($drawingId <= 0 || $pixelsPerUnit <= 0) out_json(['status' => 'error', 'msg' => 'drawing_id and a positive pixels_per_unit are required'], 422);
-            if (!takeoff_table_exists($pdo, 'takeoff_sheet_scales')) {
-                out_json(['status' => 'error', 'msg' => 'Run db/migrations/2026-08-12_takeoff_shared_persistence.sql'], 503);
-            }
             $projectId = project_id_for_file($pdo, $drawingId, i($input['project_id'] ?? 0));
             $userId = i($_SESSION['user_id'] ?? 0) ?: null;
             $stmt = $pdo->prepare(
@@ -441,7 +460,6 @@ try {
             $drawingId = i($input['drawing_id'] ?? 0);
             $pageNumber = max(1, i($input['page_number'] ?? 1, 1));
             if ($drawingId <= 0) out_json(['status' => 'error', 'msg' => 'drawing_id is required'], 422);
-            if (!takeoff_table_exists($pdo, 'takeoff_sheet_scales')) out_json(['status' => 'success']);
             $stmt = $pdo->prepare("DELETE FROM takeoff_sheet_scales WHERE drawing_id = ? AND page_number = ?");
             $stmt->execute([$drawingId, $pageNumber]);
             out_json(['status' => 'success']);
@@ -455,11 +473,6 @@ try {
             $segments = is_array($input['segments'] ?? null) ? $input['segments'] : [];
             $summary = is_array($input['summary'] ?? null) ? $input['summary'] : [];
 
-            foreach (['takeoff_layers', 'takeoff_count_markers', 'takeoff_linear_segments', 'takeoff_measurement_summaries'] as $requiredTable) {
-                if (!takeoff_table_exists($pdo, $requiredTable)) {
-                    out_json(['status' => 'error', 'msg' => "Missing $requiredTable. Run db/migrations/2026-08-12_takeoff_shared_persistence.sql"], 503);
-                }
-            }
             $takeoffId = ensure_drawing_takeoff($pdo, $projectId, $drawingId);
 
             $pdo->beginTransaction();

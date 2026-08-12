@@ -24,6 +24,9 @@ test('sheet scale schema and API are isolated by drawing and page', () => {
     assert.match(migration, /FOREIGN KEY \(drawing_id\) REFERENCES files\(id\) ON DELETE CASCADE/);
     assert.match(api, /case 'scale'/);
     assert.match(api, /case 'save_scale'/);
+    assert.match(api, /function ensure_takeoff_scale_table/);
+    assert.match(api, /ensure_takeoff_scale_table\(\$pdo\)/);
+    assert.doesNotMatch(api, /Run db\/migrations\/2026-08-12_takeoff_shared_persistence\.sql/);
     assert.match(api, /ON DUPLICATE KEY UPDATE/);
     assert.match(api, /WHERE drawing_id = \? AND page_number = \?/);
 });
