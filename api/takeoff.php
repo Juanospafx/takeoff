@@ -317,11 +317,19 @@ function state_payload(PDO $pdo, int $drawingId): array
     $stmt->execute([$drawingId]);
     $summary = $stmt->fetchColumn();
 
+    $scales = [];
+    if (takeoff_table_exists($pdo, 'takeoff_sheet_scales')) {
+        $stmt = $pdo->prepare("SELECT id, project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_sheet_scales WHERE drawing_id = ? ORDER BY page_number");
+        $stmt->execute([$drawingId]);
+        $scales = decode_json_fields($stmt->fetchAll(PDO::FETCH_ASSOC), ['calibration_json']);
+    }
+
     return [
         'layers' => $layers,
         'markers' => $markers,
         'segments' => $segments,
         'summary' => $summary ? json_decode((string)$summary, true) : [],
+        'scales' => $scales,
     ];
 }
 
@@ -341,6 +349,49 @@ try {
             $drawingId = i($_GET['drawing_id'] ?? $input['drawing_id'] ?? 0);
             if ($drawingId <= 0) out_json(['status' => 'error', 'msg' => 'drawing_id is required'], 422);
             out_json(['status' => 'success', 'data' => state_payload($pdo, $drawingId)]);
+
+        case 'scale':
+            $drawingId = i($_GET['drawing_id'] ?? $input['drawing_id'] ?? 0);
+            $pageNumber = max(1, i($_GET['page_number'] ?? $input['page_number'] ?? 1, 1));
+            if ($drawingId <= 0) out_json(['status' => 'error', 'msg' => 'drawing_id is required'], 422);
+            if (!takeoff_table_exists($pdo, 'takeoff_sheet_scales')) {
+                out_json(['status' => 'error', 'msg' => 'Run db/migrations/2026-08-12_takeoff_shared_persistence.sql'], 503);
+            }
+            $stmt = $pdo->prepare("SELECT id, project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_sheet_scales WHERE drawing_id = ? AND page_number = ? LIMIT 1");
+            $stmt->execute([$drawingId, $pageNumber]);
+            $rows = decode_json_fields(array_filter([$stmt->fetch(PDO::FETCH_ASSOC)]), ['calibration_json']);
+            out_json(['status' => 'success', 'data' => $rows[0] ?? null]);
+
+        case 'save_scale':
+            $drawingId = i($input['drawing_id'] ?? 0);
+            $pageNumber = max(1, i($input['page_number'] ?? 1, 1));
+            $pixelsPerUnit = n($input['pixels_per_unit'] ?? 0);
+            $scaleName = trim((string)($input['scale_name'] ?? 'Custom')) ?: 'Custom';
+            if ($drawingId <= 0 || $pixelsPerUnit <= 0) out_json(['status' => 'error', 'msg' => 'drawing_id and a positive pixels_per_unit are required'], 422);
+            if (!takeoff_table_exists($pdo, 'takeoff_sheet_scales')) {
+                out_json(['status' => 'error', 'msg' => 'Run db/migrations/2026-08-12_takeoff_shared_persistence.sql'], 503);
+            }
+            $projectId = project_id_for_file($pdo, $drawingId, i($input['project_id'] ?? 0));
+            $userId = i($_SESSION['user_id'] ?? 0) ?: null;
+            $stmt = $pdo->prepare(
+                "INSERT INTO takeoff_sheet_scales (project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, created_by, updated_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                 ON DUPLICATE KEY UPDATE project_id=VALUES(project_id), scale_name=VALUES(scale_name), pixels_per_unit=VALUES(pixels_per_unit), unit=VALUES(unit), calibration_json=VALUES(calibration_json), updated_by=VALUES(updated_by), updated_at=CURRENT_TIMESTAMP"
+            );
+            $stmt->execute([$projectId ?: null, $drawingId, $pageNumber, $scaleName, $pixelsPerUnit, $input['unit'] ?? 'ft', json_value($input['calibration_json'] ?? null), $userId, $userId]);
+            $stmt = $pdo->prepare("SELECT id, project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_sheet_scales WHERE drawing_id = ? AND page_number = ? LIMIT 1");
+            $stmt->execute([$drawingId, $pageNumber]);
+            $rows = decode_json_fields(array_filter([$stmt->fetch(PDO::FETCH_ASSOC)]), ['calibration_json']);
+            out_json(['status' => 'success', 'data' => $rows[0] ?? null]);
+
+        case 'delete_scale':
+            $drawingId = i($input['drawing_id'] ?? 0);
+            $pageNumber = max(1, i($input['page_number'] ?? 1, 1));
+            if ($drawingId <= 0) out_json(['status' => 'error', 'msg' => 'drawing_id is required'], 422);
+            if (!takeoff_table_exists($pdo, 'takeoff_sheet_scales')) out_json(['status' => 'success']);
+            $stmt = $pdo->prepare("DELETE FROM takeoff_sheet_scales WHERE drawing_id = ? AND page_number = ?");
+            $stmt->execute([$drawingId, $pageNumber]);
+            out_json(['status' => 'success']);
 
         case 'save_state':
             $drawingId = i($input['drawing_id'] ?? 0);

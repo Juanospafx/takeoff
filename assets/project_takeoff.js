@@ -113,9 +113,6 @@
             button.dataset.proTooltip = collapsed ? 'Expand inspector' : 'Collapse inspector';
             if (icon) icon.className = collapsed ? 'fas fa-angles-left' : 'fas fa-angles-right';
         }
-        try {
-            localStorage.setItem('takeoff.inspector.collapsed', collapsed ? '1' : '0');
-        } catch (e) {}
         requestAnimationFrame(syncWorkspaceDensity);
         setTimeout(notifyEditorVisible, 80);
     }
@@ -347,10 +344,6 @@
         uom: ''
     };
 
-    function takeoffStoreKey() {
-        return `takeoff.quantification.${window.ProjectState?.projectId || 'draft'}`;
-    }
-
     function typeToUom(type) {
         if (['Linear', 'Linear with drop', 'Linear avg. with drop'].includes(type)) return 'ft';
         if (type === 'Count by distance') return 'ea';
@@ -398,15 +391,6 @@
 
     function defaultGroup() {
         return { id: 'default', name: 'Default Group', isExpanded: true, isDefault: true, layers: [] };
-    }
-
-    function readSavedTakeoffs() {
-        try {
-            const parsed = JSON.parse(localStorage.getItem(takeoffStoreKey()) || 'null');
-            return parsed && Array.isArray(parsed.groups) ? parsed : null;
-        } catch (e) {
-            return null;
-        }
     }
 
     function seedGroupsFromProjectLayers() {
@@ -506,22 +490,9 @@
     }
 
     function saveTakeoffState() {
-        try {
-            localStorage.setItem(takeoffStoreKey(), JSON.stringify({
-                groups: takeoffState.groups,
-                activeGroupId: takeoffState.activeGroupId,
-                activeLayerId: takeoffState.activeLayerId,
-                canvasSnapshots: takeoffState.canvasSnapshots,
-                annotations: takeoffState.annotations,
-                pins: takeoffState.pins,
-                snapshots: takeoffState.snapshots,
-                compare: takeoffState.compare,
-                globalVisible: takeoffState.globalVisible
-            }));
-            syncTakeoffToEstimating();
-        } catch (e) {
-            console.warn('Takeoff state could not be saved', e);
-        }
+        // The iframe/API owns persistent Takeoff state. The dashboard keeps
+        // only transient UI state and never shadows database geometry.
+        syncTakeoffToEstimating();
     }
 
     function pushTakeoffHistory(reason = 'change') {
@@ -985,16 +956,15 @@
     }
 
     function initTakeoffState() {
-        const saved = readSavedTakeoffs();
-        takeoffState.groups = normalizeSavedGroups(saved?.groups || seedGroupsFromProjectLayers());
-        takeoffState.activeGroupId = saved?.activeGroupId || 'default';
-        takeoffState.activeLayerId = saved?.activeLayerId || null;
-        takeoffState.canvasSnapshots = saved?.canvasSnapshots && typeof saved.canvasSnapshots === 'object' ? saved.canvasSnapshots : {};
-        takeoffState.annotations = Array.isArray(saved?.annotations) ? saved.annotations : [];
-        takeoffState.pins = Array.isArray(saved?.pins) ? saved.pins : [];
-        takeoffState.snapshots = Array.isArray(saved?.snapshots) ? saved.snapshots : [];
-        takeoffState.compare = saved?.compare || null;
-        takeoffState.globalVisible = saved?.globalVisible !== false;
+        takeoffState.groups = normalizeSavedGroups(seedGroupsFromProjectLayers());
+        takeoffState.activeGroupId = 'default';
+        takeoffState.activeLayerId = null;
+        takeoffState.canvasSnapshots = {};
+        takeoffState.annotations = [];
+        takeoffState.pins = [];
+        takeoffState.snapshots = [];
+        takeoffState.compare = null;
+        takeoffState.globalVisible = true;
         applyAggregatedCanvasQuantities();
         if (!findGroup(takeoffState.activeGroupId)) takeoffState.activeGroupId = 'default';
         if (takeoffState.activeLayerId && !findLayer(takeoffState.activeLayerId)) takeoffState.activeLayerId = null;
@@ -2874,11 +2844,7 @@
     };
 
     document.addEventListener('DOMContentLoaded', () => {
-        let inspectorCollapsed = false;
-        try {
-            inspectorCollapsed = localStorage.getItem('takeoff.inspector.collapsed') === '1';
-        } catch (e) {}
-        setInspectorCollapsed(inspectorCollapsed);
+        setInspectorCollapsed(false);
         $('toggleTakeoffInspector')?.addEventListener('click', () => {
             setInspectorCollapsed(!$('takeoffWorkspace')?.classList.contains('inspector-collapsed'));
         });

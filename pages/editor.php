@@ -873,27 +873,50 @@ if ($filePath !== '') {
     let calMode = 'preset';
     let cloudStrokeWidth = 3; // default actual behavior
 
-    // Calibration Persistence
-    function getCalKey(suffix) {
-        return `cal_${suffix}_file_${fileId}_page_${pageNum}`;
+    // Calibration persistence is shared through MySQL, keyed by file + page.
+    async function takeoffScaleRequest(action, payload = {}, method = 'GET') {
+        const endpoint = '../api/takeoff.php';
+        const options = method === 'GET' ? {} : {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify({ action, ...payload })
+        };
+        const url = method === 'GET'
+            ? `${endpoint}?action=${encodeURIComponent(action)}&${new URLSearchParams(payload).toString()}`
+            : endpoint;
+        const response = await fetch(url, options);
+        const result = await response.json();
+        if (!response.ok || result.status !== 'success') throw new Error(result.msg || 'Scale persistence failed');
+        return result.data || null;
     }
 
-    function getLegacyCalKey(suffix) {
-        return `cal_${suffix}_file_${fileId}`;
-    }
-
-    function loadCalibrationForPage(showNotice) {
+    async function loadCalibrationForPage(showNotice) {
+        const requestedPage = Number(pageNum || 1);
         try {
-            let savedCal = localStorage.getItem(getCalKey('data'));
-            if (savedCal === null) savedCal = localStorage.getItem(getLegacyCalKey('data'));
-            if (savedCal && !isNaN(parseFloat(savedCal))) {
-                pixelsPerFoot = parseFloat(savedCal);
-                if (showNotice) setTimeout(() => showToast("Saved calibration loaded", "success"), 800);
-            } else {
-                pixelsPerFoot = 0;
-            }
-        } catch(e) { console.error("Storage error:", e); pixelsPerFoot = 0; }
-        loadScaleDisplay();
+            const scale = await takeoffScaleRequest('scale', { drawing_id: fileId, page_number: requestedPage });
+            if (requestedPage !== Number(pageNum || 1)) return;
+            pixelsPerFoot = Number(scale?.pixels_per_unit || 0);
+            setScaleDisplay(scale?.scale_name || '');
+            if (pixelsPerFoot > 0 && showNotice) setTimeout(() => showToast("Saved calibration loaded", "success"), 800);
+        } catch (error) {
+            pixelsPerFoot = 0;
+            setScaleDisplay('');
+            console.error('Scale load failed:', error);
+            if (showNotice) showToast(error.message, 'error');
+        }
+        refreshMeasureLabels();
+    }
+
+    function saveCalibrationForPage(scaleName, calibration = {}) {
+        return takeoffScaleRequest('save_scale', {
+            drawing_id: fileId,
+            project_id: typeof projectId !== 'undefined' ? projectId : 0,
+            page_number: pageNum,
+            scale_name: scaleName || 'Custom',
+            pixels_per_unit: pixelsPerFoot,
+            unit: 'ft',
+            calibration_json: calibration
+        }, 'POST');
     }
 
     function setScaleDisplay(text) {
@@ -904,16 +927,6 @@ if ($filePath !== '') {
     function keepScaleDisplayVisible() {
         const wrap = document.getElementById('scale-display-wrap');
         if (wrap) wrap.classList.add('active');
-    }
-
-    function loadScaleDisplay() {
-        let savedLabel = localStorage.getItem(getCalKey('scale_label'));
-        if (!savedLabel) savedLabel = localStorage.getItem(getLegacyCalKey('scale_label'));
-        if (savedLabel) {
-            setScaleDisplay(savedLabel);
-        } else {
-            setScaleDisplay('');
-        }
     }
 
     function getActiveScaleLabel() {
@@ -1109,8 +1122,7 @@ if ($filePath !== '') {
         const nextPixelsPerFoot = pixelsPerInch / preset.feetPerInch;
         if (!isFinite(nextPixelsPerFoot) || nextPixelsPerFoot <= 0) { showToast("Invalid preset calculation", "error"); return; }
         pixelsPerFoot = nextPixelsPerFoot;
-        localStorage.setItem(getCalKey('data'), pixelsPerFoot);
-        localStorage.setItem(getCalKey('scale_label'), preset.label);
+        await saveCalibrationForPage(preset.label, { mode: 'preset', preset_index: index, feet_per_inch: preset.feetPerInch });
         setScaleDisplay(preset.label);
         showToast(`Calibrated! 1 ft = ${pixelsPerFoot.toFixed(2)} px`, "success");
         refreshMeasureLabels();
@@ -3249,8 +3261,8 @@ if ($filePath !== '') {
             const val = parseFloat(document.getElementById('cal-val').value);
             if(val > 0) {
                 pixelsPerFoot = canvas.tempDist / val;
-                localStorage.setItem(getCalKey('data'), pixelsPerFoot);
-                localStorage.setItem(getCalKey('scale_label'), 'Custom');
+                saveCalibrationForPage('Custom', { mode: 'manual', measured_pixels: canvas.tempDist, real_feet: val })
+                    .catch(error => showToast(error.message, 'error'));
                 setScaleDisplay('Custom');
                 showToast(`Calibrated! 1 ft = ${pixelsPerFoot.toFixed(2)} px`, "success");
                 refreshMeasureLabels();
@@ -3718,7 +3730,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=rectangle-multiselect-20260812-1"></script>
+<script src="../assets/editor/takeoff.js?v=shared-takeoff-db-20260812-1"></script>
 </body>
 </html>
 

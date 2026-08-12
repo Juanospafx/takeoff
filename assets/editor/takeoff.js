@@ -65,12 +65,6 @@
         return false;
     }
 
-    function localTakeoffKey() {
-        const pid = typeof projectId !== 'undefined' ? projectId : 0;
-        const fid = typeof fileId !== 'undefined' ? fileId : 'drawing';
-        return `takeoff.editor.${pid}.${fid}`;
-    }
-
     function currentProjectId() {
         return typeof projectId !== 'undefined' ? String(projectId) : '0';
     }
@@ -99,26 +93,11 @@
         };
     }
 
-    function persistLocalTakeoffState() {
-        try {
-            localStorage.setItem(localTakeoffKey(), JSON.stringify(serializeTakeoffState()));
-        } catch (e) {}
-    }
-
     function scheduleTakeoffAutosave() {
         clearTimeout(takeoffAutosaveTimer);
         takeoffAutosaveTimer = setTimeout(() => {
             saveTakeoff(true);
         }, 900);
-    }
-
-    function readLocalTakeoffState() {
-        try {
-            const parsed = JSON.parse(localStorage.getItem(localTakeoffKey()) || 'null');
-            return parsed && Array.isArray(parsed.layers) ? parsed : null;
-        } catch (e) {
-            return null;
-        }
     }
 
     function request(action, payload, method) {
@@ -1273,7 +1252,6 @@
         state.dirty = true;
         renderSummary();
         renderLayers();
-        persistLocalTakeoffState();
         scheduleTakeoffAutosave();
         emitProjectState();
     }
@@ -2727,7 +2705,6 @@
 
     function saveTakeoff(silent = false) {
         state.layers.forEach(persistLayerCostSnapshot);
-        persistLocalTakeoffState();
         return request('save_state', {
             drawing_id: fileId,
             project_id: typeof projectId !== 'undefined' ? projectId : 0,
@@ -2773,22 +2750,6 @@
                 });
                 state.markers = (data.markers || []).map(m => ({ ...m, client_uid: m.client_uid || String(m.id), layer_client_uid: dbLayerIdMap.get(String(m.layer_id)) || String(m.layer_id), metadata_json: m.metadata_json || {}, symbol_size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, locked: Number(m.locked ?? m.metadata_json?.element_locked ?? 0) }));
                 state.segments = (data.segments || []).map(s => ({ ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: dbLayerIdMap.get(String(s.layer_id)) || String(s.layer_id), points_json: s.points_json || [], metadata_json: s.metadata_json || {}, locked: Number(s.locked ?? s.metadata_json?.element_locked ?? 0) }));
-            }
-            const local = readLocalTakeoffState();
-            const serverRows = [...state.layers, ...state.markers, ...state.segments];
-            const serverUpdatedAt = Math.max(0, ...serverRows.map(row => Date.parse(row.updated_at || row.updatedAt || row.created_at || '') || 0));
-            const localIsNewer = Number(local?.savedAt || 0) > serverUpdatedAt;
-            if (localIsNewer && ((local.markers || []).length || (local.segments || []).length)) {
-                state.layers = (local.layers || []).map(layer => {
-                    const stableUid = String(layer.client_uid || layer.metadata_json?.project_layer_id || layer.id || uid());
-                    return restoreLayerCostSnapshot({
-                        ...layer,
-                        client_uid: stableUid,
-                        metadata_json: { ...(layer.metadata_json || {}), project_layer_id: stableUid }
-                    });
-                });
-                state.markers = (local.markers || []).map(marker => ({ ...marker, client_uid: marker.client_uid || uid(), layer_client_uid: String(marker.layer_client_uid || marker.layer_id || ''), symbol_size: marker.symbol_size ?? marker.metadata_json?.symbol_size ?? marker.size, size: marker.symbol_size ?? marker.metadata_json?.symbol_size ?? marker.size, locked: Number(marker.locked ?? marker.metadata_json?.element_locked ?? 0) }));
-                state.segments = (local.segments || []).map(segment => ({ ...segment, client_uid: segment.client_uid || uid(), layer_client_uid: String(segment.layer_client_uid || segment.layer_id || ''), points_json: segment.points_json || [], locked: Number(segment.locked ?? segment.metadata_json?.element_locked ?? 0) }));
             }
             if (!state.selectedItemId && state.catalog.items[0]) state.selectedItemId = state.catalog.items[0].id;
             const onlyLegacyDefault = state.layers.length === 1
@@ -2858,7 +2819,6 @@
                 markDirty();
             }
         });
-        window.addEventListener('beforeunload', persistLocalTakeoffState);
     }
 
     window.setTakeoffInternalView = function(view) {
@@ -2963,7 +2923,6 @@
         setTakeoffPage(pageNum);
         renderLayers();
         emitProjectState();
-        persistLocalTakeoffState();
         return projectSnapshot();
     };
 
@@ -2983,7 +2942,6 @@
         if (!layer) return false;
         layer.visible = visible ? 1 : 0;
         setTakeoffPage(pageNum);
-        persistLocalTakeoffState();
         renderLayers();
         emitProjectState();
         scheduleTakeoffAutosave();
