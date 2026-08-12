@@ -18,13 +18,16 @@ function section(source, startMarker, endMarker) {
 test('Rectangle select is wired from the parent toolbar into the Konva editor', () => {
     assert.match(parent, /command === 'multi-select'[\s\S]*projectTakeoffSetTool', 'multi-select'[\s\S]*setActiveTool\(command\)/);
     assert.match(editor, /normalized === 'multi-select' \|\| normalized === 'select-rect'[\s\S]*setTool\('multi-select'\)/);
-    assert.match(editor, /konvaStage\.on\('mousedown touchstart'[\s\S]*new Konva\.Rect/);
-    assert.match(editor, /konvaStage\.on\('mousemove touchmove'[\s\S]*selectionRectDraft\.node\.size/);
-    assert.match(editor, /konvaStage\.on\('mouseup touchend'[\s\S]*finishRectangleSelection\(\)/);
+    assert.match(editor, /konvaStage\.on\('pointerdown mousedown touchstart'[\s\S]*new Konva\.Rect/);
+    assert.match(editor, /konvaStage\.on\('pointermove mousemove touchmove'[\s\S]*selectionRectDraft\.node\.size/);
+    assert.match(editor, /konvaStage\.on\('pointerup mouseup touchend pointercancel touchcancel'[\s\S]*finishRectangleSelection\(\)/);
 });
 
 test('Rectangle selection includes count, linear, and area objects but excludes hidden and off-page geometry', () => {
-    const finish = section(editor, 'const finishRectangleSelection', "konvaStage.on('mousedown touchstart'");
+    const finish = section(editor, 'const finishRectangleSelection', "konvaStage.on('pointerdown mousedown touchstart'");
+    assert.match(finish, /const start = selectionRectDraft\.start/);
+    assert.match(finish, /const current = selectionRectDraft\.current \|\| start/);
+    assert.doesNotMatch(finish, /selectionRectDraft\.node\.getClientRect/);
     assert.match(finish, /state\.markers\.filter\(marker => marker\.page_number === pageNum && marker\.node\?\.visible\(\)\)/);
     assert.match(finish, /state\.segments\.filter\(segment => segment\.page_number === pageNum && segment\.node\?\.visible\(\)\)/);
     assert.match(finish, /Konva\.Util\.haveIntersection\(rect,[\s\S]*marker\.node\.getClientRect/);

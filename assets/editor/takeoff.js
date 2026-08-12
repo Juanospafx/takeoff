@@ -1773,7 +1773,17 @@
         konvaStage._takeoffBound = true;
         const finishRectangleSelection = () => {
             if (!selectionRectDraft) return false;
-            const rect = selectionRectDraft.node.getClientRect({ relativeTo: konvaLayer });
+            const start = selectionRectDraft.start;
+            const current = selectionRectDraft.current || start;
+            // Keep selection geometry in world coordinates. Reading the visual
+            // node's client rect here produced inconsistent bounds when the PDF
+            // layer was zoomed or translated.
+            const rect = {
+                x: Math.min(start.x, current.x),
+                y: Math.min(start.y, current.y),
+                width: Math.abs(current.x - start.x),
+                height: Math.abs(current.y - start.y)
+            };
             selectionRectDraft.node.destroy();
             selectionRectDraft = null;
             if (rect.width < 3 && rect.height < 3) {
@@ -1801,8 +1811,10 @@
             return true;
         };
 
-        konvaStage.on('mousedown touchstart', evt => {
+        konvaStage.on('pointerdown mousedown touchstart', evt => {
             if (state.tool !== 'multi-select') return;
+            // Browsers may emit a compatibility mouse event after pointerdown.
+            if (selectionRectDraft) return;
             const nativeEvent = evt.evt;
             if (nativeEvent?.button != null && nativeEvent.button !== 0) return;
             const pos = konvaStage.getPointerPosition();
@@ -1820,18 +1832,19 @@
                 dash: [7, 5],
                 listening: false
             });
-            selectionRectDraft = { start, node };
+            selectionRectDraft = { start, current: start, node };
             konvaLayer.add(node);
             node.moveToTop();
             konvaLayer.batchDraw();
         });
 
-        konvaStage.on('mousemove touchmove', evt => {
+        konvaStage.on('pointermove mousemove touchmove', evt => {
             if (state.tool !== 'multi-select' || !selectionRectDraft) return;
             const pos = konvaStage.getPointerPosition();
             if (!pos) return;
             evt.cancelBubble = true;
             const current = screenToWorld(pos);
+            selectionRectDraft.current = current;
             selectionRectDraft.node.position({
                 x: Math.min(selectionRectDraft.start.x, current.x),
                 y: Math.min(selectionRectDraft.start.y, current.y)
@@ -1843,7 +1856,7 @@
             konvaLayer.batchDraw();
         });
 
-        konvaStage.on('mouseup touchend', evt => {
+        konvaStage.on('pointerup mouseup touchend pointercancel touchcancel', evt => {
             if (state.tool !== 'multi-select' || !selectionRectDraft) return;
             evt.cancelBubble = true;
             finishRectangleSelection();
