@@ -3718,7 +3718,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=linear-scale-required-20260811-1"></script>
+<script src="../assets/editor/takeoff.js?v=persistent-count-tool-20260812-1"></script>
 </body>
 </html>
 

@@ -21,5 +21,5 @@ test('missing scale opens the parent scale panel and the new scripts bypass cach
     assert.match(editor, /project-takeoff-scale-required/);
     assert.match(project, /project-takeoff-scale-required'[\s\S]*openScalePanel\(\)/);
     assert.match(page, /project_takeoff\.js\?v=linear-scale-required-20260811-1/);
-    assert.match(editorPage, /editor\/takeoff\.js\?v=linear-scale-required-20260811-1/);
+    assert.match(editorPage, /editor\/takeoff\.js\?v=persistent-count-tool-20260812-1/);
 });

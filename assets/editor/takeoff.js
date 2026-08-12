@@ -858,6 +858,13 @@
     }
 
     function finishToolUse() {
+        // Count/Point is intentionally persistent while its item remains active.
+        // Each click adds another marker; changing or clearing the active layer
+        // is the explicit boundary that returns the editor to Smart/Select.
+        if (state.tool === 'takeoff_count' && activeLayer()) {
+            emitToolState();
+            return;
+        }
         if (state.continuousTool) {
             emitToolState();
             return;
@@ -2840,6 +2847,7 @@
         state.projectControlled = true;
         state.selectedLayerUid = null;
         state.selectedLayerUids.clear();
+        state.continuousTool = false;
         setTool('select');
         renderLayers();
         emitProjectState();
