@@ -26,7 +26,7 @@
     const projectId = resolveProjectId();
     const storageKey = `takeoff.estimating.module.${projectId || 'draft'}`;
     const apiUrl = '../api/project_estimating.php';
-    const ui = { search: '', selected: new Set(), saving: false, saveTimer: null, loadState: projectId ? 'loading' : 'local',
+    const ui = { search: '', selected: new Set(), saving: false, saveRequested: false, saveTimer: null, loadState: projectId ? 'loading' : 'local',
         message: projectId ? 'Loading estimate' : 'Local draft', collapsed: {}, modal: null };
     let state = readLocal();
 
@@ -111,6 +111,7 @@
 
     function scheduleSave() {
         if (!projectId) return;
+        ui.saveRequested = true;
         clearTimeout(ui.saveTimer);
         ui.loadState = 'pending';
         ui.message = 'Unsaved changes';
@@ -125,7 +126,11 @@
     }
 
     async function saveServer() {
-        if (!projectId || ui.saving) return;
+        if (!projectId) return;
+        if (ui.saving) {
+            ui.saveRequested = true;
+            return;
+        }
         if (calculationErrors().length) {
             ui.loadState = 'error';
             ui.message = 'Cannot save: every margin must be below 100%.';
@@ -133,6 +138,7 @@
             return;
         }
         ui.saving = true;
+        ui.saveRequested = false;
         ui.loadState = 'saving';
         ui.message = 'Saving…';
         renderStatus();
@@ -141,9 +147,26 @@
         try {
             const result = await request('save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                 body: JSON.stringify({ action: 'save', project_id: projectId, state: sent, summary: summary() }) });
-            state = Workspace.workspace(result.state || sent, projectId);
-            ui.loadState = 'saved';
-            ui.message = 'Saved';
+            const acknowledged = Workspace.workspace(result.state || sent, projectId);
+            if (state.clientUiUpdatedAt === sent.clientUiUpdatedAt) {
+                state = acknowledged;
+                ui.loadState = 'saved';
+                ui.message = 'Saved';
+            } else {
+                // A stale response must not replace estimates created or edited
+                // while this request was in flight. Carry forward only the
+                // server identity and revision needed by the queued save.
+                const acknowledgements = new Map(acknowledged.estimates.map(estimate => [String(estimate.id), estimate]));
+                state.estimates.forEach(estimate => {
+                    const ack = acknowledgements.get(String(estimate.id));
+                    if (!ack) return;
+                    estimate.dbEstimateId = ack.dbEstimateId;
+                    estimate.revision = ack.revision;
+                });
+                ui.saveRequested = true;
+                ui.loadState = 'pending';
+                ui.message = 'Unsaved changes';
+            }
             saveLocal();
         } catch (error) {
             ui.loadState = 'error';
@@ -151,6 +174,10 @@
         } finally {
             ui.saving = false;
             render();
+            if (ui.saveRequested) {
+                clearTimeout(ui.saveTimer);
+                ui.saveTimer = setTimeout(saveServer, 0);
+            }
         }
     }
 
@@ -514,7 +541,8 @@
         if (!state.estimates.some(row => row.id === String(estimateId))) return;
         state.activeEstimateId = String(estimateId);
         state.groups = current().groups;
-        ui.selected.clear(); saveLocal(); render();
+        Workspace.touch(state, `Selected estimate “${current().name}”`);
+        ui.selected.clear(); saveLocal(); scheduleSave(); render();
     }
 
     window.addEventListener('takeoff:estimating-lines-updated', event => {
@@ -534,6 +562,23 @@
         if (event.key !== storageKey || !event.newValue) return;
         state = Workspace.workspace(JSON.parse(event.newValue), projectId); render();
     });
+
+    window.projectEstimatingSave = async function () {
+        if (!projectId) return true;
+        const started = Date.now();
+        ui.saveRequested = true;
+        while (ui.saving || ui.saveRequested) {
+            if (Date.now() - started > 15000) throw new Error('Estimating save timed out.');
+            if (ui.saving) {
+                await new Promise(resolve => setTimeout(resolve, 50));
+                continue;
+            }
+            clearTimeout(ui.saveTimer);
+            await saveServer();
+            if (ui.loadState === 'error') throw new Error(ui.message);
+        }
+        return true;
+    };
 
     saveLocal();
     render();

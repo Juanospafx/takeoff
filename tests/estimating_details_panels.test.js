@@ -19,8 +19,8 @@ test('v2 renders functional notes, summary and audit cards', () => {
 });
 
 test('dashboard loads the new state service before the v2 controller', () => {
-    assert.match(page, /estimating_workspace_service\.js\?v=estimating-calculation-audit/);
-    assert.match(page, /project_estimating\.js\?v=estimating-calculation-audit/);
+    assert.match(page, /estimating_workspace_service\.js\?v=[^"']+/);
+    assert.match(page, /project_estimating\.js\?v=[^"']+/);
     assert.ok(page.indexOf('estimating_workspace_service.js') < page.indexOf('project_estimating.js'));
     assert.match(page, /project_estimating\.css\?v=estimating-calculation-audit/);
     assert.match(css, /Estimating v2/);

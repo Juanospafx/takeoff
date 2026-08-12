@@ -508,8 +508,13 @@ try {
         $pdo->beginTransaction();
         $savedEstimates = array();
         $keptIds = array();
+        $requestedActiveId = $workspace && isset($workspace['activeEstimateId']) ? (string)$workspace['activeEstimateId'] : '';
         foreach ($incoming as $estimate) {
             if (!is_array($estimate)) pew_error('Invalid estimate in workspace.', 422, 'invalid_estimate');
+            // activeEstimateId is the workspace-level source of truth. Persist a
+            // single flag in each lossless estimate snapshot so GET/list can
+            // restore the same selection after a full page reload.
+            if ($workspace) $estimate['isActive'] = $requestedActiveId !== '' && (string)(isset($estimate['id']) ? $estimate['id'] : '') === $requestedActiveId;
             $expected = isset($estimate['revision']) ? pew_int($estimate['revision']) : null;
             $summary = isset($body['summary']) && is_array($body['summary']) && isset($workspace['activeEstimateId']) && $workspace['activeEstimateId'] === $estimate['id'] ? $body['summary'] : array();
             $savedEstimate = pew_save_estimate($pdo, $projectId, $estimate, $summary, $expected);
@@ -526,6 +531,11 @@ try {
         $pdo->commit();
         if ($workspace) {
             $workspace['estimates'] = $savedEstimates;
+            $savedActiveExists = false;
+            foreach ($savedEstimates as $savedEstimate) {
+                if ((string)$savedEstimate['id'] === $requestedActiveId) { $savedActiveExists = true; break; }
+            }
+            $workspace['activeEstimateId'] = $savedActiveExists ? $requestedActiveId : ($savedEstimates ? $savedEstimates[0]['id'] : null);
             pew_json(array('ok' => true, 'success' => true, 'state' => $workspace));
         }
         $savedEstimate = $savedEstimates[0];

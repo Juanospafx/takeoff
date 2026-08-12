@@ -106,6 +106,7 @@
         return {
             id: text(row.id) || uid('estimate'),
             dbEstimateId: projectId(row.dbEstimateId) || undefined,
+            isActive: row.isActive === true,
             revision: Math.max(0, numeric(row.revision)),
             projectId: currentProjectId,
             name: text(row.name, index ? `Estimate ${index + 1}` : 'Primary Estimate'),
@@ -150,6 +151,7 @@
             : [estimate({ groups: seedGroups(seedItems) }, currentProjectId)];
         const requestedActive = text(raw.activeEstimateId);
         const activeEstimateId = estimates.some(row => row.id === requestedActive) ? requestedActive : estimates[0].id;
+        estimates.forEach(row => { row.isActive = row.id === activeEstimateId; });
         const active = estimates.find(row => row.id === activeEstimateId);
         return {
             schemaVersion: 2,
@@ -198,6 +200,7 @@
             notes: mode === 'all' ? clone(source.notes) : {} }, state.projectId, state.estimates.length);
         state.estimates.push(created);
         state.activeEstimateId = created.id;
+        state.estimates.forEach(row => { row.isActive = row.id === created.id; });
         state.groups = created.groups;
         return touch(state, `Created estimate “${created.name}”`);
     }
@@ -208,6 +211,7 @@
         if (index < 0) return false;
         state.estimates.splice(index, 1);
         state.activeEstimateId = state.estimates[Math.max(0, index - 1)].id;
+        state.estimates.forEach(row => { row.isActive = row.id === state.activeEstimateId; });
         return touch(state, 'Deleted estimate');
     }
 

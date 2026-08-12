@@ -118,6 +118,9 @@
             if (typeof saveTakeoff === 'function') {
                 await saveTakeoff.call(takeoffFrame.contentWindow);
             }
+            if (typeof window.projectEstimatingSave === 'function') {
+                await window.projectEstimatingSave();
+            }
             const wasDraft = Number(window.ProjectState?.projectId || 0) === 0;
             const result = await request('save', payload);
             const projectId = savedProjectId(result);
