@@ -2703,7 +2703,7 @@
         emitProjectState();
     }
 
-    function saveTakeoff(silent = false) {
+    function saveTakeoff(silent = false, rejectOnError = false) {
         state.layers.forEach(persistLayerCostSnapshot);
         return request('save_state', {
             drawing_id: fileId,
@@ -2727,6 +2727,7 @@
         }).catch(err => {
             if (!silent) showToast(err.message, 'error');
             else console.warn('Takeoff autosave failed', err);
+            if (rejectOnError) throw err;
         });
     }
 
@@ -2748,8 +2749,8 @@
                     dbLayerIdMap.set(String(l.id), stableUid);
                     return restoreLayerCostSnapshot({ ...l, client_uid: stableUid, metadata_json: { ...metadata, project_layer_id: stableUid } });
                 });
-                state.markers = (data.markers || []).map(m => ({ ...m, client_uid: m.client_uid || String(m.id), layer_client_uid: dbLayerIdMap.get(String(m.layer_id)) || String(m.layer_id), metadata_json: m.metadata_json || {}, symbol_size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, locked: Number(m.locked ?? m.metadata_json?.element_locked ?? 0) }));
-                state.segments = (data.segments || []).map(s => ({ ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: dbLayerIdMap.get(String(s.layer_id)) || String(s.layer_id), points_json: s.points_json || [], metadata_json: s.metadata_json || {}, locked: Number(s.locked ?? s.metadata_json?.element_locked ?? 0) }));
+                state.markers = (data.markers || []).map(m => ({ ...m, client_uid: m.client_uid || String(m.id), layer_client_uid: String(m.layer_client_uid || dbLayerIdMap.get(String(m.layer_id)) || m.layer_id || ''), metadata_json: m.metadata_json || {}, symbol_size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, locked: Number(m.locked ?? m.metadata_json?.element_locked ?? 0) }));
+                state.segments = (data.segments || []).map(s => ({ ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: String(s.layer_client_uid || dbLayerIdMap.get(String(s.layer_id)) || s.layer_id || ''), points_json: s.points_json || [], metadata_json: s.metadata_json || {}, locked: Number(s.locked ?? s.metadata_json?.element_locked ?? 0) }));
             }
             if (!state.selectedItemId && state.catalog.items[0]) state.selectedItemId = state.catalog.items[0].id;
             const onlyLegacyDefault = state.layers.length === 1
@@ -3149,6 +3150,10 @@
 
     window.projectTakeoffDeleteSelection = function (objectIds) {
         return deleteTakeoffSelection(objectIds);
+    };
+
+    window.projectTakeoffSave = function () {
+        return saveTakeoff(true, true);
     };
 
     window.projectTakeoffDeleteCurrentSelection = function () {

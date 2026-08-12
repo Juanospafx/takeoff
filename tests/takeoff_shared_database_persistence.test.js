@@ -6,6 +6,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const editor = fs.readFileSync(path.join(root, 'assets/editor/takeoff.js'), 'utf8');
 const parent = fs.readFileSync(path.join(root, 'assets/project_takeoff.js'), 'utf8');
+const overview = fs.readFileSync(path.join(root, 'assets/project_overview.js'), 'utf8');
 const shell = fs.readFileSync(path.join(root, 'pages/editor.php'), 'utf8');
 const api = fs.readFileSync(path.join(root, 'api/takeoff.php'), 'utf8');
 const migration = fs.readFileSync(path.join(root, 'db/migrations/2026-08-12_takeoff_shared_persistence.sql'), 'utf8');
@@ -16,6 +17,15 @@ test('Takeoff geometry uses the database without a browser-state override', () =
     assert.match(editor, /request\('save_state'/);
     assert.match(editor, /request\('state', \{ drawing_id: fileId \}, 'GET'\)/);
     assert.match(parent, /iframe\/API owns persistent Takeoff state/);
+});
+
+test('one authoritative drawing snapshot survives relational mirror failures', () => {
+    assert.match(api, /CREATE TABLE IF NOT EXISTS takeoff_drawing_states/);
+    assert.match(api, /INSERT INTO takeoff_drawing_states[\s\S]*ON DUPLICATE KEY UPDATE/);
+    assert.match(api, /SELECT state_json FROM takeoff_drawing_states/);
+    assert.match(api, /Takeoff relational mirror failed/);
+    assert.match(editor, /window\.projectTakeoffSave = function[\s\S]*saveTakeoff\(true, true\)/);
+    assert.match(overview, /await saveTakeoff\.call\(takeoffFrame\.contentWindow\)/);
 });
 
 test('sheet scale schema and API are isolated by drawing and page', () => {

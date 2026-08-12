@@ -151,6 +151,20 @@ function ensure_takeoff_scale_table(PDO $pdo): void
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 }
 
+function ensure_takeoff_state_table(PDO $pdo): void
+{
+    $pdo->exec("CREATE TABLE IF NOT EXISTS takeoff_drawing_states (
+        drawing_id BIGINT UNSIGNED NOT NULL,
+        project_id BIGINT UNSIGNED NULL,
+        state_json JSON NOT NULL,
+        revision BIGINT UNSIGNED NOT NULL DEFAULT 1,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (drawing_id),
+        KEY idx_takeoff_drawing_states_project (project_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+}
+
 function ensure_estimate_schema(PDO $pdo): void
 {
     $pdo->exec("CREATE TABLE IF NOT EXISTS estimates (
@@ -371,6 +385,20 @@ function sync_estimate_items(PDO $pdo, int $estimateId, array $summary, array $l
 
 function state_payload(PDO $pdo, int $drawingId): array
 {
+    if (takeoff_table_exists($pdo, 'takeoff_drawing_states')) {
+        $stmt = $pdo->prepare("SELECT state_json FROM takeoff_drawing_states WHERE drawing_id = ? LIMIT 1");
+        $stmt->execute([$drawingId]);
+        $stored = $stmt->fetchColumn();
+        if ($stored) {
+            $snapshot = json_decode((string)$stored, true);
+            if (is_array($snapshot) && isset($snapshot['layers'], $snapshot['markers'], $snapshot['segments'])) {
+                $stmt = $pdo->prepare("SELECT id, project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_sheet_scales WHERE drawing_id = ? ORDER BY page_number");
+                $stmt->execute([$drawingId]);
+                $snapshot['scales'] = decode_json_fields($stmt->fetchAll(PDO::FETCH_ASSOC), ['calibration_json']);
+                return $snapshot;
+            }
+        }
+    }
     $stmt = $pdo->prepare("SELECT * FROM takeoff_layers WHERE drawing_id = ? ORDER BY page_number, id");
     $stmt->execute([$drawingId]);
     $layers = decode_json_fields($stmt->fetchAll(PDO::FETCH_ASSOC), ['metadata_json']);
@@ -413,6 +441,7 @@ try {
     ensure_takeoff_layer_columns($pdo);
     ensure_takeoff_geometry_tables($pdo);
     ensure_takeoff_scale_table($pdo);
+    ensure_takeoff_state_table($pdo);
     ensure_estimate_schema($pdo);
 
     switch ($action) {
@@ -473,9 +502,18 @@ try {
             $segments = is_array($input['segments'] ?? null) ? $input['segments'] : [];
             $summary = is_array($input['summary'] ?? null) ? $input['summary'] : [];
 
-            $takeoffId = ensure_drawing_takeoff($pdo, $projectId, $drawingId);
+            $snapshot = ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary];
+            $stmt = $pdo->prepare(
+                "INSERT INTO takeoff_drawing_states (drawing_id, project_id, state_json, revision)
+                 VALUES (?, ?, ?, 1)
+                 ON DUPLICATE KEY UPDATE project_id=VALUES(project_id), state_json=VALUES(state_json), revision=revision+1, updated_at=CURRENT_TIMESTAMP"
+            );
+            $stmt->execute([$drawingId, $projectId ?: null, json_value($snapshot) ?? '{}']);
 
-            $pdo->beginTransaction();
+            try {
+                $takeoffId = ensure_drawing_takeoff($pdo, $projectId, $drawingId);
+
+                $pdo->beginTransaction();
             $old = $pdo->prepare("SELECT id FROM takeoff_layers WHERE drawing_id = ?");
             $old->execute([$drawingId]);
             $oldIds = $old->fetchAll(PDO::FETCH_COLUMN);
@@ -593,7 +631,12 @@ try {
             $stmt->execute([$drawingId, json_value($summary) ?? '[]']);
             $estimateId = ensure_project_estimate($pdo, $projectId);
             sync_estimate_items($pdo, $estimateId, $summary, $layerMap);
-            $pdo->commit();
+                $pdo->commit();
+            } catch (Throwable $mirrorError) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                error_log('Takeoff relational mirror failed: ' . $mirrorError->getMessage());
+                out_json(['status' => 'success', 'data' => state_payload($pdo, $drawingId), 'warning' => 'Takeoff saved; estimating mirror will retry on the next save.']);
+            }
             out_json(['status' => 'success', 'data' => state_payload($pdo, $drawingId)]);
 
         case 'save_catalog_item':

@@ -3,6 +3,17 @@
 -- takeoff_linear_segments. This table replaces browser-only scale storage.
 SET NAMES utf8mb4;
 
+CREATE TABLE IF NOT EXISTS takeoff_drawing_states (
+    drawing_id BIGINT UNSIGNED NOT NULL,
+    project_id BIGINT UNSIGNED NULL,
+    state_json JSON NOT NULL,
+    revision BIGINT UNSIGNED NOT NULL DEFAULT 1,
+    created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (drawing_id),
+    KEY idx_takeoff_drawing_states_project (project_id)
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS takeoff_sheet_scales (
     id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     project_id BIGINT UNSIGNED NULL,

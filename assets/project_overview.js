@@ -113,6 +113,11 @@
         }
 
         try {
+            const takeoffFrame = document.getElementById('takeoffFrame');
+            const saveTakeoff = takeoffFrame?.contentWindow?.projectTakeoffSave;
+            if (typeof saveTakeoff === 'function') {
+                await saveTakeoff.call(takeoffFrame.contentWindow);
+            }
             const wasDraft = Number(window.ProjectState?.projectId || 0) === 0;
             const result = await request('save', payload);
             const projectId = savedProjectId(result);
