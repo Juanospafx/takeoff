@@ -62,6 +62,6 @@ test('Delete and trash reuse the authoritative selection deletion flow', () => {
     assert.match(deletion, /selectedTakeoffObjectIds\(\)/);
     assert.match(deletion, /state\.markers = state\.markers\.filter/);
     assert.match(deletion, /state\.segments = state\.segments\.filter/);
-    assert.match(deletion, /markDirty\(\)/);
+    assert.match(deletion, /trackTakeoffObjects\(targets, true\)[\s\S]*markDirty\(\{ objectsTracked: true \}\)/);
     assert.match(editor, /projectTakeoffDeleteSelection = function[\s\S]*deleteTakeoffSelection\(objectIds\)/);
 });

@@ -9,6 +9,14 @@ $input = json_decode(file_get_contents('php://input'), true);
 if (!is_array($input)) $input = [];
 $action = $_GET['action'] ?? $_POST['action'] ?? $input['action'] ?? '';
 
+class TakeoffObjectConflict extends RuntimeException {
+    public $conflicts;
+    public function __construct(array $conflicts) {
+        parent::__construct('One or more takeoff objects were changed by another user.');
+        $this->conflicts = $conflicts;
+    }
+}
+
 function out_json(array $payload, int $status = 200): void
 {
     http_response_code($status);
@@ -341,10 +349,27 @@ function merge_takeoff_pages(array $current, array $incoming, array $dirtyPages)
         $kept = array_values(array_filter(is_array($current[$key] ?? null) ? $current[$key] : [], function ($row) use ($pages) {
             return is_array($row) && empty($pages[(int)($row['page_number'] ?? 1)]);
         }));
+        $pageRows = [];
+        foreach (is_array($current[$key] ?? null) ? $current[$key] : [] as $row) {
+            if (!is_array($row) || empty($pages[(int)($row['page_number'] ?? 1)])) continue;
+            $id = (string)($row['client_uid'] ?? $row['id'] ?? '');
+            if ($id !== '') $pageRows[$id] = $row;
+        }
         $changed = array_values(array_filter(is_array($incoming[$key] ?? null) ? $incoming[$key] : [], function ($row) use ($pages) {
             return is_array($row) && !empty($pages[(int)($row['page_number'] ?? 1)]);
         }));
-        return array_merge($kept, $changed);
+        foreach ($changed as $row) {
+            $id = (string)($row['client_uid'] ?? $row['id'] ?? '');
+            if ($id === '') continue;
+            $existing = $pageRows[$id] ?? null;
+            $existingVersion = is_array($existing) ? (string)($existing['updated_at'] ?? $existing['updatedAt'] ?? '') : '';
+            $incomingVersion = (string)($row['updated_at'] ?? $row['updatedAt'] ?? '');
+            // Stable IDs make a same-page save a union. A newer remote object
+            // wins over a stale full-page payload; explicit object patches are
+            // applied afterwards and retain conflict detection.
+            if (!$existing || $existingVersion === '' || $incomingVersion === '' || $incomingVersion >= $existingVersion) $pageRows[$id] = $row;
+        }
+        return array_merge($kept, array_values($pageRows));
     };
     $layers = $mergeRows('layers');
     $markers = $mergeRows('markers');
@@ -362,6 +387,110 @@ function merge_takeoff_pages(array $current, array $incoming, array $dirtyPages)
         if (is_array($row) && !empty($dirtyLayerIds[(string)($row['layerUid'] ?? '')])) $summary[] = $row;
     }
     return ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary];
+}
+
+function takeoff_object_map(array $snapshot): array
+{
+    $map = [];
+    foreach (['markers', 'segments'] as $kind) {
+        foreach (is_array($snapshot[$kind] ?? null) ? $snapshot[$kind] : [] as $row) {
+            if (!is_array($row)) continue;
+            $id = (string)($row['client_uid'] ?? '');
+            if ($id !== '') $map[$id] = ['kind' => $kind, 'row' => $row];
+        }
+    }
+    return $map;
+}
+
+function merge_takeoff_objects(array $current, array $incoming, array $dirtyIds, array $deletedIds): array
+{
+    $dirty = array_fill_keys(array_map('strval', $dirtyIds), true);
+    $deleted = array_fill_keys(array_map('strval', $deletedIds), true);
+    $incomingMap = takeoff_object_map($incoming);
+    $originalMap = takeoff_object_map($current);
+    foreach (['markers', 'segments'] as $kind) {
+        $rows = [];
+        foreach (is_array($current[$kind] ?? null) ? $current[$kind] : [] as $row) {
+            if (!is_array($row)) continue;
+            $id = (string)($row['client_uid'] ?? '');
+            if ($id !== '' && (!empty($dirty[$id]) || !empty($deleted[$id]))) continue;
+            $rows[] = $row;
+        }
+        foreach ($dirty as $id => $_) {
+            if (isset($incomingMap[$id]) && $incomingMap[$id]['kind'] === $kind) $rows[] = $incomingMap[$id]['row'];
+        }
+        $current[$kind] = $rows;
+    }
+    $dirtyLayerIds = [];
+    foreach (array_merge($dirtyIds, $deletedIds) as $id) {
+        $source = $incomingMap[(string)$id]['row'] ?? ($originalMap[(string)$id]['row'] ?? null);
+        if (is_array($source) && !empty($source['layer_client_uid'])) $dirtyLayerIds[(string)$source['layer_client_uid']] = true;
+    }
+    if ($dirtyLayerIds) {
+        $currentSummary = is_array($current['summary'] ?? null) ? $current['summary'] : [];
+        $incomingSummary = is_array($incoming['summary'] ?? null) ? $incoming['summary'] : [];
+        $current['summary'] = array_values(array_filter($currentSummary, function ($row) use ($dirtyLayerIds) {
+            return is_array($row) && empty($dirtyLayerIds[(string)($row['layerUid'] ?? '')]);
+        }));
+        foreach ($incomingSummary as $row) {
+            if (is_array($row) && !empty($dirtyLayerIds[(string)($row['layerUid'] ?? '')])) $current['summary'][] = $row;
+        }
+    }
+    return $current;
+}
+
+function assert_takeoff_object_versions(array $current, array $dirtyIds, array $deletedIds, array $baseVersions): void
+{
+    $map = takeoff_object_map($current);
+    $conflicts = [];
+    foreach (array_unique(array_merge($dirtyIds, $deletedIds)) as $rawId) {
+        $id = (string)$rawId;
+        if (!isset($map[$id])) continue;
+        $row = $map[$id]['row'];
+        $actual = (string)($row['updated_at'] ?? $row['updatedAt'] ?? '');
+        $expected = array_key_exists($id, $baseVersions) ? (string)($baseVersions[$id] ?? '') : '';
+        if ($expected !== '' && $actual !== '' && $expected !== $actual) {
+            $conflicts[] = ['id' => $id, 'expected' => $expected, 'current' => $actual];
+        }
+    }
+    if ($conflicts) {
+        throw new TakeoffObjectConflict($conflicts);
+    }
+}
+
+function recalculate_takeoff_snapshot_quantities(array $snapshot): array
+{
+    $quantities = [];
+    foreach (is_array($snapshot['markers'] ?? null) ? $snapshot['markers'] : [] as $row) {
+        if (!is_array($row)) continue;
+        $key = (string)($row['layer_client_uid'] ?? $row['layer_id'] ?? '');
+        if ($key !== '') $quantities[$key] = ($quantities[$key] ?? 0) + n($row['quantity'] ?? $row['multiplier'] ?? 1, 1);
+    }
+    foreach (is_array($snapshot['segments'] ?? null) ? $snapshot['segments'] : [] as $row) {
+        if (!is_array($row)) continue;
+        $key = (string)($row['layer_client_uid'] ?? $row['layer_id'] ?? '');
+        if ($key !== '') $quantities[$key] = ($quantities[$key] ?? 0) + n($row['total_area'] ?? $row['total_length'] ?? $row['measured_length'] ?? 0);
+    }
+    foreach ($snapshot['layers'] as &$layer) {
+        if (!is_array($layer)) continue;
+        $key = (string)($layer['client_uid'] ?? $layer['id'] ?? '');
+        if ($key !== '') $layer['quantity'] = $quantities[$key] ?? 0;
+    }
+    unset($layer);
+    foreach ($snapshot['summary'] as &$row) {
+        if (!is_array($row)) continue;
+        $key = (string)($row['layerUid'] ?? '');
+        if ($key === '' || !array_key_exists($key, $quantities)) continue;
+        $oldQty = n($row['quantity'] ?? 0);
+        $newQty = n($quantities[$key]);
+        $factor = $oldQty > 0 ? $newQty / $oldQty : 0;
+        $row['quantity'] = $newQty;
+        foreach (['laborHours', 'material', 'labor', 'equipment', 'total', 'waste', 'markup'] as $field) {
+            if (isset($row[$field])) $row[$field] = n($row[$field]) * $factor;
+        }
+    }
+    unset($row);
+    return $snapshot;
 }
 
 function sync_estimate_items(PDO $pdo, int $estimateId, array $summary, array $layerMap): void
@@ -533,6 +662,9 @@ try {
             $summary = is_array($input['summary'] ?? null) ? $input['summary'] : [];
             $dirtyPages = array_values(array_unique(array_filter(array_map('intval', is_array($input['dirty_page_numbers'] ?? null)
                 ? $input['dirty_page_numbers'] : []), function ($page) { return $page > 0; })));
+            $dirtyObjectIds = array_values(array_unique(array_map('strval', is_array($input['dirty_object_ids'] ?? null) ? $input['dirty_object_ids'] : [])));
+            $deletedObjectIds = array_values(array_unique(array_map('strval', is_array($input['deleted_object_ids'] ?? null) ? $input['deleted_object_ids'] : [])));
+            $objectBaseVersions = is_array($input['object_base_versions'] ?? null) ? $input['object_base_versions'] : [];
 
             try {
                 $takeoffId = ensure_drawing_takeoff($pdo, $projectId, $drawingId);
@@ -544,8 +676,11 @@ try {
             $currentStmt->execute([$drawingId]);
             $currentSnapshot = json_decode((string)($currentStmt->fetchColumn() ?: '{}'), true);
             $snapshot = ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary];
-            if ($dirtyPages && is_array($currentSnapshot) && isset($currentSnapshot['layers'], $currentSnapshot['markers'], $currentSnapshot['segments'])) {
-                $snapshot = merge_takeoff_pages($currentSnapshot, $snapshot, $dirtyPages);
+            if (is_array($currentSnapshot) && isset($currentSnapshot['layers'], $currentSnapshot['markers'], $currentSnapshot['segments'])) {
+                assert_takeoff_object_versions($currentSnapshot, $dirtyObjectIds, $deletedObjectIds, $objectBaseVersions);
+                if ($dirtyPages) $snapshot = merge_takeoff_pages($currentSnapshot, $snapshot, $dirtyPages);
+                if ($dirtyObjectIds || $deletedObjectIds) $snapshot = merge_takeoff_objects($snapshot, ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary], $dirtyObjectIds, $deletedObjectIds);
+                $snapshot = recalculate_takeoff_snapshot_quantities($snapshot);
                 $layers = $snapshot['layers'];
                 $markers = $snapshot['markers'];
                 $segments = $snapshot['segments'];
@@ -686,8 +821,11 @@ try {
                 $retryState->execute([$drawingId]);
                 $latestSnapshot = json_decode((string)($retryState->fetchColumn() ?: '{}'), true);
                 $retrySnapshot = ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary];
-                if ($dirtyPages && is_array($latestSnapshot) && isset($latestSnapshot['layers'], $latestSnapshot['markers'], $latestSnapshot['segments'])) {
-                    $retrySnapshot = merge_takeoff_pages($latestSnapshot, $retrySnapshot, $dirtyPages);
+                if (is_array($latestSnapshot) && isset($latestSnapshot['layers'], $latestSnapshot['markers'], $latestSnapshot['segments'])) {
+                    assert_takeoff_object_versions($latestSnapshot, $dirtyObjectIds, $deletedObjectIds, $objectBaseVersions);
+                    if ($dirtyPages) $retrySnapshot = merge_takeoff_pages($latestSnapshot, $retrySnapshot, $dirtyPages);
+                    if ($dirtyObjectIds || $deletedObjectIds) $retrySnapshot = merge_takeoff_objects($retrySnapshot, ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary], $dirtyObjectIds, $deletedObjectIds);
+                    $retrySnapshot = recalculate_takeoff_snapshot_quantities($retrySnapshot);
                 }
                 $retrySave = $pdo->prepare(
                     "INSERT INTO takeoff_drawing_states (drawing_id, project_id, state_json, revision) VALUES (?, ?, ?, 1)
@@ -806,6 +944,10 @@ try {
         default:
             out_json(['status' => 'error', 'msg' => 'Invalid action'], 404);
     }
+} catch (TakeoffObjectConflict $e) {
+    if ($pdo->inTransaction()) $pdo->rollBack();
+    out_json(['status' => 'error', 'code' => 'object_conflict',
+        'msg' => $e->getMessage(), 'conflicts' => $e->conflicts], 409);
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
     out_json(['status' => 'error', 'msg' => $e->getMessage()], 500);

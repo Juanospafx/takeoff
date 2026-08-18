@@ -39,9 +39,29 @@
     let takeoffAutosaveTimer = null;
     const dirtyTakeoffPages = new Set();
     const dirtyTakeoffPageGenerations = new Map();
+    const dirtyTakeoffObjects = new Map();
+    const deletedTakeoffObjects = new Map();
+    const takeoffObjectBaseVersions = new Map();
+    const dirtyTakeoffObjectGenerations = new Map();
     let takeoffDirtyGeneration = 0;
     let missingScaleWarningShown = false;
     let selectionRectDraft = null;
+
+    function trackTakeoffObjects(targets, deleted = false) {
+        (targets || []).forEach(target => {
+            const ref = target?.ref || target;
+            const id = String(ref?.client_uid || '');
+            if (!id) return;
+            if (!takeoffObjectBaseVersions.has(id)) {
+                takeoffObjectBaseVersions.set(id, ref?._serverUpdatedAt ?? ref?.updated_at ?? ref?.updatedAt ?? null);
+            }
+            const record = { id, type: target?.type || (state.markers.includes(ref) ? 'marker' : 'segment'),
+                layerId: String(ref?.layer_client_uid || ''), page: Number(ref?.page_number || pageNum || 1) };
+            (deleted ? deletedTakeoffObjects : dirtyTakeoffObjects).set(id, record);
+            if (deleted) dirtyTakeoffObjects.delete(id);
+            dirtyTakeoffObjectGenerations.set(id, ++takeoffDirtyGeneration);
+        });
+    }
 
     function warnMissingScale() {
         if (hasPlanScale()) {
@@ -1298,6 +1318,7 @@
             return false;
         }
         snapshot();
+        trackTakeoffObjects(targets, true);
         targets.forEach(({ type, ref }) => {
             if (type === 'marker') {
                 if (ref.node) ref.node.destroy();
@@ -1311,7 +1332,7 @@
         state.selectedObjectUids.clear();
         renderProperties();
         applyObjectSelectionVisuals();
-        markDirty();
+        markDirty({ objectsTracked: true });
         emitSelectionState();
         return true;
     }
@@ -1320,10 +1341,19 @@
         return deleteTakeoffSelection();
     }
 
-    function markDirty() {
+    function markDirty(options = {}) {
         state.dirty = true;
-        dirtyTakeoffPages.add(Number(pageNum || 1));
-        dirtyTakeoffPageGenerations.set(Number(pageNum || 1), ++takeoffDirtyGeneration);
+        if (options.pageFallback) {
+            dirtyTakeoffPages.add(Number(pageNum || 1));
+            dirtyTakeoffPageGenerations.set(Number(pageNum || 1), ++takeoffDirtyGeneration);
+        } else if (!options.objectsTracked) {
+            const targets = selectedTakeoffObjectIds().map(findTakeoffObjectByUid).filter(Boolean);
+            if (targets.length) trackTakeoffObjects(targets);
+            else {
+                dirtyTakeoffPages.add(Number(pageNum || 1));
+                dirtyTakeoffPageGenerations.set(Number(pageNum || 1), ++takeoffDirtyGeneration);
+            }
+        }
         renderSummary();
         renderLayers();
         scheduleTakeoffAutosave();
@@ -1521,7 +1551,7 @@
         if (state.selectedLayerUid === layer.client_uid) state.selectedLayerUid = state.layers[0]?.client_uid || null;
         state.selectedLayerUids.delete(layer.client_uid);
         state.selectedElement = null;
-        markDirty();
+        markDirty({ pageFallback: true });
         renderAll();
     }
 
@@ -1532,7 +1562,7 @@
         const copy = { ...layer, client_uid: copyUid, name: `${layer.name} Copy`, metadata_json: { ...(layer.metadata_json || {}), project_layer_id: copyUid } };
         state.layers.push(copy);
         state.selectedLayerUid = copy.client_uid;
-        markDirty();
+        markDirty({ pageFallback: true });
         renderAll();
     }
 
@@ -1547,7 +1577,7 @@
         layer.group_name = group.trim() || 'Ungrouped';
         layer.takeoff_type = prompt('Takeoff type: count, linear, area, volume, lump_sum', layerType(layer)) || layerType(layer);
         layer.unit_of_measure = prompt('Unit of measure', layerUnit(layer)) || layerUnit(layer);
-        markDirty();
+        markDirty({ pageFallback: true });
         renderAll();
     }
 
@@ -1630,7 +1660,7 @@
         state.createCatalogItemId = null;
         closeCreateLayerModal();
         if (targetLayer) activateLayerForInsert(targetLayer.client_uid);
-        markDirty();
+        markDirty({ pageFallback: true });
         renderAll();
     }
 
@@ -2408,8 +2438,13 @@
     }
 
     function deleteLayerWithoutConfirm(layer) {
-        state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).forEach(destroyMarkerNodes);
-        state.segments.filter(segment => segment.layer_client_uid === layer.client_uid).forEach(destroySegmentNodes);
+        const removedObjects = [
+            ...state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).map(ref => ({ type: 'marker', ref })),
+            ...state.segments.filter(segment => segment.layer_client_uid === layer.client_uid).map(ref => ({ type: 'segment', ref }))
+        ];
+        trackTakeoffObjects(removedObjects, true);
+        removedObjects.filter(target => target.type === 'marker').forEach(target => destroyMarkerNodes(target.ref));
+        removedObjects.filter(target => target.type === 'segment').forEach(target => destroySegmentNodes(target.ref));
         state.markers = state.markers.filter(marker => marker.layer_client_uid !== layer.client_uid);
         state.segments = state.segments.filter(segment => segment.layer_client_uid !== layer.client_uid);
         state.layers = state.layers.filter(row => row !== layer);
@@ -2783,6 +2818,13 @@
         state.layers.forEach(persistLayerCostSnapshot);
         const sentPages = dirtyTakeoffPages.size ? [...dirtyTakeoffPages] : [Number(pageNum || 1)];
         const sentGenerations = new Map(sentPages.map(page => [page, dirtyTakeoffPageGenerations.get(page) || 0]));
+        const sentObjectIds = Array.from(new Set([...dirtyTakeoffObjects.keys(), ...deletedTakeoffObjects.keys()]));
+        const sentObjectGenerations = new Map(sentObjectIds.map(id => [id, dirtyTakeoffObjectGenerations.get(id) || 0]));
+        const objectBaseVersions = Object.fromEntries(sentObjectIds.map(id => [id, takeoffObjectBaseVersions.get(id) ?? null]));
+        // Object patches are more precise than the page fallback. A page is
+        // included only for layer/global edits that could not be attributed to
+        // stable geometry IDs.
+        const fallbackPages = dirtyTakeoffPages.size ? [...dirtyTakeoffPages] : (sentObjectIds.length ? [] : sentPages);
         return request('save_state', {
             drawing_id: fileId,
             project_id: typeof projectId !== 'undefined' ? projectId : 0,
@@ -2799,7 +2841,10 @@
                     drop_length: Math.max(0, num(segment.drop_length ?? segment.dropLength)) }
             })),
             summary: calculateTakeoffSummary(),
-            dirty_page_numbers: sentPages,
+            dirty_page_numbers: fallbackPages,
+            dirty_object_ids: [...dirtyTakeoffObjects.keys()],
+            deleted_object_ids: [...deletedTakeoffObjects.keys()],
+            object_base_versions: objectBaseVersions,
         }).then(res => {
             if (res.status !== 'success') throw new Error(res.msg || 'Save failed');
             sentPages.forEach(page => {
@@ -2807,7 +2852,18 @@
                 dirtyTakeoffPages.delete(page);
                 dirtyTakeoffPageGenerations.delete(page);
             });
-            state.dirty = dirtyTakeoffPages.size > 0;
+            sentObjectIds.forEach(id => {
+                if ((dirtyTakeoffObjectGenerations.get(id) || 0) !== sentObjectGenerations.get(id)) return;
+                dirtyTakeoffObjects.delete(id);
+                deletedTakeoffObjects.delete(id);
+                dirtyTakeoffObjectGenerations.delete(id);
+                const current = findTakeoffObjectByUid(id)?.ref;
+                if (current) {
+                    current._serverUpdatedAt = current.updated_at || current.updatedAt || timestamp();
+                    takeoffObjectBaseVersions.set(id, current._serverUpdatedAt);
+                } else takeoffObjectBaseVersions.delete(id);
+            });
+            state.dirty = dirtyTakeoffPages.size > 0 || dirtyTakeoffObjects.size > 0 || deletedTakeoffObjects.size > 0;
             if (!silent) showToast('Takeoff saved', 'success');
             renderSummary();
         }).catch(err => {
@@ -2835,8 +2891,8 @@
                     dbLayerIdMap.set(String(l.id), stableUid);
                     return restoreLayerCostSnapshot({ ...l, client_uid: stableUid, metadata_json: { ...metadata, project_layer_id: stableUid } });
                 });
-                state.markers = (data.markers || []).map(m => ({ ...m, client_uid: m.client_uid || String(m.id), layer_client_uid: String(m.layer_client_uid || dbLayerIdMap.get(String(m.layer_id)) || m.layer_id || ''), metadata_json: m.metadata_json || {}, symbol_size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, locked: Number(m.locked ?? m.metadata_json?.element_locked ?? 0) }));
-                state.segments = (data.segments || []).map(s => ({ ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: String(s.layer_client_uid || dbLayerIdMap.get(String(s.layer_id)) || s.layer_id || ''), points_json: s.points_json || [], metadata_json: s.metadata_json || {}, takeoff_subtype: s.takeoff_subtype || s.metadata_json?.takeoff_subtype || 'linear', drop_length: Math.max(0, num(s.drop_length ?? s.metadata_json?.drop_length)), locked: Number(s.locked ?? s.metadata_json?.element_locked ?? 0) }));
+                state.markers = (data.markers || []).map(m => ({ ...m, client_uid: m.client_uid || String(m.id), layer_client_uid: String(m.layer_client_uid || dbLayerIdMap.get(String(m.layer_id)) || m.layer_id || ''), metadata_json: m.metadata_json || {}, symbol_size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, locked: Number(m.locked ?? m.metadata_json?.element_locked ?? 0), _serverUpdatedAt: m.updated_at || m.updatedAt || null }));
+                state.segments = (data.segments || []).map(s => ({ ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: String(s.layer_client_uid || dbLayerIdMap.get(String(s.layer_id)) || s.layer_id || ''), points_json: s.points_json || [], metadata_json: s.metadata_json || {}, takeoff_subtype: s.takeoff_subtype || s.metadata_json?.takeoff_subtype || 'linear', drop_length: Math.max(0, num(s.drop_length ?? s.metadata_json?.drop_length)), locked: Number(s.locked ?? s.metadata_json?.element_locked ?? 0), _serverUpdatedAt: s.updated_at || s.updatedAt || null }));
             }
             if (!state.selectedItemId && state.catalog.items[0]) state.selectedItemId = state.catalog.items[0].id;
             const onlyLegacyDefault = state.layers.length === 1
@@ -3155,7 +3211,8 @@
             if (type === 'marker') applyMarkerLockVisual(ref);
             else applySegmentLockVisual(ref);
         });
-        markDirty();
+        trackTakeoffObjects(targets);
+        markDirty({ objectsTracked: true });
         applyObjectSelectionVisuals();
         return true;
     };
@@ -3166,17 +3223,21 @@
         snapshot();
         layer.locked = locked ? 1 : 0;
         layer.updated_at = timestamp();
+        const layerTargets = [];
         state.markers.filter(marker => String(marker.layer_client_uid) === String(layer.client_uid)).forEach(marker => {
             marker.locked = locked ? 1 : 0;
             marker.updated_at = timestamp();
             applyMarkerLockVisual(marker);
+            layerTargets.push({ type: 'marker', ref: marker });
         });
         state.segments.filter(segment => String(segment.layer_client_uid) === String(layer.client_uid)).forEach(segment => {
             segment.locked = locked ? 1 : 0;
             segment.updated_at = timestamp();
             applySegmentLockVisual(segment);
+            layerTargets.push({ type: 'segment', ref: segment });
         });
-        markDirty();
+        trackTakeoffObjects(layerTargets);
+        markDirty({ pageFallback: true, objectsTracked: true });
         applyObjectSelectionVisuals();
         return true;
     };
@@ -3220,7 +3281,8 @@
             ref.updatedAt = timestamp();
             ref.updated_at = ref.updatedAt;
         });
-        markDirty();
+        trackTakeoffObjects(targets);
+        markDirty({ objectsTracked: true });
         return true;
     };
 
@@ -3238,7 +3300,8 @@
             ref.updatedAt = timestamp();
             ref.updated_at = ref.updatedAt;
         });
-        markDirty();
+        trackTakeoffObjects(targets);
+        markDirty({ objectsTracked: true });
         return true;
     };
 
