@@ -82,6 +82,11 @@ test('draft save migrates workspace and the reloaded Estimating module performs 
     assert.equal(payload.state.estimates[0].id, 'draft-estimate');
     assert.equal(payload.state.estimates[0].revision, 0);
     assert.equal('dbEstimateId' in payload.state.estimates[0], false);
+    assert.equal(payload.state.activeEstimateId, 'draft-estimate');
+    assert.equal(payload.state.estimates[0].isActive, true,
+        'the first Save Project synchronization must persist the selected estimate for the next reload');
+    assert.equal(payload.state.estimates.filter(estimate => estimate.isActive).length, 1,
+        'workspace normalization must send exactly one active estimate');
     assert.equal('pendingProjectCreationSync' in payload.state, false, 'one-time migration marker must not be sent back to the server');
     assert.equal(reloadDom.window.localStorage.getItem('takeoff.estimating.module.42').includes('pendingProjectCreationSync'), false,
         'successful first save clears the local handoff marker');

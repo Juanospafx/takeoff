@@ -3730,7 +3730,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=shared-takeoff-db-20260812-1"></script>
+<script src="../assets/editor/takeoff.js?v=linear-drop-editing-20260818-1"></script>
 </body>
 </html>
 

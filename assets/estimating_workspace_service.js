@@ -168,6 +168,16 @@
         return state.estimates.find(row => row.id === state.activeEstimateId) || state.estimates[0];
     }
 
+    function selectEstimate(state, estimateId) {
+        const requested = text(estimateId);
+        const selected = state.estimates.find(row => row.id === requested);
+        if (!selected) return null;
+        state.activeEstimateId = selected.id;
+        state.estimates.forEach(row => { row.isActive = row.id === selected.id; });
+        state.groups = selected.groups;
+        return selected;
+    }
+
     function audit(state, action) {
         const current = active(state);
         current.auditLog.push({ id: uid('audit'), at: now(), action });
@@ -215,7 +225,7 @@
         return touch(state, 'Deleted estimate');
     }
 
-    const service = { now, uid, numeric, projectId, item, group, estimate, workspace, empty, active, touch,
+    const service = { now, uid, numeric, projectId, item, group, estimate, workspace, empty, active, selectEstimate, touch,
         audit, reconcileTakeoff, createEstimate, removeEstimate, clone };
     global.EstimatingWorkspaceService = service;
     if (typeof module !== 'undefined') module.exports = service;

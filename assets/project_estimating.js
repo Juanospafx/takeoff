@@ -183,14 +183,15 @@
 
     async function loadServer() {
         if (!projectId) { render(); return; }
-        const local = state;
-        const forceLocal = local.pendingProjectCreationSync === true;
+        const requestLocalTimestamp = state.clientUiUpdatedAt;
+        const forceMigratedLocal = state.pendingProjectCreationSync === true;
         try {
             const result = await request('list');
             const remoteSource = result.state || {};
             const remote = Workspace.workspace(remoteSource, projectId);
-            if (forceLocal || Date.parse(local.clientUiUpdatedAt || 0) > Date.parse(remote.clientUiUpdatedAt || 0)) {
-                state = local;
+            const local = state;
+            const changedDuringLoad = local.clientUiUpdatedAt !== requestLocalTimestamp;
+            if (forceMigratedLocal || changedDuringLoad || Date.parse(local.clientUiUpdatedAt || 0) > Date.parse(remote.clientUiUpdatedAt || 0)) {
                 delete state.pendingProjectCreationSync;
                 saveLocal();
                 await saveServer();
@@ -529,7 +530,9 @@
         if (event.target.closest('[data-create-estimate]')) {
             const name = portal.querySelector('#copyEstimateName')?.value;
             const mode = portal.querySelector('input[name="copyEstimateMode"]:checked')?.value || 'blank';
-            Workspace.createEstimate(state, name, mode); ui.modal = null; saveLocal(); scheduleSave(); render();
+            Workspace.createEstimate(state, name, mode); ui.modal = null; saveLocal();
+            if (projectId) saveServer();
+            render();
         }
     });
 
@@ -537,10 +540,16 @@
         if (event.key === 'Escape' && ui.modal) { ui.modal = null; renderModal(); }
     });
 
+    function refreshEstimateFromStorage(estimateId) {
+        try {
+            const stored = JSON.parse(localStorage.getItem(storageKey) || 'null');
+            if (stored?.estimates?.some(row => String(row.id) === String(estimateId))) state = Workspace.workspace(stored, projectId);
+        } catch (_) {}
+    }
+
     function selectEstimate(estimateId) {
-        if (!state.estimates.some(row => row.id === String(estimateId))) return;
-        state.activeEstimateId = String(estimateId);
-        state.groups = current().groups;
+        const selected = Workspace.selectEstimate(state, estimateId);
+        if (!selected) return;
         Workspace.touch(state, `Selected estimate “${current().name}”`);
         ui.selected.clear(); saveLocal(); scheduleSave(); render();
     }
@@ -551,6 +560,7 @@
     });
     window.addEventListener('takeoff:active-estimate-changed', event => {
         if (event.detail?.projectId && String(event.detail.projectId) !== String(projectId)) return;
+        refreshEstimateFromStorage(event.detail?.estimateId);
         selectEstimate(event.detail?.estimateId);
     });
     window.addEventListener('takeoff:estimating-action-requested', event => {

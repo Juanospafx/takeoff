@@ -236,11 +236,40 @@
             const dy = points[index].y - points[index - 1].y;
             px += Math.sqrt(dx * dx + dy * dy);
         }
-        const measured = getPlanScale() > 0 ? px / getPlanScale() : 0;
+        const horizontal = getPlanScale() > 0 ? px / getPlanScale() : 0;
+        const subtype = normalizeLinearSubtype(segment.takeoff_subtype || segment.takeoff_type || segment.type);
+        const dropLength = subtype === 'linear' ? 0 : Math.max(0, num(segment.drop_length ?? segment.dropLength));
+        // Each committed vertex is a defined drop point. Editing vertices via
+        // the existing handles therefore recalculates both run and drops.
+        const dropCount = subtype === 'linear' ? 0 : points.length;
+        const drops = dropLength * dropCount;
+        const measured = horizontal + drops;
+        segment.horizontal_length = horizontal;
+        segment.drop_length = dropLength;
+        segment.drop_count = dropCount;
+        segment.drop_total = drops;
         segment.measured_length = measured;
         segment.total_length = measured * num(segment.multiplier || 1);
         segment.unit = 'ft';
         return segment.total_length;
+    }
+
+    function normalizeLinearSubtype(value) {
+        const raw = String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
+        if (raw === 'linear with drop') return 'linear_with_drop';
+        if (raw === 'linear avg. with drop' || raw === 'linear avg with drop') return 'linear_avg_with_drop';
+        if (raw === 'linear_with_drop' || raw === 'linear_avg_with_drop') return raw;
+        return 'linear';
+    }
+
+    function normalizeEditorLayerType(value) {
+        const raw = String(value || 'count').trim().toLowerCase();
+        if (raw === 'area') return { type: 'area', subtype: 'area' };
+        if (raw === 'linear' || raw === 'linear with drop' || raw === 'linear avg. with drop'
+            || raw === 'linear avg with drop' || raw === 'linear_with_drop' || raw === 'linear_avg_with_drop') {
+            return { type: 'linear', subtype: normalizeLinearSubtype(raw) };
+        }
+        return { type: 'count', subtype: 'count' };
     }
 
     function calculateAreaQuantity(segment) {
@@ -713,6 +742,38 @@
         delete segment.handles;
     }
 
+    function insertSegmentVertex(segment, point) {
+        const points = segment.points_json || [];
+        if (points.length < 2 || isElementLocked(segment)) return false;
+        let insertAt = 1;
+        let nearest = Infinity;
+        for (let index = 0; index < points.length - 1; index += 1) {
+            const start = points[index];
+            const end = points[index + 1];
+            const dx = end.x - start.x;
+            const dy = end.y - start.y;
+            const lengthSquared = dx * dx + dy * dy;
+            const ratio = lengthSquared ? Math.max(0, Math.min(1,
+                ((point.x - start.x) * dx + (point.y - start.y) * dy) / lengthSquared)) : 0;
+            const projected = { x: start.x + ratio * dx, y: start.y + ratio * dy };
+            const distance = Math.hypot(point.x - projected.x, point.y - projected.y);
+            if (distance < nearest) {
+                nearest = distance;
+                insertAt = index + 1;
+            }
+        }
+        snapshot();
+        segment.points_json.splice(insertAt, 0, { x: point.x, y: point.y });
+        segment.updatedAt = timestamp();
+        segment.updated_at = segment.updatedAt;
+        destroySegmentNodes(segment);
+        createSegmentNode(segment);
+        selectElement('segment', segment);
+        markDirty();
+        showToast('Vertex added. Drag the handles to refine the run.', 'success');
+        return true;
+    }
+
     function createSegmentNode(segment) {
         if (!ensureKonva()) return;
         const visible = segment.page_number === pageNum;
@@ -767,6 +828,11 @@
             event.cancelBubble = true;
             setTool('smart');
             selectElement('segment', segment);
+        });
+        line.on('dblclick dbltap', event => {
+            event.cancelBubble = true;
+            const pointer = konvaStage?.getPointerPosition();
+            if (pointer) insertSegmentVertex(segment, screenToWorld(pointer));
         });
         line.on('contextmenu', event => openObjectContextMenu(event, 'segment', segment));
         line.on('dragstart', () => beginTakeoffSelectionDrag('segment', segment));
@@ -1053,16 +1119,19 @@
         }
         snapshot();
         const points = state.draftLine.points.map(point => ({ ...point }));
+        const subtype = normalizeLinearSubtype(layer.takeoff_subtype || layer.original_takeoff_type || layer.takeoff_type || layer.type);
         const segment = {
             client_uid: uid(),
             layer_client_uid: layer.client_uid,
             catalog_item_id: layer.catalog_item_id || state.selectedItemId,
             assembly_id: layer.assembly_id || state.selectedAssemblyId,
             takeoff_type: 'linear',
+            takeoff_subtype: subtype,
             type: 'linear',
             page_number: pageNum,
             points_json: points,
             measured_length: 0,
+            drop_length: subtype === 'linear' ? 0 : Math.max(0, num(layer.drop_length ?? layer.dropLength)),
             multiplier: 1,
             total_length: 0,
             unit: 'ft',
@@ -1275,7 +1344,8 @@
 
     function layerType(layer) {
         const raw = String(layer.takeoff_type || layer.type || layer.layer_type || '').toLowerCase();
-        if (['linear', 'line', 'lines', 'lf', 'ft'].includes(raw)) return 'linear';
+        if (['linear', 'line', 'lines', 'lf', 'ft', 'linear with drop', 'linear avg. with drop',
+            'linear avg with drop', 'linear_with_drop', 'linear_avg_with_drop'].includes(raw)) return 'linear';
         if (['count', 'counts', 'point', 'points', 'ea'].includes(raw)) return 'count';
         if (['area', 'sf'].includes(raw)) return 'area';
         if (['volume', 'cy'].includes(raw)) return 'volume';
@@ -1347,6 +1417,7 @@
             catalog_item_id: layer.catalog_item_id || null,
             unit_cost: num(layer.unit_cost || 0),
             labor_hours: num(layer.unit_labor_time || layer.labor_hours || 0),
+            dropLength: Math.max(0, num(layer.drop_length ?? layer.dropLength)),
             shapes: [
                 ...state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).map(marker => ({
                     id: marker.client_uid,
@@ -2716,7 +2787,9 @@
             })),
             segments: state.segments.map(segment => ({
                 ...stripNodes(segment),
-                metadata_json: { ...(segment.metadata_json || {}), element_locked: isObjectIndividuallyLocked(segment) ? 1 : 0 }
+                metadata_json: { ...(segment.metadata_json || {}), element_locked: isObjectIndividuallyLocked(segment) ? 1 : 0,
+                    takeoff_subtype: normalizeLinearSubtype(segment.takeoff_subtype || segment.takeoff_type || segment.type),
+                    drop_length: Math.max(0, num(segment.drop_length ?? segment.dropLength)) }
             })),
             summary: calculateTakeoffSummary(),
         }).then(res => {
@@ -2750,7 +2823,7 @@
                     return restoreLayerCostSnapshot({ ...l, client_uid: stableUid, metadata_json: { ...metadata, project_layer_id: stableUid } });
                 });
                 state.markers = (data.markers || []).map(m => ({ ...m, client_uid: m.client_uid || String(m.id), layer_client_uid: String(m.layer_client_uid || dbLayerIdMap.get(String(m.layer_id)) || m.layer_id || ''), metadata_json: m.metadata_json || {}, symbol_size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, locked: Number(m.locked ?? m.metadata_json?.element_locked ?? 0) }));
-                state.segments = (data.segments || []).map(s => ({ ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: String(s.layer_client_uid || dbLayerIdMap.get(String(s.layer_id)) || s.layer_id || ''), points_json: s.points_json || [], metadata_json: s.metadata_json || {}, locked: Number(s.locked ?? s.metadata_json?.element_locked ?? 0) }));
+                state.segments = (data.segments || []).map(s => ({ ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: String(s.layer_client_uid || dbLayerIdMap.get(String(s.layer_id)) || s.layer_id || ''), points_json: s.points_json || [], metadata_json: s.metadata_json || {}, takeoff_subtype: s.takeoff_subtype || s.metadata_json?.takeoff_subtype || 'linear', drop_length: Math.max(0, num(s.drop_length ?? s.metadata_json?.drop_length)), locked: Number(s.locked ?? s.metadata_json?.element_locked ?? 0) }));
             }
             if (!state.selectedItemId && state.catalog.items[0]) state.selectedItemId = state.catalog.items[0].id;
             const onlyLegacyDefault = state.layers.length === 1
@@ -2858,13 +2931,17 @@
         const externalId = String(payload.id);
         let layer = state.layers.find(row => row.client_uid === externalId || row.metadata_json?.project_layer_id === externalId);
         const normalizedType = String(payload.takeoff_type || payload.type || 'count').toLowerCase();
-        const type = normalizedType === 'linear' ? 'linear' : (normalizedType === 'area' ? 'area' : 'count');
+        const normalizedLayerType = normalizeEditorLayerType(normalizedType);
+        const type = normalizedLayerType.type;
         const data = {
             client_uid: externalId,
             page_number: pageNum || 1,
             name: payload.name || 'Takeoff Layer',
             type,
             takeoff_type: type,
+            takeoff_subtype: normalizedLayerType.subtype,
+            original_takeoff_type: normalizedType,
+            drop_length: Math.max(0, num(payload.drop_length ?? payload.dropLength)),
             group_name: payload.group_name || payload.category || 'Project Takeoff',
             unit_of_measure: payload.unit_of_measure || payload.uom || (type === 'linear' ? 'ft' : (type === 'area' ? 'sq ft' : 'ea')),
             catalog_item_id: payload.catalog_item_id || payload.catalogItemId || null,
@@ -2897,13 +2974,17 @@
             const externalId = String(payload.id);
             let layer = state.layers.find(row => row.client_uid === externalId || row.metadata_json?.project_layer_id === externalId);
             const normalizedType = String(payload.takeoff_type || payload.type || 'count').toLowerCase();
-            const type = normalizedType === 'linear' ? 'linear' : (normalizedType === 'area' ? 'area' : 'count');
+            const normalizedLayerType = normalizeEditorLayerType(normalizedType);
+            const type = normalizedLayerType.type;
             const data = {
                 client_uid: externalId,
                 page_number: pageNum || 1,
                 name: payload.name || 'Takeoff Layer',
                 type,
                 takeoff_type: type,
+                takeoff_subtype: normalizedLayerType.subtype,
+                original_takeoff_type: normalizedType,
+                drop_length: Math.max(0, num(payload.drop_length ?? payload.dropLength)),
                 group_name: payload.group_name || payload.category || 'Project Takeoff',
                 unit_of_measure: payload.unit_of_measure || payload.uom || (type === 'linear' ? 'ft' : (type === 'area' ? 'sq ft' : 'ea')),
                 catalog_item_id: payload.catalog_item_id || payload.catalogItemId || null,
