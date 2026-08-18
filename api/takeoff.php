@@ -334,6 +334,36 @@ function ensure_drawing_takeoff(PDO $pdo, int $projectId, int $drawingId): int
     return (int)$pdo->lastInsertId();
 }
 
+function merge_takeoff_pages(array $current, array $incoming, array $dirtyPages): array
+{
+    $pages = array_fill_keys(array_map('intval', $dirtyPages), true);
+    $mergeRows = function ($key) use ($current, $incoming, $pages) {
+        $kept = array_values(array_filter(is_array($current[$key] ?? null) ? $current[$key] : [], function ($row) use ($pages) {
+            return is_array($row) && empty($pages[(int)($row['page_number'] ?? 1)]);
+        }));
+        $changed = array_values(array_filter(is_array($incoming[$key] ?? null) ? $incoming[$key] : [], function ($row) use ($pages) {
+            return is_array($row) && !empty($pages[(int)($row['page_number'] ?? 1)]);
+        }));
+        return array_merge($kept, $changed);
+    };
+    $layers = $mergeRows('layers');
+    $markers = $mergeRows('markers');
+    $segments = $mergeRows('segments');
+    $dirtyLayerIds = [];
+    foreach (array_merge(is_array($current['layers'] ?? null) ? $current['layers'] : [], is_array($incoming['layers'] ?? null) ? $incoming['layers'] : []) as $layer) {
+        if (!is_array($layer) || empty($pages[(int)($layer['page_number'] ?? 1)])) continue;
+        $id = (string)($layer['client_uid'] ?? $layer['id'] ?? '');
+        if ($id !== '') $dirtyLayerIds[$id] = true;
+    }
+    $summary = array_values(array_filter(is_array($current['summary'] ?? null) ? $current['summary'] : [], function ($row) use ($dirtyLayerIds) {
+        return is_array($row) && empty($dirtyLayerIds[(string)($row['layerUid'] ?? '')]);
+    }));
+    foreach (is_array($incoming['summary'] ?? null) ? $incoming['summary'] : [] as $row) {
+        if (is_array($row) && !empty($dirtyLayerIds[(string)($row['layerUid'] ?? '')])) $summary[] = $row;
+    }
+    return ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary];
+}
+
 function sync_estimate_items(PDO $pdo, int $estimateId, array $summary, array $layerMap): void
 {
     if (!$summary) return;
@@ -501,19 +531,32 @@ try {
             $markers = is_array($input['markers'] ?? null) ? $input['markers'] : [];
             $segments = is_array($input['segments'] ?? null) ? $input['segments'] : [];
             $summary = is_array($input['summary'] ?? null) ? $input['summary'] : [];
+            $dirtyPages = array_values(array_unique(array_filter(array_map('intval', is_array($input['dirty_page_numbers'] ?? null)
+                ? $input['dirty_page_numbers'] : []), function ($page) { return $page > 0; })));
 
+            try {
+                $takeoffId = ensure_drawing_takeoff($pdo, $projectId, $drawingId);
+
+                $pdo->beginTransaction();
+            $ensureState = $pdo->prepare("INSERT IGNORE INTO takeoff_drawing_states (drawing_id, project_id, state_json, revision) VALUES (?, ?, '{}', 0)");
+            $ensureState->execute([$drawingId, $projectId ?: null]);
+            $currentStmt = $pdo->prepare("SELECT state_json FROM takeoff_drawing_states WHERE drawing_id = ? LIMIT 1 FOR UPDATE");
+            $currentStmt->execute([$drawingId]);
+            $currentSnapshot = json_decode((string)($currentStmt->fetchColumn() ?: '{}'), true);
             $snapshot = ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary];
+            if ($dirtyPages && is_array($currentSnapshot) && isset($currentSnapshot['layers'], $currentSnapshot['markers'], $currentSnapshot['segments'])) {
+                $snapshot = merge_takeoff_pages($currentSnapshot, $snapshot, $dirtyPages);
+                $layers = $snapshot['layers'];
+                $markers = $snapshot['markers'];
+                $segments = $snapshot['segments'];
+                $summary = $snapshot['summary'];
+            }
             $stmt = $pdo->prepare(
                 "INSERT INTO takeoff_drawing_states (drawing_id, project_id, state_json, revision)
                  VALUES (?, ?, ?, 1)
                  ON DUPLICATE KEY UPDATE project_id=VALUES(project_id), state_json=VALUES(state_json), revision=revision+1, updated_at=CURRENT_TIMESTAMP"
             );
             $stmt->execute([$drawingId, $projectId ?: null, json_value($snapshot) ?? '{}']);
-
-            try {
-                $takeoffId = ensure_drawing_takeoff($pdo, $projectId, $drawingId);
-
-                $pdo->beginTransaction();
             $old = $pdo->prepare("SELECT id FROM takeoff_layers WHERE drawing_id = ?");
             $old->execute([$drawingId]);
             $oldIds = $old->fetchAll(PDO::FETCH_COLUMN);
@@ -635,6 +678,23 @@ try {
             } catch (Throwable $mirrorError) {
                 if ($pdo->inTransaction()) $pdo->rollBack();
                 error_log('Takeoff relational mirror failed: ' . $mirrorError->getMessage());
+                // Preserve the authoritative JSON snapshot even when a legacy
+                // relational mirror is unavailable. Re-lock and re-merge so a
+                // concurrent save on another page cannot be overwritten here.
+                $pdo->beginTransaction();
+                $retryState = $pdo->prepare("SELECT state_json FROM takeoff_drawing_states WHERE drawing_id = ? LIMIT 1 FOR UPDATE");
+                $retryState->execute([$drawingId]);
+                $latestSnapshot = json_decode((string)($retryState->fetchColumn() ?: '{}'), true);
+                $retrySnapshot = ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary];
+                if ($dirtyPages && is_array($latestSnapshot) && isset($latestSnapshot['layers'], $latestSnapshot['markers'], $latestSnapshot['segments'])) {
+                    $retrySnapshot = merge_takeoff_pages($latestSnapshot, $retrySnapshot, $dirtyPages);
+                }
+                $retrySave = $pdo->prepare(
+                    "INSERT INTO takeoff_drawing_states (drawing_id, project_id, state_json, revision) VALUES (?, ?, ?, 1)
+                     ON DUPLICATE KEY UPDATE project_id=VALUES(project_id), state_json=VALUES(state_json), revision=revision+1, updated_at=CURRENT_TIMESTAMP"
+                );
+                $retrySave->execute([$drawingId, $projectId ?: null, json_value($retrySnapshot) ?? '{}']);
+                $pdo->commit();
                 out_json(['status' => 'success', 'data' => state_payload($pdo, $drawingId), 'warning' => 'Takeoff saved; estimating mirror will retry on the next save.']);
             }
             out_json(['status' => 'success', 'data' => state_payload($pdo, $drawingId)]);

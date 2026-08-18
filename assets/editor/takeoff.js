@@ -37,6 +37,9 @@
     const num = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
     const money = (v) => '$' + num(v).toFixed(2);
     let takeoffAutosaveTimer = null;
+    const dirtyTakeoffPages = new Set();
+    const dirtyTakeoffPageGenerations = new Map();
+    let takeoffDirtyGeneration = 0;
     let missingScaleWarningShown = false;
     let selectionRectDraft = null;
 
@@ -1319,6 +1322,8 @@
 
     function markDirty() {
         state.dirty = true;
+        dirtyTakeoffPages.add(Number(pageNum || 1));
+        dirtyTakeoffPageGenerations.set(Number(pageNum || 1), ++takeoffDirtyGeneration);
         renderSummary();
         renderLayers();
         scheduleTakeoffAutosave();
@@ -2776,6 +2781,8 @@
 
     function saveTakeoff(silent = false, rejectOnError = false) {
         state.layers.forEach(persistLayerCostSnapshot);
+        const sentPages = dirtyTakeoffPages.size ? [...dirtyTakeoffPages] : [Number(pageNum || 1)];
+        const sentGenerations = new Map(sentPages.map(page => [page, dirtyTakeoffPageGenerations.get(page) || 0]));
         return request('save_state', {
             drawing_id: fileId,
             project_id: typeof projectId !== 'undefined' ? projectId : 0,
@@ -2792,9 +2799,15 @@
                     drop_length: Math.max(0, num(segment.drop_length ?? segment.dropLength)) }
             })),
             summary: calculateTakeoffSummary(),
+            dirty_page_numbers: sentPages,
         }).then(res => {
             if (res.status !== 'success') throw new Error(res.msg || 'Save failed');
-            state.dirty = false;
+            sentPages.forEach(page => {
+                if ((dirtyTakeoffPageGenerations.get(page) || 0) !== sentGenerations.get(page)) return;
+                dirtyTakeoffPages.delete(page);
+                dirtyTakeoffPageGenerations.delete(page);
+            });
+            state.dirty = dirtyTakeoffPages.size > 0;
             if (!silent) showToast('Takeoff saved', 'success');
             renderSummary();
         }).catch(err => {
