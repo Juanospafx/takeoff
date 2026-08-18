@@ -238,9 +238,17 @@
             const remote = Workspace.workspace(remoteSource, projectId);
             const local = state;
             const changedDuringLoad = local.clientUiUpdatedAt !== requestLocalTimestamp;
-            if (forceMigratedLocal || changedDuringLoad || Date.parse(local.clientUiUpdatedAt || 0) > Date.parse(remote.clientUiUpdatedAt || 0)) {
+            // A newer local timestamp alone does not prove there are unsaved edits:
+            // localStorage can retain a successfully saved snapshot from an older
+            // browser session while another client has advanced the DB revision.
+            // Only explicit dirty tracking (or an edit made during this request)
+            // is allowed to push local data back to the server on startup.
+            const hasExplicitLocalChanges = dirtyEstimateIds.size > 0;
+            if (forceMigratedLocal || changedDuringLoad || hasExplicitLocalChanges) {
                 delete state.pendingProjectCreationSync;
-                state.estimates.forEach(estimate => markEstimateDirty(estimate.id));
+                if (forceMigratedLocal || changedDuringLoad) {
+                    state.estimates.forEach(estimate => markEstimateDirty(estimate.id));
+                }
                 saveLocal();
                 await saveServer();
                 return;

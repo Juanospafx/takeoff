@@ -4,6 +4,7 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const api = fs.readFileSync(path.resolve(__dirname, '../api/project_estimating.php'), 'utf8');
+const client = fs.readFileSync(path.resolve(__dirname, '../assets/project_estimating.js'), 'utf8');
 const saveStart = api.indexOf("if ($action === 'save')");
 const saveEnd = api.indexOf("if ($action === 'delete')", saveStart);
 const save = api.slice(saveStart, saveEnd);
@@ -41,4 +42,10 @@ test('replace mode remains the compatibility default for initial workspace migra
     assert.match(save, /\$mode = .*\$body\['partial'\].*\? 'patch' : 'replace'/);
     assert.match(save, /\$workspace.*\$workspace\['estimates'\]/s);
     assert.match(save, /if \(\$workspace\)[\s\S]*\$workspace\['estimates'\] = \$savedEstimates/);
+});
+
+test('startup does not resubmit a clean localStorage snapshot only because its timestamp is newer', () => {
+    assert.match(client, /const hasExplicitLocalChanges = dirtyEstimateIds\.size > 0/);
+    assert.match(client, /if \(forceMigratedLocal \|\| changedDuringLoad \|\| hasExplicitLocalChanges\)/);
+    assert.doesNotMatch(client, /changedDuringLoad \|\| Date\.parse\(local\.clientUiUpdatedAt/);
 });

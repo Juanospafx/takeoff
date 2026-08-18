@@ -1231,6 +1231,9 @@ if ($filePath !== '') {
         }
     }
     let resizeTimer = null;
+    // This must be initialized before the first waitForWrapperSize() call.
+    // Function declarations are hoisted, but a later `let` initializer is not.
+    let wrapperSizePromise = null;
     window.addEventListener('resize', () => {
         clearTimeout(resizeTimer);
         resizeTimer = setTimeout(resize, 120);
@@ -2515,7 +2518,6 @@ if ($filePath !== '') {
         return !!(w && w.clientWidth > 0 && w.clientHeight > 0);
     }
 
-    let wrapperSizePromise = null;
     function waitForWrapperSize() {
         if (wrapperHasSize()) {
             resize();
