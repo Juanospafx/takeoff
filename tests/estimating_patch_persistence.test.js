@@ -49,3 +49,9 @@ test('startup does not resubmit a clean localStorage snapshot only because its t
     assert.match(client, /if \(forceMigratedLocal \|\| changedDuringLoad \|\| hasExplicitLocalChanges\)/);
     assert.doesNotMatch(client, /changedDuringLoad \|\| Date\.parse\(local\.clientUiUpdatedAt/);
 });
+
+test('takeoff initialization waits for the current server revision and no-op sync does not autosave', () => {
+    assert.match(client, /if \(ui\.loadState === 'loading'\)[\s\S]*pendingTakeoffGroups = Workspace\.clone\(groups\)/);
+    assert.match(client, /if \(pendingTakeoffGroups\)[\s\S]*reconcileGroups\(queuedGroups\)/);
+    assert.match(client, /groupsContentSignature\(currentEstimate\.groups\) === groupsContentSignature\(reconciled\)\) return/);
+});

@@ -1363,7 +1363,7 @@ $state = [
 <script src="../assets/project_takeoff.js?v=takeoff-performance-20260818-1"></script>
 <script src="../assets/estimate_calculation_service.js?v=estimating-calculation-audit-20260811-1"></script>
 <script src="../assets/estimating_workspace_service.js?v=estimating-startup-conflict-20260818-2"></script>
-<script src="../assets/project_estimating.js?v=estimating-startup-conflict-20260818-2"></script>
+<script src="../assets/project_estimating.js?v=estimating-sync-race-20260818-3"></script>
 <script src="../assets/project_proposal.js?v=proposal-workspace-20260810-4"></script>
 <script src="../assets/global_tools.js"></script>
 </body>

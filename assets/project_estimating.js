@@ -32,6 +32,7 @@
     const dirtyEstimateIds = new Set(state.dirtyEstimateIds || []);
     const dirtyGenerations = new Map();
     let dirtyGeneration = 0;
+    let pendingTakeoffGroups = null;
 
     function restoreDirtyTracking() {
         dirtyEstimateIds.clear();
@@ -265,19 +266,38 @@
             ui.message = `Offline: ${error.message}`;
         }
         render();
+        if (pendingTakeoffGroups) {
+            const queuedGroups = pendingTakeoffGroups;
+            pendingTakeoffGroups = null;
+            reconcileGroups(queuedGroups);
+        }
+    }
+
+    function groupsContentSignature(groups) {
+        return JSON.stringify(groups, (key, value) => key === 'updatedAt' ? undefined : value);
     }
 
     function reconcileGroups(groups) {
         if (!Array.isArray(groups)) return;
+        // The iframe commonly publishes its initial snapshot while the current
+        // estimate revision is still loading. Apply that snapshot only after the
+        // server state is authoritative, otherwise it dirties a stale revision.
+        if (ui.loadState === 'loading') {
+            pendingTakeoffGroups = Workspace.clone(groups);
+            return;
+        }
         const currentEstimate = current();
+        let reconciled;
         if (groups.some(group => Array.isArray(group.items))) {
-            currentEstimate.groups = groups.map(Workspace.group);
+            reconciled = groups.map(Workspace.group);
         } else if (window.TakeoffEstimatingSyncService?.reconcile) {
-            currentEstimate.groups = window.TakeoffEstimatingSyncService.reconcile(currentEstimate.groups,
+            reconciled = window.TakeoffEstimatingSyncService.reconcile(currentEstimate.groups,
                 groups).map(Workspace.group);
         } else {
-            currentEstimate.groups = groups.map(Workspace.group);
+            reconciled = groups.map(Workspace.group);
         }
+        if (groupsContentSignature(currentEstimate.groups) === groupsContentSignature(reconciled)) return;
+        currentEstimate.groups = reconciled;
         changed('Synchronized items from Takeoff');
     }
 
