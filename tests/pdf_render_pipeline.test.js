@@ -46,3 +46,7 @@ test('PDF loading falls back from range requests and Retry restarts the document
     assert.match(source, /onclick="retryPdfLoad\(\)"/,
         'Retry must reload the PDF document instead of rendering with a null pdfDoc');
 });
+
+test('recoverable malformed TrueType hints do not flood the production console', () => {
+    assert.match(source, /verbosity:\s*pdfjsLib\.VerbosityLevel\?\.ERRORS \?\? 0/);
+});

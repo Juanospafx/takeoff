@@ -1585,10 +1585,10 @@
         syncAllLayersToCanvas();
     }
 
-    function applyLayerToCanvas(layer) {
+    function applyLayerToCanvas(layer, options = {}) {
         const win = takeoffWindow();
         if (!win) return;
-        syncAllLayersToCanvas();
+        if (!options.skipLayerSync) syncAllLayersToCanvas();
         const payload = layerCanvasPayload(layer);
         win.__projectActiveTakeoffLayer = payload;
         callEditor('projectTakeoffActivateLayer', payload);
@@ -2461,6 +2461,7 @@
             }, 250);
         });
         setInterval(() => {
+            if (document.hidden || !$('takeoffScalePanel')?.classList.contains('open')) return;
             syncScaleStatus();
             syncScaleHint();
             syncScalePresets();
@@ -2825,10 +2826,8 @@
             setTimeout(() => {
                 syncAllLayersToCanvas();
                 const active = findLayer(takeoffState.activeLayerId);
-                if (active) applyLayerToCanvas(active);
+                if (active) applyLayerToCanvas(active, { skipLayerSync: true });
                 else callEditor('projectTakeoffClearActiveLayer');
-                const snapshot = callEditor('projectTakeoffSnapshot');
-                if (snapshot) syncTakeoffFromCanvasSnapshot(snapshot);
             }, 360);
         });
     }

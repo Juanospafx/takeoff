@@ -828,7 +828,7 @@ if ($filePath !== '') {
     const isMobileViewport = window.innerWidth <= 768;
     const dpr = window.devicePixelRatio || 1;
     const PDF_PADDING = isMobileViewport ? 18 : 36;
-    const MAX_PDF_RENDER_SCALE = 6;
+    const MAX_PDF_RENDER_SCALE = 4;
     let pdfDoc = null, pageNum = 1;
     let pdfWorldWidth = 0;
     let pdfWorldHeight = 0;
@@ -841,7 +841,7 @@ if ($filePath !== '') {
     let zoomNotificationFrame = null;
     let pendingZoomNotification = null;
     const pdfBitmapCache = new Map();
-    const PDF_BITMAP_CACHE_LIMIT = 8;
+    const PDF_BITMAP_CACHE_LIMIT = 4;
     const drawingLoading = document.getElementById('drawingLoading');
 
     function notifyTakeoffZoomChanged(source = 'editor') {
@@ -2424,7 +2424,11 @@ if ($filePath !== '') {
             rangeChunkSize: 262144,
             disableRange: forceFullDownload,
             disableStream: forceFullDownload,
-            disableAutoFetch: !forceFullDownload
+            disableAutoFetch: !forceFullDownload,
+            // Broken TrueType hint programs (for example an undefined FDEF 21)
+            // are recoverable in PDF.js. Keep them from flooding production
+            // consoles while real document load/render errors remain visible.
+            verbosity: pdfjsLib.VerbosityLevel?.ERRORS ?? 0
         });
         pdfLoadingTask.promise.then(pdf => {
             pdfDoc = pdf;
@@ -2511,18 +2515,32 @@ if ($filePath !== '') {
         return !!(w && w.clientWidth > 0 && w.clientHeight > 0);
     }
 
+    let wrapperSizePromise = null;
     function waitForWrapperSize() {
-        return new Promise(resolve => {
+        if (wrapperHasSize()) {
+            resize();
+            return Promise.resolve(true);
+        }
+        if (wrapperSizePromise) return wrapperSizePromise;
+        wrapperSizePromise = new Promise(resolve => {
+            const started = performance.now();
             const tick = () => {
                 if (wrapperHasSize()) {
                     resize();
-                    resolve();
-                } else {
-                    requestAnimationFrame(tick);
+                    wrapperSizePromise = null;
+                    resolve(true);
+                    return;
                 }
+                if (document.hidden || performance.now() - started >= 3000) {
+                    wrapperSizePromise = null;
+                    resolve(false);
+                    return;
+                }
+                requestAnimationFrame(tick);
             };
             tick();
         });
+        return wrapperSizePromise;
     }
 
     function fitPdfToView(force = false) {
@@ -3730,7 +3748,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=linear-drop-editing-20260818-1"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-performance-20260818-1"></script>
 </body>
 </html>
 

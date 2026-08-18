@@ -17,6 +17,14 @@ $body = json_decode(file_get_contents('php://input'), true);
 if (!is_array($body)) $body = array();
 $action = isset($_GET['action']) ? (string)$_GET['action'] : (isset($body['action']) ? (string)$body['action'] : 'load');
 
+class PewRevisionConflict extends RuntimeException {
+    public $conflicts;
+    public function __construct(array $conflicts) {
+        parent::__construct('The estimate was changed by another client.');
+        $this->conflicts = $conflicts;
+    }
+}
+
 function pew_json($data, $status = 200) {
     http_response_code($status);
     echo json_encode($data, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
@@ -431,7 +439,14 @@ function pew_save_estimate(PDO $pdo, $projectId, array $estimate, array $summary
     }
     $current = pew_state_row($pdo, $estimateId);
     if ($expectedRevision !== null && $current && (int)$expectedRevision !== (int)$current['revision']) {
-        pew_error('The estimate was changed by another client.', 409, 'revision_conflict');
+        $serverEstimate = pew_load_one($pdo, pew_owned_estimate($pdo, $estimateId, $projectId));
+        throw new PewRevisionConflict(array(array(
+            'id' => $clientId,
+            'dbEstimateId' => $estimateId,
+            'expectedRevision' => (int)$expectedRevision,
+            'currentRevision' => (int)$current['revision'],
+            'current' => $serverEstimate
+        )));
     }
     if (isset($estimate['estimateSummary']) && is_array($estimate['estimateSummary'])) $summary = $estimate['estimateSummary'];
     $extendedValues = array(pew_text(isset($estimate['code']) ? $estimate['code'] : '', 100) ?: null, pew_text(isset($estimate['name']) ? $estimate['name'] : 'Estimate'),
@@ -501,9 +516,26 @@ try {
         $pewStage = 'workspace_save';
         pew_method('POST');
         $workspace = isset($body['state']) && is_array($body['state']) ? $body['state'] : null;
-        $incoming = $workspace && isset($workspace['estimates']) && is_array($workspace['estimates'])
-            ? $workspace['estimates']
-            : (isset($body['estimate']) && is_array($body['estimate']) ? array($body['estimate']) : array());
+        $mode = (isset($body['mode']) && $body['mode'] === 'patch') || !empty($body['partial']) ? 'patch' : 'replace';
+        if ($mode === 'patch') {
+            $patchRows = isset($body['updates']) && is_array($body['updates'])
+                ? $body['updates']
+                : ($workspace && isset($workspace['estimates']) && is_array($workspace['estimates']) ? $workspace['estimates'] : array());
+            $incoming = array_map(function ($update) {
+                return is_array($update) && isset($update['snapshot']) && is_array($update['snapshot'])
+                    ? $update['snapshot'] : $update;
+            }, $patchRows);
+            // Canonical identity order keeps concurrent PATCH requests from
+            // acquiring estimate locks in opposite orders.
+            usort($incoming, function ($a, $b) {
+                return strcmp((string)(is_array($a) && isset($a['id']) ? $a['id'] : ''),
+                    (string)(is_array($b) && isset($b['id']) ? $b['id'] : ''));
+            });
+        } else {
+            $incoming = $workspace && isset($workspace['estimates']) && is_array($workspace['estimates'])
+                ? $workspace['estimates']
+                : (isset($body['estimate']) && is_array($body['estimate']) ? array($body['estimate']) : array());
+        }
         if (!$incoming) pew_error('state.estimates is required.', 422, 'invalid_workspace');
         $pdo->beginTransaction();
         $savedEstimates = array();
@@ -522,13 +554,19 @@ try {
             $keptIds[] = (int)$savedEstimate['dbEstimateId'];
         }
         // Only estimates previously owned by this workspace API are eligible for omission deletion.
-        if ($workspace && $keptIds) {
+        if ($mode === 'replace' && $workspace && $keptIds) {
             $marks = implode(',', array_fill(0, count($keptIds), '?'));
             $stmt = $pdo->prepare("UPDATE estimates e INNER JOIN estimate_workspace_states ws ON ws.estimate_id=e.id
                 SET e.deleted_at=CURRENT_TIMESTAMP WHERE e.project_id=? AND e.deleted_at IS NULL AND e.id NOT IN ($marks)");
             $stmt->execute(array_merge(array($projectId), $keptIds));
         }
         $pdo->commit();
+        if ($mode === 'patch') {
+            pew_json(array('ok' => true, 'success' => true, 'mode' => 'patch', 'updates' => $savedEstimates,
+                'activeEstimateId' => $requestedActiveId !== '' ? $requestedActiveId : null,
+                'state' => array('activeEstimateId' => $requestedActiveId !== '' ? $requestedActiveId : null,
+                    'estimates' => $savedEstimates)));
+        }
         if ($workspace) {
             $workspace['estimates'] = $savedEstimates;
             $savedActiveExists = false;
@@ -554,6 +592,13 @@ try {
         pew_json(array('ok' => true, 'success' => true, 'estimateId' => $estimateId));
     }
     pew_error('Unknown action.', 404, 'unknown_action');
+} catch (PewRevisionConflict $e) {
+    if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+    pew_json(array('ok' => false, 'success' => false, 'error' => array(
+        'code' => 'revision_conflict',
+        'message' => 'The estimate was changed by another client.',
+        'conflicts' => $e->conflicts
+    )), 409);
 } catch (Throwable $e) {
     if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
     error_log(sprintf('project_estimating.php request=%s stage=%s type=%s message=%s',

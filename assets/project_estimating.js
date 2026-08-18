@@ -29,6 +29,20 @@
     const ui = { search: '', selected: new Set(), saving: false, saveRequested: false, saveTimer: null, loadState: projectId ? 'loading' : 'local',
         message: projectId ? 'Loading estimate' : 'Local draft', collapsed: {}, modal: null };
     let state = readLocal();
+    const dirtyEstimateIds = new Set(state.dirtyEstimateIds || []);
+    const dirtyGenerations = new Map();
+    let dirtyGeneration = 0;
+
+    function restoreDirtyTracking() {
+        dirtyEstimateIds.clear();
+        dirtyGenerations.clear();
+        (state.dirtyEstimateIds || []).forEach(id => {
+            const normalized = String(id);
+            if (!state.estimates.some(estimate => String(estimate.id) === normalized)) return;
+            dirtyEstimateIds.add(normalized);
+            dirtyGenerations.set(normalized, ++dirtyGeneration);
+        });
+    }
 
     if (!$('estTableHead')) {
         root.classList.add('est-v2');
@@ -49,8 +63,16 @@
             .map(error => ({ ...error, itemId: item.id, itemName: item.name })));
     }
     function findItem(itemId) { return allItems().find(row => row.item.id === itemId) || null; }
+    function markEstimateDirty(estimateId = state.activeEstimateId) {
+        const id = String(estimateId || '');
+        if (!id) return;
+        dirtyEstimateIds.add(id);
+        dirtyGenerations.set(id, ++dirtyGeneration);
+        state.dirtyEstimateIds = [...dirtyEstimateIds];
+    }
     function saveLocal() {
         state.groups = current().groups;
+        state.dirtyEstimateIds = [...dirtyEstimateIds];
         state.clientUiUpdatedAt = Workspace.now();
         const stored = Workspace.clone(state);
         if (!stored.pendingProjectCreationSync) delete stored.pendingProjectCreationSync;
@@ -111,6 +133,7 @@
 
     function scheduleSave() {
         if (!projectId) return;
+        markEstimateDirty();
         ui.saveRequested = true;
         clearTimeout(ui.saveTimer);
         ui.loadState = 'pending';
@@ -121,7 +144,13 @@
     async function request(action, options = {}) {
         const response = await fetch(`${apiUrl}?action=${encodeURIComponent(action)}&project_id=${projectId}`, options);
         const result = await response.json().catch(() => null);
-        if (!response.ok || !result?.success) throw new Error(result?.message || `HTTP ${response.status}`);
+        if (!response.ok || !result?.success) {
+            const error = new Error(result?.error?.message || result?.message || `HTTP ${response.status}`);
+            error.code = result?.error?.code || result?.code || (response.status === 409 ? 'revision_conflict' : 'request_failed');
+            error.status = response.status;
+            error.payload = result;
+            throw error;
+        }
         return result;
     }
 
@@ -137,40 +166,58 @@
             renderStatus();
             return;
         }
+        const sentIds = [...dirtyEstimateIds].filter(id => state.estimates.some(estimate => String(estimate.id) === id));
+        if (!sentIds.length) {
+            ui.saveRequested = false;
+            ui.loadState = 'saved';
+            ui.message = 'Saved';
+            renderStatus();
+            return;
+        }
         ui.saving = true;
         ui.saveRequested = false;
         ui.loadState = 'saving';
         ui.message = 'Saving…';
         renderStatus();
-        const sent = Workspace.clone(state);
-        delete sent.pendingProjectCreationSync;
+        const sentGenerations = new Map(sentIds.map(id => [id, dirtyGenerations.get(id) || 0]));
+        const sent = {
+            schemaVersion: state.schemaVersion,
+            projectId: state.projectId,
+            activeEstimateId: state.activeEstimateId,
+            clientUiUpdatedAt: state.clientUiUpdatedAt,
+            estimates: Workspace.clone(state.estimates.filter(estimate => sentIds.includes(String(estimate.id))))
+        };
         try {
             const result = await request('save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'save', project_id: projectId, state: sent, summary: summary() }) });
-            const acknowledged = Workspace.workspace(result.state || sent, projectId);
-            if (state.clientUiUpdatedAt === sent.clientUiUpdatedAt) {
-                state = acknowledged;
-                ui.loadState = 'saved';
-                ui.message = 'Saved';
-            } else {
-                // A stale response must not replace estimates created or edited
-                // while this request was in flight. Carry forward only the
-                // server identity and revision needed by the queued save.
-                const acknowledgements = new Map(acknowledged.estimates.map(estimate => [String(estimate.id), estimate]));
-                state.estimates.forEach(estimate => {
-                    const ack = acknowledgements.get(String(estimate.id));
-                    if (!ack) return;
-                    estimate.dbEstimateId = ack.dbEstimateId;
-                    estimate.revision = ack.revision;
-                });
-                ui.saveRequested = true;
-                ui.loadState = 'pending';
-                ui.message = 'Unsaved changes';
-            }
+                body: JSON.stringify({ action: 'save', mode: 'patch', project_id: projectId,
+                    updates: sent.estimates, state: sent, summary: summary() }) });
+            const acknowledgedRows = result.updates || result.state?.estimates || result.estimates || [];
+            const acknowledgements = new Map(acknowledgedRows.map(estimate => [String(estimate.id), estimate]));
+            sentIds.forEach(id => {
+                const currentIndex = state.estimates.findIndex(estimate => String(estimate.id) === id);
+                const ack = acknowledgements.get(id);
+                if (currentIndex < 0 || !ack) return;
+                if ((dirtyGenerations.get(id) || 0) === sentGenerations.get(id)) {
+                    state.estimates[currentIndex] = Workspace.estimate(ack, projectId, currentIndex);
+                    dirtyEstimateIds.delete(id);
+                    dirtyGenerations.delete(id);
+                } else {
+                    state.estimates[currentIndex].dbEstimateId = ack.dbEstimateId;
+                    state.estimates[currentIndex].revision = ack.revision;
+                    ui.saveRequested = true;
+                }
+            });
+            Workspace.selectEstimate(state, state.activeEstimateId);
+            ui.loadState = dirtyEstimateIds.size ? 'pending' : 'saved';
+            ui.message = dirtyEstimateIds.size ? 'Unsaved changes' : 'Saved';
             saveLocal();
         } catch (error) {
             ui.loadState = 'error';
-            ui.message = `Save failed: ${error.message}`;
+            ui.message = error.code === 'revision_conflict'
+                ? 'This estimate changed elsewhere. Your draft is saved locally; reload or retry after reviewing the latest version.'
+                : `Save failed: ${error.message}`;
+            if (error.code === 'revision_conflict') ui.saveRequested = false;
+            saveLocal();
         } finally {
             ui.saving = false;
             render();
@@ -193,11 +240,15 @@
             const changedDuringLoad = local.clientUiUpdatedAt !== requestLocalTimestamp;
             if (forceMigratedLocal || changedDuringLoad || Date.parse(local.clientUiUpdatedAt || 0) > Date.parse(remote.clientUiUpdatedAt || 0)) {
                 delete state.pendingProjectCreationSync;
+                state.estimates.forEach(estimate => markEstimateDirty(estimate.id));
                 saveLocal();
                 await saveServer();
                 return;
             }
-            if (Array.isArray(remoteSource.estimates) && remoteSource.estimates.length) state = remote;
+            if (Array.isArray(remoteSource.estimates) && remoteSource.estimates.length) {
+                state = remote;
+                restoreDirtyTracking();
+            }
             ui.loadState = 'saved';
             ui.message = 'Loaded from server';
             saveLocal();
@@ -531,6 +582,8 @@
             const name = portal.querySelector('#copyEstimateName')?.value;
             const mode = portal.querySelector('input[name="copyEstimateMode"]:checked')?.value || 'blank';
             Workspace.createEstimate(state, name, mode); ui.modal = null; saveLocal();
+            markEstimateDirty();
+            saveLocal();
             if (projectId) saveServer();
             render();
         }
@@ -543,15 +596,20 @@
     function refreshEstimateFromStorage(estimateId) {
         try {
             const stored = JSON.parse(localStorage.getItem(storageKey) || 'null');
-            if (stored?.estimates?.some(row => String(row.id) === String(estimateId))) state = Workspace.workspace(stored, projectId);
+            if (stored?.estimates?.some(row => String(row.id) === String(estimateId))) {
+                state = Workspace.workspace(stored, projectId);
+                restoreDirtyTracking();
+            }
         } catch (_) {}
     }
 
     function selectEstimate(estimateId) {
         const selected = Workspace.selectEstimate(state, estimateId);
         if (!selected) return;
-        Workspace.touch(state, `Selected estimate “${current().name}”`);
-        ui.selected.clear(); saveLocal(); scheduleSave(); render();
+        // Selecting a tab is local UI state, not an estimate content edit. It
+        // must not increment the estimate revision or conflict with another
+        // estimator editing that same estimate.
+        ui.selected.clear(); saveLocal(); render();
     }
 
     window.addEventListener('takeoff:estimating-lines-updated', event => {
@@ -570,7 +628,9 @@
     });
     window.addEventListener('storage', event => {
         if (event.key !== storageKey || !event.newValue) return;
-        state = Workspace.workspace(JSON.parse(event.newValue), projectId); render();
+        state = Workspace.workspace(JSON.parse(event.newValue), projectId);
+        restoreDirtyTracking();
+        render();
     });
 
     window.projectEstimatingSave = async function () {

@@ -55,14 +55,16 @@ test('save API persists workspace activeEstimateId into snapshots and returns it
 });
 
 test('client saves the complete workspace and retains a visible retry state', () => {
-    assert.match(client, /body: JSON\.stringify\(\{ action: 'save', project_id: projectId, state: sent, summary: summary\(\) \}\)/);
+    assert.match(client, /mode: 'patch'[\s\S]*updates: sent\.estimates[\s\S]*state: sent/);
     assert.match(client, /ui\.loadState = 'error'/);
     assert.match(client, /data-retry-save/);
     assert.match(client, /localStorage\.setItem\(storageKey/);
 });
 
-test('estimate selection and project save flush the active workspace to the server', () => {
-    assert.match(client, /function selectEstimate[\s\S]*Workspace\.touch\(state,[\s\S]*scheduleSave\(\)/);
+test('estimate selection stays local while project save flushes dirty content', () => {
+    const selection = client.slice(client.indexOf('function selectEstimate'), client.indexOf("window.addEventListener('takeoff:estimating-lines-updated'"));
+    assert.match(selection, /Workspace\.selectEstimate\(state, estimateId\)/);
+    assert.doesNotMatch(selection, /Workspace\.touch|scheduleSave/);
     assert.match(client, /window\.projectEstimatingSave = async function/);
     assert.match(client, /ui\.saveRequested/);
 });
