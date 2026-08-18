@@ -30,6 +30,9 @@
         message: projectId ? 'Loading estimate' : 'Local draft', collapsed: {}, modal: null };
     let state = readLocal();
     const dirtyEstimateIds = new Set(state.dirtyEstimateIds || []);
+    const takeoffSyncDirtyIds = new Set(state.takeoffSyncDirtyIds || []);
+    const conflictedEstimateIds = new Set();
+    const conflictRemoteEstimates = new Map();
     const dirtyGenerations = new Map();
     let dirtyGeneration = 0;
     let pendingTakeoffGroups = null;
@@ -70,10 +73,12 @@
         dirtyEstimateIds.add(id);
         dirtyGenerations.set(id, ++dirtyGeneration);
         state.dirtyEstimateIds = [...dirtyEstimateIds];
+        state.takeoffSyncDirtyIds = [...takeoffSyncDirtyIds];
     }
     function saveLocal() {
         state.groups = current().groups;
         state.dirtyEstimateIds = [...dirtyEstimateIds];
+        state.takeoffSyncDirtyIds = [...takeoffSyncDirtyIds];
         state.clientUiUpdatedAt = Workspace.now();
         const stored = Workspace.clone(state);
         if (!stored.pendingProjectCreationSync) delete stored.pendingProjectCreationSync;
@@ -94,13 +99,21 @@
     }
 
     function changed(action) {
+        const activeId = String(state.activeEstimateId || '');
+        if (action === 'Synchronized items from Takeoff') takeoffSyncDirtyIds.add(activeId);
+        else takeoffSyncDirtyIds.delete(activeId);
+        conflictedEstimateIds.delete(activeId);
+        conflictRemoteEstimates.delete(activeId);
         Workspace.touch(state, action);
         saveLocal();
-        scheduleSave();
+        scheduleSave(action === 'Synchronized items from Takeoff' ? 'takeoff' : 'manual');
         render();
     }
 
     function reactiveChanged(target) {
+        takeoffSyncDirtyIds.delete(String(state.activeEstimateId || ''));
+        conflictedEstimateIds.delete(String(state.activeEstimateId || ''));
+        conflictRemoteEstimates.delete(String(state.activeEstimateId || ''));
         Workspace.touch(state);
         saveLocal();
         scheduleSave();
@@ -132,8 +145,12 @@
         }
     }
 
-    function scheduleSave() {
+    function scheduleSave(source = 'manual') {
         if (!projectId) return;
+        const activeId = String(state.activeEstimateId || '');
+        if (source === 'takeoff') takeoffSyncDirtyIds.add(activeId);
+        else takeoffSyncDirtyIds.delete(activeId);
+        conflictedEstimateIds.delete(activeId);
         markEstimateDirty();
         ui.saveRequested = true;
         clearTimeout(ui.saveTimer);
@@ -167,8 +184,16 @@
             renderStatus();
             return;
         }
-        const sentIds = [...dirtyEstimateIds].filter(id => state.estimates.some(estimate => String(estimate.id) === id));
+        const sentIds = [...dirtyEstimateIds].filter(id => !conflictedEstimateIds.has(id)
+            && state.estimates.some(estimate => String(estimate.id) === id));
         if (!sentIds.length) {
+            if (conflictedEstimateIds.size) {
+                ui.saveRequested = false;
+                ui.loadState = 'error';
+                ui.message = 'This estimate has concurrent manual changes. Your local draft is preserved; review the latest version before saving.';
+                renderStatus();
+                return;
+            }
             ui.saveRequested = false;
             ui.loadState = 'saved';
             ui.message = 'Saved';
@@ -202,6 +227,9 @@
                     state.estimates[currentIndex] = Workspace.estimate(ack, projectId, currentIndex);
                     dirtyEstimateIds.delete(id);
                     dirtyGenerations.delete(id);
+                    takeoffSyncDirtyIds.delete(id);
+                    conflictedEstimateIds.delete(id);
+                    conflictRemoteEstimates.delete(id);
                 } else {
                     state.estimates[currentIndex].dbEstimateId = ack.dbEstimateId;
                     state.estimates[currentIndex].revision = ack.revision;
@@ -217,7 +245,28 @@
             ui.message = error.code === 'revision_conflict'
                 ? 'This estimate changed elsewhere. Your draft is saved locally; reload or retry after reviewing the latest version.'
                 : `Save failed: ${error.message}`;
-            if (error.code === 'revision_conflict') ui.saveRequested = false;
+            if (error.code === 'revision_conflict') {
+                const conflicts = error.payload?.error?.conflicts || [];
+                let rebasedTakeoff = false;
+                conflicts.forEach(conflict => {
+                    const id = String(conflict.id || '');
+                    const localIndex = state.estimates.findIndex(estimate => String(estimate.id) === id);
+                    if (localIndex < 0 || !conflict.current) return;
+                    if (takeoffSyncDirtyIds.has(id)) {
+                        state.estimates[localIndex] = rebaseTakeoffChanges(state.estimates[localIndex], conflict.current, localIndex);
+                        markEstimateDirty(id);
+                        rebasedTakeoff = true;
+                    } else {
+                        conflictedEstimateIds.add(id);
+                        conflictRemoteEstimates.set(id, Workspace.clone(conflict.current));
+                    }
+                });
+                ui.saveRequested = rebasedTakeoff;
+                if (rebasedTakeoff) {
+                    ui.loadState = 'pending';
+                    ui.message = 'Merged with the latest server revision; saving again…';
+                }
+            }
             saveLocal();
         } finally {
             ui.saving = false;
@@ -245,16 +294,40 @@
             // Only explicit dirty tracking (or an edit made during this request)
             // is allowed to push local data back to the server on startup.
             const hasExplicitLocalChanges = dirtyEstimateIds.size > 0;
-            if (forceMigratedLocal || changedDuringLoad || hasExplicitLocalChanges) {
+            if (forceMigratedLocal || hasExplicitLocalChanges) {
                 delete state.pendingProjectCreationSync;
-                if (forceMigratedLocal || changedDuringLoad) {
+                if (forceMigratedLocal) {
                     state.estimates.forEach(estimate => markEstimateDirty(estimate.id));
                 }
+                const remoteById = new Map(remote.estimates.map(estimate => [String(estimate.id), estimate]));
+                state.estimates = state.estimates.map((localEstimate, index) => {
+                    const id = String(localEstimate.id);
+                    const remoteEstimate = remoteById.get(id);
+                    if (!dirtyEstimateIds.has(id) || !remoteEstimate) return localEstimate;
+                    if (Number(localEstimate.revision) === Number(remoteEstimate.revision)) return localEstimate;
+                    if (takeoffSyncDirtyIds.has(id)) return rebaseTakeoffChanges(localEstimate, remoteEstimate, index);
+                    conflictedEstimateIds.add(id);
+                    conflictRemoteEstimates.set(id, Workspace.clone(remoteEstimate));
+                    return localEstimate;
+                });
                 saveLocal();
                 await saveServer();
+                render();
+                if (pendingTakeoffGroups) {
+                    const queuedGroups = pendingTakeoffGroups;
+                    pendingTakeoffGroups = null;
+                    reconcileGroups(queuedGroups);
+                }
                 return;
             }
-            if (Array.isArray(remoteSource.estimates) && remoteSource.estimates.length) {
+            if (changedDuringLoad) {
+                // A real edit/new estimate completed while GET was in flight.
+                // Its save lifecycle owns the newer local state; never replace it
+                // with the now-stale GET snapshot.
+                ui.loadState = 'saved';
+                ui.message = 'Loaded; local changes preserved';
+                saveLocal();
+            } else if (Array.isArray(remoteSource.estimates) && remoteSource.estimates.length) {
                 state = remote;
                 restoreDirtyTracking();
             }
@@ -277,6 +350,26 @@
         return JSON.stringify(groups, (key, value) => key === 'updatedAt' ? undefined : value);
     }
 
+    function rebaseTakeoffChanges(localEstimate, remoteEstimate, index = 0) {
+        const remote = Workspace.estimate(remoteEstimate, projectId, index);
+        const takeoffGroups = (localEstimate.groups || []).map((group, groupIndex) => ({
+            id: group.takeoffGroupId || group.id || `takeoff_group_${groupIndex}`,
+            name: group.name || 'Default Group',
+            expanded: group.expanded !== false,
+            layers: (group.items || []).filter(item => item.takeoffLayerId).map(item => ({
+                ...Workspace.clone(item), id: item.takeoffLayerId
+            }))
+        })).filter(group => group.layers.length || String(group.id).startsWith('takeoff_'));
+        if (window.TakeoffEstimatingSyncService?.reconcile) {
+            remote.groups = window.TakeoffEstimatingSyncService.reconcile(remote.groups, takeoffGroups).map(Workspace.group);
+        }
+        remote.updatedAt = Workspace.now();
+        remote.auditLog.push({ id: Workspace.uid('audit'), at: remote.updatedAt,
+            action: 'Merged Takeoff changes with concurrent server changes' });
+        remote.auditLog = remote.auditLog.slice(-100);
+        return remote;
+    }
+
     function reconcileGroups(groups) {
         if (!Array.isArray(groups)) return;
         // The iframe commonly publishes its initial snapshot while the current
@@ -285,6 +378,14 @@
         if (ui.loadState === 'loading') {
             pendingTakeoffGroups = Workspace.clone(groups);
             return;
+        }
+        const activeId = String(state.activeEstimateId || '');
+        if (conflictedEstimateIds.has(activeId) && conflictRemoteEstimates.has(activeId)) {
+            const index = state.estimates.findIndex(estimate => String(estimate.id) === activeId);
+            state.estimates[index] = rebaseTakeoffChanges(state.estimates[index], conflictRemoteEstimates.get(activeId), index);
+            conflictedEstimateIds.delete(activeId);
+            conflictRemoteEstimates.delete(activeId);
+            takeoffSyncDirtyIds.add(activeId);
         }
         const currentEstimate = current();
         let reconciled;
@@ -646,7 +747,6 @@
     });
     window.addEventListener('takeoff:active-estimate-changed', event => {
         if (event.detail?.projectId && String(event.detail.projectId) !== String(projectId)) return;
-        refreshEstimateFromStorage(event.detail?.estimateId);
         selectEstimate(event.detail?.estimateId);
     });
     window.addEventListener('takeoff:estimating-action-requested', event => {

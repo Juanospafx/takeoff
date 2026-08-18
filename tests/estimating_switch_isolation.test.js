@@ -27,7 +27,7 @@ test('persisted and temporary estimates switch without sharing groups, notes, or
     assert.equal(state.estimates[1].groups[0].items[0].name, 'Edited temporary item');
 });
 
-test('external estimate click loads the latest local snapshot before rendering and saving', () => {
+test('estimate selection intent is handled by the sole Estimating workspace owner', () => {
     const dom = new JSDOM('<div id="estimatingModule" data-project-id="0"></div>', {
         url: 'https://takeoff.test/project/draft', runScripts: 'outside-only', pretendToBeVisual: true
     });
@@ -38,20 +38,16 @@ test('external estimate click loads the latest local snapshot before rendering a
     ] }));
     sources.forEach(source => dom.window.eval(source));
 
-    const latest = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.draft'));
-    latest.activeEstimateId = 'two';
-    latest.estimates.find(row => row.id === 'two').groups[0].items[0].name = 'Latest external item';
-    dom.window.localStorage.setItem('takeoff.estimating.module.draft', JSON.stringify(latest));
     dom.window.dispatchEvent(new dom.window.CustomEvent('takeoff:active-estimate-changed', {
         detail: { projectId: '', estimateId: 'two' }
     }));
 
     const saved = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.draft'));
     assert.equal(saved.activeEstimateId, 'two');
-    assert.equal(saved.estimates.find(row => row.id === 'two').groups[0].items[0].name, 'Latest external item');
+    assert.equal(saved.estimates.find(row => row.id === 'two').groups[0].items[0].name, 'Old two item');
     assert.equal(saved.estimates.find(row => row.id === 'one').groups[0].items[0].name, 'One item');
     assert.deepEqual(saved.estimates.map(row => row.isActive), [false, true]);
-    assert.equal(dom.window.document.querySelector('[data-item-id="i2"] [data-item-field="name"]')?.value, 'Latest external item');
+    assert.equal(dom.window.document.querySelector('[data-item-id="i2"] [data-item-field="name"]')?.value, 'Old two item');
     dom.window.close();
 });
 

@@ -593,11 +593,8 @@
     function activateEstimate(estimateId) {
         const state = loadEstimatingStateForSync();
         if (!state || !Array.isArray(state.estimates) || !state.estimates.some(estimate => String(estimate.id) === String(estimateId))) return;
-        state.activeEstimateId = estimateId;
-        const active = state.estimates.find(estimate => String(estimate.id) === String(estimateId));
-        if (active && Array.isArray(active.groups)) state.groups = active.groups;
-        localStorage.setItem(estimatingStoreKey(), JSON.stringify(state));
-        renderTakeoffEstimateFooter();
+        // Estimating is the sole owner of its workspace. Takeoff publishes an
+        // intent and waits for Estimating to persist and republish selection.
         window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', { detail: { projectId: String(window.ProjectState?.projectId || ''), estimateId } }));
     }
 
@@ -718,7 +715,6 @@
         state.groups = projectedGroups;
         if (activeEstimate) activeEstimate.groups = projectedGroups;
         try {
-            localStorage.setItem(estimatingStoreKey(), JSON.stringify(state));
             window.dispatchEvent(new CustomEvent('takeoff:estimating-lines-updated', {
                 detail: {
                     version: 2,

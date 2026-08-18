@@ -160,6 +160,7 @@
             estimates,
             groups: active.groups,
             dirtyEstimateIds: Array.isArray(raw.dirtyEstimateIds) ? raw.dirtyEstimateIds.map(String) : [],
+            takeoffSyncDirtyIds: Array.isArray(raw.takeoffSyncDirtyIds) ? raw.takeoffSyncDirtyIds.map(String) : [],
             clientUiUpdatedAt: text(raw.clientUiUpdatedAt, now()),
             pendingProjectCreationSync: raw.pendingProjectCreationSync === true
         };

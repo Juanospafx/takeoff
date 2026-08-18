@@ -29,7 +29,8 @@ expect(estimatingCss, /\.est-version-bar\s*\{[\s\S]*?--est-surface:\s*#ffffff;[\
 expect(estimatingCss, /\[data-theme="dark"\]\s+\.est-version-bar\s*\{[\s\S]*?--est-surface:/, 'Shared footer must preserve Estimating parity in dark mode.');
 expect(takeoff, /data-takeoff-estimate-id/, 'Takeoff must render estimate choices.');
 expect(proposal, /data-proposal-estimate-id/, 'Proposal must render estimate choices.');
-expect(takeoff, /state\.activeEstimateId\s*=\s*estimateId/, 'Takeoff must persist the active estimate.');
+expect(takeoff, /takeoff:active-estimate-changed/, 'Takeoff must request active estimate selection from Estimating.');
+expect(takeoff, /Estimating is the sole owner of its workspace/, 'Takeoff must not become a second estimating workspace writer.');
 expect(proposal, /estimating\.activeEstimateId\s*=\s*estimateId/, 'Proposal must persist the active estimate.');
 expect(takeoff, /takeoff:active-estimate-changed/, 'Takeoff must publish estimate changes.');
 expect(proposal, /takeoff:active-estimate-changed/, 'Proposal must react to estimate changes.');
@@ -76,10 +77,12 @@ const activeButton = renderedFooter.querySelector('[data-takeoff-estimate-id="al
 if (!activeButton?.classList.contains('active') || activeButton.getAttribute('aria-pressed') !== 'true') {
     throw new Error('Takeoff footer must visibly identify the active estimate.');
 }
+let requestedEstimate = '';
+dom.window.addEventListener('takeoff:active-estimate-changed', event => { requestedEstimate = event.detail.estimateId; });
 renderedFooter.querySelector('[data-takeoff-estimate-id="primary"]').click();
 const savedState = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.2'));
-if (savedState.activeEstimateId !== 'primary' || !renderedFooter.querySelector('[data-takeoff-estimate-id="primary"]')?.classList.contains('active')) {
-    throw new Error('Clicking a visible footer option must persist and display the new active estimate.');
+if (requestedEstimate !== 'primary' || savedState.activeEstimateId !== 'alternate') {
+    throw new Error('Clicking a visible footer option must delegate selection without becoming a second workspace writer.');
 }
 let requestedAction = '';
 dom.window.addEventListener('takeoff:estimating-action-requested', event => { requestedAction = event.detail.action; });

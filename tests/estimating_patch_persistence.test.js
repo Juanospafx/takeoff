@@ -46,12 +46,24 @@ test('replace mode remains the compatibility default for initial workspace migra
 
 test('startup does not resubmit a clean localStorage snapshot only because its timestamp is newer', () => {
     assert.match(client, /const hasExplicitLocalChanges = dirtyEstimateIds\.size > 0/);
-    assert.match(client, /if \(forceMigratedLocal \|\| changedDuringLoad \|\| hasExplicitLocalChanges\)/);
+    assert.match(client, /if \(forceMigratedLocal \|\| hasExplicitLocalChanges\)/);
     assert.doesNotMatch(client, /changedDuringLoad \|\| Date\.parse\(local\.clientUiUpdatedAt/);
+});
+
+test('Takeoff publishes estimating intents but never writes the estimating workspace', () => {
+    const takeoff = fs.readFileSync(path.resolve(__dirname, '../assets/project_takeoff.js'), 'utf8');
+    assert.doesNotMatch(takeoff, /localStorage\.setItem\(estimatingStoreKey\(\)/);
+    assert.match(takeoff, /takeoff:estimating-lines-updated/);
+    assert.match(takeoff, /takeoff:active-estimate-changed/);
 });
 
 test('takeoff initialization waits for the current server revision and no-op sync does not autosave', () => {
     assert.match(client, /if \(ui\.loadState === 'loading'\)[\s\S]*pendingTakeoffGroups = Workspace\.clone\(groups\)/);
     assert.match(client, /if \(pendingTakeoffGroups\)[\s\S]*reconcileGroups\(queuedGroups\)/);
     assert.match(client, /groupsContentSignature\(currentEstimate\.groups\) === groupsContentSignature\(reconciled\)\) return/);
+});
+
+test('a queued Takeoff snapshot rebases a legacy dirty conflict before scheduling its POST', () => {
+    assert.match(client, /conflictRemoteEstimates\.set\(id, Workspace\.clone\(remoteEstimate\)\)/);
+    assert.match(client, /conflictedEstimateIds\.has\(activeId\)[\s\S]*rebaseTakeoffChanges[\s\S]*conflictedEstimateIds\.delete\(activeId\)/);
 });

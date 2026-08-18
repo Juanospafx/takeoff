@@ -43,12 +43,13 @@ function backend() {
     } };
 }
 
-function client(server) {
+function client(server, setup) {
     const dom = new JSDOM('<div id="estimatingModule" data-project-id="42"></div>', {
         url: 'https://takeoff.test/project/42', runScripts: 'outside-only', pretendToBeVisual: true
     });
     dom.window.ProjectState = { projectId: 42, estimateItems: [], projectMeta: {} };
     dom.window.fetch = server.fetch;
+    if (setup) setup(dom.window);
     sources.forEach(source => dom.window.eval(source));
     return dom;
 }
@@ -69,6 +70,34 @@ test('two clients patching different estimates do not conflict or overwrite each
     assert.doesNotMatch(a.window.document.querySelector('.est-save-status').textContent, /failed|changed elsewhere/i);
     assert.doesNotMatch(b.window.document.querySelector('.est-save-status').textContent, /failed|changed elsewhere/i);
     a.window.close(); b.window.close();
+});
+
+test('stale Takeoff sync rebases onto the current estimate revision before POST', async () => {
+    const server = backend();
+    const remote = server.state.estimates.find(row => row.id === 'one');
+    remote.revision = 3;
+    remote.groups = [{ id: 'takeoff_group_g', takeoffGroupId: 'g', name: 'Default Group', items: [
+        { id: 'takeoff_L', takeoffLayerId: 'L', name: 'Fixture', quantity: 10, originalQuantity: 10,
+            lastSyncedTakeoffQuantity: 10, materialMargin: 15, updatedAt: '2026-08-18T10:00:00.000Z' }
+    ] }];
+    const dom = client(server, window => window.localStorage.setItem('takeoff.estimating.module.42', JSON.stringify({
+        activeEstimateId: 'one', dirtyEstimateIds: ['one'], takeoffSyncDirtyIds: ['one'], estimates: [
+            { id: 'one', dbEstimateId: 1, revision: 1, name: 'One', settings: {}, notes: {}, groups: [
+                { id: 'takeoff_group_g', takeoffGroupId: 'g', name: 'Default Group', items: [
+                    { id: 'takeoff_L', takeoffLayerId: 'L', name: 'Fixture', quantity: 20, originalQuantity: 20,
+                        lastSyncedTakeoffQuantity: 20, materialMargin: 5, updatedAt: '2026-08-18T11:00:00.000Z' }
+                ] }
+            ] }
+        ]
+    })));
+    await new Promise(resolve => setTimeout(resolve, 650));
+    assert.equal(server.posts.length, 1, 'client must rebase before its first POST, not generate a 409 first');
+    assert.equal(server.posts[0].updates[0].revision, 3);
+    const saved = server.state.estimates.find(row => row.id === 'one').groups[0].items[0];
+    assert.equal(saved.quantity, 20, 'Takeoff-owned quantity wins');
+    assert.equal(saved.materialMargin, 15, 'concurrent Estimating-owned margin survives');
+    assert.doesNotMatch(dom.window.document.querySelector('.est-save-status').textContent, /changed elsewhere|conflict/i);
+    dom.window.close();
 });
 
 test('same-estimate conflict preserves the losing client draft and structured conflict state', async () => {
