@@ -645,7 +645,7 @@
         group.on('click tap', event => {
             event.cancelBubble = true;
             setTool('smart');
-            selectElement('marker', marker);
+            selectElement('marker', marker, { additive: !!event.evt?.shiftKey });
         });
         group.on('dblclick dbltap', event => {
             event.cancelBubble = true;
@@ -841,7 +841,7 @@
             });
             handle.on('click tap', event => {
                 event.cancelBubble = true;
-                selectElement('segment', segment);
+                selectElement('segment', segment, { additive: !!event.evt?.shiftKey });
             });
             handle.on('contextmenu', event => openObjectContextMenu(event, 'segment', segment));
             konvaLayer.add(handle);
@@ -850,7 +850,7 @@
         line.on('click tap', event => {
             event.cancelBubble = true;
             setTool('smart');
-            selectElement('segment', segment);
+            selectElement('segment', segment, { additive: !!event.evt?.shiftKey });
         });
         line.on('dblclick dbltap', event => {
             event.cancelBubble = true;
@@ -891,6 +891,10 @@
     }
 
     function setTakeoffPage(pg) {
+        if (selectionRectDraft && Number(selectionRectDraft.pageNumber) !== Number(pg)) {
+            selectionRectDraft.node?.destroy();
+            selectionRectDraft = null;
+        }
         state.markers.forEach(m => {
             const layer = state.layers.find(l => l.client_uid === m.layer_client_uid);
             m.node && m.node.visible(m.page_number === pg && Number(layer?.visible ?? 1));
@@ -908,11 +912,20 @@
         if (konvaLayer) konvaLayer.batchDraw();
     }
 
-    function selectElement(type, ref) {
-        state.selectedElement = { type, ref };
-        state.selectedObjectUids = new Set(ref?.client_uid ? [String(ref.client_uid)] : []);
-        state.segments.forEach(s => (s.handles || []).forEach(h => h.visible(type === 'segment' && ref === s && !isElementLocked(s))));
-        state.markers.forEach(marker => marker.transformer?.visible(type === 'marker' && ref === marker && !isElementLocked(marker)));
+    function selectElement(type, ref, options = {}) {
+        const objectUid = String(ref?.client_uid || '');
+        if (options.additive && objectUid) {
+            if (state.selectedObjectUids.has(objectUid)) state.selectedObjectUids.delete(objectUid);
+            else state.selectedObjectUids.add(objectUid);
+        } else {
+            state.selectedObjectUids = new Set(objectUid ? [objectUid] : []);
+        }
+        const selectedTargets = Array.from(state.selectedObjectUids).map(findTakeoffObjectByUid).filter(Boolean);
+        state.selectedElement = selectedTargets.length === 1 ? selectedTargets[0] : null;
+        state.segments.forEach(s => (s.handles || []).forEach(h => h.visible(
+            state.selectedElement?.type === 'segment' && state.selectedElement.ref === s && !isElementLocked(s))));
+        state.markers.forEach(marker => marker.transformer?.visible(state.selectedElement?.type === 'marker'
+            && state.selectedElement.ref === marker && !isElementLocked(marker)));
         applyObjectSelectionVisuals();
         renderProperties();
         if (konvaLayer) konvaLayer.batchDraw();
@@ -1895,33 +1908,6 @@
             return true;
         };
 
-        konvaStage.on('pointerdown mousedown touchstart', evt => {
-            if (state.tool !== 'multi-select') return;
-            // Browsers may emit a compatibility mouse event after pointerdown.
-            if (selectionRectDraft) return;
-            const nativeEvent = evt.evt;
-            if (nativeEvent?.button != null && nativeEvent.button !== 0) return;
-            const pos = konvaStage.getPointerPosition();
-            if (!pos) return;
-            evt.cancelBubble = true;
-            const start = screenToWorld(pos);
-            const node = new Konva.Rect({
-                x: start.x,
-                y: start.y,
-                width: 0,
-                height: 0,
-                fill: 'rgba(56, 189, 248, 0.14)',
-                stroke: '#38bdf8',
-                strokeWidth: 1.5,
-                dash: [7, 5],
-                listening: false
-            });
-            selectionRectDraft = { start, current: start, node };
-            konvaLayer.add(node);
-            node.moveToTop();
-            konvaLayer.batchDraw();
-        });
-
         konvaStage.on('pointermove mousemove touchmove', evt => {
             if (state.tool !== 'multi-select' || !selectionRectDraft) return;
             const pos = konvaStage.getPointerPosition();
@@ -1940,20 +1926,32 @@
             konvaLayer.batchDraw();
         });
 
-        konvaStage.on('pointerup mouseup touchend pointercancel touchcancel', evt => {
-            if (state.tool !== 'multi-select' || !selectionRectDraft) return;
-            evt.cancelBubble = true;
-            finishRectangleSelection();
-        });
-        window.addEventListener('mouseup', () => {
-            if (state.tool === 'multi-select' && selectionRectDraft) finishRectangleSelection();
-        });
-        window.addEventListener('touchend', () => {
-            if (state.tool === 'multi-select' && selectionRectDraft) finishRectangleSelection();
-        }, { passive: true });
         konvaStage.on('click tap', evt => {
+            if (state.tool === 'multi-select') {
+                const nativeEvent = evt.evt;
+                if (nativeEvent?.button != null && nativeEvent.button !== 0) return;
+                const pos = konvaStage.getPointerPosition();
+                if (!pos) return;
+                evt.cancelBubble = true;
+                const world = screenToWorld(pos);
+                if (selectionRectDraft) {
+                    selectionRectDraft.current = world;
+                    finishRectangleSelection();
+                    return;
+                }
+                const node = new Konva.Rect({
+                    x: world.x, y: world.y, width: 0, height: 0,
+                    fill: 'rgba(56, 189, 248, 0.14)', stroke: '#38bdf8',
+                    strokeWidth: 1.5, dash: [7, 5], listening: false
+                });
+                selectionRectDraft = { start: world, current: world, node, pageNumber: pageNum };
+                konvaLayer.add(node);
+                node.moveToTop();
+                konvaLayer.batchDraw();
+                return;
+            }
             if (state.tool === 'smart') {
-                if (evt.target === konvaStage || evt.target === konvaLayer) clearTakeoffSelection();
+                if ((evt.target === konvaStage || evt.target === konvaLayer) && !evt.evt?.shiftKey) clearTakeoffSelection();
                 return;
             }
             if (state.tool !== 'takeoff_count' && state.tool !== 'takeoff_linear' && state.tool !== 'takeoff_area') return;

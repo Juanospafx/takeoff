@@ -18,13 +18,23 @@ function section(source, startMarker, endMarker) {
 test('Rectangle select is wired from the parent toolbar into the Konva editor', () => {
     assert.match(parent, /command === 'multi-select'[\s\S]*projectTakeoffSetTool', 'multi-select'[\s\S]*setActiveTool\(command\)/);
     assert.match(editor, /normalized === 'multi-select' \|\| normalized === 'select-rect'[\s\S]*setTool\('multi-select'\)/);
-    assert.match(editor, /konvaStage\.on\('pointerdown mousedown touchstart'[\s\S]*new Konva\.Rect/);
+    assert.match(editor, /konvaStage\.on\('click tap'[\s\S]*state\.tool === 'multi-select'[\s\S]*new Konva\.Rect/);
     assert.match(editor, /konvaStage\.on\('pointermove mousemove touchmove'[\s\S]*selectionRectDraft\.node\.size/);
-    assert.match(editor, /konvaStage\.on\('pointerup mouseup touchend pointercancel touchcancel'[\s\S]*finishRectangleSelection\(\)/);
+    assert.match(editor, /if \(selectionRectDraft\)[\s\S]*selectionRectDraft\.current = world;[\s\S]*finishRectangleSelection\(\)/);
+    assert.doesNotMatch(editor, /konvaStage\.on\('pointerup mouseup touchend pointercancel touchcancel'[\s\S]*finishRectangleSelection\(\)/);
+});
+
+test('Shift click accumulates and toggles distant markers, lines, and areas', () => {
+    const selection = section(editor, 'function selectElement', 'function emitSelectionState');
+    assert.match(selection, /options\.additive/);
+    assert.match(selection, /selectedObjectUids\.has\(objectUid\)[\s\S]*selectedObjectUids\.delete\(objectUid\)/);
+    assert.match(selection, /selectedObjectUids\.add\(objectUid\)/);
+    assert.match(editor, /selectElement\('marker', marker, \{ additive: !!event\.evt\?\.shiftKey \}\)/);
+    assert.match(editor, /selectElement\('segment', segment, \{ additive: !!event\.evt\?\.shiftKey \}\)/);
 });
 
 test('Rectangle selection includes count, linear, and area objects but excludes hidden and off-page geometry', () => {
-    const finish = section(editor, 'const finishRectangleSelection', "konvaStage.on('pointerdown mousedown touchstart'");
+    const finish = section(editor, 'const finishRectangleSelection', "konvaStage.on('pointermove mousemove touchmove'");
     assert.match(finish, /const start = selectionRectDraft\.start/);
     assert.match(finish, /const current = selectionRectDraft\.current \|\| start/);
     assert.doesNotMatch(finish, /selectionRectDraft\.node\.getClientRect/);
@@ -34,6 +44,11 @@ test('Rectangle selection includes count, linear, and area objects but excludes 
     assert.match(finish, /Konva\.Util\.haveIntersection\(rect,[\s\S]*segment\.node\.getClientRect/);
     assert.match(finish, /state\.selectedObjectUids = new Set\(targets\.map/);
     assert.match(finish, /emitSelectionState\(\)/);
+});
+
+test('Shift-clicking empty canvas preserves the accumulated selection and page changes cancel a draft rectangle', () => {
+    assert.match(editor, /evt\.target === konvaStage \|\| evt\.target === konvaLayer\) && !evt\.evt\?\.shiftKey/);
+    assert.match(editor, /selectionRectDraft\.pageNumber[\s\S]*selectionRectDraft\.node\?\.destroy\(\)/);
 });
 
 test('Dragging any selected marker, line, or area applies one common delta and persists once', () => {
