@@ -2969,6 +2969,7 @@
                 callEditor('clearPlacementTool');
                 callEditor('projectTakeoffSetContinuous', false);
                 callEditor('projectTakeoffSetTool', 'select');
+                callEditor('projectTakeoffClearSelection');
                 callEditor('setMode', 'smart');
                 setActiveTool('smart');
                 renderActiveLayerToolbar();

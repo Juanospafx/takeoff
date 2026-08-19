@@ -25,10 +25,11 @@ test('resize respects locks and persists normalized numeric size', () => {
     assert.match(source, /symbol_size: m\.symbol_size \?\? m\.metadata_json\?\.symbol_size/);
 });
 
-test('handles show only for one unlocked selected marker', () => {
+test('every unlocked selected marker shows its resize boundary', () => {
     const visuals = between('function applyObjectSelectionVisuals', 'function findTakeoffObjectByUid');
-    assert.match(visuals, /state\.selectedObjectUids\.size === 1/);
+    assert.match(visuals, /marker\.transformer\?\.visible\(selected/);
+    assert.doesNotMatch(visuals, /state\.selectedObjectUids\.size === 1/);
     assert.match(visuals, /!isElementLocked\(marker\)/);
-    assert.match(visuals, /marker\.page_number === pageNum/);
+    assert.match(visuals, /isElementVisibleOnPage\(marker\)/);
     assert.match(source, /marker\.transformer\?\.listening\(listening && !panning && !isElementLocked\(marker\)\)/);
 });

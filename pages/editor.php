@@ -3750,7 +3750,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-multiselect-two-click-20260819-1"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-multiselect-visuals-20260819-2"></script>
 </body>
 </html>
 

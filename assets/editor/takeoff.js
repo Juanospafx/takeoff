@@ -493,6 +493,12 @@
         return Number(layer?.locked || 0) === 1;
     }
 
+    function isElementVisibleOnPage(ref, page = pageNum) {
+        const layer = state.layers.find(row => String(row.client_uid) === String(ref?.layer_client_uid));
+        return Number(ref?.page_number) === Number(page) && Number(layer?.visible ?? 1) !== 0
+            && ref?.node?.visible() !== false;
+    }
+
     function isTakeoffDrawingToolActive() {
         return ['takeoff_count', 'takeoff_linear', 'takeoff_area', 'multi-select'].includes(state.tool);
     }
@@ -519,9 +525,8 @@
         const locked = isElementLocked(marker);
         marker.node.draggable(!locked);
         marker.node.opacity(locked ? 0.55 : 1);
-        marker.transformer?.visible(!locked && state.selectedElement?.type === 'marker'
-            && state.selectedElement.ref === marker && state.selectedObjectUids.size === 1
-            && marker.page_number === pageNum);
+        marker.transformer?.visible(!locked && state.selectedObjectUids.has(String(marker.client_uid))
+            && isElementVisibleOnPage(marker));
         const existing = marker.node.findOne('.takeoff-object-lock');
         if (existing) existing.destroy();
         if (locked) marker.node.add(new Konva.Text({
@@ -612,7 +617,8 @@
         segment.node.dash(locked ? [8, 6] : []);
         (segment.handles || []).forEach(handle => {
             handle.draggable(!locked);
-            handle.visible(!locked && state.selectedElement?.ref === segment && segment.page_number === pageNum);
+            handle.visible(!locked && state.selectedObjectUids.has(String(segment.client_uid))
+                && isElementVisibleOnPage(segment));
         });
     }
 
@@ -899,15 +905,15 @@
             const layer = state.layers.find(l => l.client_uid === m.layer_client_uid);
             m.node && m.node.visible(m.page_number === pg && Number(layer?.visible ?? 1));
             m.transformer?.visible(m.page_number === pg && Number(layer?.visible ?? 1) && !isElementLocked(m)
-                && state.selectedElement?.type === 'marker' && state.selectedElement.ref === m
-                && state.selectedObjectUids.size === 1);
+                && state.selectedObjectUids.has(String(m.client_uid)));
         });
         state.segments.forEach(s => {
             const layer = state.layers.find(l => l.client_uid === s.layer_client_uid);
             const isVisible = s.page_number === pg && Number(layer?.visible ?? 1);
             if (s.node) s.node.visible(isVisible);
             if (s.labelNode) s.labelNode.visible(isVisible);
-            (s.handles || []).forEach(h => h.visible(isVisible && !isElementLocked(s) && state.selectedElement?.ref === s));
+            (s.handles || []).forEach(h => h.visible(isVisible && !isElementLocked(s)
+                && state.selectedObjectUids.has(String(s.client_uid))));
         });
         if (konvaLayer) konvaLayer.batchDraw();
     }
@@ -922,10 +928,6 @@
         }
         const selectedTargets = Array.from(state.selectedObjectUids).map(findTakeoffObjectByUid).filter(Boolean);
         state.selectedElement = selectedTargets.length === 1 ? selectedTargets[0] : null;
-        state.segments.forEach(s => (s.handles || []).forEach(h => h.visible(
-            state.selectedElement?.type === 'segment' && state.selectedElement.ref === s && !isElementLocked(s))));
-        state.markers.forEach(marker => marker.transformer?.visible(state.selectedElement?.type === 'marker'
-            && state.selectedElement.ref === marker && !isElementLocked(marker)));
         applyObjectSelectionVisuals();
         renderProperties();
         if (konvaLayer) konvaLayer.batchDraw();
@@ -967,9 +969,7 @@
             if (!marker.node) return;
             const selected = state.selectedObjectUids.has(String(marker.client_uid));
             marker.node.scale({ x: 1, y: 1 });
-            marker.transformer?.visible(selected && state.selectedElement?.type === 'marker'
-                && state.selectedElement.ref === marker && state.selectedObjectUids.size === 1
-                && !isElementLocked(marker) && marker.page_number === pageNum);
+            marker.transformer?.visible(selected && !isElementLocked(marker) && isElementVisibleOnPage(marker));
             if (typeof marker.node.shadowEnabled === 'function') marker.node.shadowEnabled(selected);
             if (typeof marker.node.shadowColor === 'function') marker.node.shadowColor('#38bdf8');
             if (typeof marker.node.shadowBlur === 'function') marker.node.shadowBlur(selected ? 10 : 0);
@@ -977,6 +977,8 @@
         state.segments.forEach(segment => {
             if (!segment.node) return;
             const selected = state.selectedObjectUids.has(String(segment.client_uid));
+            (segment.handles || []).forEach(handle => handle.visible(selected && !isElementLocked(segment)
+                && isElementVisibleOnPage(segment)));
             if (typeof segment.node.shadowEnabled === 'function') segment.node.shadowEnabled(selected);
             if (typeof segment.node.shadowColor === 'function') segment.node.shadowColor('#38bdf8');
             if (typeof segment.node.shadowBlur === 'function') segment.node.shadowBlur(selected ? 10 : 0);
@@ -2925,6 +2927,7 @@
                 state.continuousTool = false;
                 clearDrafts();
                 setTool('smart');
+                clearTakeoffSelection();
                 return;
             }
             if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;

@@ -51,6 +51,18 @@ test('Shift-clicking empty canvas preserves the accumulated selection and page c
     assert.match(editor, /selectionRectDraft\.pageNumber[\s\S]*selectionRectDraft\.node\?\.destroy\(\)/);
 });
 
+test('multiple selected objects expose the same resize and vertex controls as manual selection', () => {
+    const visuals = section(editor, 'function applyObjectSelectionVisuals', 'function findTakeoffObjectByUid');
+    assert.match(visuals, /marker\.transformer\?\.visible\(selected && !isElementLocked\(marker\)/);
+    assert.match(visuals, /segment\.handles \|\| \[\][\s\S]*handle\.visible\(selected && !isElementLocked\(segment\)/);
+});
+
+test('Escape cancels drafts, returns to Pointer, and clears every selected object', () => {
+    const keyboard = section(editor, "window.addEventListener('keydown'", "if (e.target && ['INPUT'");
+    assert.match(keyboard, /e\.key === 'Escape'[\s\S]*clearDrafts\(\)[\s\S]*setTool\('smart'\)[\s\S]*clearTakeoffSelection\(\)/);
+    assert.match(parent, /event\.key === 'Escape'[\s\S]*callEditor\('projectTakeoffClearSelection'\)/);
+});
+
 test('Dragging any selected marker, line, or area applies one common delta and persists once', () => {
     const begin = section(editor, 'function beginTakeoffSelectionDrag', 'function updateTakeoffSelectionDrag');
     const update = section(editor, 'function updateTakeoffSelectionDrag', 'function finishTakeoffSelectionDrag');
