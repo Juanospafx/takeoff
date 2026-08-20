@@ -5,6 +5,7 @@
 
     const Workspace = window.EstimatingWorkspaceService;
     const Calc = window.EstimateCalculationService;
+    const Exporter = window.EstimatingExportService;
     const Footer = window.ProjectEstimateFooter;
     if (!Workspace || !Calc) {
         root.innerHTML = '<div class="est-fatal">Estimating could not start. Required services are unavailable.</div>';
@@ -370,6 +371,30 @@
         return remote;
     }
 
+    function reconcileExistingTakeoffBindings(existingGroups, incomingGroups) {
+        const incomingByLayer = new Map();
+        (incomingGroups || []).forEach(group => (group.items || group.layers || []).forEach(item => {
+            const layerId = String(item.takeoffLayerId ?? item.id ?? '');
+            if (layerId) incomingByLayer.set(layerId, { item, group });
+        }));
+        return (existingGroups || []).map((group, groupIndex) => Workspace.group({
+            ...Workspace.clone(group),
+            items: (group.items || []).flatMap(existing => {
+                if (!existing.takeoffLayerId) return [existing];
+                const incoming = incomingByLayer.get(String(existing.takeoffLayerId));
+                if (!incoming) return [];
+                if (window.TakeoffEstimatingSyncService?.takeoffItem) {
+                    return [window.TakeoffEstimatingSyncService.takeoffItem({
+                        ...incoming.item, id: existing.takeoffLayerId
+                    }, incoming.group, existing)];
+                }
+                return [{ ...existing, quantity: incoming.item.quantity,
+                    originalQuantity: incoming.item.quantity,
+                    lastSyncedTakeoffQuantity: incoming.item.quantity }];
+            })
+        }, groupIndex));
+    }
+
     function reconcileGroups(groups) {
         if (!Array.isArray(groups)) return;
         // The iframe commonly publishes its initial snapshot while the current
@@ -389,7 +414,9 @@
         }
         const currentEstimate = current();
         let reconciled;
-        if (groups.some(group => Array.isArray(group.items))) {
+        if (currentEstimate.takeoffSyncMode === 'linked-only') {
+            reconciled = reconcileExistingTakeoffBindings(currentEstimate.groups, groups);
+        } else if (groups.some(group => Array.isArray(group.items))) {
             reconciled = groups.map(Workspace.group);
         } else if (window.TakeoffEstimatingSyncService?.reconcile) {
             reconciled = window.TakeoffEstimatingSyncService.reconcile(currentEstimate.groups,
@@ -529,8 +556,9 @@
         const portal = document.createElement('div');
         portal.dataset.estimatingModalPortal = '';
         portal.className = 'est-modal-backdrop';
-        if (ui.modal === 'new') portal.innerHTML = `<div class="est-dialog est-copy-modal" role="dialog" aria-modal="true" aria-labelledby="copyEstimateTitle"><header><div><h2 id="copyEstimateTitle">New Estimate</h2><span>Create an independent estimate for this project</span></div><button type="button" aria-label="Close" data-close-modal>&times;</button></header><div class="est-copy-body"><label class="est-copy-name"><span>Name</span><input id="copyEstimateName" type="text" value="${esc(current().name)} Copy" autocomplete="off"></label><fieldset><legend>Starting point</legend><label class="est-copy-option"><input type="radio" name="copyEstimateMode" value="all" checked><span><strong>Copy everything</strong><small>Start with the current groups, items, quantities, notes and markups.</small></span></label><label class="est-copy-option"><input type="radio" name="copyEstimateMode" value="structure"><span><strong>Groups only</strong><small>Keep the current group structure without its cost items.</small></span></label><label class="est-copy-option"><input type="radio" name="copyEstimateMode" value="blank"><span><strong>Blank</strong><small>Start with a clean estimate.</small></span></label></fieldset></div><footer><button type="button" data-close-modal>Cancel</button><button type="button" class="est-btn-primary" data-create-estimate data-est-action="create-estimate-copy">Create estimate</button></footer></div>`;
+        if (ui.modal === 'new') portal.innerHTML = `<div class="est-dialog est-copy-modal" role="dialog" aria-modal="true" aria-labelledby="copyEstimateTitle"><header><div><h2 id="copyEstimateTitle">New Estimate</h2><span>Create an independent estimate for this project</span></div><button type="button" aria-label="Close" data-close-modal>&times;</button></header><div class="est-copy-body"><label class="est-copy-name"><span>Name</span><input id="copyEstimateName" type="text" value="${esc(current().name)} Copy" autocomplete="off"></label><fieldset><legend>Starting point</legend><label class="est-copy-option"><input type="radio" name="copyEstimateMode" value="all" checked><span><strong>Copy everything</strong><small>Start with an independent copy of groups, items, quantities, notes and markups.</small></span></label><label class="est-copy-option"><input type="radio" name="copyEstimateMode" value="structure"><span><strong>Groups only</strong><small>Keep only the group structure; Takeoff items are not imported automatically.</small></span></label><label class="est-copy-option"><input type="radio" name="copyEstimateMode" value="blank"><span><strong>Blank</strong><small>Start completely empty; Takeoff items are added only when explicitly linked.</small></span></label></fieldset></div><footer><button type="button" data-close-modal>Cancel</button><button type="button" class="est-btn-primary" data-create-estimate data-est-action="create-estimate-copy">Create estimate</button></footer></div>`;
         if (ui.modal === 'compare') portal.innerHTML = `<div class="est-dialog est-compare" role="dialog" aria-modal="true"><header><h2>Compare Estimates</h2><button type="button" data-close-modal data-modal-close="compareOpen">&times;</button></header><div class="est-compare-grid">${state.estimates.map(row => { const total = Calc.calculateSummary(row.groups, row.settings); return `<article><h3>${esc(row.name)}</h3><p>${row.groups.reduce((sum, group) => sum + group.items.length, 0)} items</p><strong>${money(total.estimateTotal)}</strong><span>${money(total.profit)} profit</span></article>`; }).join('')}</div></div>`;
+        if (ui.modal === 'export') portal.innerHTML = `<div class="est-dialog est-copy-modal" role="dialog" aria-modal="true" aria-labelledby="exportEstimateTitle"><header><div><h2 id="exportEstimateTitle">Export Estimate</h2><span>Download a supplier-ready bill of quantities (CSV)</span></div><button type="button" aria-label="Close" data-close-modal>&times;</button></header><div class="est-copy-body"><fieldset><legend>Export format</legend><label class="est-copy-option"><input type="radio" name="estimateExportMode" value="normal" checked><span><strong>BOQ normal</strong><small>Export the estimate as organized, keeping assemblies as assembly rows.</small></span></label><label class="est-copy-option"><input type="radio" name="estimateExportMode" value="flat"><span><strong>BOQ Flat</strong><small>Break assemblies into parts and consolidate the total quantity of each catalog item.</small></span></label></fieldset></div><footer><button type="button" data-close-modal>Cancel</button><button type="button" class="est-btn-primary" data-download-estimate>Export CSV</button></footer></div>`;
         document.body.appendChild(portal);
         portal.querySelector('input, button')?.focus();
     }
@@ -549,11 +577,30 @@
         changed(`Added item to “${group.name}”`);
     }
 
-    function exportEstimate() {
-        const blob = new Blob([JSON.stringify({ state, summary: summary() }, null, 2)], { type: 'application/json' });
+    async function exportEstimate(mode = 'normal') {
+        if (!Exporter) return;
+        let estimate = Workspace.clone(current());
+        if (mode === 'flat' && Exporter.needsCatalog(estimate)) {
+            try {
+                const response = await fetch('../api/cost_catalog.php?action=list&view=all');
+                const payload = await response.json();
+                if (!response.ok || payload.status !== 'success') throw new Error(payload.msg || 'Cost Catalog unavailable');
+                estimate = Exporter.withCatalog(estimate, payload.data);
+            } catch (error) {
+                alert(`BOQ Flat could not load the Cost Catalog: ${error.message}`);
+                return;
+            }
+        }
+        const unresolved = mode === 'flat' ? Exporter.unresolvedAssemblies(estimate) : [];
+        if (unresolved.length) {
+            alert(`BOQ Flat cannot expand these assemblies because they have no Cost Catalog components: ${unresolved.map(item => item.name).join(', ')}`);
+            return;
+        }
+        const rows = mode === 'flat' ? Exporter.flatRows(estimate) : Exporter.normalRows(estimate);
+        const blob = new Blob([Exporter.csv(rows)], { type: 'text/csv;charset=utf-8' });
         const anchor = document.createElement('a');
         anchor.href = URL.createObjectURL(blob);
-        anchor.download = `${current().name.replace(/[^a-z0-9_-]+/gi, '_')}.json`;
+        anchor.download = `${current().name.replace(/[^a-z0-9_-]+/gi, '_')}_${mode === 'flat' ? 'BOQ_Flat' : 'BOQ'}.csv`;
         anchor.click();
         URL.revokeObjectURL(anchor.href);
     }
@@ -665,7 +712,11 @@
         const option = target.closest('[data-est-option]')?.dataset.estOption;
         if (option === 'save') saveServer();
         if (option === 'copy') { ui.modal = 'new'; renderModal(); }
-        if (option === 'export') exportEstimate();
+        if (option === 'export') { ui.modal = 'export'; renderModal(); }
+        if (target.closest('[data-download-estimate]')) {
+            const mode = document.querySelector('[name="estimateExportMode"]:checked')?.value || 'normal';
+            exportEstimate(mode); ui.modal = null; renderModal();
+        }
         const collapse = target.closest('[data-collapse-card]')?.dataset.collapseCard;
         if (collapse) { ui.collapsed[collapse] = !ui.collapsed[collapse]; renderDetails(); }
         const toggle = target.closest('[data-toggle-group]')?.dataset.toggleGroup;

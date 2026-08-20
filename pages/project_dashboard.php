@@ -1362,8 +1362,9 @@ $state = [
 <script src="../assets/project_estimate_footer.js?v=estimate-footer-20260810-1"></script>
 <script src="../assets/project_takeoff.js?v=takeoff-multiselect-visuals-20260819-2"></script>
 <script src="../assets/estimate_calculation_service.js?v=estimating-calculation-audit-20260811-1"></script>
-<script src="../assets/estimating_workspace_service.js?v=estimating-single-owner-20260818-4"></script>
-<script src="../assets/project_estimating.js?v=estimating-single-owner-20260818-4"></script>
+<script src="../assets/estimating_export_service.js?v=estimating-boq-export-20260820-1"></script>
+<script src="../assets/estimating_workspace_service.js?v=estimating-blank-isolation-20260820-1"></script>
+<script src="../assets/project_estimating.js?v=estimating-boq-export-20260820-1"></script>
 <script src="../assets/project_proposal.js?v=proposal-workspace-20260810-4"></script>
 <script src="../assets/global_tools.js"></script>
 </body>

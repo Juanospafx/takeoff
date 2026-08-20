@@ -103,6 +103,10 @@
     }
 
     function estimate(row = {}, currentProjectId = 0, index = 0) {
+        const creationMode = ['primary', 'all', 'structure', 'blank'].includes(row.creationMode)
+            ? row.creationMode : (index ? 'all' : 'primary');
+        const takeoffSyncMode = row.takeoffSyncMode === 'linked-only'
+            || row.takeoffSync?.mode === 'linked-only' ? 'linked-only' : 'mirror';
         return {
             id: text(row.id) || uid('estimate'),
             dbEstimateId: projectId(row.dbEstimateId) || undefined,
@@ -111,6 +115,8 @@
             projectId: currentProjectId,
             name: text(row.name, index ? `Estimate ${index + 1}` : 'Primary Estimate'),
             status: text(row.status, 'draft'),
+            creationMode,
+            takeoffSyncMode,
             createdAt: text(row.createdAt, now()),
             updatedAt: text(row.updatedAt, now()),
             groups: Array.isArray(row.groups) ? row.groups.map(group) : [],
@@ -205,11 +211,14 @@
 
     function createEstimate(state, name, mode = 'blank') {
         const source = active(state);
-        const groups = mode === 'all' ? clone(source.groups) : mode === 'structure'
+        const creationMode = ['all', 'structure', 'blank'].includes(mode) ? mode : 'blank';
+        const groups = creationMode === 'all' ? clone(source.groups) : creationMode === 'structure'
             ? source.groups.map(row => ({ ...clone(row), items: [] })) : [];
         const created = estimate({ name: text(name).trim() || 'New Estimate', groups,
-            settings: mode === 'all' ? clone(source.settings) : {},
-            notes: mode === 'all' ? clone(source.notes) : {} }, state.projectId, state.estimates.length);
+            creationMode,
+            takeoffSyncMode: creationMode === 'all' ? source.takeoffSyncMode : 'linked-only',
+            settings: creationMode === 'all' ? clone(source.settings) : {},
+            notes: creationMode === 'all' ? clone(source.notes) : {} }, state.projectId, state.estimates.length);
         state.estimates.push(created);
         state.activeEstimateId = created.id;
         state.estimates.forEach(row => { row.isActive = row.id === created.id; });

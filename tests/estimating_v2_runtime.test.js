@@ -5,17 +5,26 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 
 const root = path.resolve(__dirname, '..');
-const sources = ['estimate_calculation_service.js', 'takeoff_estimating_sync_service.js',
+const sources = ['estimate_calculation_service.js', 'estimating_export_service.js', 'takeoff_estimating_sync_service.js',
     'project_estimate_footer.js', 'estimating_workspace_service.js', 'project_estimating.js']
     .map(file => fs.readFileSync(path.join(root, 'assets', file), 'utf8'));
 
-function runtime() {
+function runtime(preloaded = null) {
     const dom = new JSDOM('<div id="estimatingModule" data-project-id="0"></div>', {
         url: 'https://takeoff.test/project/draft', runScripts: 'outside-only', pretendToBeVisual: true
     });
     dom.window.ProjectState = { projectId: 0, estimateItems: [], projectMeta: {} };
+    if (preloaded) dom.window.localStorage.setItem('takeoff.estimating.module.draft', JSON.stringify(preloaded));
     sources.forEach(source => dom.window.eval(source));
     return dom;
+}
+
+function takeoffSnapshot(window) {
+    window.dispatchEvent(new window.CustomEvent('takeoff:estimating-lines-updated', { detail: {
+        projectId: '', authoritative: true, groups: [{ id: 'takeoff_group_g1', takeoffGroupId: 'g1',
+            source: 'takeoff', name: 'Lighting', items: [{ id: 'takeoff_l1', takeoffLayerId: 'l1',
+                name: 'Fixture', quantity: 12, uom: 'ea', unitMaterialCost: 40 }] }]
+    } }));
 }
 
 test('authoritative Takeoff event replaces mirrored rows without corrupting layer identity', () => {
@@ -31,6 +40,45 @@ test('authoritative Takeoff event replaces mirrored rows without corrupting laye
     assert.equal(item.quantity, 12);
     assert.equal(item.unitMaterialCost, 40);
     assert.equal(dom.window.document.querySelector('[data-item-id="takeoff_l1"]') !== null, true);
+    dom.window.close();
+});
+
+test('Blank estimate stays empty after Takeoff synchronization and browser reload', () => {
+    const first = runtime();
+    first.window.dispatchEvent(new first.window.CustomEvent('takeoff:estimating-action-requested', {
+        detail: { action: 'new-estimate' }
+    }));
+    first.window.document.querySelector('[name="copyEstimateMode"][value="blank"]').click();
+    first.window.document.querySelector('#copyEstimateName').value = 'Blank Bid';
+    first.window.document.querySelector('[data-create-estimate]').click();
+    takeoffSnapshot(first.window);
+    const saved = JSON.parse(first.window.localStorage.getItem('takeoff.estimating.module.draft'));
+    let active = saved.estimates.find(row => row.id === saved.activeEstimateId);
+    assert.equal(active.name, 'Blank Bid');
+    assert.deepEqual(active.groups, []);
+    assert.equal(active.takeoffSyncMode, 'linked-only');
+    first.window.close();
+
+    const reloaded = runtime(saved);
+    takeoffSnapshot(reloaded.window);
+    const afterReload = JSON.parse(reloaded.window.localStorage.getItem('takeoff.estimating.module.draft'));
+    active = afterReload.estimates.find(row => row.id === afterReload.activeEstimateId);
+    assert.equal(active.name, 'Blank Bid');
+    assert.deepEqual(active.groups, [], 'initial Takeoff event after reload must not repopulate Blank');
+    reloaded.window.close();
+});
+
+test('linked-only estimates update existing Takeoff bindings without importing new rows', () => {
+    const dom = runtime({ activeEstimateId: 'alternate', estimates: [{ id: 'alternate', name: 'Alternate',
+        takeoffSyncMode: 'linked-only', groups: [{ id: 'g1', name: 'Lighting', items: [
+            { id: 'existing', takeoffLayerId: 'l1', name: 'Old fixture', quantity: 1 }
+        ] }] }] });
+    takeoffSnapshot(dom.window);
+    const saved = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.draft'));
+    const items = saved.estimates[0].groups[0].items;
+    assert.equal(items.length, 1);
+    assert.equal(items[0].takeoffLayerId, 'l1');
+    assert.equal(items[0].quantity, 12);
     dom.window.close();
 });
 

@@ -21,7 +21,9 @@ test('workspace migration preserves estimates, notes, audit and rebinds project 
 
 test('New Estimate keeps stable client identity and active selection across normalization and reload', () => {
     const state = Service.workspace({ activeEstimateId: 'primary', estimates: [
-        { id: 'primary', dbEstimateId: 41, name: 'Primary', groups: [] }
+        { id: 'primary', dbEstimateId: 41, name: 'Primary', takeoffSyncMode: 'mirror',
+            groups: [{ id: 'g1', name: 'Electrical', items: [{ id: 'i1', name: 'Wire', quantity: 2 }] }],
+            notes: { projectNotes: 'Source note' } }
     ] }, 73);
     const created = Service.createEstimate(state, 'Alternate', 'blank');
     const alternate = state.estimates.find(row => row.name === 'Alternate');
@@ -29,6 +31,9 @@ test('New Estimate keeps stable client identity and active selection across norm
     assert.equal(alternate.dbEstimateId, undefined, 'a new estimate must not inherit the source database id');
     assert.equal(state.activeEstimateId, alternate.id);
     assert.equal(alternate.isActive, true);
+    assert.deepEqual(alternate.groups, [], 'Blank must not inherit source groups or items');
+    assert.equal(alternate.creationMode, 'blank');
+    assert.equal(alternate.takeoffSyncMode, 'linked-only');
     assert.equal(state.estimates.find(row => row.id === 'primary').isActive, false);
 
     const savedShape = JSON.parse(JSON.stringify(state));
@@ -36,7 +41,37 @@ test('New Estimate keeps stable client identity and active selection across norm
     const reloaded = Service.workspace(savedShape, 73);
     assert.equal(reloaded.activeEstimateId, alternate.id);
     assert.equal(Service.active(reloaded).name, 'Alternate');
+    assert.deepEqual(Service.active(reloaded).groups, [], 'Blank must remain empty after normalization/reload');
+    assert.equal(Service.active(reloaded).takeoffSyncMode, 'linked-only');
     assert.equal(reloaded.estimates.filter(row => row.isActive).length, 1);
+});
+
+test('New Estimate starting points are isolated and preserve their Takeoff policy', () => {
+    const seed = () => Service.workspace({ activeEstimateId: 'primary', estimates: [{
+        id: 'primary', name: 'Primary', takeoffSyncMode: 'mirror',
+        groups: [{ id: 'g1', name: 'Electrical', expanded: false,
+            items: [{ id: 'i1', name: 'Wire', quantity: 2 }] }],
+        settings: { globalLaborCost: 85 }, notes: { projectNotes: 'Source note' }
+    }] }, 73);
+
+    const structureState = seed();
+    Service.createEstimate(structureState, 'Structure', 'structure');
+    const structure = Service.active(structureState);
+    assert.equal(structure.creationMode, 'structure');
+    assert.equal(structure.takeoffSyncMode, 'linked-only');
+    assert.equal(structure.groups.length, 1);
+    assert.deepEqual(structure.groups[0].items, []);
+
+    const copyState = seed();
+    Service.createEstimate(copyState, 'Copy', 'all');
+    const copy = Service.active(copyState);
+    assert.equal(copy.creationMode, 'all');
+    assert.equal(copy.takeoffSyncMode, 'mirror');
+    assert.equal(copy.groups[0].items[0].name, 'Wire');
+    copy.groups[0].items[0].name = 'Changed in copy';
+    copy.notes.projectNotes = 'Changed note';
+    assert.equal(copyState.estimates[0].groups[0].items[0].name, 'Wire');
+    assert.equal(copyState.estimates[0].notes.projectNotes, 'Source note');
 });
 
 test('workspace falls back safely when a persisted active id no longer exists', () => {
