@@ -1403,7 +1403,8 @@
         const measured = countQty + linearQty + areaQty;
         // `layer.quantity` may already be the persisted aggregate for this
         // layer. Only an explicit seed is additive to measured geometry.
-        const base = num(layer.seed_quantity ?? layer.seedQuantity ?? layer.baseQuantity ?? 0);
+        const base = num(layer.seed_quantity ?? layer.seedQuantity ?? layer.baseQuantity
+            ?? layer.metadata_json?.base_quantity ?? 0);
         return base + measured;
     }
 
@@ -1465,6 +1466,8 @@
     }
 
     function projectLayerPayload(layer) {
+        const baseQuantity = num(layer.seed_quantity ?? layer.seedQuantity ?? layer.baseQuantity
+            ?? layer.metadata_json?.base_quantity ?? 0);
         return {
             id: layer.client_uid,
             layerId: layer.client_uid,
@@ -1479,6 +1482,8 @@
             visible: Number(layer.visible ?? 1) !== 0,
             locked: Number(layer.locked || 0) === 1,
             quantity: layerQuantity(layer),
+            baseQuantity,
+            seed_quantity: baseQuantity,
             catalog_item_id: layer.catalog_item_id || null,
             unit_cost: num(layer.unit_cost || 0),
             labor_hours: num(layer.unit_labor_time || layer.labor_hours || 0),
@@ -3023,6 +3028,8 @@
         const normalizedType = String(payload.takeoff_type || payload.type || 'count').toLowerCase();
         const normalizedLayerType = normalizeEditorLayerType(normalizedType);
         const type = normalizedLayerType.type;
+        const seedQuantity = num(payload.baseQuantity ?? payload.base_quantity ?? payload.seedQuantity
+            ?? payload.seed_quantity ?? layer?.seed_quantity ?? layer?.metadata_json?.base_quantity ?? 0);
         const data = {
             client_uid: externalId,
             page_number: pageNum || 1,
@@ -3044,7 +3051,9 @@
             cost_code: payload.cost_code || payload.catalogNumber || '',
             visible: payload.visible === false ? 0 : 1,
             locked: payload.locked ? 1 : 0,
+            seed_quantity: seedQuantity,
             metadata_json: { ...(layer?.metadata_json || {}), project_layer_id: externalId,
+                base_quantity: seedQuantity,
                 estimate_id: payload.estimate_id || payload.estimateId || null,
                 estimating_item_id: payload.estimating_item_id || payload.estimatingItemId || null,
                 estimating_group_id: payload.estimating_group_id || payload.estimatingGroupId || null },
@@ -3069,6 +3078,8 @@
             const normalizedType = String(payload.takeoff_type || payload.type || 'count').toLowerCase();
             const normalizedLayerType = normalizeEditorLayerType(normalizedType);
             const type = normalizedLayerType.type;
+            const seedQuantity = num(payload.baseQuantity ?? payload.base_quantity ?? payload.seedQuantity
+                ?? payload.seed_quantity ?? layer?.seed_quantity ?? layer?.metadata_json?.base_quantity ?? 0);
             const data = {
                 client_uid: externalId,
                 page_number: pageNum || 1,
@@ -3090,7 +3101,9 @@
                 cost_code: payload.cost_code || payload.catalogNumber || '',
                 visible: payload.visible === false ? 0 : 1,
                 locked: payload.locked ? 1 : 0,
+                seed_quantity: seedQuantity,
                 metadata_json: { ...(layer?.metadata_json || {}), project_layer_id: externalId,
+                    base_quantity: seedQuantity,
                     estimate_id: payload.estimate_id || payload.estimateId || null,
                     estimating_item_id: payload.estimating_item_id || payload.estimatingItemId || null,
                     estimating_group_id: payload.estimating_group_id || payload.estimatingGroupId || null },
@@ -3100,7 +3113,6 @@
         });
         setTakeoffPage(pageNum);
         renderLayers();
-        emitProjectState();
         return projectSnapshot();
     };
 

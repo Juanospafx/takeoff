@@ -951,6 +951,7 @@
     window.addEventListener('takeoff:estimating-lines-updated', event => {
         if (event.detail?.projectId && String(event.detail.projectId) !== String(projectId)) return;
         if (event.detail?.activeEstimateId && String(event.detail.activeEstimateId) !== String(state.activeEstimateId)) return;
+        if (!(event.detail?.groups || []).length && event.detail?.complete !== true) return;
         reconcileGroups(event.detail?.activeEstimateId || state.activeEstimateId, event.detail?.groups || []);
     });
     window.addEventListener('takeoff:estimating-link-requested', event => {

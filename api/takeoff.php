@@ -489,6 +489,15 @@ function assert_takeoff_object_versions(array $current, array $dirtyIds, array $
 function recalculate_takeoff_snapshot_quantities(array $snapshot): array
 {
     $quantities = [];
+    foreach (is_array($snapshot['layers'] ?? null) ? $snapshot['layers'] : [] as $layer) {
+        if (!is_array($layer)) continue;
+        $key = (string)($layer['client_uid'] ?? $layer['id'] ?? '');
+        $metadata = is_array($layer['metadata_json'] ?? null) ? $layer['metadata_json'] : [];
+        if ($key !== '') {
+            $quantities[$key] = n($layer['baseQuantity'] ?? $layer['base_quantity']
+                ?? $layer['seed_quantity'] ?? $metadata['base_quantity'] ?? 0);
+        }
+    }
     foreach (is_array($snapshot['markers'] ?? null) ? $snapshot['markers'] : [] as $row) {
         if (!is_array($row)) continue;
         $key = (string)($row['layer_client_uid'] ?? $row['layer_id'] ?? '');
@@ -766,7 +775,9 @@ try {
             foreach ($layers as $layer) {
                 if (!is_array($layer)) continue;
                 $layerClientId = (string)($layer['client_uid'] ?? $layer['id'] ?? '');
-                $layerQty = 0.0;
+                $layerMetadata = is_array($layer['metadata_json'] ?? null) ? $layer['metadata_json'] : [];
+                $layerQty = n($layer['baseQuantity'] ?? $layer['base_quantity']
+                    ?? $layer['seed_quantity'] ?? $layerMetadata['base_quantity'] ?? 0);
                 foreach ($markers as $markerRow) {
                     if ((string)($markerRow['layer_client_uid'] ?? $markerRow['layer_id'] ?? '') === $layerClientId) {
                         $layerQty += n($markerRow['quantity'] ?? $markerRow['multiplier'] ?? 1);

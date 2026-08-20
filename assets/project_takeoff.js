@@ -48,7 +48,7 @@
         try { loadedEstimate = new URL(frame.getAttribute('src') || '', window.location.href).searchParams.get('estimate_key') || ''; } catch (_) {}
         if (loadedEstimate === String(estimateId)) return false;
         frame.addEventListener('load', () => {
-            syncAllLayersToCanvas();
+            syncAllLayersToCanvas({ suppressEstimatingSync: true });
             renderTakeoffPanel();
             notifyEditorVisible();
         }, { once: true });
@@ -751,8 +751,8 @@
             takeoffState.activeLayerId = null;
         }
         const editorReloading = ensureEditorEstimate(estimateId);
-        if (!editorReloading) syncAllLayersToCanvas();
-        syncTakeoffToEstimating(); renderTakeoffPanel(); renderActiveLayerToolbar();
+        if (!editorReloading) syncAllLayersToCanvas({ suppressEstimatingSync: true });
+        renderTakeoffPanel(); renderActiveLayerToolbar();
     }
 
     function estimateLineFromLayer(layer) {
@@ -777,6 +777,7 @@
             margin: 0,
             unitLabor: Number(layer.laborHours || layer.labor_hours || 0),
             laborRate: 85,
+            laborUnitType: 'hrs',
             difficulty: 1,
             laborMargin: 0,
             notes: `Synced from Takeoff${group?.name ? ` / ${group.name}` : ''}`,
@@ -834,9 +835,13 @@
             }).map(layer => {
                 const line = estimateLineFromLayer(layer);
                 const existing = existingByLayerId.get(String(layer.id));
+                const synchronized = window.TakeoffEstimatingSyncService?.takeoffItem
+                    ? window.TakeoffEstimatingSyncService.takeoffItem({ ...line, id: layer.id },
+                        { id: groupId, name: groupName }, existing)
+                    : { ...(existing || {}), ...line };
                 return {
-                    ...(existing || {}),
                     ...line,
+                    ...synchronized,
                     id: existing?.id || line.id,
                     groupId,
                     groupName,
@@ -853,13 +858,15 @@
             });
             items.push(...(manualByGroupName.get(groupName) || []));
             manualByGroupName.delete(groupName);
+            const currentGroup = currentGroups.find(row => String(row.id) === groupId
+                || String(row.takeoffGroupId || '') === String(takeoffGroup.id || groupIndex));
             return {
                 id: groupId,
                 takeoffGroupId: String(takeoffGroup.id || groupIndex),
                 source: 'takeoff',
                 type: 'group',
                 name: groupName,
-                expanded: takeoffGroup.isExpanded !== false,
+                expanded: currentGroup ? currentGroup.expanded !== false : takeoffGroup.isExpanded !== false,
                 sortOrder: groupIndex,
                 items
             };
@@ -889,6 +896,7 @@
                     projectId: String(window.ProjectState?.projectId || ''),
                     activeEstimateId: String(state.activeEstimateId || ''),
                     authoritative: true,
+                    complete: true,
                     groups: projectedGroups,
                     layerIds: Array.from(projectedLayerIds)
                 }
@@ -931,10 +939,10 @@
         };
     }
 
-    function syncAllLayersToCanvas() {
+    function syncAllLayersToCanvas(options = {}) {
         const payload = allLayers().filter(layer => layerBelongsToEstimate(layer)).map(layerCanvasPayload);
         const snapshot = callEditor('projectTakeoffSyncLayers', payload);
-        if (snapshot) syncTakeoffFromCanvasSnapshot(snapshot);
+        if (snapshot) syncTakeoffFromCanvasSnapshot(snapshot, options);
     }
 
     function quantityLabel(layer) {
@@ -1786,7 +1794,7 @@
         if (!isLinearType(layer.type) && !isAreaType(layer.type)) setActiveTool('count');
     }
 
-    function syncTakeoffFromCanvasSnapshot(snapshot) {
+    function syncTakeoffFromCanvasSnapshot(snapshot, options = {}) {
         if (!snapshot || !Array.isArray(snapshot.layers)) return;
         const doc = activeDrawingDoc();
         const documentId = String(snapshot.drawingId || snapshot.drawing_id || doc?.id || 'active');
@@ -1810,7 +1818,7 @@
         if (snapshot.activeLayerId && findLayer(snapshot.activeLayerId)) {
             takeoffState.activeLayerId = snapshot.activeLayerId;
         }
-        saveTakeoffState();
+        if (!options.suppressEstimatingSync) saveTakeoffState();
         renderTakeoffPanel();
         renderViewerLayersPopover();
         renderActiveLayerToolbar();
