@@ -55,8 +55,8 @@ test('quantities update in real time by aggregating every document snapshot once
         ]
     }];
     takeoffState.canvasSnapshots = {
-        doc1: { layers: [{ id: 'copper', shapes: [{ quantityValue: 3 }, { quantity: 4 }] }] },
-        doc2: { layers: [
+        doc1: { estimateId: 'est_primary', layers: [{ id: 'copper', shapes: [{ quantityValue: 3 }, { quantity: 4 }] }] },
+        doc2: { estimateId: 'est_primary', layers: [
             { layerId: 'copper', takeoffObjects: [{ quantityValue: 5 }] },
             { id: 'receptacle', shapes: [{ quantity: 7 }] }
         ] }

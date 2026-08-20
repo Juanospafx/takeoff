@@ -3759,7 +3759,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-total-collapse-fix-20260820-1"></script>
+<script src="../assets/editor/takeoff.js?v=blank-scale-scope-fix-20260820-1"></script>
 </body>
 </html>
 

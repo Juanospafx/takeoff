@@ -66,7 +66,7 @@ test('Copy everything regenerates mutable identities and never shares a Takeoff 
     assert.equal(source.groups[0].items[0].takeoffLayerId, 'layer-a');
 });
 
-test('Takeoff state, scale, canvas payloads and groups are estimate-scoped', () => {
+test('Takeoff state, canvas payloads and groups are estimate-scoped while scale is sheet-scoped', () => {
     assert.match(takeoff, /function groupBelongsToEstimate/);
     assert.match(takeoff, /filter\(group => groupBelongsToEstimate\(group, estimateId\)\)/);
     assert.match(takeoff, /String\(row\.estimateId \|\| ''\) === estimateId/);
@@ -74,7 +74,17 @@ test('Takeoff state, scale, canvas payloads and groups are estimate-scoped', () 
     assert.match(editor, /estimate_key: currentEstimateKey\(\)/);
     assert.match(api, /CREATE TABLE IF NOT EXISTS takeoff_estimate_states/);
     assert.match(api, /CREATE TABLE IF NOT EXISTS takeoff_estimate_scales/);
+    assert.match(api, /FROM takeoff_sheet_scales WHERE drawing_id = \? AND page_number = \?/);
     assert.match(api, /estimate_key is required/);
+});
+
+test('Blank synchronization cannot migrate legacy groups or accept another estimate canvas snapshot', () => {
+    assert.match(takeoff, /function scopeLegacyTakeoffGroupsOnce\(\)/);
+    assert.match(takeoff, /scopeLegacyTakeoffGroupsOnce\(\);[\s\S]*ensureEstimateTakeoffWorkspace\(\)/);
+    assert.doesNotMatch(takeoff, /function ensureEstimateTakeoffWorkspace[\s\S]*?takeoffState\.groups\.forEach[\s\S]*?function scopeLegacyTakeoffGroupsOnce/);
+    assert.match(editor, /estimateKey: currentEstimateKey\(\)/);
+    assert.match(takeoff, /estimateId !== activeEstimateId\(\)\) return/);
+    assert.match(takeoff, /canvasSnapshots\[`\$\{estimateId\}:\$\{documentId\}`\]/);
 });
 
 test('queued Takeoff snapshots preserve their estimate destination', () => {

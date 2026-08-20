@@ -1365,7 +1365,7 @@ $state = [
 <script src="../assets/project_overview.js?v=project-documents-persistence-20260811-6"></script>
 <script src="../assets/takeoff_estimating_sync_service.js?v=takeoff-estimating-sync-20260803-1"></script>
 <script src="../assets/project_estimate_footer.js?v=estimate-menu-all-tabs-20260820-5"></script>
-<script src="../assets/project_takeoff.js?v=takeoff-total-collapse-fix-20260820-1"></script>
+<script src="../assets/project_takeoff.js?v=blank-scale-scope-fix-20260820-1"></script>
 <script src="../assets/estimate_calculation_service.js?v=estimating-calculation-audit-20260811-1"></script>
 <script src="../assets/estimating_export_service.js?v=estimating-boq-export-20260820-1"></script>
 <script src="../assets/estimating_workspace_service.js?v=estimating-card-menu-20260820-4"></script>

@@ -1534,6 +1534,8 @@
 
     function projectSnapshot() {
         return {
+            estimateKey: currentEstimateKey(),
+            estimate_key: currentEstimateKey(),
             drawingId: typeof fileId !== 'undefined' ? fileId : null,
             drawing_id: typeof fileId !== 'undefined' ? fileId : null,
             projectId: typeof projectId !== 'undefined' ? projectId : 0,

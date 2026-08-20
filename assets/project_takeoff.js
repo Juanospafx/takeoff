@@ -1,5 +1,6 @@
 (function () {
     const $ = (id) => document.getElementById(id);
+    let editorEstimateGeneration = 0;
 
     function takeoffWindow() {
         const frame = $('takeoffFrame');
@@ -47,7 +48,10 @@
         let loadedEstimate = '';
         try { loadedEstimate = new URL(frame.getAttribute('src') || '', window.location.href).searchParams.get('estimate_key') || ''; } catch (_) {}
         if (loadedEstimate === String(estimateId)) return false;
+        const requestedEstimateId = String(estimateId);
+        const generation = ++editorEstimateGeneration;
         frame.addEventListener('load', () => {
+            if (generation !== editorEstimateGeneration || requestedEstimateId !== activeEstimateId()) return;
             syncAllLayersToCanvas({ suppressEstimatingSync: true });
             renderTakeoffPanel();
             notifyEditorVisible();
@@ -666,13 +670,6 @@
     }
 
     function ensureEstimateTakeoffWorkspace(estimateId = activeEstimateId()) {
-        const primaryId = primaryEstimateId();
-        takeoffState.groups.forEach(group => {
-            if (!group.estimateId) group.estimateId = primaryId;
-            (group.layers || []).forEach(layer => {
-                if (!layer.estimateId) layer.estimateId = group.estimateId || primaryId;
-            });
-        });
         let scopedGroups = takeoffState.groups.filter(group => groupBelongsToEstimate(group, estimateId));
         if (!scopedGroups.length) {
             const group = defaultGroup(estimateId);
@@ -685,6 +682,16 @@
         if (takeoffState.activeLayerId && !layerBelongsToEstimate(findLayer(takeoffState.activeLayerId), estimateId)) {
             takeoffState.activeLayerId = null;
         }
+    }
+
+    function scopeLegacyTakeoffGroupsOnce() {
+        const primaryId = primaryEstimateId();
+        takeoffState.groups.forEach(group => {
+            if (!group.estimateId) group.estimateId = primaryId;
+            (group.layers || []).forEach(layer => {
+                if (!layer.estimateId) layer.estimateId = group.estimateId || primaryId;
+            });
+        });
     }
 
     function layerBelongsToEstimate(layer, estimateId = activeEstimateId()) {
@@ -1136,6 +1143,7 @@
 
     function initTakeoffState() {
         takeoffState.groups = normalizeSavedGroups(seedGroupsFromProjectLayers());
+        scopeLegacyTakeoffGroupsOnce();
         ensureEstimateTakeoffWorkspace();
         takeoffState.activeLayerId = null;
         takeoffState.canvasSnapshots = {};
@@ -1796,15 +1804,19 @@
 
     function syncTakeoffFromCanvasSnapshot(snapshot, options = {}) {
         if (!snapshot || !Array.isArray(snapshot.layers)) return;
+        const estimateId = String(snapshot.estimateKey || snapshot.estimate_key || '');
+        if (!estimateId || estimateId !== activeEstimateId()) return;
         const doc = activeDrawingDoc();
         const documentId = String(snapshot.drawingId || snapshot.drawing_id || doc?.id || 'active');
-        takeoffState.canvasSnapshots[documentId] = {
+        takeoffState.canvasSnapshots[`${estimateId}:${documentId}`] = {
             ...snapshot,
+            estimateId,
             documentId,
             updatedAt: Date.now()
         };
         snapshot.layers.forEach(remote => {
-            const layer = findLayer(remote.id || remote.layerId);
+            const layer = allLayers().find(row => layerBelongsToEstimate(row, estimateId)
+                && String(row.id) === String(remote.id || remote.layerId));
             if (!layer) return;
             layer.shapes = remote.shapes || [];
             layer.takeoffObjects = remote.shapes || [];
@@ -1827,6 +1839,7 @@
     function applyAggregatedCanvasQuantities() {
         const totals = new Map();
         Object.values(takeoffState.canvasSnapshots || {}).forEach(snapshot => {
+            if (String(snapshot.estimateId || snapshot.estimateKey || '') !== activeEstimateId()) return;
             (snapshot.layers || []).forEach(remote => {
                 const id = String(remote.id || remote.layerId || '');
                 if (!id) return;
@@ -2936,6 +2949,7 @@
                 return;
             }
             if (event.data?.type === 'project-takeoff-state') {
+                if (event.source !== takeoffWindow()) return;
                 syncTakeoffFromCanvasSnapshot(event.data.payload);
                 return;
             }

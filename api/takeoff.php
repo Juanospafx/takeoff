@@ -589,8 +589,8 @@ function state_payload(PDO $pdo, int $drawingId, string $estimateKey = '', bool 
             $snapshot = json_decode((string)$row['state_json'], true);
             if (is_array($snapshot)) {
                 $snapshot['revision'] = (int)$row['revision'];
-                $stmt = $pdo->prepare("SELECT project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_estimate_scales WHERE estimate_key = ? AND drawing_id = ? ORDER BY page_number");
-                $stmt->execute([$estimateKey, $drawingId]);
+                $stmt = $pdo->prepare("SELECT project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_sheet_scales WHERE drawing_id = ? ORDER BY page_number");
+                $stmt->execute([$drawingId]);
                 $snapshot['scales'] = decode_json_fields($stmt->fetchAll(PDO::FETCH_ASSOC), ['calibration_json']);
                 return $snapshot;
             }
@@ -678,9 +678,19 @@ try {
             $estimateKey = trim((string)($_GET['estimate_key'] ?? $input['estimate_key'] ?? ''));
             if ($drawingId <= 0) out_json(['status' => 'error', 'msg' => 'drawing_id is required'], 422);
             if ($estimateKey === '') out_json(['status' => 'error', 'msg' => 'estimate_key is required'], 422);
-            $stmt = $pdo->prepare("SELECT project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_estimate_scales WHERE estimate_key = ? AND drawing_id = ? AND page_number = ? LIMIT 1");
-            $stmt->execute([$estimateKey, $drawingId, $pageNumber]);
-            $rows = decode_json_fields(array_filter([$stmt->fetch(PDO::FETCH_ASSOC)]), ['calibration_json']);
+            $stmt = $pdo->prepare("SELECT project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_sheet_scales WHERE drawing_id = ? AND page_number = ? LIMIT 1");
+            $stmt->execute([$drawingId, $pageNumber]);
+            $shared = $stmt->fetch(PDO::FETCH_ASSOC);
+            if (!$shared) {
+                $legacy = $pdo->prepare("SELECT project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_estimate_scales WHERE drawing_id = ? AND page_number = ? ORDER BY updated_at DESC LIMIT 1");
+                $legacy->execute([$drawingId, $pageNumber]);
+                $shared = $legacy->fetch(PDO::FETCH_ASSOC);
+                if ($shared) {
+                    $copy = $pdo->prepare("INSERT INTO takeoff_sheet_scales (project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json) VALUES (?, ?, ?, ?, ?, ?, ?) ON DUPLICATE KEY UPDATE drawing_id=VALUES(drawing_id)");
+                    $copy->execute([$shared['project_id'], $drawingId, $pageNumber, $shared['scale_name'], $shared['pixels_per_unit'], $shared['unit'], $shared['calibration_json']]);
+                }
+            }
+            $rows = decode_json_fields(array_filter([$shared]), ['calibration_json']);
             out_json(['status' => 'success', 'data' => $rows[0] ?? null]);
 
         case 'save_scale':
@@ -694,13 +704,13 @@ try {
             $projectId = project_id_for_file($pdo, $drawingId, i($input['project_id'] ?? 0));
             $userId = i($_SESSION['user_id'] ?? 0) ?: null;
             $stmt = $pdo->prepare(
-                "INSERT INTO takeoff_estimate_scales (estimate_key, project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, created_by, updated_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "INSERT INTO takeoff_sheet_scales (project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, created_by, updated_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON DUPLICATE KEY UPDATE project_id=VALUES(project_id), scale_name=VALUES(scale_name), pixels_per_unit=VALUES(pixels_per_unit), unit=VALUES(unit), calibration_json=VALUES(calibration_json), updated_by=VALUES(updated_by), updated_at=CURRENT_TIMESTAMP"
             );
-            $stmt->execute([$estimateKey, $projectId ?: null, $drawingId, $pageNumber, $scaleName, $pixelsPerUnit, $input['unit'] ?? 'ft', json_value($input['calibration_json'] ?? null), $userId, $userId]);
-            $stmt = $pdo->prepare("SELECT project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_estimate_scales WHERE estimate_key = ? AND drawing_id = ? AND page_number = ? LIMIT 1");
-            $stmt->execute([$estimateKey, $drawingId, $pageNumber]);
+            $stmt->execute([$projectId ?: null, $drawingId, $pageNumber, $scaleName, $pixelsPerUnit, $input['unit'] ?? 'ft', json_value($input['calibration_json'] ?? null), $userId, $userId]);
+            $stmt = $pdo->prepare("SELECT project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_sheet_scales WHERE drawing_id = ? AND page_number = ? LIMIT 1");
+            $stmt->execute([$drawingId, $pageNumber]);
             $rows = decode_json_fields(array_filter([$stmt->fetch(PDO::FETCH_ASSOC)]), ['calibration_json']);
             out_json(['status' => 'success', 'data' => $rows[0] ?? null]);
 
@@ -710,8 +720,8 @@ try {
             $estimateKey = trim((string)($input['estimate_key'] ?? ''));
             if ($drawingId <= 0) out_json(['status' => 'error', 'msg' => 'drawing_id is required'], 422);
             if ($estimateKey === '') out_json(['status' => 'error', 'msg' => 'estimate_key is required'], 422);
-            $stmt = $pdo->prepare("DELETE FROM takeoff_estimate_scales WHERE estimate_key = ? AND drawing_id = ? AND page_number = ?");
-            $stmt->execute([$estimateKey, $drawingId, $pageNumber]);
+            $stmt = $pdo->prepare("DELETE FROM takeoff_sheet_scales WHERE drawing_id = ? AND page_number = ?");
+            $stmt->execute([$drawingId, $pageNumber]);
             out_json(['status' => 'success']);
 
         case 'save_state':

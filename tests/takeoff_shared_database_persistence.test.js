@@ -29,16 +29,17 @@ test('one authoritative estimate and drawing snapshot survives relational mirror
     assert.match(overview, /await saveTakeoff\.call\(takeoffFrame\.contentWindow\)/);
 });
 
-test('sheet scale schema and API are isolated by estimate, drawing and page', () => {
-    assert.match(estimateMigration, /CREATE TABLE IF NOT EXISTS takeoff_estimate_scales/);
-    assert.match(estimateMigration, /PRIMARY KEY \(estimate_key, drawing_id, page_number\)/);
+test('sheet scale is shared by drawing and page while geometry remains estimate-scoped', () => {
+    assert.match(api, /CREATE TABLE IF NOT EXISTS takeoff_sheet_scales/);
+    assert.match(api, /UNIQUE KEY uq_takeoff_sheet_scale \(drawing_id, page_number\)/);
     assert.match(api, /case 'scale'/);
     assert.match(api, /case 'save_scale'/);
     assert.match(api, /function ensure_takeoff_scale_table/);
     assert.match(api, /ensure_takeoff_scale_table\(\$pdo\)/);
     assert.doesNotMatch(api, /Run db\/migrations\/2026-08-12_takeoff_shared_persistence\.sql/);
     assert.match(api, /ON DUPLICATE KEY UPDATE/);
-    assert.match(api, /WHERE estimate_key = \? AND drawing_id = \? AND page_number = \?/);
+    assert.match(api, /FROM takeoff_sheet_scales WHERE drawing_id = \? AND page_number = \?/);
+    assert.match(api, /FROM takeoff_estimate_scales WHERE drawing_id = \? AND page_number = \? ORDER BY updated_at DESC LIMIT 1/);
 });
 
 test('geometry tables exist and every saved layer belongs to a persisted takeoff', () => {
