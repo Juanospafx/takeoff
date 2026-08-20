@@ -257,8 +257,9 @@
         if (state.estimates.length < 2) return false;
         const index = state.estimates.findIndex(row => row.id === estimateId);
         if (index < 0) return false;
+        const removingActive = state.activeEstimateId === estimateId;
         state.estimates.splice(index, 1);
-        state.activeEstimateId = state.estimates[Math.max(0, index - 1)].id;
+        if (removingActive) state.activeEstimateId = state.estimates[Math.max(0, index - 1)].id;
         state.estimates.forEach(row => { row.isActive = row.id === state.activeEstimateId; });
         state.groups = active(state).groups;
         return touch(state, 'Deleted estimate');

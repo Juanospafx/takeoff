@@ -547,7 +547,8 @@
         if (!bar) return;
         if (Footer?.render) {
             bar.innerHTML = Footer.render({ estimates: state.estimates, activeEstimateId: state.activeEstimateId,
-                selectAttribute: 'data-version', actionAttribute: 'data-estimating-action' });
+                selectAttribute: 'data-version', actionAttribute: 'data-estimating-action',
+                menuAttribute: 'data-estimate-menu', itemActionAttribute: 'data-estimate-action' });
         } else {
             bar.innerHTML = state.estimates.map(row => `<button data-version="${row.id}" class="${row.id === state.activeEstimateId ? 'active' : ''}">${esc(row.name)}</button>`).join('');
         }
@@ -740,7 +741,7 @@
         if (row) row[row.type === 'fixed_amount' ? 'amount' : 'percent'] = Workspace.numeric(target.value);
     }
 
-    async function deleteCurrentEstimate() {
+    async function deleteCurrentEstimate(estimateId = state.activeEstimateId) {
         if (ui.saving) {
             alert('Wait for the current save to finish before deleting this estimate.');
             return;
@@ -749,7 +750,8 @@
             alert('At least one estimate must remain in the project.');
             return;
         }
-        const estimate = current();
+        const estimate = state.estimates.find(row => String(row.id) === String(estimateId));
+        if (!estimate) return;
         if (!confirm(`Delete “${estimate.name}”? This will also delete its Takeoff items and cannot be undone.`)) return;
         $('optionsMenu')?.classList.remove('open');
         ui.loadState = 'saving';
@@ -786,6 +788,41 @@
 
     root.addEventListener('click', event => {
         const target = event.target;
+        const estimateMenu = target.closest('[data-estimate-menu]');
+        if (estimateMenu) {
+            const id = estimateMenu.dataset.estimateMenu;
+            const menu = root.querySelector(`[data-estimate-actions-menu="${selectorValue(id)}"]`);
+            const opening = Boolean(menu?.hidden);
+            root.querySelectorAll('[data-estimate-actions-menu]').forEach(row => { row.hidden = true; });
+            root.querySelectorAll('[data-estimate-menu]').forEach(row => row.setAttribute('aria-expanded', 'false'));
+            if (menu && opening) {
+                const rect = estimateMenu.getBoundingClientRect();
+                menu.hidden = false;
+                menu.style.left = `${Math.max(8, Math.min(window.innerWidth - 178, rect.right - 170))}px`;
+                menu.style.top = `${Math.max(8, rect.top - menu.offsetHeight - 6)}px`;
+                estimateMenu.setAttribute('aria-expanded', 'true');
+            }
+            return;
+        }
+        const estimateAction = target.closest('[data-estimate-action]');
+        if (estimateAction) {
+            const estimateId = estimateAction.dataset.estimateId;
+            const actionName = estimateAction.dataset.estimateAction;
+            root.querySelectorAll('[data-estimate-actions-menu]').forEach(row => { row.hidden = true; });
+            if (actionName === 'rename') {
+                const estimate = state.estimates.find(row => String(row.id) === String(estimateId));
+                const name = estimate && prompt('Estimate name', estimate.name);
+                if (estimate && name?.trim()) {
+                    estimate.name = name.trim(); estimate.updatedAt = Workspace.now();
+                    estimate.auditLog.push({ id: Workspace.uid('audit'), at: estimate.updatedAt, action: 'Renamed estimate' });
+                    markEstimateDirty(estimate.id); saveLocal(); ui.saveRequested = true;
+                    clearTimeout(ui.saveTimer); ui.saveTimer = setTimeout(saveServer, 0); render();
+                }
+            }
+            if (actionName === 'copy') { selectEstimate(estimateId); ui.modal = 'new'; renderModal(); }
+            if (actionName === 'delete') deleteCurrentEstimate(estimateId);
+            return;
+        }
         const action = target.closest('[data-est-action]')?.dataset.estAction;
         if (action === 'create-group') createGroup();
         if (action === 'delete-selected') {
@@ -876,6 +913,16 @@
 
     document.addEventListener('keydown', event => {
         if (event.key === 'Escape' && ui.modal) { ui.modal = null; renderModal(); }
+        if (event.key === 'Escape') {
+            root.querySelectorAll('[data-estimate-actions-menu]').forEach(row => { row.hidden = true; });
+            root.querySelectorAll('[data-estimate-menu]').forEach(row => row.setAttribute('aria-expanded', 'false'));
+        }
+    });
+
+    document.addEventListener('click', event => {
+        if (event.target.closest('[data-estimate-menu], [data-estimate-actions-menu]')) return;
+        root.querySelectorAll('[data-estimate-actions-menu]').forEach(row => { row.hidden = true; });
+        root.querySelectorAll('[data-estimate-menu]').forEach(row => row.setAttribute('aria-expanded', 'false'));
     });
 
     function refreshEstimateFromStorage(estimateId) {

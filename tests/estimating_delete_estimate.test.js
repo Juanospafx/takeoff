@@ -15,6 +15,11 @@ test('Estimating exposes a confirmed delete action and keeps one estimate', () =
     assert.match(client, /state\.estimates\.length <= 1/);
     assert.match(client, /confirm\(`Delete/);
     assert.match(client, /request\('delete'/);
+    assert.match(client, /menuAttribute: 'data-estimate-menu'/);
+    assert.match(client, /data-estimate-actions-menu/);
+    assert.match(client, /actionName === 'rename'/);
+    assert.match(client, /actionName === 'copy'/);
+    assert.match(client, /actionName === 'delete'/);
 });
 
 test('removing an estimate selects another isolated workspace', () => {
@@ -26,6 +31,14 @@ test('removing an estimate selects another isolated workspace', () => {
     assert.equal(state.activeEstimateId, 'a');
     assert.equal(state.estimates.length, 1);
     assert.equal(state.groups[0].id, 'ga');
+});
+
+test('deleting an inactive estimate keeps the current estimate selected', () => {
+    const state = Workspace.workspace({ activeEstimateId: 'a', estimates: [
+        { id: 'a', name: 'A', groups: [] }, { id: 'b', name: 'B', groups: [] }
+    ] }, 42);
+    Workspace.removeEstimate(state, 'b');
+    assert.equal(state.activeEstimateId, 'a');
 });
 
 test('server soft-deletes the estimate and cleans its scoped Takeoff workspace', () => {
