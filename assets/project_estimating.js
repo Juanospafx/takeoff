@@ -786,6 +786,21 @@
         }
     }
 
+    function handleEstimateCardAction(actionName, estimateId) {
+        if (actionName === 'rename') {
+            const estimate = state.estimates.find(row => String(row.id) === String(estimateId));
+            const name = estimate && prompt('Estimate name', estimate.name);
+            if (estimate && name?.trim()) {
+                estimate.name = name.trim(); estimate.updatedAt = Workspace.now();
+                estimate.auditLog.push({ id: Workspace.uid('audit'), at: estimate.updatedAt, action: 'Renamed estimate' });
+                markEstimateDirty(estimate.id); saveLocal(); ui.saveRequested = true;
+                clearTimeout(ui.saveTimer); ui.saveTimer = setTimeout(saveServer, 0); render();
+            }
+        }
+        if (actionName === 'copy') { selectEstimate(estimateId); ui.modal = 'new'; renderModal(); }
+        if (actionName === 'delete') deleteCurrentEstimate(estimateId);
+    }
+
     root.addEventListener('click', event => {
         const target = event.target;
         const estimateMenu = target.closest('[data-estimate-menu]');
@@ -809,18 +824,7 @@
             const estimateId = estimateAction.dataset.estimateId;
             const actionName = estimateAction.dataset.estimateAction;
             root.querySelectorAll('[data-estimate-actions-menu]').forEach(row => { row.hidden = true; });
-            if (actionName === 'rename') {
-                const estimate = state.estimates.find(row => String(row.id) === String(estimateId));
-                const name = estimate && prompt('Estimate name', estimate.name);
-                if (estimate && name?.trim()) {
-                    estimate.name = name.trim(); estimate.updatedAt = Workspace.now();
-                    estimate.auditLog.push({ id: Workspace.uid('audit'), at: estimate.updatedAt, action: 'Renamed estimate' });
-                    markEstimateDirty(estimate.id); saveLocal(); ui.saveRequested = true;
-                    clearTimeout(ui.saveTimer); ui.saveTimer = setTimeout(saveServer, 0); render();
-                }
-            }
-            if (actionName === 'copy') { selectEstimate(estimateId); ui.modal = 'new'; renderModal(); }
-            if (actionName === 'delete') deleteCurrentEstimate(estimateId);
+            handleEstimateCardAction(actionName, estimateId);
             return;
         }
         const action = target.closest('[data-est-action]')?.dataset.estAction;
@@ -969,6 +973,11 @@
         if (event.detail?.action === 'new-estimate') ui.modal = 'new';
         if (event.detail?.action === 'compare-estimates') ui.modal = 'compare';
         renderModal();
+    });
+    window.addEventListener('takeoff:estimating-estimate-action-requested', event => {
+        const detail = event.detail || {};
+        if (detail.projectId && String(detail.projectId) !== String(projectId)) return;
+        handleEstimateCardAction(detail.action, detail.estimateId);
     });
     window.addEventListener('storage', event => {
         if (event.key !== storageKey || !event.newValue) return;

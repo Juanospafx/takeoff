@@ -66,6 +66,10 @@ function assertFooterParity(html, idAttribute) {
     assert.match(html, /fa-lock/);
     assert.match(html, /New estimate/);
     assert.match(html, /Compare/);
+    assert.match(html, /fa-ellipsis-vertical/);
+    assert.match(html, /> Rename</);
+    assert.match(html, /> Copy</);
+    assert.match(html, /> Delete</);
     assert.doesNotMatch(html, /compare-estimates" disabled/);
 }
 

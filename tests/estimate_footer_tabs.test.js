@@ -29,6 +29,9 @@ expect(estimatingCss, /\.est-version-bar\s*\{[\s\S]*?--est-surface:\s*#ffffff;[\
 expect(estimatingCss, /\[data-theme="dark"\]\s+\.est-version-bar\s*\{[\s\S]*?--est-surface:/, 'Shared footer must preserve Estimating parity in dark mode.');
 expect(takeoff, /data-takeoff-estimate-id/, 'Takeoff must render estimate choices.');
 expect(proposal, /data-proposal-estimate-id/, 'Proposal must render estimate choices.');
+expect(takeoff, /data-takeoff-estimate-menu/, 'Every Takeoff estimate card must expose its actions menu.');
+expect(proposal, /data-proposal-estimate-menu/, 'Every Proposal estimate card must expose its actions menu.');
+expect(estimating, /takeoff:estimating-estimate-action-requested/, 'Estimating must own actions requested from every workspace footer.');
 expect(takeoff, /takeoff:active-estimate-changed/, 'Takeoff must request active estimate selection from Estimating.');
 expect(takeoff, /Estimating is the sole owner of its workspace/, 'Takeoff must not become a second estimating workspace writer.');
 expect(proposal, /estimating\.activeEstimateId\s*=\s*estimateId/, 'Proposal must persist the active estimate.');

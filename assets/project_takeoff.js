@@ -630,7 +630,16 @@
             estimates,
             activeEstimateId: activeId,
             selectAttribute: 'data-takeoff-estimate-id',
-            actionAttribute: 'data-takeoff-estimating-action'
+            actionAttribute: 'data-takeoff-estimating-action',
+            menuAttribute: 'data-takeoff-estimate-menu',
+            itemActionAttribute: 'data-takeoff-estimate-action'
+        });
+        window.ProjectEstimateFooter.bindMenus?.(footer, {
+            menuAttribute: 'data-takeoff-estimate-menu',
+            itemActionAttribute: 'data-takeoff-estimate-action',
+            onAction: (action, estimateId) => window.dispatchEvent(new CustomEvent('takeoff:estimating-estimate-action-requested', {
+                detail: { action, estimateId, sourceTab: 'takeoff', projectId: String(window.ProjectState?.projectId || '') }
+            }))
         });
     }
 

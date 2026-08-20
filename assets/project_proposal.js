@@ -199,7 +199,16 @@
             estimates,
             activeEstimateId: activeId,
             selectAttribute: 'data-proposal-estimate-id',
-            actionAttribute: 'data-proposal-estimating-action'
+            actionAttribute: 'data-proposal-estimating-action',
+            menuAttribute: 'data-proposal-estimate-menu',
+            itemActionAttribute: 'data-proposal-estimate-action'
+        });
+        window.ProjectEstimateFooter.bindMenus?.(estimateFooter, {
+            menuAttribute: 'data-proposal-estimate-menu',
+            itemActionAttribute: 'data-proposal-estimate-action',
+            onAction: (action, estimateId) => window.dispatchEvent(new CustomEvent('takeoff:estimating-estimate-action-requested', {
+                detail: { action, estimateId, sourceTab: 'proposal', projectId: String(projectId) }
+            }))
         });
     }
 

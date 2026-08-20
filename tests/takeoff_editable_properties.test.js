@@ -47,6 +47,6 @@ test('deleting a marker removes its transformer and fallback notes start editabl
 });
 
 test('dashboard and editor bypass the previous cached Takeoff scripts', () => {
-    assert.match(dashboard, /project_takeoff\.js\?v=takeoff-estimate-isolation-20260820-2/);
+    assert.match(dashboard, /project_takeoff\.js\?v=estimate-menu-all-tabs-20260820-5/);
     assert.match(page, /editor\/takeoff\.js\?v=takeoff-estimate-isolation-20260820-2/);
 });

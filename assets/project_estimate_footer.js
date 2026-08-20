@@ -23,5 +23,48 @@
         return `<span class="est-pill">${estimateLabel}</span>${tabs}${empty}<button type="button" class="est-btn est-new-estimate" ${actionAttribute}="new-estimate"><i class="fas fa-plus"></i><span>New estimate</span></button><button type="button" class="est-btn" ${actionAttribute}="compare-estimates" ${estimates.length < 2 ? 'disabled' : ''}><i class="fas fa-code-compare"></i><span>Compare</span></button>`;
     }
 
-    window.ProjectEstimateFooter = Object.freeze({ render });
+    function bindMenus(container, options = {}) {
+        if (!container || typeof container.addEventListener !== 'function') return;
+        container.__estimateMenuOptions = options;
+        if (container.__estimateMenusBound) return;
+        container.__estimateMenusBound = true;
+        container.addEventListener('click', event => {
+            const config = container.__estimateMenuOptions || {};
+            const menuAttribute = config.menuAttribute || 'data-estimate-menu';
+            const actionAttribute = config.itemActionAttribute || 'data-estimate-action';
+            const toggle = event.target.closest(`[${menuAttribute}]`);
+            if (toggle) {
+                event.stopPropagation();
+                const id = toggle.getAttribute(menuAttribute);
+                const menu = [...container.querySelectorAll('[data-estimate-actions-menu]')]
+                    .find(row => row.dataset.estimateActionsMenu === id);
+                const opening = Boolean(menu?.hidden);
+                container.querySelectorAll('[data-estimate-actions-menu]').forEach(row => { row.hidden = true; });
+                container.querySelectorAll(`[${menuAttribute}]`).forEach(row => row.setAttribute('aria-expanded', 'false'));
+                if (menu && opening) {
+                    const rect = toggle.getBoundingClientRect();
+                    menu.hidden = false;
+                    menu.style.left = `${Math.max(8, Math.min(window.innerWidth - 178, rect.right - 170))}px`;
+                    menu.style.top = `${Math.max(8, rect.top - menu.offsetHeight - 6)}px`;
+                    toggle.setAttribute('aria-expanded', 'true');
+                }
+                return;
+            }
+            const action = event.target.closest(`[${actionAttribute}]`);
+            if (!action) return;
+            event.stopPropagation();
+            container.querySelectorAll('[data-estimate-actions-menu]').forEach(row => { row.hidden = true; });
+            config.onAction?.(action.getAttribute(actionAttribute), action.dataset.estimateId);
+        });
+        document.addEventListener('click', event => {
+            if (container.contains(event.target)) return;
+            container.querySelectorAll('[data-estimate-actions-menu]').forEach(row => { row.hidden = true; });
+        });
+        document.addEventListener('keydown', event => {
+            if (event.key !== 'Escape') return;
+            container.querySelectorAll('[data-estimate-actions-menu]').forEach(row => { row.hidden = true; });
+        });
+    }
+
+    window.ProjectEstimateFooter = Object.freeze({ render, bindMenus });
 })();
