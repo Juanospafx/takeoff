@@ -395,21 +395,35 @@
         return { id: 'default', name: 'Default Group', isExpanded: true, isDefault: true, layers: [] };
     }
 
+    function takeoffLayerMetadata(layer) {
+        if (layer?.metadata_json && typeof layer.metadata_json === 'object') return layer.metadata_json;
+        try { return JSON.parse(layer?.metadata_json || '{}') || {}; } catch (_) { return {}; }
+    }
+
     function seedGroupsFromProjectLayers() {
         const groups = [defaultGroup()];
         const byName = new Map([['Default Group', groups[0]]]);
         (window.ProjectState?.takeoffLayers || []).forEach((layer, index) => {
+            const metadata = takeoffLayerMetadata(layer);
             const groupName = layer.group_name || 'Default Group';
-            let group = byName.get(groupName);
+            const groupKey = metadata.estimating_group_id
+                ? `${metadata.estimate_id || ''}:${metadata.estimating_group_id}` : groupName;
+            let group = byName.get(groupKey);
             if (!group) {
-                group = { id: makeId('grp'), name: groupName, isExpanded: true, isDefault: false, layers: [] };
-                byName.set(groupName, group);
+                group = { id: metadata.estimating_group_id ? `estgrp_${metadata.estimate_id}_${metadata.estimating_group_id}` : makeId('grp'),
+                    name: groupName, estimateId: metadata.estimate_id || null,
+                    estimatingGroupId: metadata.estimating_group_id || null,
+                    isExpanded: true, isDefault: false, layers: [] };
+                byName.set(groupKey, group);
                 groups.push(group);
             }
             const type = normalizeTakeoffType(layer.takeoff_type || layer.type);
             group.layers.push({
                 id: String(layer.integration_key || layer.id || makeId('layer')),
                 groupId: group.id,
+                estimateId: metadata.estimate_id || null,
+                estimatingItemId: metadata.estimating_item_id || null,
+                estimatingGroupId: metadata.estimating_group_id || null,
                 name: layer.name || layer.title || `Takeoff Item ${index + 1}`,
                 type,
                 uom: layer.unit_of_measure || typeToUom(type),
@@ -463,6 +477,9 @@
             layers: (group.layers || []).map(layer => ({
                 id: layer.id || makeId('layer'),
                 groupId: group.id,
+                estimateId: layer.estimateId || group.estimateId || null,
+                estimatingItemId: layer.estimatingItemId || null,
+                estimatingGroupId: layer.estimatingGroupId || group.estimatingGroupId || null,
                 name: layer.name || 'New Takeoff Layer',
                 type: normalizeTakeoffType(layer.type),
                 uom: layer.uom || typeToUom(normalizeTakeoffType(layer.type)),
@@ -600,6 +617,76 @@
         window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', { detail: { projectId: String(window.ProjectState?.projectId || ''), estimateId } }));
     }
 
+    function activeEstimateId() {
+        const estimating = loadEstimatingStateForSync();
+        return String(estimating.activeEstimateId || estimating.estimates?.[0]?.id || 'est_primary');
+    }
+
+    function layerBelongsToEstimate(layer, estimateId = activeEstimateId()) {
+        return !layer.estimateId || String(layer.estimateId) === String(estimateId);
+    }
+
+    function syncEstimatingItemsToTakeoff(detail = {}) {
+        if (detail.projectId && String(detail.projectId) !== String(window.ProjectState?.projectId || '')) return;
+        const estimateId = String(detail.activeEstimateId || '');
+        if (!estimateId || estimateId !== activeEstimateId() || !Array.isArray(detail.groups)) return;
+        const seen = new Set();
+        detail.groups.forEach((estimateGroup, groupIndex) => {
+            const groupKey = String(estimateGroup.id || `group_${groupIndex}`);
+            let group = takeoffState.groups.find(row => String(row.estimatingGroupId || '') === groupKey
+                && String(row.estimateId || '') === estimateId);
+            if (!group) {
+                group = { id: `estgrp_${estimateId}_${groupKey}`, estimatingGroupId: groupKey,
+                    estimateId, name: estimateGroup.name || 'Default Group', isExpanded: true, isDefault: false, layers: [] };
+                takeoffState.groups.push(group);
+            }
+            group.name = estimateGroup.name || group.name;
+            (estimateGroup.items || []).forEach(item => {
+                const itemId = String(item.id || '');
+                if (!itemId) return;
+                const layerId = String(item.takeoffLayerId || `estitem_${estimateId}_${itemId}`);
+                let layer = allLayers().find(row => String(row.id) === layerId
+                    || (String(row.estimatingItemId || '') === itemId && String(row.estimateId || '') === estimateId));
+                if (!layer) {
+                    layer = { id: layerId, groupId: group.id, estimateId, estimatingItemId: itemId,
+                        name: item.name || 'Cost item', type: inferTakeoffTypeFromUom(item.uom) || 'Count',
+                        uom: item.uom || 'ea', symbol: 'Solid Circle', size: 'Medium', color: '#2563eb',
+                        visible: true, locked: false, quantity: Number(item.quantity || 0),
+                        baseQuantity: Number(item.quantity || 0), catalogItemId: item.catalogItemId || null,
+                        catalog_item_id: item.catalogItemId || null, unitCost: Number(item.unitMaterialCost || 0),
+                        unit_cost: Number(item.unitMaterialCost || 0), laborHours: Number(item.unitLabor || 0),
+                        labor_hours: Number(item.unitLabor || 0), description: item.description || '',
+                        catalogNumber: item.costCode || item.budgetCode || '', itemType: item.itemType || 'part' };
+                    group.layers.push(layer);
+                } else {
+                    const oldGroup = groupForLayer(layer);
+                    if (oldGroup !== group) {
+                        oldGroup.layers = oldGroup.layers.filter(row => row !== layer);
+                        group.layers.push(layer); layer.groupId = group.id;
+                    }
+                    Object.assign(layer, { estimateId, estimatingItemId: itemId, name: item.name || layer.name,
+                        uom: item.uom || layer.uom, catalogItemId: item.catalogItemId || null,
+                        catalog_item_id: item.catalogItemId || null, unitCost: Number(item.unitMaterialCost || 0),
+                        unit_cost: Number(item.unitMaterialCost || 0), laborHours: Number(item.unitLabor || 0),
+                        labor_hours: Number(item.unitLabor || 0), description: item.description || '' });
+                }
+                seen.add(String(layer.id));
+                if (!item.takeoffLayerId) window.dispatchEvent(new CustomEvent('takeoff:estimating-link-requested', { detail: {
+                    version: 1, origin: 'takeoff', projectId: String(window.ProjectState?.projectId || ''),
+                    estimateId, itemId, layerId: String(layer.id)
+                } }));
+            });
+        });
+        takeoffState.groups.forEach(group => {
+            group.layers = (group.layers || []).filter(layer => String(layer.estimateId || '') !== estimateId
+                || !layer.estimatingItemId || seen.has(String(layer.id)));
+        });
+        if (takeoffState.activeLayerId && !layerBelongsToEstimate(findLayer(takeoffState.activeLayerId), estimateId)) {
+            takeoffState.activeLayerId = null;
+        }
+        saveTakeoffState(); syncAllLayersToCanvas(); renderTakeoffPanel(); renderActiveLayerToolbar();
+    }
+
     function estimateLineFromLayer(layer) {
         const group = groupForLayer(layer);
         const itemType = layer.itemType || layer.item_type || (String(layer.category || '').toLowerCase().includes('labor') ? 'Labor' : 'Materials');
@@ -630,7 +717,8 @@
             groupName: group?.name || 'Default Group',
             uom: layer.uom || typeToUom(layer.type),
             projectId: String(window.ProjectState?.projectId || ''),
-            estimateId: ''
+            estimateId: String(layer.estimateId || activeEstimateId()),
+            estimatingItemId: layer.estimatingItemId || null
         };
     }
 
@@ -642,12 +730,20 @@
         const currentGroups = activeEstimate?.groups || state.groups || [];
         const existingByLayerId = new Map();
         const manualByGroupName = new Map();
+        const layerByEstimatingItemId = new Map(allLayers()
+            .filter(layer => layerBelongsToEstimate(layer, state.activeEstimateId) && layer.estimatingItemId)
+            .map(layer => [String(layer.estimatingItemId), layer]));
 
         currentGroups.forEach(group => {
             (group.items || []).forEach(item => {
                 if (item.takeoffLayerId) {
                     const key = String(item.takeoffLayerId);
                     if (!existingByLayerId.has(key)) existingByLayerId.set(key, item);
+                    return;
+                }
+                const linkedLayer = layerByEstimatingItemId.get(String(item.id));
+                if (linkedLayer) {
+                    existingByLayerId.set(String(linkedLayer.id), item);
                     return;
                 }
                 const name = group.name || 'Default Group';
@@ -657,10 +753,12 @@
         });
 
         const projectedLayerIds = new Set();
+        const targetEstimateId = String(state.activeEstimateId || '');
+        allLayers().forEach(layer => { if (!layer.estimateId) layer.estimateId = targetEstimateId; });
         const projectedGroups = takeoffState.groups.map((takeoffGroup, groupIndex) => {
             const groupName = takeoffGroup.name || 'Default Group';
-            const groupId = `takeoff_group_${String(takeoffGroup.id || groupIndex)}`;
-            const items = (takeoffGroup.layers || []).filter(layer => {
+            const groupId = String(takeoffGroup.estimatingGroupId || `takeoff_group_${String(takeoffGroup.id || groupIndex)}`);
+            const items = (takeoffGroup.layers || []).filter(layer => layerBelongsToEstimate(layer, targetEstimateId)).filter(layer => {
                 const layerId = String(layer.id);
                 if (projectedLayerIds.has(layerId)) return false;
                 projectedLayerIds.add(layerId);
@@ -697,7 +795,7 @@
                 sortOrder: groupIndex,
                 items
             };
-        });
+        }).filter(group => group.items.length || currentGroups.some(row => row.name === group.name));
 
         // Manual estimating items remain intact. Empty and takeoff-only legacy groups
         // intentionally disappear so deleted/renamed Takeoff folders cannot accumulate.
@@ -721,6 +819,7 @@
                 detail: {
                     version: 2,
                     projectId: String(window.ProjectState?.projectId || ''),
+                    activeEstimateId: String(state.activeEstimateId || ''),
                     authoritative: true,
                     groups: projectedGroups,
                     layerIds: Array.from(projectedLayerIds)
@@ -756,7 +855,10 @@
             spacing: layer.spacing || 0,
             height: layer.height || 0,
             depth: layer.depth || 0,
-            visible: layer.visible !== false,
+            estimate_id: layer.estimateId || activeEstimateId(),
+            estimating_item_id: layer.estimatingItemId || null,
+            estimating_group_id: groupForLayer(layer)?.estimatingGroupId || null,
+            visible: layer.visible !== false && layerBelongsToEstimate(layer),
             locked: Boolean(layer.locked)
         };
     }
@@ -800,7 +902,8 @@
         const activeLabel = $('takeoffActiveLayerLabel');
         if (!tree) return;
         const q = takeoffState.query;
-        const layersCount = allLayers().length;
+        const estimateId = activeEstimateId();
+        const layersCount = allLayers().filter(layer => layerBelongsToEstimate(layer, estimateId)).length;
         if (title) title.textContent = `Takeoffs (${layersCount})`;
         const activeLayer = findLayer(takeoffState.activeLayerId);
         if (activeLabel) activeLabel.textContent = activeLayer ? activeLayer.name : 'None';
@@ -808,7 +911,7 @@
         renderInspector();
         renderWorkspaceSummary();
         tree.innerHTML = takeoffState.groups.map(group => {
-            const visibleLayers = (group.layers || []).filter(layer => {
+            const visibleLayers = (group.layers || []).filter(layer => layerBelongsToEstimate(layer, estimateId)).filter(layer => {
                 if (!q) return true;
                 return group.name.toLowerCase().includes(q) || layer.name.toLowerCase().includes(q) || layer.type.toLowerCase().includes(q);
             });
@@ -821,8 +924,8 @@
                     <button class="pro-tree-toggle" type="button" data-group-toggle="${esc(group.id)}"><i class="fas ${expanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i></button>
                     <input type="checkbox" ${groupSelected ? 'checked' : ''} aria-label="Select all items in group" data-group-select="${esc(group.id)}">
                     <span class="pro-tree-name"><i class="fas fa-folder${expanded ? '-open' : ''}"></i> ${esc(group.name)}</span>
-                    <span class="pro-tree-qty">${group.layers.length}</span>
-                    <button class="pro-visibility-btn" type="button" data-group-visibility="${esc(group.id)}" title="Show or hide group" aria-label="Show or hide group"><i class="fas ${group.layers.some(layer => layer.visible !== false) ? 'fa-eye' : 'fa-eye-slash'}"></i></button>
+                    <span class="pro-tree-qty">${visibleLayers.length}</span>
+                    <button class="pro-visibility-btn" type="button" data-group-visibility="${esc(group.id)}" title="Show or hide group" aria-label="Show or hide group"><i class="fas ${visibleLayers.some(layer => layer.visible !== false) ? 'fa-eye' : 'fa-eye-slash'}"></i></button>
                     <button class="pro-row-menu-btn" type="button" data-group-menu="${esc(group.id)}"><i class="fas fa-ellipsis-vertical"></i></button>
                 </div>
                 <div class="pro-tree-children" ${expanded ? '' : 'hidden'}>
@@ -1206,6 +1309,7 @@
             const layer = {
                 id: makeId('layer'),
                 groupId: group.id,
+                estimateId: activeEstimateId(),
                 quantity: 0,
                 ...payload
             };
@@ -2933,6 +3037,10 @@
         window.addEventListener('takeoff:active-estimate-changed', renderTakeoffEstimateFooter);
         window.addEventListener('takeoff:estimating-lines-updated', renderTakeoffEstimateFooter);
         window.addEventListener('takeoff:estimating-state-updated', renderTakeoffEstimateFooter);
+        window.addEventListener('takeoff:estimating-items-updated', event => {
+            syncEstimatingItemsToTakeoff(event.detail || {});
+            renderTakeoffEstimateFooter();
+        });
         ensureViewerLayersPopover();
         bindDrawingDropdown();
         bindScalePanel();

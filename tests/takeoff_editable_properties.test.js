@@ -47,6 +47,6 @@ test('deleting a marker removes its transformer and fallback notes start editabl
 });
 
 test('dashboard and editor bypass the previous cached Takeoff scripts', () => {
-    assert.match(dashboard, /project_takeoff\.js\?v=takeoff-editable-properties-20260820-1/);
-    assert.match(page, /editor\/takeoff\.js\?v=takeoff-editable-properties-20260820-1/);
+    assert.match(dashboard, /project_takeoff\.js\?v=takeoff-bidirectional-sync-20260820-1/);
+    assert.match(page, /editor\/takeoff\.js\?v=takeoff-bidirectional-sync-20260820-1/);
 });

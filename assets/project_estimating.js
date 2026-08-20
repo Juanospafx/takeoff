@@ -28,7 +28,8 @@
     const storageKey = `takeoff.estimating.module.${projectId || 'draft'}`;
     const apiUrl = '../api/project_estimating.php';
     const ui = { search: '', selected: new Set(), saving: false, saveRequested: false, saveTimer: null, loadState: projectId ? 'loading' : 'local',
-        message: projectId ? 'Loading estimate' : 'Local draft', collapsed: {}, modal: null };
+        message: projectId ? 'Loading estimate' : 'Local draft', collapsed: {}, modal: null,
+        catalogTargetGroupId: null, catalogData: null, catalogLoading: false, catalogError: '' };
     let state = readLocal();
     const dirtyEstimateIds = new Set(state.dirtyEstimateIds || []);
     const takeoffSyncDirtyIds = new Set(state.takeoffSyncDirtyIds || []);
@@ -95,6 +96,11 @@
             summary: { material: total.direct.materialSales, labor: total.direct.laborSales,
                 equipment: total.direct.equipmentSales, preTaxMarkup: total.preTaxTotal,
                 taxes: total.totalTax, total: total.estimateTotal, profit: total.profit }
+        } }));
+        window.dispatchEvent(new CustomEvent('takeoff:estimating-items-updated', { detail: {
+            version: 1, origin: 'estimating', projectId: String(projectId),
+            activeEstimateId: String(state.activeEstimateId), revision: Number(current().revision || 0),
+            groups: Workspace.clone(current().groups)
         } }));
         window.dispatchEvent(new CustomEvent('takeoff:estimate-summary-updated', { detail: total }));
     }
@@ -559,6 +565,7 @@
         if (ui.modal === 'new') portal.innerHTML = `<div class="est-dialog est-copy-modal" role="dialog" aria-modal="true" aria-labelledby="copyEstimateTitle"><header><div><h2 id="copyEstimateTitle">New Estimate</h2><span>Create an independent estimate for this project</span></div><button type="button" aria-label="Close" data-close-modal>&times;</button></header><div class="est-copy-body"><label class="est-copy-name"><span>Name</span><input id="copyEstimateName" type="text" value="${esc(current().name)} Copy" autocomplete="off"></label><fieldset><legend>Starting point</legend><label class="est-copy-option"><input type="radio" name="copyEstimateMode" value="all" checked><span><strong>Copy everything</strong><small>Start with an independent copy of groups, items, quantities, notes and markups.</small></span></label><label class="est-copy-option"><input type="radio" name="copyEstimateMode" value="structure"><span><strong>Groups only</strong><small>Keep only the group structure; Takeoff items are not imported automatically.</small></span></label><label class="est-copy-option"><input type="radio" name="copyEstimateMode" value="blank"><span><strong>Blank</strong><small>Start completely empty; Takeoff items are added only when explicitly linked.</small></span></label></fieldset></div><footer><button type="button" data-close-modal>Cancel</button><button type="button" class="est-btn-primary" data-create-estimate data-est-action="create-estimate-copy">Create estimate</button></footer></div>`;
         if (ui.modal === 'compare') portal.innerHTML = `<div class="est-dialog est-compare" role="dialog" aria-modal="true"><header><h2>Compare Estimates</h2><button type="button" data-close-modal data-modal-close="compareOpen">&times;</button></header><div class="est-compare-grid">${state.estimates.map(row => { const total = Calc.calculateSummary(row.groups, row.settings); return `<article><h3>${esc(row.name)}</h3><p>${row.groups.reduce((sum, group) => sum + group.items.length, 0)} items</p><strong>${money(total.estimateTotal)}</strong><span>${money(total.profit)} profit</span></article>`; }).join('')}</div></div>`;
         if (ui.modal === 'export') portal.innerHTML = `<div class="est-dialog est-copy-modal" role="dialog" aria-modal="true" aria-labelledby="exportEstimateTitle"><header><div><h2 id="exportEstimateTitle">Export Estimate</h2><span>Download a supplier-ready bill of quantities (CSV)</span></div><button type="button" aria-label="Close" data-close-modal>&times;</button></header><div class="est-copy-body"><fieldset><legend>Export format</legend><label class="est-copy-option"><input type="radio" name="estimateExportMode" value="normal" checked><span><strong>BOQ normal</strong><small>Export the estimate as organized, keeping assemblies as assembly rows.</small></span></label><label class="est-copy-option"><input type="radio" name="estimateExportMode" value="flat"><span><strong>BOQ Flat</strong><small>Break assemblies into parts and consolidate the total quantity of each catalog item.</small></span></label></fieldset></div><footer><button type="button" data-close-modal>Cancel</button><button type="button" class="est-btn-primary" data-download-estimate>Export CSV</button></footer></div>`;
+        if (ui.modal === 'catalog') portal.innerHTML = `<div class="est-dialog est-copy-modal" role="dialog" aria-modal="true" aria-labelledby="estimateCatalogTitle"><header><div><h2 id="estimateCatalogTitle">Add Cost Catalog Item</h2><span>Select an existing catalog item for this estimate group</span></div><button type="button" aria-label="Close" data-close-modal>&times;</button></header><div class="est-copy-body"><input type="search" data-est-catalog-search placeholder="Search Cost Catalog" autocomplete="off"><div data-est-catalog-results>${ui.catalogLoading ? '<div class="est-empty">Loading Cost Catalog…</div>' : (ui.catalogError ? `<div class="est-empty">${esc(ui.catalogError)}</div>` : renderCatalogChoices(''))}</div></div><footer><button type="button" data-close-modal>Cancel</button></footer></div>`;
         document.body.appendChild(portal);
         portal.querySelector('input, button')?.focus();
     }
@@ -569,12 +576,42 @@
         changed(`Created group “${group.name}”`);
     }
 
-    function addItem(groupId) {
-        const group = current().groups.find(row => row.id === groupId);
-        if (!group) return;
-        group.items.push(Workspace.item({ name: 'New cost item', laborRate: current().settings.globalLaborCost }));
-        group.expanded = true;
-        changed(`Added item to “${group.name}”`);
+    function renderCatalogChoices(query = '') {
+        const rows = ui.catalogData?.items || [];
+        const normalized = String(query).trim().toLowerCase();
+        const visible = rows.filter(item => !normalized || `${item.name} ${item.description || ''} ${item.catalog_number || ''} ${item.cost_code || ''}`.toLowerCase().includes(normalized));
+        return visible.map(item => `<button type="button" class="est-copy-option" data-est-catalog-item="${esc(item.id)}"><span><strong>${esc(item.name)}</strong><small>${esc(item.catalog_name || '')} · ${esc(item.group_name || '')} · ${esc(item.unit_of_measure || 'ea')} · ${money(item.unit_cost || 0)}</small></span></button>`).join('')
+            || '<div class="est-empty">No catalog items found.</div>';
+    }
+
+    async function addItem(groupId) {
+        if (!current().groups.some(row => row.id === groupId)) return;
+        ui.catalogTargetGroupId = groupId;
+        ui.catalogLoading = true; ui.catalogError = ''; ui.modal = 'catalog'; renderModal();
+        try {
+            const response = await fetch('../api/cost_catalog.php?action=list&view=all');
+            const payload = await response.json();
+            if (!response.ok || payload.status !== 'success') throw new Error(payload.msg || 'Cost Catalog unavailable');
+            ui.catalogData = payload.data;
+        } catch (error) { ui.catalogError = error.message; }
+        ui.catalogLoading = false; renderModal();
+    }
+
+    function catalogEstimateItem(catalog) {
+        const parts = (ui.catalogData?.assemblyParts || []).filter(part => String(part.assembly_catalog_item_id) === String(catalog.id));
+        const byId = new Map((ui.catalogData?.allItems || []).map(item => [String(item.id), item]));
+        return Workspace.item({ catalogItemId: catalog.id, itemType: catalog.item_type || 'part',
+            isAssembly: String(catalog.item_type).toLowerCase() === 'assembly', name: catalog.name,
+            description: catalog.description || '', budgetCode: catalog.budget_code || '',
+            costCode: catalog.cost_code || catalog.catalog_number || '', costCategory: catalog.cost_type || 'Materials',
+            uom: catalog.unit_of_measure || 'ea', quantity: 0, unitMaterialCost: catalog.unit_cost || 0,
+            unitLabor: catalog.labor_hours || 0, laborUnitType: 'hrs', laborRate: current().settings.globalLaborCost,
+            children: parts.map(part => { const child = byId.get(String(part.part_catalog_item_id)) || {}; return {
+                catalogItemId: part.part_catalog_item_id, name: child.name || part.child_item_name || 'Assembly part',
+                description: child.description || '', costCode: child.cost_code || '', costCategory: child.cost_type || 'Materials',
+                uom: child.unit_of_measure || part.child_item_unit || 'ea', quantity: Number(part.quantity || 0),
+                unitMaterialCost: Number(child.unit_cost ?? part.unit_cost_snapshot ?? 0),
+                unitLabor: Number(child.labor_hours ?? part.unit_labor_time_snapshot ?? 0), laborUnitType: 'hrs' }; }) });
     }
 
     async function exportEstimate(mode = 'normal') {
@@ -767,6 +804,21 @@
             if (projectId) saveServer();
             render();
         }
+        const catalogId = event.target.closest('[data-est-catalog-item]')?.dataset.estCatalogItem;
+        if (catalogId) {
+            const group = current().groups.find(row => String(row.id) === String(ui.catalogTargetGroupId));
+            const catalog = (ui.catalogData?.items || []).find(row => String(row.id) === String(catalogId));
+            if (!group || !catalog) return;
+            const item = catalogEstimateItem(catalog);
+            group.items.push(item); group.expanded = true; ui.modal = null;
+            changed(`Added ${item.name} from Cost Catalog`);
+        }
+    });
+
+    document.addEventListener('input', event => {
+        if (!event.target.matches('[data-est-catalog-search]')) return;
+        const results = document.querySelector('[data-est-catalog-results]');
+        if (results) results.innerHTML = renderCatalogChoices(event.target.value);
     });
 
     document.addEventListener('keydown', event => {
@@ -794,7 +846,20 @@
 
     window.addEventListener('takeoff:estimating-lines-updated', event => {
         if (event.detail?.projectId && String(event.detail.projectId) !== String(projectId)) return;
+        if (event.detail?.activeEstimateId && String(event.detail.activeEstimateId) !== String(state.activeEstimateId)) return;
         reconcileGroups(event.detail?.groups || []);
+    });
+    window.addEventListener('takeoff:estimating-link-requested', event => {
+        const detail = event.detail || {};
+        if (detail.projectId && String(detail.projectId) !== String(projectId)) return;
+        if (String(detail.estimateId || '') !== String(state.activeEstimateId)) return;
+        const found = allItems().find(row => String(row.item.id) === String(detail.itemId));
+        if (!found || !detail.layerId) return;
+        if (found.item.takeoffLayerId && String(found.item.takeoffLayerId) === String(detail.layerId)) return;
+        found.item.takeoffLayerId = String(detail.layerId);
+        found.item.quantitySource = 'takeoff';
+        found.item.quantitySyncStatus = 'synced';
+        changed(`Linked ${found.item.name} to Takeoff`);
     });
     window.addEventListener('takeoff:active-estimate-changed', event => {
         if (event.detail?.projectId && String(event.detail.projectId) !== String(projectId)) return;
@@ -809,7 +874,7 @@
         if (event.key !== storageKey || !event.newValue) return;
         state = Workspace.workspace(JSON.parse(event.newValue), projectId);
         restoreDirtyTracking();
-        render();
+        render(); publish();
     });
 
     window.projectEstimatingSave = async function () {

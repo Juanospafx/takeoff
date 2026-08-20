@@ -1477,6 +1477,9 @@
             catalog_item_id: layer.catalog_item_id || null,
             unit_cost: num(layer.unit_cost || 0),
             labor_hours: num(layer.unit_labor_time || layer.labor_hours || 0),
+            estimate_id: layer.metadata_json?.estimate_id || null,
+            estimating_item_id: layer.metadata_json?.estimating_item_id || null,
+            estimating_group_id: layer.metadata_json?.estimating_group_id || null,
             dropLength: Math.max(0, num(layer.drop_length ?? layer.dropLength)),
             shapes: [
                 ...state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).map(marker => ({
@@ -3034,7 +3037,10 @@
             cost_code: payload.cost_code || payload.catalogNumber || '',
             visible: payload.visible === false ? 0 : 1,
             locked: payload.locked ? 1 : 0,
-            metadata_json: { ...(layer?.metadata_json || {}), project_layer_id: externalId },
+            metadata_json: { ...(layer?.metadata_json || {}), project_layer_id: externalId,
+                estimate_id: payload.estimate_id || payload.estimateId || null,
+                estimating_item_id: payload.estimating_item_id || payload.estimatingItemId || null,
+                estimating_group_id: payload.estimating_group_id || payload.estimatingGroupId || null },
         };
         if (layer) Object.assign(layer, data);
         else {
@@ -3077,7 +3083,10 @@
                 cost_code: payload.cost_code || payload.catalogNumber || '',
                 visible: payload.visible === false ? 0 : 1,
                 locked: payload.locked ? 1 : 0,
-                metadata_json: { ...(layer?.metadata_json || {}), project_layer_id: externalId },
+                metadata_json: { ...(layer?.metadata_json || {}), project_layer_id: externalId,
+                    estimate_id: payload.estimate_id || payload.estimateId || null,
+                    estimating_item_id: payload.estimating_item_id || payload.estimatingItemId || null,
+                    estimating_group_id: payload.estimating_group_id || payload.estimatingGroupId || null },
             };
             if (layer) Object.assign(layer, data);
             else state.layers.push(data);

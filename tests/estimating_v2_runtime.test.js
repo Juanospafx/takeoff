@@ -14,6 +14,11 @@ function runtime(preloaded = null) {
         url: 'https://takeoff.test/project/draft', runScripts: 'outside-only', pretendToBeVisual: true
     });
     dom.window.ProjectState = { projectId: 0, estimateItems: [], projectMeta: {} };
+    dom.window.fetch = async () => ({ ok: true, json: async () => ({ status: 'success', data: {
+        items: [{ id: 77, name: 'Catalog Disconnect', item_type: 'part', unit_of_measure: 'ea',
+            unit_cost: 25, labor_hours: 0.5, cost_code: '26-28-16', group_name: 'Devices', catalog_name: 'Electrical' }],
+        allItems: [], assemblyParts: []
+    } }) });
     if (preloaded) dom.window.localStorage.setItem('takeoff.estimating.module.draft', JSON.stringify(preloaded));
     sources.forEach(source => dom.window.eval(source));
     return dom;
@@ -82,15 +87,20 @@ test('linked-only estimates update existing Takeoff bindings without importing n
     dom.window.close();
 });
 
-test('manual edits persist locally and calculations rerender after change', () => {
+test('Add Item opens Cost Catalog and the selected item persists with its catalog identity', async () => {
     const dom = runtime();
     dom.window.document.querySelector('[data-est-action="create-group"]').click();
     dom.window.document.querySelector('[data-add-item]').click();
+    await new Promise(resolve => dom.window.setTimeout(resolve, 0));
+    dom.window.document.querySelector('[data-est-catalog-item="77"]').click();
     const name = dom.window.document.querySelector('[data-item-field="name"]');
-    name.value = 'Manual disconnect';
-    name.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
     const state = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.draft'));
-    assert.equal(state.estimates.find(row => row.id === state.activeEstimateId).groups[0].items[0].name, 'Manual disconnect');
+    const item = state.estimates.find(row => row.id === state.activeEstimateId).groups[0].items[0];
+    assert.equal(name.value, 'Catalog Disconnect');
+    assert.equal(item.name, 'Catalog Disconnect');
+    assert.equal(item.catalogItemId, 77);
+    assert.equal(item.costCode, '26-28-16');
+    assert.equal(item.unitMaterialCost, 25);
     dom.window.close();
 });
 

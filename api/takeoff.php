@@ -807,8 +807,9 @@ try {
 
             $stmt = $pdo->prepare("INSERT INTO takeoff_measurement_summaries (drawing_id, summary_json) VALUES (?, ?)");
             $stmt->execute([$drawingId, json_value($summary) ?? '[]']);
-            $estimateId = ensure_project_estimate($pdo, $projectId);
-            sync_estimate_items($pdo, $estimateId, $summary, $layerMap);
+            // Estimating is the sole writer of estimate_items. The browser sends
+            // an estimate-scoped layer snapshot to its workspace owner, avoiding
+            // the former bug where Takeoff silently updated the project's first estimate.
                 $pdo->commit();
             } catch (Throwable $mirrorError) {
                 if ($pdo->inTransaction()) $pdo->rollBack();

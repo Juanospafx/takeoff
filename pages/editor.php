@@ -3754,7 +3754,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-editable-properties-20260820-1"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-bidirectional-sync-20260820-1"></script>
 </body>
 </html>
 
