@@ -873,7 +873,11 @@ if ($filePath !== '') {
     let calMode = 'preset';
     let cloudStrokeWidth = 3; // default actual behavior
 
-    // Calibration persistence is shared through MySQL, keyed by file + page.
+    const takeoffEstimateKey = new URLSearchParams(window.location.search).get('estimate_key') || 'est_primary';
+    const takeoffInheritLegacy = new URLSearchParams(window.location.search).get('inherit_legacy') === '1';
+    window.__projectTakeoffEstimateKey = takeoffEstimateKey;
+
+    // Calibration persistence is isolated by estimate + file + page.
     async function takeoffScaleRequest(action, payload = {}, method = 'GET') {
         const endpoint = '../api/takeoff.php';
         const options = method === 'GET' ? {} : {
@@ -893,7 +897,7 @@ if ($filePath !== '') {
     async function loadCalibrationForPage(showNotice) {
         const requestedPage = Number(pageNum || 1);
         try {
-            const scale = await takeoffScaleRequest('scale', { drawing_id: fileId, page_number: requestedPage });
+            const scale = await takeoffScaleRequest('scale', { drawing_id: fileId, estimate_key: takeoffEstimateKey, page_number: requestedPage });
             if (requestedPage !== Number(pageNum || 1)) return;
             pixelsPerFoot = Number(scale?.pixels_per_unit || 0);
             setScaleDisplay(scale?.scale_name || '');
@@ -911,6 +915,7 @@ if ($filePath !== '') {
         return takeoffScaleRequest('save_scale', {
             drawing_id: fileId,
             project_id: typeof projectId !== 'undefined' ? projectId : 0,
+            estimate_key: takeoffEstimateKey,
             page_number: pageNum,
             scale_name: scaleName || 'Custom',
             pixels_per_unit: pixelsPerFoot,
@@ -3754,7 +3759,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-bidirectional-sync-20260820-1"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-estimate-isolation-20260820-2"></script>
 </body>
 </html>
 

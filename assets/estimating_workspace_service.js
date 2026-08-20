@@ -48,6 +48,7 @@
         return {
             id: text(row.id) || uid('item'),
             takeoffLayerId: takeoffLayerId || null,
+            copiedFromTakeoffLayerId: text(row.copiedFromTakeoffLayerId) || null,
             catalogItemId: row.catalogItemId ?? row.catalog_item_id ?? null,
             itemType,
             isAssembly: row.isAssembly === true || itemType === 'assembly',
@@ -212,11 +213,37 @@
     function createEstimate(state, name, mode = 'blank') {
         const source = active(state);
         const creationMode = ['all', 'structure', 'blank'].includes(mode) ? mode : 'blank';
-        const groups = creationMode === 'all' ? clone(source.groups) : creationMode === 'structure'
-            ? source.groups.map(row => ({ ...clone(row), items: [] })) : [];
+        const sourceGroups = creationMode === 'blank' ? [] : clone(source.groups);
+        const groupIds = new Map(sourceGroups.map(row => [String(row.id), uid('group')]));
+        const sourceItems = [];
+        const collectItems = rows => (rows || []).forEach(item => {
+            sourceItems.push(item);
+            collectItems(item.children);
+        });
+        sourceGroups.forEach(row => collectItems(row.items));
+        const itemIds = new Map(sourceItems.map(item => [String(item.id), uid('item')]));
+        const copyItem = item => ({
+            ...item,
+            id: itemIds.get(String(item.id)),
+            parentItemId: item.parentItemId ? (itemIds.get(String(item.parentItemId)) || null) : null,
+            children: (item.children || []).map(copyItem),
+            copiedFromTakeoffLayerId: item.takeoffLayerId || null,
+            takeoffLayerId: null,
+            estimateItemId: null,
+            dbEstimateItemId: null,
+            quantitySource: 'manual',
+            quantitySyncStatus: 'manual'
+        });
+        const groups = sourceGroups.map(row => ({
+            ...row,
+            id: groupIds.get(String(row.id)),
+            takeoffGroupId: null,
+            source: creationMode === 'all' ? 'estimate-copy' : 'manual',
+            items: creationMode === 'structure' ? [] : (row.items || []).map(copyItem)
+        }));
         const created = estimate({ name: text(name).trim() || 'New Estimate', groups,
             creationMode,
-            takeoffSyncMode: creationMode === 'all' ? source.takeoffSyncMode : 'linked-only',
+            takeoffSyncMode: 'linked-only',
             settings: creationMode === 'all' ? clone(source.settings) : {},
             notes: creationMode === 'all' ? clone(source.notes) : {} }, state.projectId, state.estimates.length);
         state.estimates.push(created);
@@ -233,6 +260,7 @@
         state.estimates.splice(index, 1);
         state.activeEstimateId = state.estimates[Math.max(0, index - 1)].id;
         state.estimates.forEach(row => { row.isActive = row.id === state.activeEstimateId; });
+        state.groups = active(state).groups;
         return touch(state, 'Deleted estimate');
     }
 

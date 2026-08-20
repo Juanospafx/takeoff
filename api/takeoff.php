@@ -103,6 +103,7 @@ function ensure_takeoff_layer_columns(PDO $pdo): void
     takeoff_add_column($pdo, 'takeoff_layers', 'tag', "ALTER TABLE takeoff_layers ADD COLUMN tag VARCHAR(100) NULL");
     takeoff_add_column($pdo, 'takeoff_layers', 'estimate_item_id', "ALTER TABLE takeoff_layers ADD COLUMN estimate_item_id BIGINT UNSIGNED NULL");
     takeoff_add_column($pdo, 'takeoff_layers', 'metadata_json', "ALTER TABLE takeoff_layers ADD COLUMN metadata_json JSON NULL");
+    takeoff_add_column($pdo, 'takeoff_layers', 'estimate_key', "ALTER TABLE takeoff_layers ADD COLUMN estimate_key VARCHAR(191) NULL");
 }
 
 function ensure_takeoff_geometry_tables(PDO $pdo): void
@@ -170,6 +171,33 @@ function ensure_takeoff_state_table(PDO $pdo): void
         updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
         PRIMARY KEY (drawing_id),
         KEY idx_takeoff_drawing_states_project (project_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS takeoff_estimate_states (
+        estimate_key VARCHAR(191) NOT NULL,
+        drawing_id BIGINT UNSIGNED NOT NULL,
+        project_id BIGINT UNSIGNED NULL,
+        state_json JSON NOT NULL,
+        revision BIGINT UNSIGNED NOT NULL DEFAULT 1,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (estimate_key, drawing_id),
+        KEY idx_takeoff_estimate_states_project (project_id)
+    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
+    $pdo->exec("CREATE TABLE IF NOT EXISTS takeoff_estimate_scales (
+        estimate_key VARCHAR(191) NOT NULL,
+        project_id BIGINT UNSIGNED NULL,
+        drawing_id BIGINT UNSIGNED NOT NULL,
+        page_number INT UNSIGNED NOT NULL DEFAULT 1,
+        scale_name VARCHAR(100) NOT NULL,
+        pixels_per_unit DECIMAL(18,8) NOT NULL,
+        unit VARCHAR(50) NOT NULL DEFAULT 'ft',
+        calibration_json JSON NULL,
+        created_by BIGINT UNSIGNED NULL,
+        updated_by BIGINT UNSIGNED NULL,
+        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+        PRIMARY KEY (estimate_key, drawing_id, page_number),
+        KEY idx_takeoff_estimate_scales_project (project_id)
     ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
 }
 
@@ -542,9 +570,25 @@ function sync_estimate_items(PDO $pdo, int $estimateId, array $summary, array $l
         ->execute([$estimateId, $estimateId, $estimateId]);
 }
 
-function state_payload(PDO $pdo, int $drawingId): array
+function state_payload(PDO $pdo, int $drawingId, string $estimateKey = '', bool $inheritLegacy = false): array
 {
-    if (takeoff_table_exists($pdo, 'takeoff_drawing_states')) {
+    if ($estimateKey !== '') {
+        $stmt = $pdo->prepare("SELECT state_json, revision FROM takeoff_estimate_states WHERE estimate_key = ? AND drawing_id = ? LIMIT 1");
+        $stmt->execute([$estimateKey, $drawingId]);
+        $row = $stmt->fetch(PDO::FETCH_ASSOC);
+        if ($row) {
+            $snapshot = json_decode((string)$row['state_json'], true);
+            if (is_array($snapshot)) {
+                $snapshot['revision'] = (int)$row['revision'];
+                $stmt = $pdo->prepare("SELECT project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_estimate_scales WHERE estimate_key = ? AND drawing_id = ? ORDER BY page_number");
+                $stmt->execute([$estimateKey, $drawingId]);
+                $snapshot['scales'] = decode_json_fields($stmt->fetchAll(PDO::FETCH_ASSOC), ['calibration_json']);
+                return $snapshot;
+            }
+        }
+        if (!$inheritLegacy) return ['layers' => [], 'markers' => [], 'segments' => [], 'summary' => [], 'scales' => [], 'revision' => 0];
+    }
+    if ($inheritLegacy && takeoff_table_exists($pdo, 'takeoff_drawing_states')) {
         $stmt = $pdo->prepare("SELECT state_json FROM takeoff_drawing_states WHERE drawing_id = ? LIMIT 1");
         $stmt->execute([$drawingId]);
         $stored = $stmt->fetchColumn();
@@ -613,15 +657,20 @@ try {
 
         case 'state':
             $drawingId = i($_GET['drawing_id'] ?? $input['drawing_id'] ?? 0);
+            $estimateKey = trim((string)($_GET['estimate_key'] ?? $input['estimate_key'] ?? ''));
+            $inheritLegacy = !empty($_GET['inherit_legacy'] ?? $input['inherit_legacy'] ?? false);
             if ($drawingId <= 0) out_json(['status' => 'error', 'msg' => 'drawing_id is required'], 422);
-            out_json(['status' => 'success', 'data' => state_payload($pdo, $drawingId)]);
+            if ($estimateKey === '') out_json(['status' => 'error', 'msg' => 'estimate_key is required'], 422);
+            out_json(['status' => 'success', 'data' => state_payload($pdo, $drawingId, $estimateKey, $inheritLegacy)]);
 
         case 'scale':
             $drawingId = i($_GET['drawing_id'] ?? $input['drawing_id'] ?? 0);
             $pageNumber = max(1, i($_GET['page_number'] ?? $input['page_number'] ?? 1, 1));
+            $estimateKey = trim((string)($_GET['estimate_key'] ?? $input['estimate_key'] ?? ''));
             if ($drawingId <= 0) out_json(['status' => 'error', 'msg' => 'drawing_id is required'], 422);
-            $stmt = $pdo->prepare("SELECT id, project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_sheet_scales WHERE drawing_id = ? AND page_number = ? LIMIT 1");
-            $stmt->execute([$drawingId, $pageNumber]);
+            if ($estimateKey === '') out_json(['status' => 'error', 'msg' => 'estimate_key is required'], 422);
+            $stmt = $pdo->prepare("SELECT project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_estimate_scales WHERE estimate_key = ? AND drawing_id = ? AND page_number = ? LIMIT 1");
+            $stmt->execute([$estimateKey, $drawingId, $pageNumber]);
             $rows = decode_json_fields(array_filter([$stmt->fetch(PDO::FETCH_ASSOC)]), ['calibration_json']);
             out_json(['status' => 'success', 'data' => $rows[0] ?? null]);
 
@@ -630,31 +679,37 @@ try {
             $pageNumber = max(1, i($input['page_number'] ?? 1, 1));
             $pixelsPerUnit = n($input['pixels_per_unit'] ?? 0);
             $scaleName = trim((string)($input['scale_name'] ?? 'Custom')) ?: 'Custom';
+            $estimateKey = trim((string)($input['estimate_key'] ?? ''));
             if ($drawingId <= 0 || $pixelsPerUnit <= 0) out_json(['status' => 'error', 'msg' => 'drawing_id and a positive pixels_per_unit are required'], 422);
+            if ($estimateKey === '') out_json(['status' => 'error', 'msg' => 'estimate_key is required'], 422);
             $projectId = project_id_for_file($pdo, $drawingId, i($input['project_id'] ?? 0));
             $userId = i($_SESSION['user_id'] ?? 0) ?: null;
             $stmt = $pdo->prepare(
-                "INSERT INTO takeoff_sheet_scales (project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, created_by, updated_by)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
+                "INSERT INTO takeoff_estimate_scales (estimate_key, project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, created_by, updated_by)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON DUPLICATE KEY UPDATE project_id=VALUES(project_id), scale_name=VALUES(scale_name), pixels_per_unit=VALUES(pixels_per_unit), unit=VALUES(unit), calibration_json=VALUES(calibration_json), updated_by=VALUES(updated_by), updated_at=CURRENT_TIMESTAMP"
             );
-            $stmt->execute([$projectId ?: null, $drawingId, $pageNumber, $scaleName, $pixelsPerUnit, $input['unit'] ?? 'ft', json_value($input['calibration_json'] ?? null), $userId, $userId]);
-            $stmt = $pdo->prepare("SELECT id, project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_sheet_scales WHERE drawing_id = ? AND page_number = ? LIMIT 1");
-            $stmt->execute([$drawingId, $pageNumber]);
+            $stmt->execute([$estimateKey, $projectId ?: null, $drawingId, $pageNumber, $scaleName, $pixelsPerUnit, $input['unit'] ?? 'ft', json_value($input['calibration_json'] ?? null), $userId, $userId]);
+            $stmt = $pdo->prepare("SELECT project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_estimate_scales WHERE estimate_key = ? AND drawing_id = ? AND page_number = ? LIMIT 1");
+            $stmt->execute([$estimateKey, $drawingId, $pageNumber]);
             $rows = decode_json_fields(array_filter([$stmt->fetch(PDO::FETCH_ASSOC)]), ['calibration_json']);
             out_json(['status' => 'success', 'data' => $rows[0] ?? null]);
 
         case 'delete_scale':
             $drawingId = i($input['drawing_id'] ?? 0);
             $pageNumber = max(1, i($input['page_number'] ?? 1, 1));
+            $estimateKey = trim((string)($input['estimate_key'] ?? ''));
             if ($drawingId <= 0) out_json(['status' => 'error', 'msg' => 'drawing_id is required'], 422);
-            $stmt = $pdo->prepare("DELETE FROM takeoff_sheet_scales WHERE drawing_id = ? AND page_number = ?");
-            $stmt->execute([$drawingId, $pageNumber]);
+            if ($estimateKey === '') out_json(['status' => 'error', 'msg' => 'estimate_key is required'], 422);
+            $stmt = $pdo->prepare("DELETE FROM takeoff_estimate_scales WHERE estimate_key = ? AND drawing_id = ? AND page_number = ?");
+            $stmt->execute([$estimateKey, $drawingId, $pageNumber]);
             out_json(['status' => 'success']);
 
         case 'save_state':
             $drawingId = i($input['drawing_id'] ?? 0);
             if ($drawingId <= 0) out_json(['status' => 'error', 'msg' => 'drawing_id is required'], 422);
+            $estimateKey = trim((string)($input['estimate_key'] ?? ''));
+            if ($estimateKey === '') out_json(['status' => 'error', 'msg' => 'estimate_key is required'], 422);
             $projectId = project_id_for_file($pdo, $drawingId, i($input['project_id'] ?? 0));
             $layers = is_array($input['layers'] ?? null) ? $input['layers'] : [];
             $markers = is_array($input['markers'] ?? null) ? $input['markers'] : [];
@@ -670,10 +725,10 @@ try {
                 $takeoffId = ensure_drawing_takeoff($pdo, $projectId, $drawingId);
 
                 $pdo->beginTransaction();
-            $ensureState = $pdo->prepare("INSERT IGNORE INTO takeoff_drawing_states (drawing_id, project_id, state_json, revision) VALUES (?, ?, '{}', 0)");
-            $ensureState->execute([$drawingId, $projectId ?: null]);
-            $currentStmt = $pdo->prepare("SELECT state_json FROM takeoff_drawing_states WHERE drawing_id = ? LIMIT 1 FOR UPDATE");
-            $currentStmt->execute([$drawingId]);
+            $ensureState = $pdo->prepare("INSERT IGNORE INTO takeoff_estimate_states (estimate_key, drawing_id, project_id, state_json, revision) VALUES (?, ?, ?, '{}', 0)");
+            $ensureState->execute([$estimateKey, $drawingId, $projectId ?: null]);
+            $currentStmt = $pdo->prepare("SELECT state_json FROM takeoff_estimate_states WHERE estimate_key = ? AND drawing_id = ? LIMIT 1 FOR UPDATE");
+            $currentStmt->execute([$estimateKey, $drawingId]);
             $currentSnapshot = json_decode((string)($currentStmt->fetchColumn() ?: '{}'), true);
             $snapshot = ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary];
             if (is_array($currentSnapshot) && isset($currentSnapshot['layers'], $currentSnapshot['markers'], $currentSnapshot['segments'])) {
@@ -687,27 +742,26 @@ try {
                 $summary = $snapshot['summary'];
             }
             $stmt = $pdo->prepare(
-                "INSERT INTO takeoff_drawing_states (drawing_id, project_id, state_json, revision)
-                 VALUES (?, ?, ?, 1)
+                "INSERT INTO takeoff_estimate_states (estimate_key, drawing_id, project_id, state_json, revision)
+                 VALUES (?, ?, ?, ?, 1)
                  ON DUPLICATE KEY UPDATE project_id=VALUES(project_id), state_json=VALUES(state_json), revision=revision+1, updated_at=CURRENT_TIMESTAMP"
             );
-            $stmt->execute([$drawingId, $projectId ?: null, json_value($snapshot) ?? '{}']);
-            $old = $pdo->prepare("SELECT id FROM takeoff_layers WHERE drawing_id = ?");
-            $old->execute([$drawingId]);
+            $stmt->execute([$estimateKey, $drawingId, $projectId ?: null, json_value($snapshot) ?? '{}']);
+            $old = $pdo->prepare("SELECT id FROM takeoff_layers WHERE drawing_id = ? AND estimate_key = ?");
+            $old->execute([$drawingId, $estimateKey]);
             $oldIds = $old->fetchAll(PDO::FETCH_COLUMN);
             if ($oldIds) {
                 $in = implode(',', array_fill(0, count($oldIds), '?'));
                 $pdo->prepare("DELETE FROM takeoff_count_markers WHERE layer_id IN ($in)")->execute($oldIds);
                 $pdo->prepare("DELETE FROM takeoff_linear_segments WHERE layer_id IN ($in)")->execute($oldIds);
-                $pdo->prepare("UPDATE estimate_items SET deleted_at = CURRENT_TIMESTAMP WHERE source_type = 'takeoff' AND takeoff_layer_id IN ($in)")->execute($oldIds);
                 $pdo->prepare("DELETE FROM takeoff_layers WHERE id IN ($in)")->execute($oldIds);
             }
 
             $layerMap = [];
             $layerStmt = $pdo->prepare(
                 "INSERT INTO takeoff_layers
-                 (takeoff_id, integration_key, drawing_id, page_number, name, type, takeoff_type, unit_of_measure, group_name, catalog_item_id, assembly_id, color, symbol, symbol_size, quantity, visible, locked, tag, estimate_item_id, metadata_json)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                 (takeoff_id, integration_key, drawing_id, estimate_key, page_number, name, type, takeoff_type, unit_of_measure, group_name, catalog_item_id, assembly_id, color, symbol, symbol_size, quantity, visible, locked, tag, estimate_item_id, metadata_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             );
             foreach ($layers as $layer) {
                 if (!is_array($layer)) continue;
@@ -727,6 +781,7 @@ try {
                     $takeoffId,
                     $layerClientId !== '' ? $layerClientId : null,
                     $drawingId,
+                    $estimateKey,
                     i($layer['page_number'] ?? 1, 1),
                     trim((string)($layer['name'] ?? 'Takeoff Layer')) ?: 'Takeoff Layer',
                     $layer['type'] ?? 'mixed',
@@ -818,8 +873,8 @@ try {
                 // relational mirror is unavailable. Re-lock and re-merge so a
                 // concurrent save on another page cannot be overwritten here.
                 $pdo->beginTransaction();
-                $retryState = $pdo->prepare("SELECT state_json FROM takeoff_drawing_states WHERE drawing_id = ? LIMIT 1 FOR UPDATE");
-                $retryState->execute([$drawingId]);
+                $retryState = $pdo->prepare("SELECT state_json FROM takeoff_estimate_states WHERE estimate_key = ? AND drawing_id = ? LIMIT 1 FOR UPDATE");
+                $retryState->execute([$estimateKey, $drawingId]);
                 $latestSnapshot = json_decode((string)($retryState->fetchColumn() ?: '{}'), true);
                 $retrySnapshot = ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary];
                 if (is_array($latestSnapshot) && isset($latestSnapshot['layers'], $latestSnapshot['markers'], $latestSnapshot['segments'])) {
@@ -829,14 +884,14 @@ try {
                     $retrySnapshot = recalculate_takeoff_snapshot_quantities($retrySnapshot);
                 }
                 $retrySave = $pdo->prepare(
-                    "INSERT INTO takeoff_drawing_states (drawing_id, project_id, state_json, revision) VALUES (?, ?, ?, 1)
+                    "INSERT INTO takeoff_estimate_states (estimate_key, drawing_id, project_id, state_json, revision) VALUES (?, ?, ?, ?, 1)
                      ON DUPLICATE KEY UPDATE project_id=VALUES(project_id), state_json=VALUES(state_json), revision=revision+1, updated_at=CURRENT_TIMESTAMP"
                 );
-                $retrySave->execute([$drawingId, $projectId ?: null, json_value($retrySnapshot) ?? '{}']);
+                $retrySave->execute([$estimateKey, $drawingId, $projectId ?: null, json_value($retrySnapshot) ?? '{}']);
                 $pdo->commit();
-                out_json(['status' => 'success', 'data' => state_payload($pdo, $drawingId), 'warning' => 'Takeoff saved; estimating mirror will retry on the next save.']);
+                out_json(['status' => 'success', 'data' => state_payload($pdo, $drawingId, $estimateKey), 'warning' => 'Takeoff saved; relational mirror will retry on the next save.']);
             }
-            out_json(['status' => 'success', 'data' => state_payload($pdo, $drawingId)]);
+            out_json(['status' => 'success', 'data' => state_payload($pdo, $drawingId, $estimateKey)]);
 
         case 'save_catalog_item':
             $item = is_array($input['item'] ?? null) ? $input['item'] : $input;

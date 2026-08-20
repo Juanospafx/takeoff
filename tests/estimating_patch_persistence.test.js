@@ -58,8 +58,8 @@ test('Takeoff publishes estimating intents but never writes the estimating works
 });
 
 test('takeoff initialization waits for the current server revision and no-op sync does not autosave', () => {
-    assert.match(client, /if \(ui\.loadState === 'loading'\)[\s\S]*pendingTakeoffGroups = Workspace\.clone\(groups\)/);
-    assert.match(client, /if \(pendingTakeoffGroups\)[\s\S]*reconcileGroups\(queuedGroups\)/);
+    assert.match(client, /if \(ui\.loadState === 'loading'\)[\s\S]*pendingTakeoffByEstimate\.set\(String\(estimateId/);
+    assert.match(client, /function drainPendingTakeoff\(\)[\s\S]*reconcileGroups\(estimateId, groups\)/);
     assert.match(client, /groupsContentSignature\(currentEstimate\.groups\) === groupsContentSignature\(reconciled\)\) return/);
 });
 

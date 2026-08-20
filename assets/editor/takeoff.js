@@ -96,6 +96,10 @@
         return typeof fileId !== 'undefined' ? String(fileId) : 'drawing';
     }
 
+    function currentEstimateKey() {
+        return String(window.__projectTakeoffEstimateKey || new URLSearchParams(window.location.search).get('estimate_key') || 'est_primary');
+    }
+
     function sheetIdFor(page = pageNum) {
         return `${currentDocumentId()}:${Number(page || 1)}`;
     }
@@ -109,6 +113,7 @@
             savedAt: Date.now(),
             drawing_id: typeof fileId !== 'undefined' ? fileId : null,
             project_id: typeof projectId !== 'undefined' ? projectId : 0,
+            estimate_key: currentEstimateKey(),
             layers: state.layers.map(stripNodes),
             markers: state.markers.map(stripNodes),
             segments: state.segments.map(stripNodes),
@@ -2841,6 +2846,7 @@
         return request('save_state', {
             drawing_id: fileId,
             project_id: typeof projectId !== 'undefined' ? projectId : 0,
+            estimate_key: currentEstimateKey(),
             layers: state.layers,
             markers: state.markers.map(marker => ({
                 ...stripNodes(marker),
@@ -2889,7 +2895,8 @@
     function loadTakeoff() {
         return Promise.all([
             request('bootstrap', {}, 'GET'),
-            request('state', { drawing_id: fileId }, 'GET'),
+            request('state', { drawing_id: fileId, estimate_key: currentEstimateKey(),
+                inherit_legacy: new URLSearchParams(window.location.search).get('inherit_legacy') === '1' ? 1 : 0 }, 'GET'),
         ]).then(([boot, loaded]) => {
             if (boot.status === 'success') {
                 state.catalog = boot.catalog || state.catalog;

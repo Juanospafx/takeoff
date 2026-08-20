@@ -34,6 +34,28 @@
         } catch (e) {}
     }
 
+    function takeoffEditorUrl(documentId, estimateId = activeEstimateId()) {
+        const inheritLegacy = String(estimateId) === primaryEstimateId() ? '&inherit_legacy=1' : '';
+        return `editor.php?id=${encodeURIComponent(documentId)}&embedded=1&estimate_key=${encodeURIComponent(estimateId)}${inheritLegacy}`;
+    }
+    window.projectTakeoffEditorUrl = takeoffEditorUrl;
+
+    function ensureEditorEstimate(estimateId = activeEstimateId()) {
+        const frame = $('takeoffFrame');
+        const documentId = activeDrawingDoc()?.id || window.ProjectState?.selectedDocumentId;
+        if (!frame || !documentId) return false;
+        let loadedEstimate = '';
+        try { loadedEstimate = new URL(frame.getAttribute('src') || '', window.location.href).searchParams.get('estimate_key') || ''; } catch (_) {}
+        if (loadedEstimate === String(estimateId)) return false;
+        frame.addEventListener('load', () => {
+            syncAllLayersToCanvas();
+            renderTakeoffPanel();
+            notifyEditorVisible();
+        }, { once: true });
+        frame.src = takeoffEditorUrl(documentId, estimateId);
+        return true;
+    }
+
     function setZoom(percent) {
         const clamped = Math.max(25, Math.min(400, Number(percent || 100)));
         const editorZoom = callEditor('projectTakeoffSetZoom', clamped);
@@ -391,8 +413,9 @@
         return `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 7)}`;
     }
 
-    function defaultGroup() {
-        return { id: 'default', name: 'Default Group', isExpanded: true, isDefault: true, layers: [] };
+    function defaultGroup(estimateId = null) {
+        const scopedId = estimateId ? `default_${estimateId}` : 'default';
+        return { id: scopedId, estimateId, name: 'Default Group', isExpanded: true, isDefault: true, layers: [] };
     }
 
     function takeoffLayerMetadata(layer) {
@@ -401,17 +424,17 @@
     }
 
     function seedGroupsFromProjectLayers() {
-        const groups = [defaultGroup()];
-        const byName = new Map([['Default Group', groups[0]]]);
+        const groups = [];
+        const byName = new Map();
         (window.ProjectState?.takeoffLayers || []).forEach((layer, index) => {
             const metadata = takeoffLayerMetadata(layer);
             const groupName = layer.group_name || 'Default Group';
-            const groupKey = metadata.estimating_group_id
-                ? `${metadata.estimate_id || ''}:${metadata.estimating_group_id}` : groupName;
+            const estimateId = metadata.estimate_id || null;
+            const groupKey = `${estimateId || 'legacy'}:${metadata.estimating_group_id || groupName}`;
             let group = byName.get(groupKey);
             if (!group) {
-                group = { id: metadata.estimating_group_id ? `estgrp_${metadata.estimate_id}_${metadata.estimating_group_id}` : makeId('grp'),
-                    name: groupName, estimateId: metadata.estimate_id || null,
+                group = { id: metadata.estimating_group_id ? `estgrp_${estimateId}_${metadata.estimating_group_id}` : makeId('grp'),
+                    name: groupName, estimateId,
                     estimatingGroupId: metadata.estimating_group_id || null,
                     isExpanded: true, isDefault: false, layers: [] };
                 byName.set(groupKey, group);
@@ -421,7 +444,7 @@
             group.layers.push({
                 id: String(layer.integration_key || layer.id || makeId('layer')),
                 groupId: group.id,
-                estimateId: metadata.estimate_id || null,
+                estimateId,
                 estimatingItemId: metadata.estimating_item_id || null,
                 estimatingGroupId: metadata.estimating_group_id || null,
                 name: layer.name || layer.title || `Takeoff Item ${index + 1}`,
@@ -454,24 +477,23 @@
                 depth: Number(layer.depth || 0)
             });
         });
-        return groups;
+        return groups.length ? groups : [defaultGroup()];
     }
 
     function normalizeSavedGroups(groups) {
-        const result = [defaultGroup()];
+        const result = [];
         (groups || []).forEach(group => {
-            if (group.id === 'default') {
-                result[0] = { ...defaultGroup(), ...group, id: 'default', name: 'Default Group', isDefault: true, layers: group.layers || [] };
-            } else {
-                result.push({
-                    id: group.id || makeId('grp'),
-                    name: group.name || 'New Group',
-                    isExpanded: group.isExpanded !== false,
-                    isDefault: false,
-                    layers: group.layers || []
-                });
-            }
+            result.push({
+                id: group.id || makeId('grp'),
+                estimateId: group.estimateId || null,
+                estimatingGroupId: group.estimatingGroupId || null,
+                name: group.name || 'New Group',
+                isExpanded: group.isExpanded !== false,
+                isDefault: Boolean(group.isDefault),
+                layers: group.layers || []
+            });
         });
+        if (!result.length) result.push(defaultGroup());
         return result.map(group => ({
             ...group,
             layers: (group.layers || []).map(layer => ({
@@ -558,7 +580,8 @@
     }
 
     function findGroup(groupId) {
-        return takeoffState.groups.find(group => group.id === groupId) || takeoffState.groups[0];
+        return takeoffState.groups.find(group => group.id === groupId)
+            || takeoffState.groups.find(group => groupBelongsToEstimate(group)) || null;
     }
 
     function findLayer(layerId) {
@@ -566,7 +589,9 @@
     }
 
     function groupForLayer(layer) {
-        return takeoffState.groups.find(group => group.id === layer?.groupId) || takeoffState.groups[0] || defaultGroup();
+        return takeoffState.groups.find(group => group.id === layer?.groupId)
+            || takeoffState.groups.find(group => groupBelongsToEstimate(group, layer?.estimateId))
+            || defaultGroup(layer?.estimateId || activeEstimateId());
     }
 
     function estimatingStoreKey() {
@@ -622,14 +647,46 @@
         return String(estimating.activeEstimateId || estimating.estimates?.[0]?.id || 'est_primary');
     }
 
+    function primaryEstimateId() {
+        const estimating = loadEstimatingStateForSync();
+        return String(estimating.estimates?.[0]?.id || estimating.activeEstimateId || 'est_primary');
+    }
+
+    function groupBelongsToEstimate(group, estimateId = activeEstimateId()) {
+        return String(group?.estimateId || '') === String(estimateId || '');
+    }
+
+    function ensureEstimateTakeoffWorkspace(estimateId = activeEstimateId()) {
+        const primaryId = primaryEstimateId();
+        takeoffState.groups.forEach(group => {
+            if (!group.estimateId) group.estimateId = primaryId;
+            (group.layers || []).forEach(layer => {
+                if (!layer.estimateId) layer.estimateId = group.estimateId || primaryId;
+            });
+        });
+        let scopedGroups = takeoffState.groups.filter(group => groupBelongsToEstimate(group, estimateId));
+        if (!scopedGroups.length) {
+            const group = defaultGroup(estimateId);
+            takeoffState.groups.push(group);
+            scopedGroups = [group];
+        }
+        if (!scopedGroups.some(group => group.id === takeoffState.activeGroupId)) {
+            takeoffState.activeGroupId = scopedGroups[0].id;
+        }
+        if (takeoffState.activeLayerId && !layerBelongsToEstimate(findLayer(takeoffState.activeLayerId), estimateId)) {
+            takeoffState.activeLayerId = null;
+        }
+    }
+
     function layerBelongsToEstimate(layer, estimateId = activeEstimateId()) {
-        return !layer.estimateId || String(layer.estimateId) === String(estimateId);
+        return Boolean(layer) && String(layer.estimateId || '') === String(estimateId || '');
     }
 
     function syncEstimatingItemsToTakeoff(detail = {}) {
         if (detail.projectId && String(detail.projectId) !== String(window.ProjectState?.projectId || '')) return;
         const estimateId = String(detail.activeEstimateId || '');
         if (!estimateId || estimateId !== activeEstimateId() || !Array.isArray(detail.groups)) return;
+        ensureEstimateTakeoffWorkspace(estimateId);
         const seen = new Set();
         detail.groups.forEach((estimateGroup, groupIndex) => {
             const groupKey = String(estimateGroup.id || `group_${groupIndex}`);
@@ -645,8 +702,8 @@
                 const itemId = String(item.id || '');
                 if (!itemId) return;
                 const layerId = String(item.takeoffLayerId || `estitem_${estimateId}_${itemId}`);
-                let layer = allLayers().find(row => String(row.id) === layerId
-                    || (String(row.estimatingItemId || '') === itemId && String(row.estimateId || '') === estimateId));
+                let layer = allLayers().find(row => String(row.estimateId || '') === estimateId
+                    && (String(row.id) === layerId || String(row.estimatingItemId || '') === itemId));
                 if (!layer) {
                     layer = { id: layerId, groupId: group.id, estimateId, estimatingItemId: itemId,
                         name: item.name || 'Cost item', type: inferTakeoffTypeFromUom(item.uom) || 'Count',
@@ -684,7 +741,9 @@
         if (takeoffState.activeLayerId && !layerBelongsToEstimate(findLayer(takeoffState.activeLayerId), estimateId)) {
             takeoffState.activeLayerId = null;
         }
-        saveTakeoffState(); syncAllLayersToCanvas(); renderTakeoffPanel(); renderActiveLayerToolbar();
+        const editorReloading = ensureEditorEstimate(estimateId);
+        if (!editorReloading) syncAllLayersToCanvas();
+        syncTakeoffToEstimating(); renderTakeoffPanel(); renderActiveLayerToolbar();
     }
 
     function estimateLineFromLayer(layer) {
@@ -754,8 +813,8 @@
 
         const projectedLayerIds = new Set();
         const targetEstimateId = String(state.activeEstimateId || '');
-        allLayers().forEach(layer => { if (!layer.estimateId) layer.estimateId = targetEstimateId; });
-        const projectedGroups = takeoffState.groups.map((takeoffGroup, groupIndex) => {
+        const scopedTakeoffGroups = takeoffState.groups.filter(group => groupBelongsToEstimate(group, targetEstimateId));
+        const projectedGroups = scopedTakeoffGroups.map((takeoffGroup, groupIndex) => {
             const groupName = takeoffGroup.name || 'Default Group';
             const groupId = String(takeoffGroup.estimatingGroupId || `takeoff_group_${String(takeoffGroup.id || groupIndex)}`);
             const items = (takeoffGroup.layers || []).filter(layer => layerBelongsToEstimate(layer, targetEstimateId)).filter(layer => {
@@ -864,7 +923,7 @@
     }
 
     function syncAllLayersToCanvas() {
-        const payload = allLayers().map(layerCanvasPayload);
+        const payload = allLayers().filter(layer => layerBelongsToEstimate(layer)).map(layerCanvasPayload);
         const snapshot = callEditor('projectTakeoffSyncLayers', payload);
         if (snapshot) syncTakeoffFromCanvasSnapshot(snapshot);
     }
@@ -910,7 +969,7 @@
         renderActiveLayerToolbar();
         renderInspector();
         renderWorkspaceSummary();
-        tree.innerHTML = takeoffState.groups.map(group => {
+        tree.innerHTML = takeoffState.groups.filter(group => groupBelongsToEstimate(group, estimateId)).map(group => {
             const visibleLayers = (group.layers || []).filter(layer => layerBelongsToEstimate(layer, estimateId)).filter(layer => {
                 if (!q) return true;
                 return group.name.toLowerCase().includes(q) || layer.name.toLowerCase().includes(q) || layer.type.toLowerCase().includes(q);
@@ -1060,7 +1119,7 @@
 
     function initTakeoffState() {
         takeoffState.groups = normalizeSavedGroups(seedGroupsFromProjectLayers());
-        takeoffState.activeGroupId = 'default';
+        ensureEstimateTakeoffWorkspace();
         takeoffState.activeLayerId = null;
         takeoffState.canvasSnapshots = {};
         takeoffState.annotations = [];
@@ -1069,10 +1128,11 @@
         takeoffState.compare = null;
         takeoffState.globalVisible = true;
         applyAggregatedCanvasQuantities();
-        if (!findGroup(takeoffState.activeGroupId)) takeoffState.activeGroupId = 'default';
+        if (!findGroup(takeoffState.activeGroupId)) takeoffState.activeGroupId = takeoffState.groups.find(group => groupBelongsToEstimate(group))?.id || null;
         if (takeoffState.activeLayerId && !findLayer(takeoffState.activeLayerId)) takeoffState.activeLayerId = null;
         ensureTakeoffModal();
         ensureTakeoffOverlays();
+        ensureEditorEstimate();
         renderTakeoffPanel();
         renderActiveLayerToolbar();
         syncTakeoffToEstimating();
@@ -1535,7 +1595,7 @@
         const name = prompt('Group name', 'New Group');
         if (!name || !name.trim()) return;
         pushTakeoffHistory('create-group');
-        const group = { id: makeId('grp'), name: name.trim(), isExpanded: true, isDefault: false, layers: [] };
+        const group = { id: makeId('grp'), estimateId: activeEstimateId(), name: name.trim(), isExpanded: true, isDefault: false, layers: [] };
         takeoffState.groups.push(group);
         takeoffState.activeGroupId = group.id;
         saveTakeoffState();
@@ -1543,7 +1603,7 @@
     }
 
     function collapseAllTakeoffGroups() {
-        takeoffState.groups.forEach(group => { group.isExpanded = false; });
+        takeoffState.groups.filter(group => groupBelongsToEstimate(group)).forEach(group => { group.isExpanded = false; });
         saveTakeoffState();
         renderTakeoffPanel();
     }
@@ -1553,6 +1613,7 @@
         pushTakeoffHistory('duplicate-group');
         const copy = {
             id: makeId('grp'),
+            estimateId: activeEstimateId(),
             name: `${group.name} Copy`,
             isExpanded: true,
             isDefault: false,
@@ -1570,7 +1631,7 @@
         if (group.layers.length && !confirm('Delete this group and its takeoff layers?')) return;
         pushTakeoffHistory('delete-group');
         takeoffState.groups = takeoffState.groups.filter(item => item.id !== group.id);
-        if (takeoffState.activeGroupId === group.id) takeoffState.activeGroupId = 'default';
+        if (takeoffState.activeGroupId === group.id) takeoffState.activeGroupId = takeoffState.groups.find(item => groupBelongsToEstimate(item))?.id || null;
         if (group.layers.some(layer => layer.id === takeoffState.activeLayerId)) takeoffState.activeLayerId = null;
         saveTakeoffState();
         renderTakeoffPanel();
@@ -1775,7 +1836,7 @@
     function renderViewerLayersPopover() {
         const popover = $('takeoffViewerLayersPopover');
         if (!popover) return;
-        const layers = allLayers();
+        const layers = allLayers().filter(layer => layerBelongsToEstimate(layer));
         popover.innerHTML = `<div class="pro-viewer-layers-head">
                 <strong>Layers</strong>
                 <button class="pro-icon-btn" type="button" data-viewer-layers-close aria-label="Close"><i class="fas fa-times"></i></button>
@@ -2780,7 +2841,7 @@
         if (doc.source !== 'legacy_file') return;
         const frame = $('takeoffFrame');
         if (!frame) return;
-        const nextSrc = `editor.php?id=${encodeURIComponent(doc.id)}&embedded=1`;
+        const nextSrc = takeoffEditorUrl(doc.id);
         let currentFrameId = 0;
         try {
             const currentUrl = new URL(frame.getAttribute('src') || '', window.location.href);
@@ -3034,7 +3095,15 @@
         window.addEventListener('storage', event => {
             if (event.key === estimatingStoreKey()) renderTakeoffEstimateFooter();
         });
-        window.addEventListener('takeoff:active-estimate-changed', renderTakeoffEstimateFooter);
+        window.addEventListener('takeoff:active-estimate-changed', () => {
+            renderTakeoffEstimateFooter();
+            setTimeout(() => {
+                ensureEstimateTakeoffWorkspace();
+                ensureEditorEstimate();
+                renderTakeoffPanel();
+                renderViewerLayersPopover();
+            }, 0);
+        });
         window.addEventListener('takeoff:estimating-lines-updated', renderTakeoffEstimateFooter);
         window.addEventListener('takeoff:estimating-state-updated', renderTakeoffEstimateFooter);
         window.addEventListener('takeoff:estimating-items-updated', event => {

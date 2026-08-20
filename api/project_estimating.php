@@ -587,7 +587,26 @@ try {
         $estimateId = pew_int(isset($body['estimate_id']) ? $body['estimate_id'] : 0);
         $pdo->beginTransaction();
         pew_owned_estimate($pdo, $estimateId, $projectId, true);
+        $countStmt = $pdo->prepare('SELECT id FROM estimates WHERE project_id=? AND deleted_at IS NULL FOR UPDATE');
+        $countStmt->execute(array($projectId));
+        if (count($countStmt->fetchAll(PDO::FETCH_COLUMN)) <= 1) pew_error('At least one estimate must remain in the project.', 409, 'last_estimate');
+        $clientStmt = $pdo->prepare('SELECT client_estimate_id FROM estimate_workspace_states WHERE estimate_id=? AND project_id=? LIMIT 1');
+        $clientStmt->execute(array($estimateId, $projectId));
+        $clientEstimateId = (string)($clientStmt->fetchColumn() ?: '');
         $pdo->prepare('UPDATE estimates SET deleted_at=CURRENT_TIMESTAMP WHERE id=? AND project_id=?')->execute(array($estimateId, $projectId));
+        if ($clientEstimateId !== '') pew_best_effort('delete estimate Takeoff workspace', $pdo, function () use ($pdo, $projectId, $clientEstimateId) {
+            $layerStmt = $pdo->prepare('SELECT tl.id FROM takeoff_layers tl INNER JOIN takeoffs t ON t.id=tl.takeoff_id WHERE tl.estimate_key=? AND t.project_id=?');
+            $layerStmt->execute(array($clientEstimateId, $projectId));
+            $layerIds = $layerStmt->fetchAll(PDO::FETCH_COLUMN);
+            if ($layerIds) {
+                $marks = implode(',', array_fill(0, count($layerIds), '?'));
+                $pdo->prepare("DELETE FROM takeoff_count_markers WHERE layer_id IN ($marks)")->execute($layerIds);
+                $pdo->prepare("DELETE FROM takeoff_linear_segments WHERE layer_id IN ($marks)")->execute($layerIds);
+                $pdo->prepare("DELETE FROM takeoff_layers WHERE id IN ($marks)")->execute($layerIds);
+            }
+            $pdo->prepare('DELETE FROM takeoff_estimate_states WHERE estimate_key=? AND project_id=?')->execute(array($clientEstimateId, $projectId));
+            $pdo->prepare('DELETE FROM takeoff_estimate_scales WHERE estimate_key=? AND project_id=?')->execute(array($clientEstimateId, $projectId));
+        });
         $pdo->commit();
         pew_json(array('ok' => true, 'success' => true, 'estimateId' => $estimateId));
     }

@@ -66,7 +66,7 @@ test('New Estimate starting points are isolated and preserve their Takeoff polic
     Service.createEstimate(copyState, 'Copy', 'all');
     const copy = Service.active(copyState);
     assert.equal(copy.creationMode, 'all');
-    assert.equal(copy.takeoffSyncMode, 'mirror');
+    assert.equal(copy.takeoffSyncMode, 'linked-only');
     assert.equal(copy.groups[0].items[0].name, 'Wire');
     copy.groups[0].items[0].name = 'Changed in copy';
     copy.notes.projectNotes = 'Changed note';

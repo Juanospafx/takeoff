@@ -37,7 +37,7 @@
     const conflictRemoteEstimates = new Map();
     const dirtyGenerations = new Map();
     let dirtyGeneration = 0;
-    let pendingTakeoffGroups = null;
+    const pendingTakeoffByEstimate = new Map();
 
     function restoreDirtyTracking() {
         dirtyEstimateIds.clear();
@@ -320,11 +320,7 @@
                 saveLocal();
                 await saveServer();
                 render();
-                if (pendingTakeoffGroups) {
-                    const queuedGroups = pendingTakeoffGroups;
-                    pendingTakeoffGroups = null;
-                    reconcileGroups(queuedGroups);
-                }
+                drainPendingTakeoff();
                 return;
             }
             if (changedDuringLoad) {
@@ -346,11 +342,7 @@
             ui.message = `Offline: ${error.message}`;
         }
         render();
-        if (pendingTakeoffGroups) {
-            const queuedGroups = pendingTakeoffGroups;
-            pendingTakeoffGroups = null;
-            reconcileGroups(queuedGroups);
-        }
+        drainPendingTakeoff();
     }
 
     function groupsContentSignature(groups) {
@@ -401,16 +393,24 @@
         }, groupIndex));
     }
 
-    function reconcileGroups(groups) {
+    function drainPendingTakeoff() {
+        const queued = [...pendingTakeoffByEstimate.entries()];
+        pendingTakeoffByEstimate.clear();
+        queued.forEach(([estimateId, groups]) => reconcileGroups(estimateId, groups));
+    }
+
+    function reconcileGroups(estimateId, groups) {
         if (!Array.isArray(groups)) return;
         // The iframe commonly publishes its initial snapshot while the current
         // estimate revision is still loading. Apply that snapshot only after the
         // server state is authoritative, otherwise it dirties a stale revision.
         if (ui.loadState === 'loading') {
-            pendingTakeoffGroups = Workspace.clone(groups);
+            pendingTakeoffByEstimate.set(String(estimateId || ''), Workspace.clone(groups));
             return;
         }
-        const activeId = String(state.activeEstimateId || '');
+        const activeId = String(estimateId || '');
+        const estimateIndex = state.estimates.findIndex(row => String(row.id) === activeId);
+        if (estimateIndex < 0) return;
         if (conflictedEstimateIds.has(activeId) && conflictRemoteEstimates.has(activeId)) {
             const index = state.estimates.findIndex(estimate => String(estimate.id) === activeId);
             state.estimates[index] = rebaseTakeoffChanges(state.estimates[index], conflictRemoteEstimates.get(activeId), index);
@@ -418,7 +418,7 @@
             conflictRemoteEstimates.delete(activeId);
             takeoffSyncDirtyIds.add(activeId);
         }
-        const currentEstimate = current();
+        const currentEstimate = state.estimates[estimateIndex];
         let reconciled;
         if (currentEstimate.takeoffSyncMode === 'linked-only') {
             reconciled = reconcileExistingTakeoffBindings(currentEstimate.groups, groups);
@@ -432,7 +432,15 @@
         }
         if (groupsContentSignature(currentEstimate.groups) === groupsContentSignature(reconciled)) return;
         currentEstimate.groups = reconciled;
-        changed('Synchronized items from Takeoff');
+        currentEstimate.updatedAt = Workspace.now();
+        currentEstimate.auditLog.push({ id: Workspace.uid('audit'), at: currentEstimate.updatedAt,
+            action: 'Synchronized items from Takeoff' });
+        currentEstimate.auditLog = currentEstimate.auditLog.slice(-100);
+        takeoffSyncDirtyIds.add(activeId);
+        markEstimateDirty(activeId);
+        saveLocal();
+        scheduleSave('takeoff');
+        render();
     }
 
     function render() {
@@ -732,6 +740,50 @@
         if (row) row[row.type === 'fixed_amount' ? 'amount' : 'percent'] = Workspace.numeric(target.value);
     }
 
+    async function deleteCurrentEstimate() {
+        if (ui.saving) {
+            alert('Wait for the current save to finish before deleting this estimate.');
+            return;
+        }
+        if (state.estimates.length <= 1) {
+            alert('At least one estimate must remain in the project.');
+            return;
+        }
+        const estimate = current();
+        if (!confirm(`Delete “${estimate.name}”? This will also delete its Takeoff items and cannot be undone.`)) return;
+        $('optionsMenu')?.classList.remove('open');
+        ui.loadState = 'saving';
+        ui.message = 'Deleting estimate…';
+        renderStatus();
+        try {
+            if (projectId && Number(estimate.dbEstimateId || 0) > 0) {
+                await request('delete', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({ action: 'delete', project_id: projectId,
+                        estimate_id: Number(estimate.dbEstimateId) }) });
+            }
+            const deletedId = String(estimate.id);
+            Workspace.removeEstimate(state, estimate.id);
+            dirtyEstimateIds.delete(deletedId);
+            dirtyGenerations.delete(deletedId);
+            takeoffSyncDirtyIds.delete(deletedId);
+            conflictedEstimateIds.delete(deletedId);
+            conflictRemoteEstimates.delete(deletedId);
+            markEstimateDirty(state.activeEstimateId);
+            saveLocal();
+            render();
+            if (projectId) await saveServer();
+            else {
+                ui.loadState = 'local';
+                ui.message = 'Estimate deleted';
+                renderStatus();
+            }
+        } catch (error) {
+            ui.loadState = 'error';
+            ui.message = `Delete failed: ${error.message}`;
+            renderStatus();
+        }
+    }
+
     root.addEventListener('click', event => {
         const target = event.target;
         const action = target.closest('[data-est-action]')?.dataset.estAction;
@@ -750,6 +802,7 @@
         if (option === 'save') saveServer();
         if (option === 'copy') { ui.modal = 'new'; renderModal(); }
         if (option === 'export') { ui.modal = 'export'; renderModal(); }
+        if (option === 'delete-estimate') deleteCurrentEstimate();
         if (target.closest('[data-download-estimate]')) {
             const mode = document.querySelector('[name="estimateExportMode"]:checked')?.value || 'normal';
             exportEstimate(mode); ui.modal = null; renderModal();
@@ -847,7 +900,7 @@
     window.addEventListener('takeoff:estimating-lines-updated', event => {
         if (event.detail?.projectId && String(event.detail.projectId) !== String(projectId)) return;
         if (event.detail?.activeEstimateId && String(event.detail.activeEstimateId) !== String(state.activeEstimateId)) return;
-        reconcileGroups(event.detail?.groups || []);
+        reconcileGroups(event.detail?.activeEstimateId || state.activeEstimateId, event.detail?.groups || []);
     });
     window.addEventListener('takeoff:estimating-link-requested', event => {
         const detail = event.detail || {};

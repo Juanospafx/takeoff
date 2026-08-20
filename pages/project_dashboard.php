@@ -972,7 +972,7 @@ $state = [
 
                     <div class="pro-canvas-shell">
                         <?php if ($selectedDoc && $selectedDoc['source'] === 'legacy_file'): ?>
-                            <iframe id="takeoffFrame" class="takeoff-frame pro-takeoff-frame" src="editor.php?id=<?= (int)$selectedDoc['id'] ?>&embedded=1"></iframe>
+                            <iframe id="takeoffFrame" class="takeoff-frame pro-takeoff-frame" src="editor.php?id=<?= (int)$selectedDoc['id'] ?>&embedded=1&estimate_key=est_primary&inherit_legacy=1"></iframe>
                         <?php else: ?>
                             <div id="takeoffEmpty" class="takeoff-empty pro-takeoff-empty">
                                 <div>
@@ -1063,6 +1063,7 @@ $state = [
                                 <button type="button" data-est-option="status"><i class="fas fa-circle-check"></i> Change project status</button>
                                 <button type="button" data-est-option="import"><i class="fas fa-file-import"></i> Import</button>
                                 <button type="button" data-est-option="export"><i class="fas fa-file-export"></i> Export</button>
+                                <button type="button" data-est-option="delete-estimate" class="danger"><i class="fas fa-trash"></i> Delete estimate</button>
                             </div>
                         </div>
                         <button class="est-btn" type="button" data-est-action="reset-quantities" title="Reset quantities"><i class="fas fa-rotate-left"></i><span>Reset Quantities</span></button>
@@ -1185,7 +1186,9 @@ $state = [
                 }
             }
             if (drawing && takeoffFrame) {
-                const expectedSrc = 'editor.php?id=' + encodeURIComponent(drawing.id) + '&embedded=1';
+                const expectedSrc = window.projectTakeoffEditorUrl
+                    ? window.projectTakeoffEditorUrl(drawing.id)
+                    : 'editor.php?id=' + encodeURIComponent(drawing.id) + '&embedded=1';
                 if (!takeoffFrame.getAttribute('src') || !takeoffFrame.getAttribute('src').includes('id=' + encodeURIComponent(drawing.id))) {
                     takeoffFrame.src = expectedSrc;
                 }
@@ -1260,7 +1263,9 @@ $state = [
             return;
         }
         if (takeoffFrame) {
-            takeoffFrame.src = 'editor.php?id=' + encodeURIComponent(doc.id) + '&embedded=1';
+            takeoffFrame.src = window.projectTakeoffEditorUrl
+                ? window.projectTakeoffEditorUrl(doc.id)
+                : 'editor.php?id=' + encodeURIComponent(doc.id) + '&embedded=1';
             takeoffFrame.style.display = 'block';
             takeoffFrame.addEventListener('load', () => {
                 takeoffFrame.contentWindow?.postMessage({ type: 'takeoff-visible' }, '*');
@@ -1360,11 +1365,11 @@ $state = [
 <script src="../assets/project_overview.js?v=project-documents-persistence-20260811-6"></script>
 <script src="../assets/takeoff_estimating_sync_service.js?v=takeoff-estimating-sync-20260803-1"></script>
 <script src="../assets/project_estimate_footer.js?v=estimate-footer-20260810-1"></script>
-<script src="../assets/project_takeoff.js?v=takeoff-bidirectional-sync-20260820-1"></script>
+<script src="../assets/project_takeoff.js?v=takeoff-estimate-isolation-20260820-2"></script>
 <script src="../assets/estimate_calculation_service.js?v=estimating-calculation-audit-20260811-1"></script>
 <script src="../assets/estimating_export_service.js?v=estimating-boq-export-20260820-1"></script>
-<script src="../assets/estimating_workspace_service.js?v=estimating-blank-isolation-20260820-1"></script>
-<script src="../assets/project_estimating.js?v=estimating-bidirectional-sync-20260820-1"></script>
+<script src="../assets/estimating_workspace_service.js?v=estimating-delete-20260820-3"></script>
+<script src="../assets/project_estimating.js?v=estimating-delete-20260820-3"></script>
 <script src="../assets/project_proposal.js?v=proposal-workspace-20260810-4"></script>
 <script src="../assets/global_tools.js"></script>
 </body>

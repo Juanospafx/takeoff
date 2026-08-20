@@ -16,7 +16,7 @@ test('Takeoff autosave identifies only pages changed by this client', () => {
 
 test('server serializes and merges dirty pages without replacing other sheets', () => {
     assert.match(api, /function merge_takeoff_pages/);
-    assert.match(api, /SELECT state_json FROM takeoff_drawing_states WHERE drawing_id = \? LIMIT 1 FOR UPDATE/);
+    assert.match(api, /SELECT state_json FROM takeoff_estimate_states WHERE estimate_key = \? AND drawing_id = \? LIMIT 1 FOR UPDATE/);
     assert.match(api, /merge_takeoff_pages\(\$currentSnapshot, \$snapshot, \$dirtyPages\)/);
     assert.ok(api.indexOf('FOR UPDATE') < api.indexOf('DELETE FROM takeoff_count_markers WHERE layer_id IN'));
 });

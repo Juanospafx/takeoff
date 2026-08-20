@@ -8,6 +8,7 @@ const estimating = fs.readFileSync(path.join(root, 'assets/project_estimating.js
 const takeoff = fs.readFileSync(path.join(root, 'assets/project_takeoff.js'), 'utf8');
 const editor = fs.readFileSync(path.join(root, 'assets/editor/takeoff.js'), 'utf8');
 const api = fs.readFileSync(path.join(root, 'api/takeoff.php'), 'utf8');
+const Workspace = require(path.join(root, 'assets/estimating_workspace_service.js'));
 
 test('Estimating publishes active estimate items and Takeoff consumes the scoped snapshot', () => {
     assert.match(estimating, /takeoff:estimating-items-updated/);
@@ -47,4 +48,37 @@ test('Takeoff API no longer writes silently into the first project estimate', ()
     assert.doesNotMatch(saveBlock, /ensure_project_estimate\(/);
     assert.doesNotMatch(saveBlock, /sync_estimate_items\(/);
     assert.match(saveBlock, /Estimating is the sole writer of estimate_items/);
+});
+
+test('Copy everything regenerates mutable identities and never shares a Takeoff layer binding', () => {
+    const state = Workspace.workspace({ activeEstimateId: 'estimate-a', estimates: [{
+        id: 'estimate-a', name: 'A', groups: [{ id: 'group-a', name: 'Electrical', items: [{
+            id: 'item-a', name: 'Receptacle', takeoffLayerId: 'layer-a', catalogItemId: 77, quantity: 12
+        }] }]
+    }] }, 42);
+    const source = state.estimates[0];
+    Workspace.createEstimate(state, 'B', 'all');
+    const copy = Workspace.active(state);
+    assert.notEqual(copy.groups[0].id, source.groups[0].id);
+    assert.notEqual(copy.groups[0].items[0].id, source.groups[0].items[0].id);
+    assert.equal(copy.groups[0].items[0].takeoffLayerId, null);
+    assert.equal(copy.groups[0].items[0].copiedFromTakeoffLayerId, 'layer-a');
+    assert.equal(source.groups[0].items[0].takeoffLayerId, 'layer-a');
+});
+
+test('Takeoff state, scale, canvas payloads and groups are estimate-scoped', () => {
+    assert.match(takeoff, /function groupBelongsToEstimate/);
+    assert.match(takeoff, /filter\(group => groupBelongsToEstimate\(group, estimateId\)\)/);
+    assert.match(takeoff, /String\(row\.estimateId \|\| ''\) === estimateId/);
+    assert.match(takeoff, /filter\(layer => layerBelongsToEstimate\(layer\)\)\.map\(layerCanvasPayload\)/);
+    assert.match(editor, /estimate_key: currentEstimateKey\(\)/);
+    assert.match(api, /CREATE TABLE IF NOT EXISTS takeoff_estimate_states/);
+    assert.match(api, /CREATE TABLE IF NOT EXISTS takeoff_estimate_scales/);
+    assert.match(api, /estimate_key is required/);
+});
+
+test('queued Takeoff snapshots preserve their estimate destination', () => {
+    assert.match(estimating, /pendingTakeoffByEstimate = new Map\(\)/);
+    assert.match(estimating, /pendingTakeoffByEstimate\.set\(String\(estimateId/);
+    assert.match(estimating, /reconcileGroups\(event\.detail\?\.activeEstimateId/);
 });

@@ -10,35 +10,35 @@ const overview = fs.readFileSync(path.join(root, 'assets/project_overview.js'), 
 const shell = fs.readFileSync(path.join(root, 'pages/editor.php'), 'utf8');
 const api = fs.readFileSync(path.join(root, 'api/takeoff.php'), 'utf8');
 const migration = fs.readFileSync(path.join(root, 'db/migrations/2026-08-12_takeoff_shared_persistence.sql'), 'utf8');
+const estimateMigration = fs.readFileSync(path.join(root, 'db/migrations/2026-08-20_takeoff_estimate_isolation.sql'), 'utf8');
 
 test('Takeoff geometry uses the database without a browser-state override', () => {
     assert.doesNotMatch(editor, /localTakeoffKey|persistLocalTakeoffState|readLocalTakeoffState/);
     assert.doesNotMatch(parent, /takeoff\.quantification|readSavedTakeoffs/);
     assert.match(editor, /request\('save_state'/);
-    assert.match(editor, /request\('state', \{ drawing_id: fileId \}, 'GET'\)/);
+    assert.match(editor, /request\('state', \{ drawing_id: fileId, estimate_key: currentEstimateKey\(\)/);
     assert.match(parent, /iframe\/API owns persistent Takeoff state/);
 });
 
-test('one authoritative drawing snapshot survives relational mirror failures', () => {
-    assert.match(api, /CREATE TABLE IF NOT EXISTS takeoff_drawing_states/);
-    assert.match(api, /INSERT INTO takeoff_drawing_states[\s\S]*ON DUPLICATE KEY UPDATE/);
-    assert.match(api, /SELECT state_json FROM takeoff_drawing_states/);
+test('one authoritative estimate and drawing snapshot survives relational mirror failures', () => {
+    assert.match(api, /CREATE TABLE IF NOT EXISTS takeoff_estimate_states/);
+    assert.match(api, /INSERT INTO takeoff_estimate_states[\s\S]*ON DUPLICATE KEY UPDATE/);
+    assert.match(api, /SELECT state_json FROM takeoff_estimate_states/);
     assert.match(api, /Takeoff relational mirror failed/);
     assert.match(editor, /window\.projectTakeoffSave = function[\s\S]*saveTakeoff\(true, true\)/);
     assert.match(overview, /await saveTakeoff\.call\(takeoffFrame\.contentWindow\)/);
 });
 
-test('sheet scale schema and API are isolated by drawing and page', () => {
-    assert.match(migration, /CREATE TABLE IF NOT EXISTS takeoff_sheet_scales/);
-    assert.match(migration, /UNIQUE KEY uq_takeoff_sheet_scale \(drawing_id, page_number\)/);
-    assert.match(migration, /FOREIGN KEY \(drawing_id\) REFERENCES files\(id\) ON DELETE CASCADE/);
+test('sheet scale schema and API are isolated by estimate, drawing and page', () => {
+    assert.match(estimateMigration, /CREATE TABLE IF NOT EXISTS takeoff_estimate_scales/);
+    assert.match(estimateMigration, /PRIMARY KEY \(estimate_key, drawing_id, page_number\)/);
     assert.match(api, /case 'scale'/);
     assert.match(api, /case 'save_scale'/);
     assert.match(api, /function ensure_takeoff_scale_table/);
     assert.match(api, /ensure_takeoff_scale_table\(\$pdo\)/);
     assert.doesNotMatch(api, /Run db\/migrations\/2026-08-12_takeoff_shared_persistence\.sql/);
     assert.match(api, /ON DUPLICATE KEY UPDATE/);
-    assert.match(api, /WHERE drawing_id = \? AND page_number = \?/);
+    assert.match(api, /WHERE estimate_key = \? AND drawing_id = \? AND page_number = \?/);
 });
 
 test('geometry tables exist and every saved layer belongs to a persisted takeoff', () => {
@@ -52,7 +52,7 @@ test('geometry tables exist and every saved layer belongs to a persisted takeoff
 });
 
 test('editor loads and saves calibration through the shared API', () => {
-    assert.match(shell, /takeoffScaleRequest\('scale', \{ drawing_id: fileId, page_number: requestedPage \}\)/);
+    assert.match(shell, /takeoffScaleRequest\('scale', \{ drawing_id: fileId, estimate_key: takeoffEstimateKey, page_number: requestedPage \}\)/);
     assert.match(shell, /takeoffScaleRequest\('save_scale'/);
     assert.match(shell, /requestedPage !== Number\(pageNum \|\| 1\)/);
     assert.doesNotMatch(shell, /localStorage\.setItem\(getCalKey|localStorage\.getItem\(getCalKey/);
