@@ -106,7 +106,7 @@ test('activation arms pending placement after smart-mode reset and tool-state ca
     assert.match(clear, /projectTakeoffSetAnnotationPlacement\?\.\(false\)/,
         'takeoff node interaction must be restored when placement ends or is cancelled');
     assert.match(fs.readFileSync(path.join(__dirname, '..', 'assets', 'editor', 'takeoff.js'), 'utf8'),
-        /annotationPlacement[\s\S]*const listening = !isTakeoffDrawingToolActive\(\) && !panning && !state\.annotationPlacement/);
+        /annotationPlacement[\s\S]*const listening = !isTakeoffObjectInteractionBlocked\(\) && !panning && !state\.annotationPlacement/);
     const toolState = section(parent, "if (event.data?.type === 'project-takeoff-tool-state')", "if (event.data?.type === 'project-annotation-tool-state')");
     assert.match(toolState, /annotationPlacementActive/);
     assert.match(toolState, /reportedTool === 'smart' && annotationPlacementActive[\s\S]*viewerState\.activeTool/);

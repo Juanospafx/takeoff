@@ -503,9 +503,15 @@
         return ['takeoff_count', 'takeoff_linear', 'takeoff_area', 'multi-select'].includes(state.tool);
     }
 
+    function isTakeoffObjectInteractionBlocked() {
+        // Count remains armed for repeated placement, but existing geometry must
+        // still receive clicks/drags so it never becomes static after creation.
+        return ['takeoff_linear', 'takeoff_area', 'multi-select'].includes(state.tool);
+    }
+
     function applyTakeoffDrawingInteractivity() {
         const panning = state.panMode || state.temporaryPan;
-        const listening = !isTakeoffDrawingToolActive() && !panning && !state.annotationPlacement;
+        const listening = !isTakeoffObjectInteractionBlocked() && !panning && !state.annotationPlacement;
         state.markers.forEach(marker => {
             marker.node?.listening(listening);
             marker.node?.draggable(listening && !panning && !isElementLocked(marker));
@@ -523,7 +529,8 @@
     function applyMarkerLockVisual(marker) {
         if (!marker.node) return;
         const locked = isElementLocked(marker);
-        marker.node.draggable(!locked);
+        marker.node.draggable(!locked && !isTakeoffObjectInteractionBlocked()
+            && !state.panMode && !state.temporaryPan && !state.annotationPlacement);
         marker.node.opacity(locked ? 0.55 : 1);
         marker.transformer?.visible(!locked && state.selectedObjectUids.has(String(marker.client_uid))
             && isElementVisibleOnPage(marker));
@@ -612,11 +619,13 @@
     function applySegmentLockVisual(segment) {
         if (!segment.node) return;
         const locked = isElementLocked(segment);
-        segment.node.draggable(!locked);
+        segment.node.draggable(!locked && !isTakeoffObjectInteractionBlocked()
+            && !state.panMode && !state.temporaryPan && !state.annotationPlacement);
         segment.node.opacity(locked ? 0.55 : (String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area' ? 0.28 : 1));
         segment.node.dash(locked ? [8, 6] : []);
         (segment.handles || []).forEach(handle => {
-            handle.draggable(!locked);
+            handle.draggable(!locked && !isTakeoffObjectInteractionBlocked()
+                && !state.panMode && !state.temporaryPan && !state.annotationPlacement);
             handle.visible(!locked && state.selectedObjectUids.has(String(segment.client_uid))
                 && isElementVisibleOnPage(segment));
         });
@@ -626,7 +635,7 @@
         if (!ensureKonva()) return;
         const markerLayer = state.layers.find(layer => String(layer.client_uid) === String(marker.layer_client_uid));
         const itemName = markerLayer?.name || marker.label || 'Takeoff item';
-        const group = new Konva.Group({ x: num(marker.x), y: num(marker.y), draggable: !isElementLocked(marker), listening: !isTakeoffDrawingToolActive(), visible: marker.page_number === pageNum });
+        const group = new Konva.Group({ x: num(marker.x), y: num(marker.y), draggable: !isElementLocked(marker), listening: !isTakeoffObjectInteractionBlocked(), visible: marker.page_number === pageNum });
         const symbol = new Konva.Group({ name: 'takeoff-count-symbol' });
         drawSymbol(symbol, marker.symbol || 'circle', marker.color || '#2563eb', marker.symbol_size || marker.size);
         group.add(symbol);
@@ -818,12 +827,12 @@
             lineCap: 'round',
             lineJoin: 'round',
             draggable: !isElementLocked(segment),
-            listening: !isTakeoffDrawingToolActive(),
+            listening: !isTakeoffObjectInteractionBlocked(),
             visible,
         });
-        const label = new Konva.Text({ fill: segment.color || '#22c55e', fontSize: 16, padding: 4, visible, listening: false });
+        const label = new Konva.Text({ fill: segment.color || '#22c55e', fontSize: 16, padding: 4, visible: false, listening: false });
         const handles = (segment.points_json || []).map((point, index) => {
-            const handle = new Konva.Circle({ x: point.x, y: point.y, radius: 5, fill: '#fff', stroke: segment.color || '#2563eb', strokeWidth: 2, draggable: !isElementLocked(segment), listening: !isTakeoffDrawingToolActive(), visible: false });
+            const handle = new Konva.Circle({ x: point.x, y: point.y, radius: 5, fill: '#fff', stroke: segment.color || '#2563eb', strokeWidth: 2, draggable: !isElementLocked(segment), listening: !isTakeoffObjectInteractionBlocked(), visible: false });
             handle.on('dragstart', () => snapshot());
             handle.on('dragmove', () => {
                 const position = handle.position();
@@ -911,7 +920,7 @@
             const layer = state.layers.find(l => l.client_uid === s.layer_client_uid);
             const isVisible = s.page_number === pg && Number(layer?.visible ?? 1);
             if (s.node) s.node.visible(isVisible);
-            if (s.labelNode) s.labelNode.visible(isVisible);
+            if (s.labelNode) s.labelNode.visible(false);
             (s.handles || []).forEach(h => h.visible(isVisible && !isElementLocked(s)
                 && state.selectedObjectUids.has(String(s.client_uid))));
         });
@@ -1113,6 +1122,7 @@
                     fill: layer.color || '#22c55e',
                     fontSize: 14,
                     fontStyle: 'bold',
+                    visible: false,
                     listening: false
                 })
             };
@@ -1336,7 +1346,7 @@
         trackTakeoffObjects(targets, true);
         targets.forEach(({ type, ref }) => {
             if (type === 'marker') {
-                if (ref.node) ref.node.destroy();
+                destroyMarkerNodes(ref);
                 state.markers = state.markers.filter(marker => marker !== ref);
             } else {
                 destroySegmentNodes(ref);
@@ -3284,6 +3294,53 @@
         });
         trackTakeoffObjects(targets);
         markDirty({ objectsTracked: true });
+        return true;
+    };
+
+    window.projectTakeoffUpdateLayerObjects = function (layerId, patch) {
+        if (!layerId || !patch || typeof patch !== 'object') return false;
+        const layerKey = String(layerId);
+        const layer = state.layers.find(row => String(row.client_uid) === layerKey
+            || String(row.metadata_json?.project_layer_id || '') === layerKey);
+        const targets = [
+            ...state.markers.filter(marker => String(marker.layer_client_uid) === layerKey),
+            ...state.segments.filter(segment => String(segment.layer_client_uid) === layerKey)
+        ];
+        if (!layer) return false;
+        snapshot();
+        if (patch.symbol !== undefined) layer.symbol = normalizeSymbol(patch.symbol);
+        if (patch.color !== undefined) layer.color = String(patch.color);
+        if (patch.symbolSize !== undefined) layer.symbol_size = Math.max(4, Math.min(96, num(patch.symbolSize)));
+        if (patch.strokeWidth !== undefined) layer.stroke_width = Math.max(1, Math.min(20, num(patch.strokeWidth)));
+        targets.forEach(ref => {
+            if (isElementLocked(ref)) return;
+            const marker = state.markers.includes(ref);
+            if (patch.color !== undefined) ref.color = String(patch.color);
+            if (marker) {
+                if (patch.symbol !== undefined) ref.symbol = normalizeSymbol(patch.symbol);
+                if (patch.symbolSize !== undefined) {
+                    ref.symbol_size = Math.max(4, Math.min(96, num(patch.symbolSize)));
+                    ref.size = ref.symbol_size;
+                }
+                ref.metadata_json = { ...(ref.metadata_json || {}),
+                    symbol_size: ref.symbol_size,
+                    diameter: Math.max(8, Math.min(192, num(patch.diameter || ref.symbol_size * 2))) };
+                destroyMarkerNodes(ref);
+                createMarkerNode(ref);
+            } else {
+                if (patch.strokeWidth !== undefined) ref.stroke_width = Math.max(1, Math.min(20, num(patch.strokeWidth)));
+                ref.metadata_json = { ...(ref.metadata_json || {}), thickness: ref.stroke_width };
+                ref.node?.stroke(String(ref.color || layer.color));
+                ref.node?.strokeWidth(ref.stroke_width);
+                refreshSegment(ref);
+            }
+            ref.updatedAt = timestamp();
+            ref.updated_at = ref.updatedAt;
+        });
+        applyObjectSelectionVisuals();
+        trackTakeoffObjects(targets.map(ref => ({ type: state.markers.includes(ref) ? 'marker' : 'segment', ref })));
+        markDirty({ objectsTracked: true });
+        renderProperties();
         return true;
     };
 

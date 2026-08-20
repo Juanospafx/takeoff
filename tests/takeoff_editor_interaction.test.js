@@ -27,5 +27,7 @@ test('vertex controls keep a usable visual and hit size at fit-to-screen zoom', 
 test('an active drawing tool receives clicks that land on existing geometry', () => {
     assert.match(source, /function applyTakeoffDrawingInteractivity\(\)[\s\S]*?marker\.node\?\.listening\(listening\)[\s\S]*?segment\.node\?\.listening\(listening\)[\s\S]*?handle\.listening\(listening\)/);
     assert.match(source, /state\.tool\s*=\s*tool;[\s\S]*?applyTakeoffDrawingInteractivity\(\);/);
-    assert.match(source, /listening:\s*!isTakeoffDrawingToolActive\(\)/);
+    assert.match(source, /listening:\s*!isTakeoffObjectInteractionBlocked\(\)/);
+    assert.doesNotMatch(source.slice(source.indexOf('function isTakeoffObjectInteractionBlocked'),
+        source.indexOf('function applyTakeoffDrawingInteractivity')), /takeoff_count/);
 });

@@ -37,7 +37,7 @@ test('background drag activates Hand only after threshold and never claims objec
 });
 
 test('pan mode and takeoff object dragging are mutually exclusive', () => {
-    assert.match(editor, /const listening = !isTakeoffDrawingToolActive\(\) && !panning/);
+    assert.match(editor, /const listening = !isTakeoffObjectInteractionBlocked\(\) && !panning/);
     assert.match(editor, /window\.projectTakeoffSetTemporaryPan = function \(enabled\)/);
     assert.match(shell, /konvaPanMode \|\| konvaTemporaryPan \|\| \(explicitPan && isEmpty\)/);
     assert.match(shell, /!takeoffDrawing \|\| konvaTemporaryPan/);

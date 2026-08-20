@@ -3353,7 +3353,11 @@ if ($filePath !== '') {
             originY: 'center',
             isNew: true
         });
-        lockObject(t); canvas.add(t); canvas.setActiveObject(t); t.selectAll(); t.enterEditing();
+        // Newly placed fallback annotations must remain movable/resizable like
+        // their Konva counterparts; locking is an explicit user action.
+        unlockObject(t);
+        t.set({ hasControls: true, lockScalingX: false, lockScalingY: false });
+        canvas.add(t); canvas.setActiveObject(t); t.selectAll(); t.enterEditing();
         showPropSection('text');
         document.getElementById('text-size-input').value = preset.fontSize;
         document.querySelectorAll('#prop-text .color-dot').forEach(d => d.classList.remove('active'));
@@ -3750,7 +3754,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-multiselect-visuals-20260819-2"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-editable-properties-20260820-1"></script>
 </body>
 </html>
 

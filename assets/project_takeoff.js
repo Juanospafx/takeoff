@@ -288,6 +288,8 @@
     const TAKEOFF_UOMS = ['ea', 'ft', 'lf', 'sq ft', 'ft3', 'yd', 'm'];
     const TAKEOFF_SYMBOLS = ['Solid Circle', 'Hollow Circle', 'Square', 'Triangle', 'Diamond', 'Cross'];
     const TAKEOFF_SIZES = ['Small', 'Medium', 'Large'];
+    const takeoffSizeRadius = size => ({ Small: 7, Medium: 9, Large: 12 }[size]
+        || Math.max(4, Math.min(96, Number(size) || 9)));
     const TAKEOFF_COLORS = [
         { label: 'Black', value: '#111827' },
         { label: 'Red', value: '#dc2626' },
@@ -738,8 +740,10 @@
             unit_of_measure: layer.uom,
             uom: layer.uom,
             symbol: layer.symbol,
-            symbol_size: layer.size,
-            size: layer.size,
+            symbol_size: layer.markerDiameter ? layer.markerDiameter / 2 : layer.size,
+            size: layer.markerDiameter ? layer.markerDiameter / 2 : layer.size,
+            marker_diameter: layer.markerDiameter || takeoffSizeRadius(layer.size) * 2,
+            stroke_width: layer.strokeWidth || 4,
             color: layer.color,
             quantity: layer.quantity,
             baseQuantity: layer.baseQuantity || 0,
@@ -1000,6 +1004,8 @@
                     <div class="pro-field"><label for="layerUomInput">UoM</label><select id="layerUomInput">${TAKEOFF_UOMS.map(uom => `<option>${uom}</option>`).join('')}</select></div>
                     <div class="pro-field"><label for="layerSymbolInput">Symbol</label><select id="layerSymbolInput">${TAKEOFF_SYMBOLS.map(symbol => `<option>${symbol}</option>`).join('')}</select></div>
                     <div class="pro-field"><label for="layerSizeInput">Size</label><select id="layerSizeInput">${TAKEOFF_SIZES.map(size => `<option>${size}</option>`).join('')}</select></div>
+                    <div class="pro-field" data-type-field="diameter"><label for="layerDiameterInput">Diameter (px)</label><input id="layerDiameterInput" type="number" min="8" max="192" step="1"></div>
+                    <div class="pro-field" data-type-field="stroke"><label for="layerStrokeInput">Line thickness (px)</label><input id="layerStrokeInput" type="number" min="1" max="20" step="1"></div>
                     <div class="pro-field">
                         <label for="layerColorInput">Color</label>
                         <div class="pro-color-select">
@@ -1046,7 +1052,9 @@
                 (name === 'drop' && ['Linear with drop', 'Linear avg. with drop'].includes(type)) ||
                 (name === 'spacing' && type === 'Count by distance') ||
                 (name === 'height' && ['Area / Volume', 'Vertical wall area'].includes(type)) ||
-                (name === 'depth' && type === 'Area / Volume')
+                (name === 'depth' && type === 'Area / Volume') ||
+                (name === 'diameter' && ['Count', 'Count by distance'].includes(type)) ||
+                (name === 'stroke' && !['Count', 'Count by distance'].includes(type))
             );
             field.toggleAttribute('hidden', !visible);
         });
@@ -1078,6 +1086,8 @@
         setSelectValue($('layerUomInput'), layer?.uom || typeToUom($('layerTypeInput').value));
         $('layerSymbolInput').value = layer?.symbol || 'Solid Circle';
         $('layerSizeInput').value = layer?.size || 'Medium';
+        $('layerDiameterInput').value = Number(layer?.markerDiameter || (takeoffSizeRadius(layer?.size || 'Medium') * 2));
+        $('layerStrokeInput').value = Number(layer?.strokeWidth || (String(layer?.type || '').includes('Area') ? 3 : 4));
         $('layerColorInput').value = layer?.color || '#111827';
         $('layerDropInput').value = layer?.dropLength || '';
         $('layerSpacingInput').value = layer?.spacing || '';
@@ -1171,6 +1181,8 @@
             uom: $('layerUomInput').value || typeToUom(type),
             symbol: $('layerSymbolInput').value || 'Solid Circle',
             size: $('layerSizeInput').value || 'Medium',
+            markerDiameter: Math.max(8, Math.min(192, Number($('layerDiameterInput')?.value || 18))),
+            strokeWidth: Math.max(1, Math.min(20, Number($('layerStrokeInput')?.value || 4))),
             color: $('layerColorInput').value || '#111827',
             dropLength: Number($('layerDropInput')?.value || 0),
             spacing: Number($('layerSpacingInput')?.value || 0),
@@ -1181,6 +1193,13 @@
         if (takeoffState.editingLayerId) {
             const layer = findLayer(takeoffState.editingLayerId);
             if (layer) Object.assign(layer, payload);
+            callEditor('projectTakeoffUpdateLayerObjects', takeoffState.editingLayerId, {
+                symbol: payload.symbol,
+                color: payload.color,
+                symbolSize: payload.markerDiameter / 2,
+                diameter: payload.markerDiameter,
+                strokeWidth: payload.strokeWidth
+            });
             setActiveTakeoffLayer(takeoffState.editingLayerId, false);
         } else {
             const group = findGroup(takeoffState.pendingLayerGroupId);
@@ -2029,7 +2048,7 @@
                <button type="button" data-menu-act="group-copy-estimate"><i class="fas fa-copy"></i> Copy to other estimate</button>
                <button type="button" data-menu-act="group-move-estimate"><i class="fas fa-arrow-right"></i> Move to other estimate</button>
                ${group?.isDefault ? '' : '<button type="button" class="danger" data-menu-act="group-delete"><i class="fas fa-trash"></i> Delete</button>'}`
-            : `<button type="button" data-menu-act="layer-edit"><i class="fas fa-sliders"></i> Edit Layer</button>
+            : `<button type="button" data-menu-act="layer-edit"><i class="fas fa-sliders"></i> Item properties & size</button>
                <button type="button" data-menu-act="layer-rename"><i class="fas fa-pen"></i> Rename</button>
                <button type="button" data-menu-act="layer-duplicate"><i class="fas fa-copy"></i> Duplicate</button>
                <button type="button" data-menu-act="layer-color"><i class="fas fa-palette"></i> Change Color</button>
