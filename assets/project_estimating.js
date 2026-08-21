@@ -27,7 +27,7 @@
     const projectId = resolveProjectId();
     const storageKey = `takeoff.estimating.module.${projectId || 'draft'}`;
     const apiUrl = '../api/project_estimating.php';
-    const ui = { search: '', selected: new Set(), saving: false, saveRequested: false, saveTimer: null, loadState: projectId ? 'loading' : 'local',
+    const ui = { search: '', selected: new Set(), saving: false, saveRequested: false, saveTimer: null, pendingDeleteId: null, loadState: projectId ? 'loading' : 'local',
         message: projectId ? 'Loading estimate' : 'Local draft', collapsed: {}, modal: null,
         catalogTargetGroupId: null, catalogData: null, catalogLoading: false, catalogError: '' };
     let state = readLocal();
@@ -278,7 +278,12 @@
         } finally {
             ui.saving = false;
             render();
-            if (ui.saveRequested) {
+            if (ui.pendingDeleteId) {
+                const pendingDeleteId = ui.pendingDeleteId;
+                ui.pendingDeleteId = null;
+                clearTimeout(ui.saveTimer);
+                ui.saveTimer = setTimeout(() => deleteCurrentEstimate(pendingDeleteId, true), 0);
+            } else if (ui.saveRequested) {
                 clearTimeout(ui.saveTimer);
                 ui.saveTimer = setTimeout(saveServer, 0);
             }
@@ -741,11 +746,7 @@
         if (row) row[row.type === 'fixed_amount' ? 'amount' : 'percent'] = Workspace.numeric(target.value);
     }
 
-    async function deleteCurrentEstimate(estimateId = state.activeEstimateId) {
-        if (ui.saving) {
-            alert('Wait for the current save to finish before deleting this estimate.');
-            return;
-        }
+    async function deleteCurrentEstimate(estimateId = state.activeEstimateId, confirmed = false) {
         if (state.estimates.length <= 1) {
             alert('At least one estimate must remain in the project.');
             return;
@@ -757,8 +758,16 @@
         const deleteMessage = original
             ? `WARNING: "${estimate.name}" is the original estimate. It can be deleted because another estimate will remain. Its Takeoff data will also be permanently removed. Delete it?`
             : `Delete “${estimate.name}”? This will also delete its Takeoff items and cannot be undone.`;
-        if (!confirm(deleteMessage)) return;
+        if (!confirmed && !confirm(deleteMessage)) return;
+        if (ui.saving) {
+            ui.pendingDeleteId = String(estimate.id);
+            ui.message = 'Finishing the current save, then deleting estimate…';
+            renderStatus();
+            return;
+        }
         $('optionsMenu')?.classList.remove('open');
+        clearTimeout(ui.saveTimer);
+        ui.saving = true;
         ui.loadState = 'saving';
         ui.message = 'Deleting estimate…';
         renderStatus();
@@ -776,19 +785,21 @@
             takeoffSyncDirtyIds.delete(deletedId);
             conflictedEstimateIds.delete(deletedId);
             conflictRemoteEstimates.delete(deletedId);
-            markEstimateDirty(state.activeEstimateId);
             saveLocal();
             render();
-            if (projectId) await saveServer();
-            else {
-                ui.loadState = 'local';
-                ui.message = 'Estimate deleted';
-                renderStatus();
-            }
+            ui.loadState = projectId ? 'saved' : 'local';
+            ui.message = 'Estimate deleted';
+            renderStatus();
         } catch (error) {
             ui.loadState = 'error';
             ui.message = `Delete failed: ${error.message}`;
             renderStatus();
+        } finally {
+            ui.saving = false;
+            if (ui.saveRequested) {
+                clearTimeout(ui.saveTimer);
+                ui.saveTimer = setTimeout(saveServer, 0);
+            }
         }
     }
 

@@ -15,8 +15,13 @@ test('Estimating exposes a confirmed delete action and keeps one estimate', () =
     assert.match(client, /is the original estimate/);
     assert.match(client, /client_estimate_id: String\(estimate\.id\)/);
     assert.match(client, /delete_original: original/);
+    assert.match(client, /pendingDeleteId/);
+    assert.match(client, /deleteCurrentEstimate\(pendingDeleteId, true\)/);
+    const deleteFlow = client.slice(client.indexOf('async function deleteCurrentEstimate'), client.indexOf('function handleEstimateCardAction'));
+    assert.doesNotMatch(deleteFlow, /await saveServer\(\)/);
     assert.match(api, /Estimate could not be resolved for deletion/);
     assert.match(api, /ORDER BY id ASC LIMIT 1/);
+    assert.match(api, /ORDER BY id ASC FOR UPDATE/);
     assert.match(client, /state\.estimates\.length <= 1/);
     assert.match(client, /confirm\(deleteMessage\)/);
     assert.match(client, /request\('delete'/);
