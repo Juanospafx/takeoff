@@ -82,6 +82,13 @@ test('a stale local dbEstimateId is recovered without updating another project o
     assert.doesNotMatch(save, /if \(\$estimateId\) \{\s*pew_owned_estimate\(/);
 });
 
+test('client retries one legacy 404 using stable estimate identity without a stale database id', () => {
+    const client = fs.readFileSync(path.join(root, 'assets/project_estimating.js'), 'utf8');
+    assert.match(client, /if \(error\.status !== 404\) throw error/);
+    assert.match(client, /dbEstimateId: null, revision: 0/);
+    assert.match(client, /savePayload\(recoverable\)/);
+});
+
 test('stale client mappings are removed without stealing a live estimate mapping', () => {
     const start = api.indexOf('function pew_save_workspace_state');
     const fn = api.slice(start, api.indexOf('function pew_relational_groups', start));

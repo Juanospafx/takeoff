@@ -221,9 +221,21 @@
             estimates: Workspace.clone(state.estimates.filter(estimate => sentIds.includes(String(estimate.id))))
         };
         try {
-            const result = await request('save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action: 'save', mode: 'patch', project_id: projectId,
-                    updates: sent.estimates, state: sent, summary: summary() }) });
+            const savePayload = estimates => ({ action: 'save', mode: 'patch', project_id: projectId,
+                updates: estimates, state: { ...sent, estimates }, summary: summary() });
+            let result;
+            try {
+                result = await request('save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(savePayload(sent.estimates)) });
+            } catch (error) {
+                if (error.status !== 404) throw error;
+                // Compatibility recovery for older deployments that treat a stale
+                // numeric database id as authoritative. Stable client ids remain
+                // unchanged, so retry once as an unmapped estimate.
+                const recoverable = sent.estimates.map(estimate => ({ ...estimate, dbEstimateId: null, revision: 0 }));
+                result = await request('save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(savePayload(recoverable)) });
+            }
             const acknowledgedRows = result.updates || result.state?.estimates || result.estimates || [];
             const acknowledgements = new Map(acknowledgedRows.map(estimate => [String(estimate.id), estimate]));
             sentIds.forEach(id => {

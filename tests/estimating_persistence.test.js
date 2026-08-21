@@ -90,7 +90,7 @@ test('save API persists workspace activeEstimateId into snapshots and returns it
 });
 
 test('client saves the complete workspace and retains a visible retry state', () => {
-    assert.match(client, /mode: 'patch'[\s\S]*updates: sent\.estimates[\s\S]*state: sent/);
+    assert.match(client, /savePayload = estimates => \(\{ action: 'save', mode: 'patch'[\s\S]*updates: estimates[\s\S]*state: \{ \.\.\.sent, estimates \}/);
     assert.match(client, /ui\.loadState = 'error'/);
     assert.match(client, /data-retry-save/);
     assert.match(client, /localStorage\.setItem\(storageKey/);
