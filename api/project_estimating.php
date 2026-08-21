@@ -585,6 +585,18 @@ try {
         $pewStage = 'workspace_delete';
         pew_method('POST');
         $estimateId = pew_int(isset($body['estimate_id']) ? $body['estimate_id'] : 0);
+        $clientEstimateIdInput = trim((string)(isset($body['client_estimate_id']) ? $body['client_estimate_id'] : ''));
+        if ($estimateId <= 0 && $clientEstimateIdInput !== '') {
+            $resolveStmt = $pdo->prepare('SELECT estimate_id FROM estimate_workspace_states WHERE project_id=? AND client_estimate_id=? LIMIT 1');
+            $resolveStmt->execute(array($projectId, $clientEstimateIdInput));
+            $estimateId = (int)($resolveStmt->fetchColumn() ?: 0);
+        }
+        if ($estimateId <= 0 && !empty($body['delete_original'])) {
+            $resolveOriginal = $pdo->prepare('SELECT id FROM estimates WHERE project_id=? AND deleted_at IS NULL ORDER BY id ASC LIMIT 1');
+            $resolveOriginal->execute(array($projectId));
+            $estimateId = (int)($resolveOriginal->fetchColumn() ?: 0);
+        }
+        if ($estimateId <= 0) pew_error('Estimate could not be resolved for deletion.', 404, 'estimate_not_found');
         $pdo->beginTransaction();
         pew_owned_estimate($pdo, $estimateId, $projectId, true);
         $countStmt = $pdo->prepare('SELECT id FROM estimates WHERE project_id=? AND deleted_at IS NULL FOR UPDATE');
@@ -592,7 +604,7 @@ try {
         if (count($countStmt->fetchAll(PDO::FETCH_COLUMN)) <= 1) pew_error('At least one estimate must remain in the project.', 409, 'last_estimate');
         $clientStmt = $pdo->prepare('SELECT client_estimate_id FROM estimate_workspace_states WHERE estimate_id=? AND project_id=? LIMIT 1');
         $clientStmt->execute(array($estimateId, $projectId));
-        $clientEstimateId = (string)($clientStmt->fetchColumn() ?: '');
+        $clientEstimateId = (string)($clientStmt->fetchColumn() ?: $clientEstimateIdInput);
         $pdo->prepare('UPDATE estimates SET deleted_at=CURRENT_TIMESTAMP WHERE id=? AND project_id=?')->execute(array($estimateId, $projectId));
         if ($clientEstimateId !== '') pew_best_effort('delete estimate Takeoff workspace', $pdo, function () use ($pdo, $projectId, $clientEstimateId) {
             $layerStmt = $pdo->prepare('SELECT tl.id FROM takeoff_layers tl INNER JOIN takeoffs t ON t.id=tl.takeoff_id WHERE tl.estimate_key=? AND t.project_id=?');

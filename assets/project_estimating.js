@@ -754,17 +754,20 @@
         if (!estimate) return;
         const original = String(state.estimates[0]?.id || '') === String(estimate.id)
             || String(estimate.creationMode || '') === 'primary';
-        if (original && !confirm(`WARNING: "${estimate.name}" is the original estimate. You can delete it because another estimate will remain, but its Takeoff data will also be removed. Continue?`)) return;
-        if (!confirm(`Delete “${estimate.name}”? This will also delete its Takeoff items and cannot be undone.`)) return;
+        const deleteMessage = original
+            ? `WARNING: "${estimate.name}" is the original estimate. It can be deleted because another estimate will remain. Its Takeoff data will also be permanently removed. Delete it?`
+            : `Delete “${estimate.name}”? This will also delete its Takeoff items and cannot be undone.`;
+        if (!confirm(deleteMessage)) return;
         $('optionsMenu')?.classList.remove('open');
         ui.loadState = 'saving';
         ui.message = 'Deleting estimate…';
         renderStatus();
         try {
-            if (projectId && Number(estimate.dbEstimateId || 0) > 0) {
+            if (projectId) {
                 await request('delete', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ action: 'delete', project_id: projectId,
-                        estimate_id: Number(estimate.dbEstimateId) }) });
+                        estimate_id: Number(estimate.dbEstimateId || 0), client_estimate_id: String(estimate.id),
+                        delete_original: original }) });
             }
             const deletedId = String(estimate.id);
             Workspace.removeEstimate(state, estimate.id);

@@ -13,8 +13,12 @@ test('Estimating exposes a confirmed delete action and keeps one estimate', () =
     assert.match(page, /data-est-option="delete-estimate"/);
     assert.match(client, /function deleteCurrentEstimate/);
     assert.match(client, /is the original estimate/);
+    assert.match(client, /client_estimate_id: String\(estimate\.id\)/);
+    assert.match(client, /delete_original: original/);
+    assert.match(api, /Estimate could not be resolved for deletion/);
+    assert.match(api, /ORDER BY id ASC LIMIT 1/);
     assert.match(client, /state\.estimates\.length <= 1/);
-    assert.match(client, /confirm\(`Delete/);
+    assert.match(client, /confirm\(deleteMessage\)/);
     assert.match(client, /request\('delete'/);
     assert.match(client, /menuAttribute: 'data-estimate-menu'/);
     assert.match(client, /data-estimate-actions-menu/);
