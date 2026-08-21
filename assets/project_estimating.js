@@ -278,11 +278,14 @@
         } finally {
             ui.saving = false;
             render();
-            if (ui.pendingDeleteId) {
+            if (ui.pendingDeleteId && ui.loadState !== 'error') {
                 const pendingDeleteId = ui.pendingDeleteId;
                 ui.pendingDeleteId = null;
                 clearTimeout(ui.saveTimer);
                 ui.saveTimer = setTimeout(() => deleteCurrentEstimate(pendingDeleteId, true), 0);
+            } else if (ui.pendingDeleteId) {
+                ui.message = 'Delete paused because pending estimates could not be saved. Retry after resolving the save error.';
+                renderStatus();
             } else if (ui.saveRequested) {
                 clearTimeout(ui.saveTimer);
                 ui.saveTimer = setTimeout(saveServer, 0);
@@ -759,10 +762,14 @@
             ? `WARNING: "${estimate.name}" is the original estimate. It can be deleted because another estimate will remain. Its Takeoff data will also be permanently removed. Delete it?`
             : `Delete “${estimate.name}”? This will also delete its Takeoff items and cannot be undone.`;
         if (!confirmed && !confirm(deleteMessage)) return;
-        if (ui.saving) {
+        if (ui.saving || ui.saveRequested || dirtyEstimateIds.size) {
             ui.pendingDeleteId = String(estimate.id);
-            ui.message = 'Finishing the current save, then deleting estimate…';
+            ui.message = 'Saving pending estimates before deletion…';
             renderStatus();
+            if (!ui.saving) {
+                clearTimeout(ui.saveTimer);
+                await saveServer();
+            }
             return;
         }
         $('optionsMenu')?.classList.remove('open');
@@ -902,18 +909,33 @@
         if (group) { group.name = event.target.value.trim() || 'Untitled Group'; changed('Renamed group'); }
     });
 
-    document.addEventListener('click', event => {
+    document.addEventListener('click', async event => {
         const portal = event.target.closest('[data-estimating-modal-portal]');
         if (!portal) return;
         if (event.target.closest('[data-close-modal]') || event.target === portal) { ui.modal = null; renderModal(); return; }
         if (event.target.closest('[data-create-estimate]')) {
+            const createButton = event.target.closest('[data-create-estimate]');
             const name = portal.querySelector('#copyEstimateName')?.value;
             const mode = portal.querySelector('input[name="copyEstimateMode"]:checked')?.value || 'blank';
             Workspace.createEstimate(state, name, mode); ui.modal = null; saveLocal();
             markEstimateDirty();
             saveLocal();
-            if (projectId) saveServer();
             render();
+            if (projectId) {
+                createButton.disabled = true;
+                ui.loadState = 'saving';
+                ui.message = 'Creating estimate in database…';
+                renderStatus();
+                try {
+                    await window.projectEstimatingSave();
+                    ui.message = 'Estimate created';
+                    renderStatus();
+                } catch (error) {
+                    ui.loadState = 'error';
+                    ui.message = `Estimate was not confirmed by the database: ${error.message}`;
+                    renderStatus();
+                }
+            }
         }
         const catalogId = event.target.closest('[data-est-catalog-item]')?.dataset.estCatalogItem;
         if (catalogId) {
@@ -1053,6 +1075,12 @@
         }
         return true;
     };
+
+    window.addEventListener('beforeunload', event => {
+        if (!ui.saving && !ui.saveRequested && !dirtyEstimateIds.size) return;
+        event.preventDefault();
+        event.returnValue = '';
+    });
 
     saveLocal();
     render();

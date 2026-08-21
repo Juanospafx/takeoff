@@ -16,9 +16,11 @@ test('Estimating exposes a confirmed delete action and keeps one estimate', () =
     assert.match(client, /client_estimate_id: String\(estimate\.id\)/);
     assert.match(client, /delete_original: original/);
     assert.match(client, /pendingDeleteId/);
+    assert.match(client, /ui\.saving \|\| ui\.saveRequested \|\| dirtyEstimateIds\.size/);
+    assert.match(client, /Saving pending estimates before deletion/);
     assert.match(client, /deleteCurrentEstimate\(pendingDeleteId, true\)/);
     const deleteFlow = client.slice(client.indexOf('async function deleteCurrentEstimate'), client.indexOf('function handleEstimateCardAction'));
-    assert.doesNotMatch(deleteFlow, /await saveServer\(\)/);
+    assert.match(deleteFlow, /await saveServer\(\)[\s\S]*?return;[\s\S]*?await request\('delete'/);
     assert.match(api, /Estimate could not be resolved for deletion/);
     assert.match(api, /ORDER BY id ASC LIMIT 1/);
     assert.match(api, /ORDER BY id ASC FOR UPDATE/);
@@ -30,6 +32,22 @@ test('Estimating exposes a confirmed delete action and keeps one estimate', () =
     assert.match(client, /actionName === 'rename'/);
     assert.match(client, /actionName === 'copy'/);
     assert.match(client, /actionName === 'delete'/);
+});
+
+test('removing an estimate accepts the string identity emitted by footer cards', () => {
+    const state = Workspace.workspace({ projectId: 42, activeEstimateId: 101, estimates: [
+        { id: 101, name: 'Original', groups: [] }, { id: 202, name: 'Copy', groups: [] }
+    ] }, 42);
+    assert.ok(Workspace.removeEstimate(state, '202'));
+    assert.deepEqual(state.estimates.map(row => String(row.id)), ['101']);
+});
+
+test('new estimates wait for a database acknowledgement and protect pending navigation', () => {
+    assert.match(client, /await window\.projectEstimatingSave\(\)/);
+    assert.match(client, /Creating estimate in database/);
+    assert.match(client, /beforeunload/);
+    assert.match(client, /dirtyEstimateIds\.size/);
+    assert.match(page, /project_estimating\.js\?v=estimating-durable-lifecycle-20260821-6/);
 });
 
 test('removing an estimate selects another isolated workspace', () => {

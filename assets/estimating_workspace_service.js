@@ -255,9 +255,9 @@
 
     function removeEstimate(state, estimateId) {
         if (state.estimates.length < 2) return false;
-        const index = state.estimates.findIndex(row => row.id === estimateId);
+        const index = state.estimates.findIndex(row => String(row.id) === String(estimateId));
         if (index < 0) return false;
-        const removingActive = state.activeEstimateId === estimateId;
+        const removingActive = String(state.activeEstimateId) === String(estimateId);
         state.estimates.splice(index, 1);
         if (removingActive) state.activeEstimateId = state.estimates[Math.max(0, index - 1)].id;
         state.estimates.forEach(row => { row.isActive = row.id === state.activeEstimateId; });
