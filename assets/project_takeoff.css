@@ -340,14 +340,37 @@
 }
 
 .pro-takeoff-actions-row {
-    justify-content: flex-start;
+    display: grid;
+    grid-template-columns: minmax(112px, .72fr) minmax(0, 1.28fr);
+    align-items: stretch;
+    gap: 8px;
     padding: 6px 12px 10px;
     border-bottom: 1px solid #e7ebf0;
 }
 
 .pro-actions-btn {
-    min-width: 126px;
+    width: 100%;
+    min-width: 0;
+    justify-content: space-between;
 }
+
+.pro-create-group-btn {
+    min-width: 0;
+    min-height: 38px;
+    padding: 0 12px;
+    border: 1px solid #cfd7e2;
+    border-radius: 7px;
+    background: #fff;
+    color: #18212f;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+    font-weight: 800;
+    cursor: pointer;
+    white-space: nowrap;
+}
+.pro-create-group-btn:hover { border-color: #f97316; color: #ea580c; background: #fff7ed; }
 
 .pro-search-input {
     flex: 1;
@@ -441,17 +464,32 @@
     padding: 4px 0;
 }
 
-.pro-takeoff-create-group {
-    margin: 8px 10px;
-    padding: 10px 12px;
-    border: 1px solid var(--border, #cbd5e1);
-    border-radius: 8px;
-    background: transparent;
-    color: inherit;
-    font-weight: 700;
-    cursor: pointer;
+#takeoffItemsActions {
+    left: 0;
+    right: auto;
+    width: min(310px, calc(100vw - 32px));
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 4px;
+    padding: 8px;
 }
-.pro-takeoff-create-group:hover { border-color: #f97316; color: #f97316; }
+#takeoffItemsActions button {
+    min-height: 42px;
+    padding: 9px 10px;
+    line-height: 1.2;
+}
+#takeoffItemsActions button.excel { grid-column: 1 / -1; }
+
+[data-theme="dark"] .pro-create-group-btn {
+    border-color: #475569;
+    background: #1e293b;
+    color: #f8fafc;
+}
+[data-theme="dark"] .pro-create-group-btn:hover { border-color: #fb923c; color: #fdba74; background: #273449; }
+
+@media (max-width: 430px) {
+    .pro-takeoff-actions-row { grid-template-columns: minmax(102px, .8fr) minmax(0, 1.2fr); }
+    .pro-create-group-btn { padding-inline: 9px; font-size: 13px; }
+}
 
 .pro-tree-row {
     display: grid;

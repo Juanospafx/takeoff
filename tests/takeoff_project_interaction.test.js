@@ -62,7 +62,9 @@ test('an intentionally empty Takeoff stays empty and exposes visible group creat
     assert.match(source, /return groups;[\s\S]*?function normalizeSavedGroups/);
     assert.doesNotMatch(source, /if \(!result\.length\) result\.push\(defaultGroup/);
     assert.match(source, /estimating-group-create-requested/);
-    assert.match(dashboard, /class="pro-takeoff-create-group"[^>]*data-takeoff-action="create-group"/);
+    assert.match(dashboard, /class="pro-create-group-btn"[^>]*data-takeoff-action="create-group"/);
+    const actionsMenu = dashboard.slice(dashboard.indexOf('id="takeoffItemsActions"'), dashboard.indexOf('class="pro-create-group-btn"'));
+    assert.doesNotMatch(actionsMenu, /data-takeoff-action="create-group"/);
 });
 
 test('quantities update in real time by aggregating every document snapshot once', () => {

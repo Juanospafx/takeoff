@@ -574,7 +574,7 @@ $state = [
         }
     </style>
     <link rel="stylesheet" href="../assets/project_overview.css?v=project-document-menus-20260811-1">
-    <link rel="stylesheet" href="../assets/project_takeoff.css?v=workspace-takeoff-20260810-1">
+    <link rel="stylesheet" href="../assets/project_takeoff.css?v=takeoff-actions-grid-20260821-3">
     <link rel="stylesheet" href="../assets/project_estimating.css?v=estimating-card-menu-20260820-4">
     <link rel="stylesheet" href="../assets/project_proposal.css?v=proposal-workspace-20260810-1">
 </head>
@@ -848,7 +848,6 @@ $state = [
                             <h2 id="takeoffPanelTitle">Takeoffs (0)</h2>
                         </div>
                         <button class="pro-icon-btn" type="button" data-takeoff-action="toggle-global-visibility" title="Show/hide all takeoffs" aria-label="Show/hide all takeoffs"><i class="fas fa-eye"></i></button>
-                        <button class="pro-icon-btn" type="button" data-takeoff-action="create-group" title="Create New Group" aria-label="Create New Group"><i class="fas fa-folder-plus"></i></button>
                         <button class="pro-add-btn" type="button" data-takeoff-action="create-layer" title="Create New Takeoff Layer" aria-label="Create New Takeoff Layer"><i class="fas fa-plus"></i></button>
                         <button class="pro-icon-btn" type="button" id="toggleTakeoffItemsPanel" title="Collapse panel" aria-label="Collapse items panel">
                             <i class="fas fa-angles-left"></i>
@@ -866,15 +865,14 @@ $state = [
                                 Actions <i class="fas fa-chevron-down"></i>
                             </button>
                             <div class="pro-menu" id="takeoffItemsActions">
-                                <button type="button" data-takeoff-action="create-group"><i class="fas fa-folder-plus"></i> Create New Group</button>
                                 <button type="button" data-takeoff-action="create-layer"><i class="fas fa-plus"></i> Create New Layer</button>
                                 <button type="button" data-takeoff-action="collapse-all"><i class="fas fa-down-left-and-up-right-to-center"></i> Collapse All</button>
                                 <button type="button" class="excel" data-takeoff-action="export-excel"><i class="fas fa-file-excel"></i> Takeoff Quantities to Excel</button>
                             </div>
                         </div>
+                        <button class="pro-create-group-btn" type="button" data-takeoff-action="create-group"><i class="fas fa-folder-plus"></i><span>Create new group</span></button>
                     </div>
                     <div class="pro-takeoff-tree" id="takeoffItemsTree"></div>
-                    <button class="pro-takeoff-create-group" type="button" data-takeoff-action="create-group"><i class="fas fa-folder-plus"></i> Create new group</button>
                     <div class="pro-takeoff-footer">
                         <div>
                             <span>Active Layer</span>
