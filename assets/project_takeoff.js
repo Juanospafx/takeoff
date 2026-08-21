@@ -354,9 +354,11 @@
     const selectionState = {
         selectedObjectIds: [],
         activeLayerId: null,
-        selectedGroupId: null,
+        selectedGroupIds: [],
         selectedLayerIds: []
     };
+    let draggedTakeoffGroupId = null;
+    let suppressNextGroupToggle = false;
 
     const historyState = [];
 
@@ -588,6 +590,11 @@
             || takeoffState.groups.find(group => groupBelongsToEstimate(group)) || null;
     }
 
+    function findGroupExact(groupId) {
+        return takeoffState.groups.find(group => String(group.id) === String(groupId)
+            && groupBelongsToEstimate(group)) || null;
+    }
+
     function findLayer(layerId) {
         return allLayers().find(layer => layer.id === layerId) || null;
     }
@@ -704,6 +711,7 @@
         if (!estimateId || estimateId !== activeEstimateId() || !Array.isArray(detail.groups)) return;
         ensureEstimateTakeoffWorkspace(estimateId);
         const seen = new Set();
+        const orderedGroupIds = [];
         detail.groups.forEach((estimateGroup, groupIndex) => {
             const groupKey = String(estimateGroup.id || `group_${groupIndex}`);
             let group = takeoffState.groups.find(row => String(row.estimatingGroupId || '') === groupKey
@@ -714,6 +722,8 @@
                 takeoffState.groups.push(group);
             }
             group.name = estimateGroup.name || group.name;
+            group.sortOrder = groupIndex;
+            orderedGroupIds.push(String(group.id));
             (estimateGroup.items || []).forEach(item => {
                 const itemId = String(item.id || '');
                 if (!itemId) return;
@@ -754,6 +764,11 @@
             group.layers = (group.layers || []).filter(layer => String(layer.estimateId || '') !== estimateId
                 || !layer.estimatingItemId || seen.has(String(layer.id)));
         });
+        const scopedIndexes = takeoffState.groups.map((group, index) => groupBelongsToEstimate(group, estimateId) ? index : -1).filter(index => index >= 0);
+        const order = new Map(orderedGroupIds.map((id, index) => [id, index]));
+        const scopedGroups = scopedIndexes.map(index => takeoffState.groups[index]).sort((a, b) =>
+            (order.get(String(a.id)) ?? Number.MAX_SAFE_INTEGER) - (order.get(String(b.id)) ?? Number.MAX_SAFE_INTEGER));
+        scopedGroups.forEach((group, index) => { takeoffState.groups[scopedIndexes[index]] = group; });
         if (takeoffState.activeLayerId && !layerBelongsToEstimate(findLayer(takeoffState.activeLayerId), estimateId)) {
             takeoffState.activeLayerId = null;
         }
@@ -1001,10 +1016,10 @@
             const groupVisible = !q || group.name.toLowerCase().includes(q) || visibleLayers.length > 0;
             if (!groupVisible) return '';
             const expanded = q ? true : group.isExpanded !== false;
-            const groupSelected = selectionState.selectedGroupId === group.id;
+            const groupSelected = selectionState.selectedGroupIds.includes(String(group.id));
             return `<div class="pro-takeoff-group" data-group-id="${esc(group.id)}">
                 <div class="pro-tree-row pro-tree-folder ${takeoffState.activeGroupId === group.id ? 'active' : ''} ${groupSelected ? 'group-selected' : ''}" data-takeoff-group-row="${esc(group.id)}" role="button" tabindex="0" aria-selected="${groupSelected ? 'true' : 'false'}">
-                    <button class="pro-tree-toggle" type="button" data-group-toggle="${esc(group.id)}"><i class="fas ${expanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i></button>
+                    <button class="pro-tree-toggle" type="button" draggable="true" data-group-toggle="${esc(group.id)}" title="Click to expand; drag to reorder" aria-label="Expand or drag group"><i class="fas ${expanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i></button>
                     <input type="checkbox" ${groupSelected ? 'checked' : ''} aria-label="Select all items in group" data-group-select="${esc(group.id)}">
                     <span class="pro-tree-name"><i class="fas fa-folder${expanded ? '-open' : ''}"></i> ${esc(group.name)}</span>
                     <span class="pro-tree-qty">${visibleLayers.length}</span>
@@ -1086,10 +1101,39 @@
         document.querySelectorAll('[data-group-toggle]').forEach(button => {
             button.addEventListener('click', event => {
                 event.stopPropagation();
+                if (suppressNextGroupToggle) { suppressNextGroupToggle = false; return; }
                 const group = findGroup(button.dataset.groupToggle);
+                if (!group) return;
                 group.isExpanded = group.isExpanded === false;
                 saveTakeoffState();
                 renderTakeoffPanel();
+            });
+            button.addEventListener('dragstart', event => {
+                if (takeoffState.query) { event.preventDefault(); return; }
+                draggedTakeoffGroupId = button.dataset.groupToggle;
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', draggedTakeoffGroupId);
+                button.setAttribute('aria-grabbed', 'true');
+            });
+            button.addEventListener('dragend', () => {
+                button.removeAttribute('aria-grabbed');
+                draggedTakeoffGroupId = null;
+            });
+        });
+        document.querySelectorAll('.pro-takeoff-group[data-group-id]').forEach(container => {
+            container.addEventListener('dragover', event => {
+                if (!draggedTakeoffGroupId || takeoffState.query) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
+            });
+            container.addEventListener('drop', event => {
+                event.preventDefault();
+                const sourceId = draggedTakeoffGroupId || event.dataTransfer.getData('text/plain');
+                const targetId = container.dataset.groupId;
+                if (sourceId && targetId && sourceId !== targetId) reorderTakeoffGroup(sourceId, targetId);
+                suppressNextGroupToggle = true;
+                setTimeout(() => { suppressNextGroupToggle = false; }, 0);
+                draggedTakeoffGroupId = null;
             });
         });
         document.querySelectorAll('[data-group-select]').forEach(box => {
@@ -1651,15 +1695,54 @@
     }
 
     function deleteGroup(groupId) {
-        const group = findGroup(groupId);
+        const group = findGroupExact(groupId);
         if (!group || group.isDefault) return;
         if (group.layers.length && !confirm('Delete this group and its takeoff layers?')) return;
-        pushTakeoffHistory('delete-group');
-        takeoffState.groups = takeoffState.groups.filter(item => item.id !== group.id);
-        if (takeoffState.activeGroupId === group.id) takeoffState.activeGroupId = takeoffState.groups.find(item => groupBelongsToEstimate(item))?.id || null;
-        if (group.layers.some(layer => layer.id === takeoffState.activeLayerId)) takeoffState.activeLayerId = null;
+        deleteTakeoffGroups([group.id], false);
+    }
+
+    function deleteTakeoffGroups(groupIds, ask = true) {
+        const wanted = new Set((groupIds || []).map(String));
+        const groups = takeoffState.groups.filter(group => wanted.has(String(group.id))
+            && groupBelongsToEstimate(group) && !group.isDefault);
+        if (!groups.length) return false;
+        const layerIds = groups.flatMap(group => (group.layers || []).map(layer => String(layer.id)));
+        if (ask && !confirm(`Delete ${groups.length} group(s) and ${layerIds.length} takeoff layer(s)?`)) return false;
+        const deleted = callEditor('projectTakeoffDeleteLayers', layerIds);
+        if (layerIds.length && !deleted) return showPrepared('Unlock the selected groups before deleting them.');
+        pushTakeoffHistory('delete-groups');
+        const estimatingGroupIds = groups.map(group => String(group.estimatingGroupId || `takeoff_group_${group.id}`));
+        takeoffState.groups = takeoffState.groups.filter(group => !wanted.has(String(group.id)));
+        selectionState.selectedGroupIds = [];
+        selectionState.selectedLayerIds = [];
+        selectionState.selectedObjectIds = [];
+        if (wanted.has(String(takeoffState.activeGroupId))) takeoffState.activeGroupId = takeoffState.groups.find(group => groupBelongsToEstimate(group))?.id || null;
+        if (layerIds.includes(String(takeoffState.activeLayerId))) takeoffState.activeLayerId = null;
+        window.dispatchEvent(new CustomEvent('takeoff:estimating-groups-delete-requested', { detail: {
+            projectId: String(window.ProjectState?.projectId || ''), estimateId: activeEstimateId(), groupIds: estimatingGroupIds
+        } }));
         saveTakeoffState();
-        renderTakeoffPanel();
+        renderTakeoffPanel(); renderSelectionBar(); renderInspector();
+        return true;
+    }
+
+    function reorderTakeoffGroup(sourceId, targetId) {
+        const estimateId = activeEstimateId();
+        const scopedIndexes = takeoffState.groups.map((group, index) => groupBelongsToEstimate(group, estimateId) ? index : -1).filter(index => index >= 0);
+        const scoped = scopedIndexes.map(index => takeoffState.groups[index]);
+        const from = scoped.findIndex(group => String(group.id) === String(sourceId));
+        const to = scoped.findIndex(group => String(group.id) === String(targetId));
+        if (from < 0 || to < 0 || from === to) return false;
+        pushTakeoffHistory('reorder-groups');
+        const [moved] = scoped.splice(from, 1);
+        scoped.splice(to, 0, moved);
+        scoped.forEach((group, index) => { group.sortOrder = index; takeoffState.groups[scopedIndexes[index]] = group; });
+        window.dispatchEvent(new CustomEvent('takeoff:estimating-groups-reorder-requested', { detail: {
+            projectId: String(window.ProjectState?.projectId || ''), estimateId,
+            groupIds: scoped.map(group => String(group.estimatingGroupId || `takeoff_group_${group.id}`))
+        } }));
+        saveTakeoffState(); renderTakeoffPanel();
+        return true;
     }
 
     function renameGroup(groupId) {
@@ -1991,9 +2074,10 @@
         ensureTakeoffOverlays();
         const bar = $('takeoffSelectionBar');
         if (!bar) return;
+        const groupCount = selectionState.selectedGroupIds.length;
         const count = selectionState.selectedObjectIds.length;
-        bar.hidden = count === 0;
-        if (!count) {
+        bar.hidden = count === 0 && groupCount === 0;
+        if (!count && !groupCount) {
             bar.innerHTML = '';
             return;
         }
@@ -2002,7 +2086,7 @@
         const lockLabel = lockState.anyLocked ? 'Unlock' : 'Lock';
         const lockIcon = lockState.anyLocked ? 'fa-lock-open' : 'fa-lock';
         bar.innerHTML = `
-            <strong>${count} element(s) selected</strong>
+            <strong>${groupCount ? `${groupCount} group(s)` : `${count} element(s)`} selected</strong>
             <button type="button" data-selection-action="copy"><i class="fas fa-copy"></i> Copy</button>
             <button type="button" data-selection-action="move"><i class="fas fa-folder-tree"></i> Move To</button>
             <button type="button" data-selection-action="properties"><i class="fas fa-sliders"></i> Properties</button>
@@ -2018,32 +2102,36 @@
     function setSelectedObjects(ids = [], layerId = null) {
         selectionState.selectedObjectIds = Array.from(new Set(ids.map(String).filter(Boolean)));
         selectionState.activeLayerId = layerId || selectionState.activeLayerId || takeoffState.activeLayerId;
-        selectionState.selectedGroupId = null;
+        selectionState.selectedGroupIds = [];
         selectionState.selectedLayerIds = layerId ? [String(layerId)] : [];
         renderSelectionBar();
         renderInspector();
     }
 
     function toggleGroupSelection(groupId) {
-        setGroupSelection(groupId, selectionState.selectedGroupId !== groupId);
+        setGroupSelection(groupId, !selectionState.selectedGroupIds.includes(String(groupId)));
     }
 
     function setGroupSelection(groupId, selected) {
-        const group = findGroup(groupId);
+        const group = findGroupExact(groupId);
         if (!group) return;
+        const groupIds = new Set(selectionState.selectedGroupIds.map(String));
+        const layerIds = new Set(selectionState.selectedLayerIds.map(String));
         if (!selected) {
-            selectionState.selectedGroupId = null;
-            selectionState.selectedLayerIds = [];
-            selectionState.selectedObjectIds = [];
-            callEditor('projectTakeoffClearSelection');
+            groupIds.delete(String(group.id));
+            (group.layers || []).forEach(layer => layerIds.delete(String(layer.id)));
         } else {
             takeoffState.activeGroupId = group.id;
-            selectionState.selectedGroupId = group.id;
-            selectionState.selectedLayerIds = (group.layers || []).map(layer => String(layer.id));
-            const selectedIds = callEditor('projectTakeoffSelectGroup', selectionState.selectedLayerIds);
-            selectionState.selectedObjectIds = Array.isArray(selectedIds) ? selectedIds : [];
+            groupIds.add(String(group.id));
+            (group.layers || []).forEach(layer => layerIds.add(String(layer.id)));
             selectionState.activeLayerId = group.layers?.[0]?.id || null;
         }
+        selectionState.selectedGroupIds = Array.from(groupIds);
+        selectionState.selectedLayerIds = Array.from(layerIds);
+        const selectedIds = selectionState.selectedLayerIds.length
+            ? callEditor('projectTakeoffSelectGroup', selectionState.selectedLayerIds)
+            : (callEditor('projectTakeoffClearSelection'), []);
+        selectionState.selectedObjectIds = Array.isArray(selectedIds) ? selectedIds : [];
         renderTakeoffPanel();
         renderSelectionBar();
         renderInspector();
@@ -2058,7 +2146,10 @@
         selectionState.selectedLayerIds = Array.from(ids);
         const group = findGroup(layer.groupId);
         const groupLayerIds = (group?.layers || []).map(item => String(item.id));
-        selectionState.selectedGroupId = groupLayerIds.length && groupLayerIds.every(id => ids.has(id)) ? group.id : null;
+        const selectedGroups = new Set(selectionState.selectedGroupIds.map(String));
+        if (groupLayerIds.length && groupLayerIds.every(id => ids.has(id))) selectedGroups.add(String(group.id));
+        else selectedGroups.delete(String(group.id));
+        selectionState.selectedGroupIds = Array.from(selectedGroups);
         selectionState.activeLayerId = selected ? layer.id : (selectionState.selectedLayerIds[0] || null);
         // Checking an item is also the user's placement-layer choice. Keep the
         // multi-layer/object selection below, but activate this specific layer
@@ -2088,6 +2179,10 @@
             callEditor('projectTakeoffClearSelection');
             return;
         }
+        if (action === 'delete' && selectionState.selectedGroupIds.length) {
+            deleteTakeoffGroups(selectionState.selectedGroupIds);
+            return;
+        }
         if (!selectionState.selectedObjectIds.length) {
             const editorIds = callEditor('projectTakeoffGetSelectionIds');
             if (Array.isArray(editorIds)) selectionState.selectedObjectIds = editorIds;
@@ -2104,7 +2199,7 @@
             if (!deleted) showPrepared('Select an unlocked element before deleting.');
             else {
                 selectionState.selectedObjectIds = [];
-                selectionState.selectedGroupId = null;
+                selectionState.selectedGroupIds = [];
                 selectionState.selectedLayerIds = [];
             }
         }
@@ -3127,6 +3222,7 @@
             if (event.key === estimatingStoreKey()) renderTakeoffEstimateFooter();
         });
         window.addEventListener('takeoff:active-estimate-changed', () => {
+            setSelectedObjects([]);
             renderTakeoffEstimateFooter();
             setTimeout(() => {
                 ensureEstimateTakeoffWorkspace();
@@ -3191,12 +3287,13 @@
                 runSelectionAction('delete');
                 return;
             }
-            if (event.key === 'Escape') {
+                if (event.key === 'Escape') {
                 viewerState.continuousTool = false;
                 callEditor('clearPlacementTool');
                 callEditor('projectTakeoffSetContinuous', false);
                 callEditor('projectTakeoffSetTool', 'select');
-                callEditor('projectTakeoffClearSelection');
+                    callEditor('projectTakeoffClearSelection');
+                    setSelectedObjects([]);
                 callEditor('setMode', 'smart');
                 setActiveTool('smart');
                 renderActiveLayerToolbar();

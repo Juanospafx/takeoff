@@ -280,7 +280,7 @@ function pew_load_one(PDO $pdo, array $estimate) {
     // Relational rows are the durable integration layer. Recover them when a
     // legacy/malformed workspace snapshot has no group payload instead of
     // rendering an empty estimate after refresh.
-    if (!isset($snapshot['groups']) || !is_array($snapshot['groups']) || !$snapshot['groups']) {
+    if (!array_key_exists('groups', $snapshot) || !is_array($snapshot['groups'])) {
         $recoveredGroups = pew_relational_groups($pdo, (int)$estimate['id']);
         if ($recoveredGroups) $snapshot['groups'] = $recoveredGroups;
     }

@@ -3759,7 +3759,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=blank-scale-scope-fix-20260820-1"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-group-persistence-20260821-1"></script>
 </body>
 </html>
 

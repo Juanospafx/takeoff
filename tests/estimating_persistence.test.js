@@ -109,4 +109,7 @@ test('API retains lossless snapshots and relational recovery', () => {
     assert.match(api, /function pew_relational_groups/);
     assert.match(api, /estimate_items WHERE estimate_id = \? AND deleted_at IS NULL/);
     assert.match(api, /if \(\$recoveredGroups\) \$snapshot\['groups'\] = \$recoveredGroups/);
+    assert.match(api, /!array_key_exists\('groups', \$snapshot\) \|\| !is_array\(\$snapshot\['groups'\]\)/,
+        'an intentionally empty groups array must remain authoritative after refresh');
+    assert.doesNotMatch(api, /!is_array\(\$snapshot\['groups'\]\) \|\| !\$snapshot\['groups'\]/);
 });

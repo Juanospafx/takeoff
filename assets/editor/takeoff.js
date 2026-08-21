@@ -3149,6 +3149,22 @@
         return true;
     };
 
+    window.projectTakeoffDeleteLayers = function (layerIds) {
+        const wanted = new Set((Array.isArray(layerIds) ? layerIds : []).map(String));
+        const layers = state.layers.filter(row => wanted.has(String(row.client_uid))
+            || wanted.has(String(row.metadata_json?.project_layer_id || '')));
+        if (!layers.length && wanted.size) return false;
+        const blocked = layers.some(layer => Number(layer.locked || 0) === 1
+            || state.markers.some(marker => marker.layer_client_uid === layer.client_uid && isElementLocked(marker))
+            || state.segments.some(segment => segment.layer_client_uid === layer.client_uid && isElementLocked(segment)));
+        if (blocked) return false;
+        snapshot();
+        layers.forEach(deleteLayerWithoutConfirm);
+        markDirty({ pageFallback: true, objectsTracked: true });
+        renderAll();
+        return { deletedLayerIds: layers.map(layer => String(layer.client_uid)), snapshot: projectSnapshot() };
+    };
+
     window.projectTakeoffSnapshot = function () {
         return projectSnapshot();
     };

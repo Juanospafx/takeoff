@@ -45,6 +45,16 @@ test('group and layer checkboxes activate from their change event without bubbli
     assert.match(source, /\[data-layer-select\][\s\S]*?addEventListener\('click',\s*event\s*=>\s*event\.stopPropagation\(\)\)[\s\S]*?addEventListener\('change',\s*\(\)\s*=>\s*toggleLayerSelection\(box\.dataset\.layerSelect,\s*box\.checked\)\)/);
 });
 
+test('groups support additive selection, persistent bulk deletion, and drag reorder from the chevron', () => {
+    assert.match(source, /selectedGroupIds:\s*\[\]/);
+    assert.match(source, /groupIds\.add\(String\(group\.id\)\)/);
+    assert.match(source, /callEditor\('projectTakeoffDeleteLayers', layerIds\)/);
+    assert.match(source, /takeoff:estimating-groups-delete-requested/);
+    assert.match(source, /draggable="true" data-group-toggle/);
+    assert.match(source, /function reorderTakeoffGroup\(sourceId, targetId\)/);
+    assert.match(source, /takeoff:estimating-groups-reorder-requested/);
+});
+
 test('quantities update in real time by aggregating every document snapshot once', () => {
     const { takeoffState, applyAggregatedCanvasQuantities } = projectTakeoffInternals();
     takeoffState.groups = [{

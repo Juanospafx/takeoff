@@ -970,6 +970,30 @@
         if (event.detail?.projectId && String(event.detail.projectId) !== String(projectId)) return;
         selectEstimate(event.detail?.estimateId);
     });
+    window.addEventListener('takeoff:estimating-groups-delete-requested', event => {
+        const detail = event.detail || {};
+        if (detail.projectId && String(detail.projectId) !== String(projectId)) return;
+        if (String(detail.estimateId || '') !== String(state.activeEstimateId) || !Array.isArray(detail.groupIds)) return;
+        const ids = new Set(detail.groupIds.map(String));
+        const estimate = current();
+        const next = estimate.groups.filter(group => !ids.has(String(group.id)));
+        if (next.length === estimate.groups.length) return;
+        const removedCount = estimate.groups.length - next.length;
+        estimate.groups = next;
+        changed(`Deleted ${removedCount} Takeoff group(s)`);
+    });
+    window.addEventListener('takeoff:estimating-groups-reorder-requested', event => {
+        const detail = event.detail || {};
+        if (detail.projectId && String(detail.projectId) !== String(projectId)) return;
+        if (String(detail.estimateId || '') !== String(state.activeEstimateId) || !Array.isArray(detail.groupIds)) return;
+        const order = new Map(detail.groupIds.map((id, index) => [String(id), index]));
+        const estimate = current();
+        const before = estimate.groups.map(group => String(group.id)).join('|');
+        estimate.groups.sort((a, b) => (order.get(String(a.id)) ?? Number.MAX_SAFE_INTEGER) - (order.get(String(b.id)) ?? Number.MAX_SAFE_INTEGER));
+        estimate.groups.forEach((group, index) => { group.sortOrder = index; });
+        if (before === estimate.groups.map(group => String(group.id)).join('|')) return;
+        changed('Reordered Takeoff groups');
+    });
     window.addEventListener('takeoff:estimating-action-requested', event => {
         if (event.detail?.action === 'new-estimate') ui.modal = 'new';
         if (event.detail?.action === 'compare-estimates') ui.modal = 'compare';
