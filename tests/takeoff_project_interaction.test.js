@@ -6,6 +6,8 @@ const vm = require('node:vm');
 
 const sourcePath = path.join(__dirname, '..', 'assets', 'project_takeoff.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
+const editor = fs.readFileSync(path.join(__dirname, '..', 'assets', 'editor', 'takeoff.js'), 'utf8');
+const dashboard = fs.readFileSync(path.join(__dirname, '..', 'pages', 'project_dashboard.php'), 'utf8');
 
 function projectTakeoffInternals() {
     const end = source.lastIndexOf('})();');
@@ -53,6 +55,14 @@ test('groups support additive selection, persistent bulk deletion, and drag reor
     assert.match(source, /draggable="true" data-group-toggle/);
     assert.match(source, /function reorderTakeoffGroup\(sourceId, targetId\)/);
     assert.match(source, /takeoff:estimating-groups-reorder-requested/);
+});
+
+test('an intentionally empty Takeoff stays empty and exposes visible group creation', () => {
+    assert.doesNotMatch(editor, /if \(!state\.layers\.length[^\n]*\)[\s\S]{0,120}seedTemplateLayers/);
+    assert.match(source, /return groups;[\s\S]*?function normalizeSavedGroups/);
+    assert.doesNotMatch(source, /if \(!result\.length\) result\.push\(defaultGroup/);
+    assert.match(source, /estimating-group-create-requested/);
+    assert.match(dashboard, /class="pro-takeoff-create-group"[^>]*data-takeoff-action="create-group"/);
 });
 
 test('quantities update in real time by aggregating every document snapshot once', () => {

@@ -12,6 +12,7 @@ const Workspace = require(path.join(root, 'assets/estimating_workspace_service.j
 test('Estimating exposes a confirmed delete action and keeps one estimate', () => {
     assert.match(page, /data-est-option="delete-estimate"/);
     assert.match(client, /function deleteCurrentEstimate/);
+    assert.match(client, /is the original estimate/);
     assert.match(client, /state\.estimates\.length <= 1/);
     assert.match(client, /confirm\(`Delete/);
     assert.match(client, /request\('delete'/);

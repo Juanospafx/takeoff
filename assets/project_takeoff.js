@@ -483,7 +483,7 @@
                 depth: Number(layer.depth || 0)
             });
         });
-        return groups.length ? groups : [defaultGroup()];
+        return groups;
     }
 
     function normalizeSavedGroups(groups) {
@@ -499,7 +499,6 @@
                 layers: group.layers || []
             });
         });
-        if (!result.length) result.push(defaultGroup());
         return result.map(group => ({
             ...group,
             layers: (group.layers || []).map(layer => ({
@@ -676,15 +675,15 @@
         return String(group?.estimateId || '') === String(estimateId || '');
     }
 
-    function ensureEstimateTakeoffWorkspace(estimateId = activeEstimateId()) {
+    function ensureEstimateTakeoffWorkspace(estimateId = activeEstimateId(), createDefault = false) {
         let scopedGroups = takeoffState.groups.filter(group => groupBelongsToEstimate(group, estimateId));
-        if (!scopedGroups.length) {
+        if (!scopedGroups.length && createDefault) {
             const group = defaultGroup(estimateId);
             takeoffState.groups.push(group);
             scopedGroups = [group];
         }
         if (!scopedGroups.some(group => group.id === takeoffState.activeGroupId)) {
-            takeoffState.activeGroupId = scopedGroups[0].id;
+            takeoffState.activeGroupId = scopedGroups[0]?.id || null;
         }
         if (takeoffState.activeLayerId && !layerBelongsToEstimate(findLayer(takeoffState.activeLayerId), estimateId)) {
             takeoffState.activeLayerId = null;
@@ -1297,6 +1296,10 @@
     }
 
     function openLayerModal(groupId = takeoffState.activeGroupId, layerId = null) {
+        if (!layerId && !takeoffState.groups.some(group => groupBelongsToEstimate(group))) {
+            ensureEstimateTakeoffWorkspace(activeEstimateId(), true);
+            groupId = takeoffState.activeGroupId;
+        }
         ensureTakeoffModal();
         const layer = layerId ? findLayer(layerId) : null;
         takeoffState.pendingLayerGroupId = groupId || layer?.groupId || takeoffState.activeGroupId || 'default';
@@ -1667,6 +1670,11 @@
         const group = { id: makeId('grp'), estimateId: activeEstimateId(), name: name.trim(), isExpanded: true, isDefault: false, layers: [] };
         takeoffState.groups.push(group);
         takeoffState.activeGroupId = group.id;
+        window.dispatchEvent(new CustomEvent('takeoff:estimating-group-create-requested', { detail: {
+            projectId: String(window.ProjectState?.projectId || ''), estimateId: activeEstimateId(),
+            group: { id: `takeoff_group_${group.id}`, takeoffGroupId: group.id, name: group.name,
+                expanded: true, sortOrder: takeoffState.groups.filter(row => groupBelongsToEstimate(row)).length - 1, items: [] }
+        } }));
         saveTakeoffState();
         renderTakeoffPanel();
     }
@@ -1696,7 +1704,7 @@
 
     function deleteGroup(groupId) {
         const group = findGroupExact(groupId);
-        if (!group || group.isDefault) return;
+        if (!group) return;
         if (group.layers.length && !confirm('Delete this group and its takeoff layers?')) return;
         deleteTakeoffGroups([group.id], false);
     }
@@ -1704,7 +1712,7 @@
     function deleteTakeoffGroups(groupIds, ask = true) {
         const wanted = new Set((groupIds || []).map(String));
         const groups = takeoffState.groups.filter(group => wanted.has(String(group.id))
-            && groupBelongsToEstimate(group) && !group.isDefault);
+            && groupBelongsToEstimate(group));
         if (!groups.length) return false;
         const layerIds = groups.flatMap(group => (group.layers || []).map(layer => String(layer.id)));
         if (ask && !confirm(`Delete ${groups.length} group(s) and ${layerIds.length} takeoff layer(s)?`)) return false;

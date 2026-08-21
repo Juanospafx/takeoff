@@ -752,6 +752,9 @@
         }
         const estimate = state.estimates.find(row => String(row.id) === String(estimateId));
         if (!estimate) return;
+        const original = String(state.estimates[0]?.id || '') === String(estimate.id)
+            || String(estimate.creationMode || '') === 'primary';
+        if (original && !confirm(`WARNING: "${estimate.name}" is the original estimate. You can delete it because another estimate will remain, but its Takeoff data will also be removed. Continue?`)) return;
         if (!confirm(`Delete “${estimate.name}”? This will also delete its Takeoff items and cannot be undone.`)) return;
         $('optionsMenu')?.classList.remove('open');
         ui.loadState = 'saving';
@@ -981,6 +984,15 @@
         const removedCount = estimate.groups.length - next.length;
         estimate.groups = next;
         changed(`Deleted ${removedCount} Takeoff group(s)`);
+    });
+    window.addEventListener('takeoff:estimating-group-create-requested', event => {
+        const detail = event.detail || {};
+        if (detail.projectId && String(detail.projectId) !== String(projectId)) return;
+        if (String(detail.estimateId || '') !== String(state.activeEstimateId) || !detail.group) return;
+        const estimate = current();
+        if (estimate.groups.some(group => String(group.id) === String(detail.group.id))) return;
+        estimate.groups.push(Workspace.group(detail.group));
+        changed(`Created Takeoff group ${detail.group.name || ''}`.trim());
     });
     window.addEventListener('takeoff:estimating-groups-reorder-requested', event => {
         const detail = event.detail || {};

@@ -3759,7 +3759,7 @@ if ($filePath !== '') {
     });
 
 </script>
-<script src="../assets/editor/takeoff.js?v=takeoff-group-persistence-20260821-1"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-empty-groups-20260821-2"></script>
 </body>
 </html>
 

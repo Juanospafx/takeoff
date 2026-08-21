@@ -848,6 +848,7 @@ $state = [
                             <h2 id="takeoffPanelTitle">Takeoffs (0)</h2>
                         </div>
                         <button class="pro-icon-btn" type="button" data-takeoff-action="toggle-global-visibility" title="Show/hide all takeoffs" aria-label="Show/hide all takeoffs"><i class="fas fa-eye"></i></button>
+                        <button class="pro-icon-btn" type="button" data-takeoff-action="create-group" title="Create New Group" aria-label="Create New Group"><i class="fas fa-folder-plus"></i></button>
                         <button class="pro-add-btn" type="button" data-takeoff-action="create-layer" title="Create New Takeoff Layer" aria-label="Create New Takeoff Layer"><i class="fas fa-plus"></i></button>
                         <button class="pro-icon-btn" type="button" id="toggleTakeoffItemsPanel" title="Collapse panel" aria-label="Collapse items panel">
                             <i class="fas fa-angles-left"></i>
@@ -873,6 +874,7 @@ $state = [
                         </div>
                     </div>
                     <div class="pro-takeoff-tree" id="takeoffItemsTree"></div>
+                    <button class="pro-takeoff-create-group" type="button" data-takeoff-action="create-group"><i class="fas fa-folder-plus"></i> Create new group</button>
                     <div class="pro-takeoff-footer">
                         <div>
                             <span>Active Layer</span>
@@ -1365,11 +1367,11 @@ $state = [
 <script src="../assets/project_overview.js?v=project-documents-persistence-20260811-6"></script>
 <script src="../assets/takeoff_estimating_sync_service.js?v=takeoff-estimating-sync-20260803-1"></script>
 <script src="../assets/project_estimate_footer.js?v=estimate-menu-all-tabs-20260820-5"></script>
-<script src="../assets/project_takeoff.js?v=takeoff-group-persistence-20260821-1"></script>
+<script src="../assets/project_takeoff.js?v=takeoff-empty-groups-20260821-2"></script>
 <script src="../assets/estimate_calculation_service.js?v=estimating-calculation-audit-20260811-1"></script>
 <script src="../assets/estimating_export_service.js?v=estimating-boq-export-20260820-1"></script>
 <script src="../assets/estimating_workspace_service.js?v=estimating-card-menu-20260820-4"></script>
-<script src="../assets/project_estimating.js?v=takeoff-group-persistence-20260821-1"></script>
+<script src="../assets/project_estimating.js?v=takeoff-empty-groups-20260821-2"></script>
 <script src="../assets/project_proposal.js?v=estimate-menu-all-tabs-20260820-5"></script>
 <script src="../assets/global_tools.js"></script>
 </body>

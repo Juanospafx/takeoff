@@ -2922,14 +2922,8 @@
                 state.segments = (data.segments || []).map(s => ({ ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: String(s.layer_client_uid || dbLayerIdMap.get(String(s.layer_id)) || s.layer_id || ''), points_json: s.points_json || [], metadata_json: s.metadata_json || {}, takeoff_subtype: s.takeoff_subtype || s.metadata_json?.takeoff_subtype || 'linear', drop_length: Math.max(0, num(s.drop_length ?? s.metadata_json?.drop_length)), locked: Number(s.locked ?? s.metadata_json?.element_locked ?? 0), _serverUpdatedAt: s.updated_at || s.updatedAt || null }));
             }
             if (!state.selectedItemId && state.catalog.items[0]) state.selectedItemId = state.catalog.items[0].id;
-            const onlyLegacyDefault = state.layers.length === 1
-                && String(state.layers[0].name || '').toLowerCase() === 'default takeoff'
-                && !state.markers.length
-                && !state.segments.length;
-            if (!state.layers.length || onlyLegacyDefault || isLegacyTemplateSeed()) {
-                state.layers = [];
-                seedTemplateLayers();
-            }
+            // An empty server snapshot is intentional. Never treat zero layers as
+            // a first run or deleted starter groups will return after refresh.
             renderNodes();
             renderAll();
         }).catch(err => {
@@ -3158,9 +3152,18 @@
             || state.markers.some(marker => marker.layer_client_uid === layer.client_uid && isElementLocked(marker))
             || state.segments.some(segment => segment.layer_client_uid === layer.client_uid && isElementLocked(segment)));
         if (blocked) return false;
+        const affectedPages = new Set();
+        layers.forEach(layer => affectedPages.add(Number(layer.page_number || 1)));
+        state.markers.forEach(marker => {
+            if (layers.some(layer => marker.layer_client_uid === layer.client_uid)) affectedPages.add(Number(marker.page_number || 1));
+        });
+        state.segments.forEach(segment => {
+            if (layers.some(layer => segment.layer_client_uid === layer.client_uid)) affectedPages.add(Number(segment.page_number || 1));
+        });
         snapshot();
         layers.forEach(deleteLayerWithoutConfirm);
-        markDirty({ pageFallback: true, objectsTracked: true });
+        affectedPages.forEach(page => dirtyTakeoffPages.add(page));
+        markDirty({ objectsTracked: true });
         renderAll();
         return { deletedLayerIds: layers.map(layer => String(layer.client_uid)), snapshot: projectSnapshot() };
     };

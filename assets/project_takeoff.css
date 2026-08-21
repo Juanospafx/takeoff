@@ -441,6 +441,18 @@
     padding: 4px 0;
 }
 
+.pro-takeoff-create-group {
+    margin: 8px 10px;
+    padding: 10px 12px;
+    border: 1px solid var(--border, #cbd5e1);
+    border-radius: 8px;
+    background: transparent;
+    color: inherit;
+    font-weight: 700;
+    cursor: pointer;
+}
+.pro-takeoff-create-group:hover { border-color: #f97316; color: #f97316; }
+
 .pro-tree-row {
     display: grid;
     align-items: center;
