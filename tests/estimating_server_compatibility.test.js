@@ -84,9 +84,12 @@ test('a stale local dbEstimateId is recovered without updating another project o
 
 test('client retries one legacy 404 using stable estimate identity without a stale database id', () => {
     const client = fs.readFileSync(path.join(root, 'assets/project_estimating.js'), 'utf8');
-    assert.match(client, /if \(error\.status !== 404\) throw error/);
-    assert.match(client, /dbEstimateId: null, revision: 0/);
+    assert.match(client, /\['estimate_not_found', 'stale_estimate_id'\]\.includes\(error\.code\)/);
+    assert.match(client, /dbEstimateId: null/);
+    assert.doesNotMatch(client, /dbEstimateId: null, revision: 0/);
     assert.match(client, /savePayload\(recoverable\)/);
+    assert.match(client, /automaticRebaseKeys/);
+    assert.match(client, /ui\.saveRequested = false/);
 });
 
 test('stale client mappings are removed without stealing a live estimate mapping', () => {

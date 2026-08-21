@@ -36,6 +36,7 @@
     const conflictedEstimateIds = new Set();
     const conflictRemoteEstimates = new Map();
     const dirtyGenerations = new Map();
+    const automaticRebaseKeys = new Set();
     let dirtyGeneration = 0;
     const pendingTakeoffByEstimate = new Map();
 
@@ -228,11 +229,11 @@
                 result = await request('save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(savePayload(sent.estimates)) });
             } catch (error) {
-                if (error.status !== 404) throw error;
+                if (error.status !== 404 || !['estimate_not_found', 'stale_estimate_id'].includes(error.code)) throw error;
                 // Compatibility recovery for older deployments that treat a stale
                 // numeric database id as authoritative. Stable client ids remain
                 // unchanged, so retry once as an unmapped estimate.
-                const recoverable = sent.estimates.map(estimate => ({ ...estimate, dbEstimateId: null, revision: 0 }));
+                const recoverable = sent.estimates.map(estimate => ({ ...estimate, dbEstimateId: null }));
                 result = await request('save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify(savePayload(recoverable)) });
             }
@@ -249,6 +250,7 @@
                     takeoffSyncDirtyIds.delete(id);
                     conflictedEstimateIds.delete(id);
                     conflictRemoteEstimates.delete(id);
+                    [...automaticRebaseKeys].filter(key => key.startsWith(`${id}:`)).forEach(key => automaticRebaseKeys.delete(key));
                 } else {
                     state.estimates[currentIndex].dbEstimateId = ack.dbEstimateId;
                     state.estimates[currentIndex].revision = ack.revision;
@@ -271,11 +273,18 @@
                     const id = String(conflict.id || '');
                     const localIndex = state.estimates.findIndex(estimate => String(estimate.id) === id);
                     if (localIndex < 0 || !conflict.current) return;
-                    if (takeoffSyncDirtyIds.has(id)) {
+                    const currentRevision = Number(conflict.currentRevision ?? conflict.current?.revision ?? 0);
+                    const rebaseKey = `${id}:${currentRevision}`;
+                    if (takeoffSyncDirtyIds.has(id) && !automaticRebaseKeys.has(rebaseKey)) {
+                        automaticRebaseKeys.add(rebaseKey);
                         state.estimates[localIndex] = rebaseTakeoffChanges(state.estimates[localIndex], conflict.current, localIndex);
                         markEstimateDirty(id);
                         rebasedTakeoff = true;
                     } else {
+                        if (conflict.current) {
+                            state.estimates[localIndex].dbEstimateId = conflict.current.dbEstimateId ?? conflict.dbEstimateId ?? state.estimates[localIndex].dbEstimateId;
+                            state.estimates[localIndex].revision = currentRevision;
+                        }
                         conflictedEstimateIds.add(id);
                         conflictRemoteEstimates.set(id, Workspace.clone(conflict.current));
                     }
@@ -286,6 +295,7 @@
                     ui.message = 'Merged with the latest server revision; saving again…';
                 }
             }
+            if (error.code !== 'revision_conflict') ui.saveRequested = false;
             saveLocal();
         } finally {
             ui.saving = false;
