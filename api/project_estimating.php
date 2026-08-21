@@ -599,7 +599,11 @@ try {
         $estimateId = $clientEstimateIdInput !== ''
             ? pew_resolve_estimate_id($pdo, $projectId, $clientEstimateIdInput, $estimateIdHint)
             : (in_array($estimateIdHint, $activeEstimateIds, true) ? $estimateIdHint : 0);
-        if ($estimateId <= 0 && !empty($body['delete_original'])) $estimateId = $activeEstimateIds[0];
+        // Never delete a different estimate merely because a stale client called
+        // the target "original". Explicit identities must resolve exactly.
+        if ($estimateId <= 0 && !empty($body['delete_original']) && $estimateIdHint <= 0 && $clientEstimateIdInput === '') {
+            $estimateId = $activeEstimateIds[0];
+        }
         if ($estimateId <= 0 || !in_array($estimateId, $activeEstimateIds, true)) {
             $pdo->rollBack();
             pew_error('Estimate could not be resolved for deletion.', 404, 'estimate_not_found');
@@ -607,7 +611,12 @@ try {
         $clientStmt = $pdo->prepare('SELECT client_estimate_id FROM estimate_workspace_states WHERE estimate_id=? AND project_id=? LIMIT 1');
         $clientStmt->execute(array($estimateId, $projectId));
         $clientEstimateId = (string)($clientStmt->fetchColumn() ?: $clientEstimateIdInput);
-        $pdo->prepare('UPDATE estimates SET deleted_at=CURRENT_TIMESTAMP WHERE id=? AND project_id=?')->execute(array($estimateId, $projectId));
+        $deleteStmt = $pdo->prepare('UPDATE estimates SET deleted_at=CURRENT_TIMESTAMP WHERE id=? AND project_id=? AND deleted_at IS NULL');
+        $deleteStmt->execute(array($estimateId, $projectId));
+        if ($deleteStmt->rowCount() !== 1) {
+            $pdo->rollBack();
+            pew_error('Estimate changed before deletion could be completed.', 409, 'estimate_delete_conflict');
+        }
         if ($clientEstimateId !== '') pew_best_effort('delete estimate Takeoff workspace', $pdo, function () use ($pdo, $projectId, $clientEstimateId) {
             $layerStmt = $pdo->prepare('SELECT tl.id FROM takeoff_layers tl INNER JOIN takeoffs t ON t.id=tl.takeoff_id WHERE tl.estimate_key=? AND t.project_id=?');
             $layerStmt->execute(array($clientEstimateId, $projectId));

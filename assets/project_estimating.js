@@ -801,19 +801,39 @@
         ui.message = 'Deleting estimate…';
         renderStatus();
         try {
+            let deleteAck = null;
             if (projectId) {
-                await request('delete', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                deleteAck = await request('delete', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ action: 'delete', project_id: projectId,
                         estimate_id: Number(estimate.dbEstimateId || 0), client_estimate_id: String(estimate.id),
                         delete_original: original }) });
             }
-            const deletedId = String(estimate.id);
-            Workspace.removeEstimate(state, estimate.id);
+            const acknowledgedClientId = String(deleteAck?.clientEstimateId || estimate.id);
+            const acknowledgedDbId = Number(deleteAck?.estimateId || estimate.dbEstimateId || 0);
+            const deletedEstimate = state.estimates.find(row => String(row.id) === acknowledgedClientId)
+                || state.estimates.find(row => acknowledgedDbId > 0 && Number(row.dbEstimateId || 0) === acknowledgedDbId);
+            const deletedId = String(deletedEstimate?.id || acknowledgedClientId);
+            const removed = deletedEstimate ? Workspace.removeEstimate(state, deletedEstimate.id) : false;
+            if (!removed) {
+                // The server committed the delete, but local state changed while the
+                // request was in flight. Reconcile from the authoritative DB list so
+                // a stale card can never remain actionable or be saved again.
+                const latest = await request('list');
+                state = Workspace.workspace(latest.state || {}, projectId);
+            }
             dirtyEstimateIds.delete(deletedId);
             dirtyGenerations.delete(deletedId);
             takeoffSyncDirtyIds.delete(deletedId);
             conflictedEstimateIds.delete(deletedId);
             conflictRemoteEstimates.delete(deletedId);
+            // Also clear the originally requested identity when the server resolved
+            // it to a canonical client/database id.
+            const requestedId = String(estimate.id);
+            dirtyEstimateIds.delete(requestedId);
+            dirtyGenerations.delete(requestedId);
+            takeoffSyncDirtyIds.delete(requestedId);
+            conflictedEstimateIds.delete(requestedId);
+            conflictRemoteEstimates.delete(requestedId);
             saveLocal();
             render();
             ui.loadState = projectId ? 'saved' : 'local';

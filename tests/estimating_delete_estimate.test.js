@@ -14,6 +14,10 @@ test('Estimating exposes a confirmed delete action and keeps one estimate', () =
     assert.match(client, /function deleteCurrentEstimate/);
     assert.match(client, /is the original estimate/);
     assert.match(client, /client_estimate_id: String\(estimate\.id\)/);
+    assert.match(client, /deleteAck = await request\('delete'/);
+    assert.match(client, /deleteAck\?\.clientEstimateId/);
+    assert.match(client, /deleteAck\?\.estimateId/);
+    assert.match(client, /if \(!removed\)[\s\S]*await request\('list'\)/);
     assert.match(client, /delete_original: original/);
     assert.match(client, /pendingDeleteId/);
     assert.match(client, /ui\.saving \|\| ui\.saveRequested \|\| dirtyEstimateIds\.size/);
@@ -47,7 +51,7 @@ test('new estimates wait for a database acknowledgement and protect pending navi
     assert.match(client, /Creating estimate in database/);
     assert.match(client, /beforeunload/);
     assert.match(client, /dirtyEstimateIds\.size/);
-    assert.match(page, /project_estimating\.js\?v=estimating-bounded-recovery-20260821-8/);
+    assert.match(page, /project_estimating\.js\?v=estimating-delete-ack-reconcile-20260821-9/);
 });
 
 test('removing an estimate selects another isolated workspace', () => {
@@ -73,6 +77,7 @@ test('server soft-deletes the estimate and cleans its scoped Takeoff workspace',
     assert.match(api, /action === 'delete'/);
     assert.match(api, /At least one estimate must remain/);
     assert.match(api, /UPDATE estimates SET deleted_at=CURRENT_TIMESTAMP/);
+    assert.match(api, /rowCount\(\) !== 1/);
     assert.match(api, /DELETE FROM takeoff_estimate_states WHERE estimate_key=\?/);
     assert.match(api, /DELETE FROM takeoff_estimate_scales WHERE estimate_key=\?/);
 });
