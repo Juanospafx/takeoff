@@ -14,7 +14,7 @@ $isDirectory = ($currentScript === 'directorio.php');
 $isFiles     = ($currentScript === 'archivos.php');
 $isTools     = ($currentScript === 'company_tools.php');
 // Dashboard solo se enciende si es index.php Y no hay proyecto Y no es papelera
-$isDashboard = ($currentScript === 'index.php' && !$pId && !$isTrash);
+$isDashboard = ($currentScript === 'bid_board.php' || ($currentScript === 'index.php' && !$pId && !$isTrash));
 
 // Definimos si el usuario es admin (asumiendo que $isAdmin viene del archivo padre, si no, lo recalculamos seguro)
 $userRoleRawSidebar = $_SESSION['role'] ?? 'viewer';
@@ -32,8 +32,8 @@ $isAdminSidebar = (strtolower($userRoleRawSidebar) === 'admin');
             <i class="fas fa-grip"></i><span class="menu-label">Company Tools</span>
         </a>
 
-        <a href="../pages/takeoff.php" class="menu-item <?= $isDashboard ? 'active' : '' ?>">
-            <i class="fas fa-ruler-combined"></i><span class="menu-label">Takeoff</span>
+        <a href="../pages/bid_board.php" class="menu-item <?= $isDashboard ? 'active' : '' ?>">
+            <i class="fas fa-table-columns"></i><span class="menu-label">Bid Board</span>
         </a>
         
         <a href="../pages/archivos.php" class="menu-item <?= $isFiles ? 'active' : '' ?>">

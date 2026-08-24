@@ -17,7 +17,7 @@ try {
         echo "<h1>✅ ¡ÉXITO!</h1>";
         echo "<p>La contraseña del usuario <strong>'$usuario'</strong> se ha restablecido a: <strong>'$nuevaPassword'</strong></p>";
         echo "<p>El nuevo hash generado es: <small>$nuevoHash</small></p>";
-        echo "<br><a href='../pages/takeoff.php'>--> Ir al módulo Takeoff <--</a>";
+        echo "<br><a href='../pages/bid_board.php'>--> Ir al Bid Board <--</a>";
     } else {
         echo "<h1>⚠️ ALERTA</h1>";
         echo "<p>No se pudo actualizar. Posibles razones:</p>";
@@ -35,7 +35,7 @@ try {
             $stmtInsert = $pdo->prepare("INSERT INTO users (username, password, role) VALUES (?, ?, 'admin')");
             if($stmtInsert->execute([$usuario, $nuevoHash])) {
                  echo "<p style='color:green'>✅ Se ha creado el usuario '$usuario' automáticamente. Intenta entrar ahora.</p>";
-                 echo "<br><a href='../pages/takeoff.php'>--> Ir al módulo Takeoff <--</a>";
+                 echo "<br><a href='../pages/bid_board.php'>--> Ir al Bid Board <--</a>";
             }
         }
     }
