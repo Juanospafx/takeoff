@@ -34,7 +34,8 @@ expect(proposal, /data-proposal-estimate-menu/, 'Every Proposal estimate card mu
 expect(estimating, /takeoff:estimating-estimate-action-requested/, 'Estimating must own actions requested from every workspace footer.');
 expect(takeoff, /takeoff:active-estimate-changed/, 'Takeoff must request active estimate selection from Estimating.');
 expect(takeoff, /Estimating is the sole owner of its workspace/, 'Takeoff must not become a second estimating workspace writer.');
-expect(proposal, /estimating\.activeEstimateId\s*=\s*estimateId/, 'Proposal must persist the active estimate.');
+expect(proposal, /^(?![\s\S]*estimating\.activeEstimateId\s*=\s*estimateId)[\s\S]*$/, 'Proposal must not write the Estimating workspace directly.');
+expect(proposal, /takeoff:active-estimate-changed/, 'Proposal must send active estimate selection to the Estimating owner.');
 expect(takeoff, /takeoff:active-estimate-changed/, 'Takeoff must publish estimate changes.');
 expect(proposal, /takeoff:active-estimate-changed/, 'Proposal must react to estimate changes.');
 expect(takeoff, /takeoff:estimating-state-updated/, 'Takeoff must react after asynchronous estimating load.');

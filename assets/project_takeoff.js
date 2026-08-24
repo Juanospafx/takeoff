@@ -630,10 +630,13 @@
         };
     }
 
-    function renderTakeoffEstimateFooter() {
+    function renderTakeoffEstimateFooter(source = null) {
         const footer = $('takeoffEstimateTypesFooter');
         if (!footer) return;
-        const state = loadEstimatingStateForSync();
+        const published = source?.detail && Array.isArray(source.detail.estimates)
+            ? { estimates: source.detail.estimates, activeEstimateId: source.detail.activeEstimateId }
+            : null;
+        const state = published || loadEstimatingStateForSync();
         const estimates = Array.isArray(state?.estimates) ? state.estimates : [];
         const activeId = String(state?.activeEstimateId || estimates[0]?.id || '');
         footer.innerHTML = window.ProjectEstimateFooter.render({

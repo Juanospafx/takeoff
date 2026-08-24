@@ -77,10 +77,11 @@ async function scenario(deleteOriginal) {
     await waitFor(() => JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.42')).dirtyEstimateIds?.length > 0);
 
     const target = deleteOriginal ? estimates.find(row => row.creationMode === 'primary') : estimates.find(row => row.creationMode !== 'primary');
-    const menuButton = dom.window.document.querySelector(`[data-estimate-menu="${target.id}"]`);
-    if (!menuButton) throw new Error(`Missing menu ${target.id}; available=${[...dom.window.document.querySelectorAll('[data-estimate-menu]')].map(row => row.dataset.estimateMenu).join(',')}`);
-    menuButton.click();
-    dom.window.document.querySelector(`[data-estimate-action="delete"][data-estimate-id="${target.id}"]`).click();
+    dom.window.dispatchEvent(new dom.window.CustomEvent('takeoff:estimating-estimate-action-requested', { detail: {
+        action: 'delete', estimateId: target.id, sourceTab: 'takeoff', projectId: '42'
+    } }));
+    await waitFor(() => dom.window.document.querySelector('[data-estimate-delete-confirm]'));
+    dom.window.document.querySelector('[data-estimate-delete-confirm] [data-delete-confirm]').click();
     await waitFor(() => estimates.length === 1 && dom.window.document.querySelectorAll('.est-version-entry').length === 1)
         .catch(error => { const local = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.42')); throw new Error(`${error.message}; actions=${actions.join(',')}; remote=${estimates.map(row => row.id).join(',')}; local=${local.estimates.map(row => `${row.id}:${row.dbEstimateId || 0}`).join(',')}; dirty=${local.dirtyEstimateIds}; cards=${[...dom.window.document.querySelectorAll('[data-version]')].map(row => row.dataset.version).join(',')}; status=${dom.window.document.querySelector('.est-save-status')?.textContent}`); });
     assert.equal(dom.window.document.querySelector(`[data-version="${target.id}"]`), null);

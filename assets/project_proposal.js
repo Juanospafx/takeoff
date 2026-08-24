@@ -190,9 +190,11 @@
         return Array.isArray(state.estimateItems) ? state.estimateItems.map(itemFromEstimate) : [];
     }
 
-    function renderEstimateFooter() {
+    function renderEstimateFooter(source = null) {
         if (!estimateFooter) return;
-        const estimating = readEstimatingModule();
+        const estimating = source?.detail && Array.isArray(source.detail.estimates)
+            ? { estimates: source.detail.estimates, activeEstimateId: source.detail.activeEstimateId }
+            : readEstimatingModule();
         const estimates = Array.isArray(estimating.estimates) ? estimating.estimates : [];
         const activeId = String(estimating.activeEstimateId || estimates[0]?.id || '');
         estimateFooter.innerHTML = window.ProjectEstimateFooter.render({
@@ -215,12 +217,6 @@
     function activateEstimate(estimateId) {
         const estimating = readEstimatingModule();
         if (!Array.isArray(estimating.estimates) || !estimating.estimates.some(estimate => String(estimate.id) === String(estimateId))) return;
-        estimating.activeEstimateId = estimateId;
-        const active = estimating.estimates.find(estimate => String(estimate.id) === String(estimateId));
-        if (active && Array.isArray(active.groups)) estimating.groups = active.groups;
-        localStorage.setItem(estimatingKey, JSON.stringify(estimating));
-        renderEstimateFooter();
-        renderPreview();
         window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', { detail: { projectId: String(projectId), estimateId } }));
     }
 
@@ -436,7 +432,7 @@
         if (event.key === estimatingKey) { renderPreview(); renderEstimateFooter(); }
     });
     window.addEventListener('takeoff:active-estimate-changed', () => { renderPreview(); renderEstimateFooter(); });
-    window.addEventListener('takeoff:estimating-state-updated', () => { renderPreview(); renderEstimateFooter(); });
+    window.addEventListener('takeoff:estimating-state-updated', event => { renderPreview(); renderEstimateFooter(event); });
     window.addEventListener('takeoff:estimate-summary-updated', (event) => {
         if (window.ProjectState) window.ProjectState.estimateSummary = event.detail || {};
         renderPreview();

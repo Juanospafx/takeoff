@@ -788,19 +788,57 @@
         if (row) row[row.type === 'fixed_amount' ? 'amount' : 'percent'] = Workspace.numeric(target.value);
     }
 
+    function confirmEstimateDeletion(message) {
+        return new Promise(resolve => {
+            document.querySelector('[data-estimate-delete-confirm]')?.remove();
+            const portal = document.createElement('div');
+            portal.className = 'est-modal-backdrop';
+            portal.dataset.estimateDeleteConfirm = 'true';
+            portal.innerHTML = `<div class="est-dialog est-copy-modal" role="dialog" aria-modal="true" aria-labelledby="deleteEstimateTitle"><header><div><h2 id="deleteEstimateTitle">Delete estimate</h2><span>This action cannot be undone</span></div></header><div class="est-copy-body"><p>${esc(message)}</p></div><footer><button type="button" data-delete-cancel>Cancel</button><button type="button" class="est-btn-primary" data-delete-confirm>Delete</button></footer></div>`;
+            const finish = value => { portal.remove(); resolve(value); };
+            portal.addEventListener('click', event => {
+                if (event.target === portal || event.target.closest('[data-delete-cancel]')) finish(false);
+                if (event.target.closest('[data-delete-confirm]')) finish(true);
+            });
+            document.body.appendChild(portal);
+            portal.querySelector('[data-delete-confirm]')?.focus();
+        });
+    }
+
     async function deleteCurrentEstimate(estimateId = state.activeEstimateId, confirmed = false, identityAttempted = false) {
+        let estimate = state.estimates.find(row => String(row.id) === String(estimateId));
+        if (!estimate && projectId) {
+            try {
+                const latest = await request('list');
+                state = applyDeletedEstimateTombstones(Workspace.workspace(latest.state || {}, projectId));
+                restoreDirtyTracking();
+                saveLocal();
+                render();
+                estimate = state.estimates.find(row => String(row.id) === String(estimateId));
+            } catch (error) {
+                ui.loadState = 'error';
+                ui.message = `Could not refresh estimates: ${error.message}`;
+                renderStatus();
+                return;
+            }
+            if (!estimate) {
+                ui.loadState = 'saved';
+                ui.message = 'That estimate was already removed.';
+                renderStatus();
+                return;
+            }
+        }
+        if (!estimate) return;
         if (state.estimates.length <= 1) {
             alert('At least one estimate must remain in the project.');
             return;
         }
-        const estimate = state.estimates.find(row => String(row.id) === String(estimateId));
-        if (!estimate) return;
         const original = String(state.estimates[0]?.id || '') === String(estimate.id)
             || String(estimate.creationMode || '') === 'primary';
         const deleteMessage = original
             ? `WARNING: "${estimate.name}" is the original estimate. It can be deleted because another estimate will remain. Its Takeoff data will also be permanently removed. Delete it?`
             : `Delete “${estimate.name}”? This will also delete its Takeoff items and cannot be undone.`;
-        if (!confirmed && !confirm(deleteMessage)) return;
+        if (!confirmed && !(await confirmEstimateDeletion(deleteMessage))) return;
         if (ui.saving) {
             ui.message = 'Waiting for the current save before deletion...';
             renderStatus();
@@ -816,20 +854,17 @@
             }
             return deleteCurrentEstimate(estimateId, true, identityAttempted);
         }
-        const unpersistedIds = state.estimates
-            .filter(row => !Number(row.dbEstimateId || 0))
-            .map(row => String(row.id));
-        if (unpersistedIds.length) {
+        if (!Number(estimate.dbEstimateId || 0)) {
             if (identityAttempted) {
                 ui.loadState = 'error';
-                ui.message = 'Delete paused because the database did not confirm every estimate identity.';
+                ui.message = 'Delete paused because the database did not confirm this estimate identity.';
                 renderStatus();
                 return;
             }
             ui.message = 'Saving pending estimates before deletion…';
             renderStatus();
             if (!ui.saving) {
-                unpersistedIds.forEach(id => markEstimateDirty(id));
+                markEstimateDirty(estimate.id);
                 ui.saveRequested = true;
                 clearTimeout(ui.saveTimer);
                 await saveServer();
