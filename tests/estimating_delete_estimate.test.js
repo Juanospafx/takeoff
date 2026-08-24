@@ -23,10 +23,10 @@ test('Estimating exposes a confirmed delete action and keeps one estimate', () =
     assert.match(client, /state\.estimates = state\.estimates\.filter/);
     assert.match(client, /const incoming = Workspace\.workspace[\s\S]*applyDeletedEstimateTombstones\(incoming\)[\s\S]*localStorage\.setItem\(storageKey[\s\S]*publish\(\)/);
     assert.match(client, /delete_original: original/);
-    assert.match(client, /pendingDeleteId/);
-    assert.match(client, /ui\.saving \|\| ui\.saveRequested \|\| dirtyEstimateIds\.size/);
-    assert.match(client, /Saving pending estimates before deletion/);
-    assert.match(client, /deleteCurrentEstimate\(pendingDeleteId, true\)/);
+    assert.match(client, /const unpersistedIds = state\.estimates/);
+    assert.match(client, /while \(ui\.saving\)/);
+    assert.match(client, /return deleteCurrentEstimate\(estimateId, true\)/);
+    assert.match(client, /ui\.saveRequested = dirtyEstimateIds\.size > 0/);
     const deleteFlow = client.slice(client.indexOf('async function deleteCurrentEstimate'), client.indexOf('function handleEstimateCardAction'));
     assert.match(deleteFlow, /await saveServer\(\)[\s\S]*?return;[\s\S]*?await request\('delete'/);
     assert.match(api, /Estimate could not be resolved for deletion/);
@@ -55,7 +55,7 @@ test('new estimates wait for a database acknowledgement and protect pending navi
     assert.match(client, /Creating estimate in database/);
     assert.match(client, /beforeunload/);
     assert.match(client, /dirtyEstimateIds\.size/);
-    assert.match(page, /project_estimating\.js\?v=estimating-delete-tombstone-20260824-10/);
+    assert.match(page, /project_estimating\.js\?v=estimating-delete-await-save-20260824-12/);
 });
 
 test('removing an estimate selects another isolated workspace', () => {

@@ -801,16 +801,38 @@
             ? `WARNING: "${estimate.name}" is the original estimate. It can be deleted because another estimate will remain. Its Takeoff data will also be permanently removed. Delete it?`
             : `Delete “${estimate.name}”? This will also delete its Takeoff items and cannot be undone.`;
         if (!confirmed && !confirm(deleteMessage)) return;
-        if (ui.saving || ui.saveRequested || dirtyEstimateIds.size) {
-            ui.pendingDeleteId = String(estimate.id);
+        if (ui.saving) {
+            ui.message = 'Waiting for the current save before deletion...';
+            renderStatus();
+            const started = Date.now();
+            while (ui.saving) {
+                if (Date.now() - started > 15000) {
+                    ui.loadState = 'error';
+                    ui.message = 'Delete paused because the current save did not finish.';
+                    renderStatus();
+                    return;
+                }
+                await new Promise(resolve => setTimeout(resolve, 50));
+            }
+            return deleteCurrentEstimate(estimateId, true);
+        }
+        const unpersistedIds = state.estimates
+            .filter(row => !Number(row.dbEstimateId || 0))
+            .map(row => String(row.id));
+        if (unpersistedIds.length) {
             ui.message = 'Saving pending estimates before deletion…';
             renderStatus();
             if (!ui.saving) {
+                unpersistedIds.forEach(id => markEstimateDirty(id));
+                ui.saveRequested = true;
                 clearTimeout(ui.saveTimer);
                 await saveServer();
+                if (ui.loadState !== 'error') return deleteCurrentEstimate(estimateId, true);
             }
             return;
         }
+        // Pending edits on other persisted estimates must not starve deletion.
+        ui.saveRequested = false;
         $('optionsMenu')?.classList.remove('open');
         clearTimeout(ui.saveTimer);
         ui.saving = true;
@@ -862,6 +884,7 @@
             takeoffSyncDirtyIds.delete(requestedId);
             conflictedEstimateIds.delete(requestedId);
             conflictRemoteEstimates.delete(requestedId);
+            ui.saveRequested = dirtyEstimateIds.size > 0;
             // The DELETE acknowledgement is authoritative. Re-read the database
             // catalog even when the local splice succeeded so all three footers
             // converge on exactly the same surviving estimates.
