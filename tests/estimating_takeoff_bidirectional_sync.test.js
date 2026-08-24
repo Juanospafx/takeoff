@@ -24,8 +24,11 @@ test('manual estimate items create one deterministic Takeoff layer preserving gr
     assert.match(takeoff, /estimatingItemId: itemId/);
     assert.match(takeoff, /catalogItemId: item\.catalogItemId \|\| null/);
     assert.match(takeoff, /estimatingGroupId: groupKey/);
-    assert.match(takeoff, /takeoff:estimating-link-requested/);
     assert.match(estimating, /takeoff:estimating-link-requested/);
+    assert.match(takeoff, /takeoff:estimating-links-requested/);
+    assert.match(estimating, /takeoff:estimating-links-requested/);
+    assert.match(takeoff, /const pendingLinks = \[\]/);
+    assert.match(estimating, /Linked \$\{linked\} item\(s\) to Takeoff/);
     assert.match(estimating, /found\.item\.takeoffLayerId = String\(detail\.layerId\)/);
 });
 

@@ -21,11 +21,16 @@ test('Estimating exposes a confirmed delete action and keeps one estimate', () =
     assert.match(client, /deletedEstimateIds/);
     assert.match(client, /applyDeletedEstimateTombstones/);
     assert.match(client, /state\.estimates = state\.estimates\.filter/);
-    assert.match(client, /const incoming = Workspace\.workspace[\s\S]*applyDeletedEstimateTombstones\(incoming\)[\s\S]*localStorage\.setItem\(storageKey[\s\S]*publish\(\)/);
+    const storageStart = client.indexOf("window.addEventListener('storage'");
+    const storageFlow = client.slice(storageStart, client.indexOf('window.projectEstimatingSave', storageStart));
+    assert.match(storageFlow, /applyDeletedEstimateTombstones\(incoming\)[\s\S]*render\(\)[\s\S]*publish\(\)/);
+    assert.doesNotMatch(storageFlow, /localStorage\.setItem/);
     assert.match(client, /delete_original: original/);
     assert.match(client, /const unpersistedIds = state\.estimates/);
     assert.match(client, /while \(ui\.saving\)/);
-    assert.match(client, /return deleteCurrentEstimate\(estimateId, true\)/);
+    assert.match(client, /identityAttempted/);
+    assert.match(client, /deleteCurrentEstimate\(estimateId, true, true\)/);
+    assert.match(client, /database did not confirm every estimate identity/);
     assert.match(client, /ui\.saveRequested = dirtyEstimateIds\.size > 0/);
     const deleteFlow = client.slice(client.indexOf('async function deleteCurrentEstimate'), client.indexOf('function handleEstimateCardAction'));
     assert.match(deleteFlow, /await saveServer\(\)[\s\S]*?return;[\s\S]*?await request\('delete'/);
@@ -55,7 +60,7 @@ test('new estimates wait for a database acknowledgement and protect pending navi
     assert.match(client, /Creating estimate in database/);
     assert.match(client, /beforeunload/);
     assert.match(client, /dirtyEstimateIds\.size/);
-    assert.match(page, /project_estimating\.js\?v=estimating-delete-await-save-20260824-12/);
+    assert.match(page, /project_estimating\.js\?v=estimating-storage-loop-stop-20260824-13/);
 });
 
 test('removing an estimate selects another isolated workspace', () => {

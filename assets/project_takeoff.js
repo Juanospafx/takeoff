@@ -710,6 +710,7 @@
         if (!estimateId || estimateId !== activeEstimateId() || !Array.isArray(detail.groups)) return;
         ensureEstimateTakeoffWorkspace(estimateId);
         const seen = new Set();
+        const pendingLinks = [];
         const orderedGroupIds = [];
         detail.groups.forEach((estimateGroup, groupIndex) => {
             const groupKey = String(estimateGroup.id || `group_${groupIndex}`);
@@ -753,10 +754,7 @@
                         labor_hours: Number(item.unitLabor || 0), description: item.description || '' });
                 }
                 seen.add(String(layer.id));
-                if (!item.takeoffLayerId) window.dispatchEvent(new CustomEvent('takeoff:estimating-link-requested', { detail: {
-                    version: 1, origin: 'takeoff', projectId: String(window.ProjectState?.projectId || ''),
-                    estimateId, itemId, layerId: String(layer.id)
-                } }));
+                if (!item.takeoffLayerId) pendingLinks.push({ itemId, layerId: String(layer.id) });
             });
         });
         takeoffState.groups.forEach(group => {
@@ -771,6 +769,10 @@
         if (takeoffState.activeLayerId && !layerBelongsToEstimate(findLayer(takeoffState.activeLayerId), estimateId)) {
             takeoffState.activeLayerId = null;
         }
+        if (pendingLinks.length) window.dispatchEvent(new CustomEvent('takeoff:estimating-links-requested', { detail: {
+            version: 1, origin: 'takeoff', projectId: String(window.ProjectState?.projectId || ''),
+            estimateId, links: pendingLinks
+        } }));
         const editorReloading = ensureEditorEstimate(estimateId);
         if (!editorReloading) syncAllLayersToCanvas({ suppressEstimatingSync: true });
         renderTakeoffPanel(); renderActiveLayerToolbar();

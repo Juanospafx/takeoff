@@ -95,7 +95,7 @@
             ...(workspace?.deletedEstimateIds || []),
             ...additionalIds
         ].map(String));
-        workspace.deletedEstimateIds = [...deletedIds];
+        workspace.deletedEstimateIds = [...deletedIds].sort();
         if (!deletedIds.size) return workspace;
         workspace.estimates = workspace.estimates.filter(estimate => !deletedIds.has(String(estimate.id)));
         if (!workspace.estimates.length) return workspace;
@@ -788,7 +788,7 @@
         if (row) row[row.type === 'fixed_amount' ? 'amount' : 'percent'] = Workspace.numeric(target.value);
     }
 
-    async function deleteCurrentEstimate(estimateId = state.activeEstimateId, confirmed = false) {
+    async function deleteCurrentEstimate(estimateId = state.activeEstimateId, confirmed = false, identityAttempted = false) {
         if (state.estimates.length <= 1) {
             alert('At least one estimate must remain in the project.');
             return;
@@ -814,12 +814,18 @@
                 }
                 await new Promise(resolve => setTimeout(resolve, 50));
             }
-            return deleteCurrentEstimate(estimateId, true);
+            return deleteCurrentEstimate(estimateId, true, identityAttempted);
         }
         const unpersistedIds = state.estimates
             .filter(row => !Number(row.dbEstimateId || 0))
             .map(row => String(row.id));
         if (unpersistedIds.length) {
+            if (identityAttempted) {
+                ui.loadState = 'error';
+                ui.message = 'Delete paused because the database did not confirm every estimate identity.';
+                renderStatus();
+                return;
+            }
             ui.message = 'Saving pending estimates before deletion…';
             renderStatus();
             if (!ui.saving) {
@@ -827,7 +833,7 @@
                 ui.saveRequested = true;
                 clearTimeout(ui.saveTimer);
                 await saveServer();
-                if (ui.loadState !== 'error') return deleteCurrentEstimate(estimateId, true);
+                if (ui.loadState !== 'error') return deleteCurrentEstimate(estimateId, true, true);
             }
             return;
         }
@@ -852,7 +858,7 @@
             const deletedEstimate = state.estimates.find(row => String(row.id) === acknowledgedClientId)
                 || state.estimates.find(row => acknowledgedDbId > 0 && Number(row.dbEstimateId || 0) === acknowledgedDbId);
             const deletedId = String(deletedEstimate?.id || acknowledgedClientId);
-            state.deletedEstimateIds = [...new Set([...(state.deletedEstimateIds || []), deletedId, String(estimate.id)])];
+            state.deletedEstimateIds = [...new Set([...(state.deletedEstimateIds || []), deletedId, String(estimate.id)])].sort();
             const previousCount = state.estimates.length;
             state.estimates = state.estimates.filter(row => String(row.id) !== acknowledgedClientId
                 && String(row.id) !== String(estimate.id)
@@ -1111,6 +1117,22 @@
         found.item.quantitySyncStatus = 'synced';
         changed(`Linked ${found.item.name} to Takeoff`);
     });
+    window.addEventListener('takeoff:estimating-links-requested', event => {
+        const detail = event.detail || {};
+        if (detail.projectId && String(detail.projectId) !== String(projectId)) return;
+        if (String(detail.estimateId || '') !== String(state.activeEstimateId) || !Array.isArray(detail.links)) return;
+        const itemsById = new Map(allItems().map(row => [String(row.item.id), row.item]));
+        let linked = 0;
+        detail.links.forEach(link => {
+            const item = itemsById.get(String(link.itemId || ''));
+            if (!item || !link.layerId || String(item.takeoffLayerId || '') === String(link.layerId)) return;
+            item.takeoffLayerId = String(link.layerId);
+            item.quantitySource = 'takeoff';
+            item.quantitySyncStatus = 'synced';
+            linked += 1;
+        });
+        if (linked) changed(`Linked ${linked} item(s) to Takeoff`);
+    });
     window.addEventListener('takeoff:active-estimate-changed', event => {
         if (event.detail?.projectId && String(event.detail.projectId) !== String(projectId)) return;
         selectEstimate(event.detail?.estimateId);
@@ -1163,13 +1185,12 @@
         const incoming = Workspace.workspace(JSON.parse(event.newValue), projectId);
         state = applyDeletedEstimateTombstones(incoming);
         restoreDirtyTracking();
-        // Rewrite the canonical filtered snapshot before publishing. Do not call
-        // saveLocal() here because it advances the UI timestamp and could make two
-        // tabs bounce storage events indefinitely.
+        // Storage events are notifications only. Never write the same workspace
+        // key from inside its handler: two tabs can otherwise bounce normalized
+        // snapshots forever and monopolize the browser main thread.
         state.groups = current().groups;
         state.dirtyEstimateIds = [...dirtyEstimateIds];
         state.takeoffSyncDirtyIds = [...takeoffSyncDirtyIds];
-        localStorage.setItem(storageKey, JSON.stringify(Workspace.clone(state)));
         render();
         publish();
     });
