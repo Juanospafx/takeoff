@@ -631,8 +631,19 @@ try {
             $pdo->prepare('DELETE FROM takeoff_estimate_scales WHERE estimate_key=? AND project_id=?')->execute(array($clientEstimateId, $projectId));
         });
         $pdo->commit();
+        $remainingStmt = $pdo->prepare('SELECT * FROM estimates WHERE project_id=? AND deleted_at IS NULL ORDER BY updated_at DESC,id DESC');
+        $remainingStmt->execute(array($projectId));
+        $remainingEstimates = array();
+        foreach ($remainingStmt->fetchAll(PDO::FETCH_ASSOC) as $remainingRow) $remainingEstimates[] = pew_load_one($pdo, $remainingRow);
+        $remainingActiveId = $remainingEstimates ? $remainingEstimates[0]['id'] : null;
+        foreach ($remainingEstimates as $remainingCandidate) {
+            if (!empty($remainingCandidate['isActive'])) { $remainingActiveId = $remainingCandidate['id']; break; }
+        }
         pew_json(array('ok' => true, 'success' => true, 'estimateId' => $estimateId,
-            'clientEstimateId' => $clientEstimateId));
+            'clientEstimateId' => $clientEstimateId,
+            'deleted' => array('dbEstimateId' => $estimateId, 'clientEstimateId' => $clientEstimateId),
+            'activeEstimateId' => $remainingActiveId,
+            'state' => array('activeEstimateId' => $remainingActiveId, 'estimates' => $remainingEstimates)));
     }
     pew_error('Unknown action.', 404, 'unknown_action');
 } catch (PewRevisionConflict $e) {

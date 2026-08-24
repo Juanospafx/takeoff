@@ -1369,7 +1369,7 @@ $state = [
 <script src="../assets/estimate_calculation_service.js?v=estimating-calculation-audit-20260811-1"></script>
 <script src="../assets/estimating_export_service.js?v=estimating-boq-export-20260820-1"></script>
 <script src="../assets/estimating_workspace_service.js?v=estimating-durable-lifecycle-20260821-6"></script>
-<script src="../assets/project_estimating.js?v=estimating-async-delete-20260824-15"></script>
+<script src="../assets/project_estimating.js?v=estimating-authoritative-delete-20260824-16"></script>
 <script src="../assets/project_proposal.js?v=estimating-owner-intents-20260824-7"></script>
 <script src="../assets/global_tools.js"></script>
 </body>

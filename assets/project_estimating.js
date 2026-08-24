@@ -37,6 +37,7 @@
     const conflictRemoteEstimates = new Map();
     const dirtyGenerations = new Map();
     const automaticRebaseKeys = new Set();
+    const deletingEstimateIds = new Set();
     let dirtyGeneration = 0;
     const pendingTakeoffByEstimate = new Map();
 
@@ -321,7 +322,7 @@
                 const pendingDeleteId = ui.pendingDeleteId;
                 ui.pendingDeleteId = null;
                 clearTimeout(ui.saveTimer);
-                ui.saveTimer = setTimeout(() => deleteCurrentEstimate(pendingDeleteId, true), 0);
+                ui.saveTimer = setTimeout(() => deleteEstimateAuthoritative(pendingDeleteId, true), 0);
             } else if (ui.pendingDeleteId) {
                 ui.message = 'Delete paused because pending estimates could not be saved. Retry after resolving the save error.';
                 renderStatus();
@@ -805,8 +806,12 @@
         });
     }
 
-    async function deleteCurrentEstimate(estimateId = state.activeEstimateId, confirmed = false, identityAttempted = false) {
-        let estimate = state.estimates.find(row => String(row.id) === String(estimateId));
+
+    async function deleteEstimateAuthoritative(estimateId = state.activeEstimateId, confirmed = false) {
+        const requestedId = String(estimateId || '');
+        if (!requestedId || deletingEstimateIds.has(requestedId)) return;
+
+        let estimate = state.estimates.find(row => String(row.id) === requestedId);
         if (!estimate && projectId) {
             try {
                 const latest = await request('list');
@@ -814,7 +819,7 @@
                 restoreDirtyTracking();
                 saveLocal();
                 render();
-                estimate = state.estimates.find(row => String(row.id) === String(estimateId));
+                estimate = state.estimates.find(row => String(row.id) === requestedId);
             } catch (error) {
                 ui.loadState = 'error';
                 ui.message = `Could not refresh estimates: ${error.message}`;
@@ -833,127 +838,86 @@
             alert('At least one estimate must remain in the project.');
             return;
         }
-        const original = String(state.estimates[0]?.id || '') === String(estimate.id)
+
+        const original = String(state.estimates[0]?.id || '') === requestedId
             || String(estimate.creationMode || '') === 'primary';
-        const deleteMessage = original
-            ? `WARNING: "${estimate.name}" is the original estimate. It can be deleted because another estimate will remain. Its Takeoff data will also be permanently removed. Delete it?`
-            : `Delete “${estimate.name}”? This will also delete its Takeoff items and cannot be undone.`;
-        if (!confirmed && !(await confirmEstimateDeletion(deleteMessage))) return;
-        if (ui.saving) {
-            ui.message = 'Waiting for the current save before deletion...';
-            renderStatus();
-            const started = Date.now();
-            while (ui.saving) {
-                if (Date.now() - started > 15000) {
-                    ui.loadState = 'error';
-                    ui.message = 'Delete paused because the current save did not finish.';
-                    renderStatus();
-                    return;
-                }
+        const message = original
+            ? `WARNING: "${estimate.name}" is the original estimate. Its Takeoff data will also be permanently removed. Delete it?`
+            : `Delete "${estimate.name}"? This will also delete its Takeoff items and cannot be undone.`;
+        if (!confirmed && !(await confirmEstimateDeletion(message))) return;
+
+        deletingEstimateIds.add(requestedId);
+        const backup = Workspace.clone(state);
+        const requestedDbId = Number(estimate.dbEstimateId || 0);
+
+        // Optimistic catalog removal is intentional: all three footers consume
+        // this one published state and the stale card becomes non-actionable
+        // immediately. A failed server transaction restores the exact backup.
+        state.deletedEstimateIds = [...new Set([...(state.deletedEstimateIds || []), requestedId])].sort();
+        state.estimates = state.estimates.filter(row => String(row.id) !== requestedId);
+        if (!state.estimates.some(row => String(row.id) === String(state.activeEstimateId))) {
+            state.activeEstimateId = state.estimates[0]?.id || null;
+        }
+        if (state.estimates.length) Workspace.selectEstimate(state, state.activeEstimateId);
+        dirtyEstimateIds.delete(requestedId);
+        dirtyGenerations.delete(requestedId);
+        takeoffSyncDirtyIds.delete(requestedId);
+        conflictedEstimateIds.delete(requestedId);
+        conflictRemoteEstimates.delete(requestedId);
+        clearTimeout(ui.saveTimer);
+        ui.saveRequested = false;
+        ui.loadState = 'saving';
+        ui.message = 'Deleting estimate...';
+        saveLocal();
+        render();
+
+        try {
+            // A request already in flight may contain the target. Wait for that
+            // one request only; never start a save/delete recursion.
+            const waitStarted = Date.now();
+            while (ui.saving && Date.now() - waitStarted < 15000) {
                 await new Promise(resolve => setTimeout(resolve, 50));
             }
-            return deleteCurrentEstimate(estimateId, true, identityAttempted);
-        }
-        if (!Number(estimate.dbEstimateId || 0)) {
-            if (identityAttempted) {
-                ui.loadState = 'error';
-                ui.message = 'Delete paused because the database did not confirm this estimate identity.';
-                renderStatus();
-                return;
-            }
-            ui.message = 'Saving pending estimates before deletion…';
-            renderStatus();
-            if (!ui.saving) {
-                markEstimateDirty(estimate.id);
-                ui.saveRequested = true;
-                clearTimeout(ui.saveTimer);
-                await saveServer();
-                if (ui.loadState !== 'error') return deleteCurrentEstimate(estimateId, true, true);
-            }
-            return;
-        }
-        // Pending edits on other persisted estimates must not starve deletion.
-        ui.saveRequested = false;
-        $('optionsMenu')?.classList.remove('open');
-        clearTimeout(ui.saveTimer);
-        ui.saving = true;
-        ui.loadState = 'saving';
-        ui.message = 'Deleting estimate…';
-        renderStatus();
-        try {
-            let deleteAck = null;
+            if (ui.saving) throw new Error('The current save did not finish in time.');
+
+            let ack = { success: true, state };
             if (projectId) {
-                deleteAck = await request('delete', { method: 'POST', headers: { 'Content-Type': 'application/json' },
+                ack = await request('delete', { method: 'POST', headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({ action: 'delete', project_id: projectId,
-                        estimate_id: Number(estimate.dbEstimateId || 0), client_estimate_id: String(estimate.id),
+                        estimate_id: requestedDbId, client_estimate_id: requestedId,
                         delete_original: original }) });
             }
-            const acknowledgedClientId = String(deleteAck?.clientEstimateId || estimate.id);
-            const acknowledgedDbId = Number(deleteAck?.estimateId || estimate.dbEstimateId || 0);
-            const deletedEstimate = state.estimates.find(row => String(row.id) === acknowledgedClientId)
-                || state.estimates.find(row => acknowledgedDbId > 0 && Number(row.dbEstimateId || 0) === acknowledgedDbId);
-            const deletedId = String(deletedEstimate?.id || acknowledgedClientId);
-            state.deletedEstimateIds = [...new Set([...(state.deletedEstimateIds || []), deletedId, String(estimate.id)])].sort();
-            const previousCount = state.estimates.length;
-            state.estimates = state.estimates.filter(row => String(row.id) !== acknowledgedClientId
-                && String(row.id) !== String(estimate.id)
-                && !(acknowledgedDbId > 0 && Number(row.dbEstimateId || 0) === acknowledgedDbId));
-            const removed = state.estimates.length < previousCount;
-            if (removed && state.estimates.length) {
-                if (!state.estimates.some(row => String(row.id) === String(state.activeEstimateId))) {
-                    state.activeEstimateId = state.estimates[0].id;
-                }
-                Workspace.selectEstimate(state, state.activeEstimateId);
-            }
-            if (!removed) {
-                // The server committed the delete, but local state changed while the
-                // request was in flight. Reconcile from the authoritative DB list so
-                // a stale card can never remain actionable or be saved again.
-                const latest = await request('list');
-                state = applyDeletedEstimateTombstones(Workspace.workspace(latest.state || {}, projectId), [deletedId, String(estimate.id)]);
-            }
-            dirtyEstimateIds.delete(deletedId);
-            dirtyGenerations.delete(deletedId);
-            takeoffSyncDirtyIds.delete(deletedId);
-            conflictedEstimateIds.delete(deletedId);
-            conflictRemoteEstimates.delete(deletedId);
-            // Also clear the originally requested identity when the server resolved
-            // it to a canonical client/database id.
-            const requestedId = String(estimate.id);
-            dirtyEstimateIds.delete(requestedId);
-            dirtyGenerations.delete(requestedId);
-            takeoffSyncDirtyIds.delete(requestedId);
-            conflictedEstimateIds.delete(requestedId);
-            conflictRemoteEstimates.delete(requestedId);
-            ui.saveRequested = dirtyEstimateIds.size > 0;
-            // The DELETE acknowledgement is authoritative. Re-read the database
-            // catalog even when the local splice succeeded so all three footers
-            // converge on exactly the same surviving estimates.
-            if (projectId) {
-                try {
-                    const latest = await request('list');
-                    state = applyDeletedEstimateTombstones(Workspace.workspace(latest.state || {}, projectId), [deletedId, requestedId]);
-                    restoreDirtyTracking();
-                } catch (refreshError) {
-                    // The local tombstone already prevents the committed delete
-                    // from being rendered or resaved while connectivity recovers.
-                }
-            }
+            const acknowledgedId = String(ack?.deleted?.clientEstimateId || ack?.clientEstimateId || requestedId);
+            const localDrafts = state.estimates.filter(row => !Number(row.dbEstimateId || 0)
+                && String(row.id) !== requestedId && String(row.id) !== acknowledgedId);
+            const authoritative = Workspace.workspace(ack?.state || state, projectId);
+            const serverIds = new Set(authoritative.estimates.map(row => String(row.id)));
+            localDrafts.forEach(row => { if (!serverIds.has(String(row.id))) authoritative.estimates.push(row); });
+            state = applyDeletedEstimateTombstones(authoritative, [requestedId, acknowledgedId]);
+            restoreDirtyTracking();
             saveLocal();
             render();
             ui.loadState = projectId ? 'saved' : 'local';
             ui.message = 'Estimate deleted';
             renderStatus();
         } catch (error) {
-            ui.loadState = 'error';
-            ui.message = `Delete failed: ${error.message}`;
-            renderStatus();
-        } finally {
-            ui.saving = false;
-            if (ui.saveRequested) {
-                clearTimeout(ui.saveTimer);
-                ui.saveTimer = setTimeout(saveServer, 0);
+            if (!requestedDbId && ['estimate_not_found', 'last_estimate'].includes(error.code)) {
+                saveLocal();
+                render();
+                ui.loadState = projectId ? 'saved' : 'local';
+                ui.message = 'Estimate deleted';
+                renderStatus();
+            } else {
+                state = Workspace.workspace(backup, projectId);
+                restoreDirtyTracking();
+                saveLocal();
+                render();
+                ui.loadState = 'error';
+                ui.message = `Delete failed: ${error.message}`;
+                renderStatus();
             }
+        } finally {
+            deletingEstimateIds.delete(requestedId);
         }
     }
 
@@ -969,7 +933,7 @@
             }
         }
         if (actionName === 'copy') { selectEstimate(estimateId); ui.modal = 'new'; renderModal(); }
-        if (actionName === 'delete') deleteCurrentEstimate(estimateId);
+        if (actionName === 'delete') deleteEstimateAuthoritative(estimateId);
     }
 
     root.addEventListener('click', event => {
@@ -1014,7 +978,7 @@
         if (option === 'save') saveServer();
         if (option === 'copy') { ui.modal = 'new'; renderModal(); }
         if (option === 'export') { ui.modal = 'export'; renderModal(); }
-        if (option === 'delete-estimate') deleteCurrentEstimate();
+        if (option === 'delete-estimate') deleteEstimateAuthoritative();
         if (target.closest('[data-download-estimate]')) {
             const mode = document.querySelector('[name="estimateExportMode"]:checked')?.value || 'normal';
             exportEstimate(mode); ui.modal = null; renderModal();

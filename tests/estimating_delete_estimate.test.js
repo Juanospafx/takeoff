@@ -11,13 +11,12 @@ const Workspace = require(path.join(root, 'assets/estimating_workspace_service.j
 
 test('Estimating exposes a confirmed delete action and keeps one estimate', () => {
     assert.match(page, /data-est-option="delete-estimate"/);
-    assert.match(client, /function deleteCurrentEstimate/);
+    assert.match(client, /function deleteEstimateAuthoritative/);
     assert.match(client, /is the original estimate/);
-    assert.match(client, /client_estimate_id: String\(estimate\.id\)/);
-    assert.match(client, /deleteAck = await request\('delete'/);
-    assert.match(client, /deleteAck\?\.clientEstimateId/);
-    assert.match(client, /deleteAck\?\.estimateId/);
-    assert.match(client, /if \(!removed\)[\s\S]*await request\('list'\)/);
+    assert.match(client, /client_estimate_id: requestedId/);
+    assert.match(client, /ack = await request\('delete'/);
+    assert.match(client, /ack\?\.deleted\?\.clientEstimateId/);
+    assert.match(api, /'state' => array\('activeEstimateId' => \$remainingActiveId, 'estimates' => \$remainingEstimates\)/);
     assert.match(client, /deletedEstimateIds/);
     assert.match(client, /applyDeletedEstimateTombstones/);
     assert.match(client, /state\.estimates = state\.estimates\.filter/);
@@ -26,20 +25,16 @@ test('Estimating exposes a confirmed delete action and keeps one estimate', () =
     assert.match(storageFlow, /applyDeletedEstimateTombstones\(incoming\)[\s\S]*render\(\)[\s\S]*publish\(\)/);
     assert.doesNotMatch(storageFlow, /localStorage\.setItem/);
     assert.match(client, /delete_original: original/);
-    assert.match(client, /!Number\(estimate\.dbEstimateId \|\| 0\)/);
-    assert.match(client, /while \(ui\.saving\)/);
-    assert.match(client, /identityAttempted/);
-    assert.match(client, /deleteCurrentEstimate\(estimateId, true, true\)/);
-    assert.match(client, /database did not confirm this estimate identity/);
-    assert.match(client, /ui\.saveRequested = dirtyEstimateIds\.size > 0/);
-    const deleteFlow = client.slice(client.indexOf('async function deleteCurrentEstimate'), client.indexOf('function handleEstimateCardAction'));
-    assert.match(deleteFlow, /await saveServer\(\)[\s\S]*?return;[\s\S]*?await request\('delete'/);
+    assert.match(client, /deletingEstimateIds/);
+    const deleteFlow = client.slice(client.indexOf('async function deleteEstimateAuthoritative'), client.indexOf('function handleEstimateCardAction'));
+    assert.match(deleteFlow, /state\.estimates = state\.estimates\.filter[\s\S]*?saveLocal\(\)[\s\S]*?await request\('delete'/);
+    assert.doesNotMatch(deleteFlow, /await saveServer\(\)/);
     assert.match(api, /Estimate could not be resolved for deletion/);
     assert.match(api, /ORDER BY id ASC LIMIT 1/);
     assert.match(api, /ORDER BY id ASC FOR UPDATE/);
     assert.match(client, /state\.estimates\.length <= 1/);
     assert.match(client, /confirmEstimateDeletion/);
-    assert.match(client, /await confirmEstimateDeletion\(deleteMessage\)/);
+    assert.match(client, /await confirmEstimateDeletion\(message\)/);
     assert.match(client, /request\('delete'/);
     assert.match(client, /menuAttribute: 'data-estimate-menu'/);
     assert.match(client, /data-estimate-actions-menu/);
@@ -61,7 +56,7 @@ test('new estimates wait for a database acknowledgement and protect pending navi
     assert.match(client, /Creating estimate in database/);
     assert.match(client, /beforeunload/);
     assert.match(client, /dirtyEstimateIds\.size/);
-    assert.match(page, /project_estimating\.js\?v=estimating-async-delete-20260824-15/);
+    assert.match(page, /project_estimating\.js\?v=estimating-authoritative-delete-20260824-16/);
 });
 
 test('removing an estimate selects another isolated workspace', () => {
