@@ -9,83 +9,84 @@
     <title>Cost Catalog | Brightronix</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="../assets/cost_catalog.css">
+    <link rel="stylesheet" href="../assets/global_tools.css">
+    <script>
+        (function () {
+            try {
+                var saved = localStorage.getItem('takeoff.theme');
+                document.documentElement.setAttribute('data-theme', saved === 'dark' ? 'dark' : 'light');
+            } catch (error) {
+                document.documentElement.setAttribute('data-theme', 'light');
+            }
+        })();
+    </script>
+    <link rel="stylesheet" href="../assets/cost_catalog.css?v=procore-catalog-20260824-1">
 </head>
 <body>
+<?php include __DIR__ . '/../views/global_tools_header.php'; ?>
 <div class="cc-shell">
-    <aside class="cc-app-nav">
-        <div class="cc-brand">
-            <div class="cc-brand-icon"><i class="fas fa-book"></i></div>
-            <span>Cost Catalog</span>
-        </div>
-        <nav class="cc-nav">
-            <a class="active" href="/pages/cost_catalog.php"><i class="fas fa-book"></i><span>Cost Catalog</span></a>
-            <a href="/pages/bid_board.php"><i class="fas fa-table-columns"></i><span>Bid Board</span></a>
-            <a href="/pages/project_module.php"><i class="fas fa-folder-tree"></i><span>Projects</span></a>
-            <a href="/pages/takeoff.php"><i class="fas fa-ruler-combined"></i><span>Takeoff</span></a>
-            <a href="/pages/estimate_module.php"><i class="fas fa-calculator"></i><span>Estimate</span></a>
-            <a href="/pages/company_settings.php"><i class="fas fa-gear"></i><span>Settings</span></a>
-        </nav>
-    </aside>
-
     <aside class="cc-catalog-sidebar">
         <div class="cc-sidebar-head">
-            <strong>Catalog Library</strong>
-            <button class="cc-icon-btn" id="ccAddCatalog" title="Add Catalog"><i class="fas fa-plus"></i></button>
+            <div><span class="cc-eyebrow">Company tool</span><strong>Catalog Library</strong></div>
+            <button class="cc-icon-btn" id="ccAddCatalog" title="Add catalog" aria-label="Add catalog"><i class="fas fa-plus" aria-hidden="true"></i></button>
         </div>
-        <button class="cc-tree-row active" data-view="all"><i class="fas fa-layer-group"></i><span>All Catalog Items</span></button>
-        <button class="cc-tree-row" data-view="recent"><i class="fas fa-clock"></i><span>Most Recently Used</span></button>
+        <button class="cc-tree-row active" data-view="all"><i class="fas fa-layer-group" aria-hidden="true"></i><span>All Catalog Items</span></button>
+        <button class="cc-tree-row" data-view="recent"><i class="far fa-clock" aria-hidden="true"></i><span>Most Recently Used</span></button>
         <div class="cc-tree-title">Catalogs</div>
         <div id="ccCatalogTree"></div>
     </aside>
 
     <main class="cc-main">
         <div class="cc-topbar">
-            <div>
-                <h1 id="ccTitle">All Catalog Items</h1>
-                <p id="ccSubtitle">Browse catalog items by catalog, group or subgroup.</p>
+            <div class="cc-title-wrap">
+                <div class="cc-module-icon"><i class="fas fa-book" aria-hidden="true"></i></div>
+                <div>
+                    <h1 id="ccTitle">All Catalog Items</h1>
+                    <p id="ccSubtitle">Browse catalog items by catalog, group or subgroup.</p>
+                </div>
             </div>
             <div class="cc-actions">
-                <button class="cc-btn primary" id="ccAddItem"><i class="fas fa-plus"></i> Add Item</button>
-                <button class="cc-btn" id="ccAddGroup"><i class="fas fa-folder-plus"></i> Add Group</button>
-                <button class="cc-btn" id="ccAddCatalogTop"><i class="fas fa-book-medical"></i> Add Catalog</button>
+                <button class="cc-btn primary" id="ccAddItem"><i class="fas fa-plus" aria-hidden="true"></i> Add Item</button>
+                <button class="cc-btn" id="ccAddGroup"><i class="fas fa-folder-plus" aria-hidden="true"></i> Add Group</button>
+                <button class="cc-icon-btn bordered" id="ccAddCatalogTop" title="Add catalog" aria-label="Add catalog"><i class="fas fa-book-medical" aria-hidden="true"></i></button>
             </div>
         </div>
 
         <div id="ccError" class="cc-error" style="display:none;"></div>
 
-        <section class="cc-workspace">
+        <section class="cc-context-actions" aria-label="Selected catalog and group actions">
             <div class="cc-panel">
                 <div class="cc-panel-head">
-                    <strong>Catalog Actions</strong>
+                    <span>Catalog</span><strong id="ccCatalogContext">No catalog selected</strong>
                 </div>
                 <div class="cc-action-grid" id="ccCatalogActions"></div>
             </div>
 
             <div class="cc-panel">
                 <div class="cc-panel-head">
-                    <strong>Group Actions</strong>
+                    <span>Group</span><strong id="ccGroupContext">No group selected</strong>
                 </div>
                 <div class="cc-action-grid" id="ccGroupActions"></div>
             </div>
         </section>
 
-        <section class="cc-table-wrap">
-            <table class="cc-table">
-                <thead>
-                    <tr>
-                        <th>Item Name</th>
-                        <th>Description</th>
-                        <th>UoM</th>
-                        <th>Unit Cost</th>
-                        <th>Unit Labor Time</th>
-                        <th>Catalog Name</th>
-                        <th>Group Name</th>
-                        <th>Actions</th>
-                    </tr>
-                </thead>
-                <tbody id="ccItemsBody"></tbody>
-            </table>
+        <section class="cc-table-section" aria-label="Cost catalog items">
+            <div class="cc-table-controls">
+                <label class="cc-search-field">
+                    <span class="sr-only">Search catalog items</span>
+                    <input id="ccSearch" type="search" placeholder="Search catalog items" autocomplete="off">
+                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
+                </label>
+                <label class="cc-select-field"><span>Sort by</span><select id="ccSortBy"><option value="name">Item name</option><option value="cost">Unit cost</option><option value="labor">Labor time</option><option value="catalog">Catalog</option></select></label>
+                <button class="cc-icon-btn bordered" id="ccSortDir" type="button" aria-label="Sort descending" title="Toggle sort direction"><i class="fas fa-arrow-down-wide-short" aria-hidden="true"></i></button>
+                <span class="cc-result-count" id="ccResultCount" aria-live="polite"></span>
+            </div>
+            <div class="cc-table-wrap">
+                <table class="cc-table">
+                    <thead><tr><th>Item Name</th><th>Description</th><th>UoM</th><th>Unit Cost</th><th>Unit Labor Time</th><th>Catalog Name</th><th>Group Name</th><th><span class="sr-only">Actions</span></th></tr></thead>
+                    <tbody id="ccItemsBody"></tbody>
+                </table>
+            </div>
         </section>
     </main>
 </div>
@@ -252,6 +253,7 @@
     </div>
 </div>
 
-<script src="../assets/cost_catalog.js"></script>
+<script src="../assets/global_tools.js"></script>
+<script src="../assets/cost_catalog.js?v=procore-catalog-20260824-1"></script>
 </body>
 </html>

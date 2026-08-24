@@ -4,6 +4,9 @@
     let selection = { view: 'all', catalogId: null, groupId: null };
     let editingItemId = null;
     let movingItemId = null;
+    let itemQuery = '';
+    let itemSort = 'name';
+    let itemSortDirection = 1;
 
     const esc = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({
         '&': '&amp;',
@@ -115,6 +118,10 @@
     function renderActions() {
         const catalog = currentCatalog();
         const group = currentGroup();
+        const catalogContext = document.getElementById('ccCatalogContext');
+        const groupContext = document.getElementById('ccGroupContext');
+        if (catalogContext) catalogContext.textContent = catalog?.name || 'No catalog selected';
+        if (groupContext) groupContext.textContent = group?.name || 'No group selected';
         document.getElementById('ccCatalogActions').innerHTML = `
             <button class="cc-btn" data-catalog-action="add">Add Catalog</button>
             <button class="cc-btn" data-catalog-action="rename" ${!catalog ? 'disabled' : ''}>Rename</button>
@@ -139,36 +146,87 @@
 
     function renderItems() {
         const body = document.getElementById('ccItemsBody');
-        body.innerHTML = state.items.map(item => `
+        const normalizedQuery = itemQuery.trim().toLowerCase();
+        const valueForSort = item => {
+            if (itemSort === 'cost') return Number(item.unit_cost || 0);
+            if (itemSort === 'labor') return Number(item.labor_hours || 0);
+            if (itemSort === 'catalog') return String(item.catalog_name || '').toLowerCase();
+            return String(item.name || '').toLowerCase();
+        };
+        const items = state.items.filter(item => !normalizedQuery || [item.name, item.description,
+            item.catalog_name, item.group_name, item.manufacturer, item.catalog_number, item.cost_code]
+            .some(value => String(value || '').toLowerCase().includes(normalizedQuery)))
+            .slice().sort((a, b) => {
+                const left = valueForSort(a);
+                const right = valueForSort(b);
+                return (typeof left === 'number' ? left - right : left.localeCompare(right)) * itemSortDirection;
+            });
+        const resultCount = document.getElementById('ccResultCount');
+        if (resultCount) resultCount.textContent = `${items.length} ${items.length === 1 ? 'item' : 'items'}`;
+        body.innerHTML = items.map(item => `
             <tr>
                 <td>
-                    <strong>${esc(item.name)}</strong><br>
-                    <span class="cc-pill">${displayItemType(item.item_type)}</span>
-                    ${item.color ? `<span class="cc-swatch" style="background:${esc(item.color)}"></span>` : ''}
+                    <span class="cc-item-name" title="${esc(item.name)}">${esc(item.name)}</span>
+                    <span class="cc-item-meta"><span class="cc-pill">${displayItemType(item.item_type)}</span>
+                    ${item.color ? `<span class="cc-swatch" style="background:${esc(item.color)}" title="Item color"></span>` : ''}</span>
                 </td>
-                <td>${esc(item.description || '-')}</td>
+                <td class="cc-muted-cell" title="${esc(item.description || '')}">${esc(item.description || '-')}</td>
                 <td>${esc(item.unit_of_measure || 'ea')}</td>
-                <td>${money(item.unit_cost)}</td>
+                <td class="cc-money">${money(item.unit_cost)}</td>
                 <td>${Number(item.labor_hours || 0).toFixed(4)}</td>
-                <td>${esc(item.catalog_name || '-')}</td>
-                <td>${esc(item.group_name || '-')}</td>
+                <td class="cc-muted-cell">${esc(item.catalog_name || '-')}</td>
+                <td class="cc-muted-cell">${esc(item.group_name || '-')}</td>
                 <td>
                     <div class="cc-row-actions">
-                        <button class="cc-btn" data-item-action="edit" data-id="${item.id}">Edit</button>
-                        <button class="cc-btn" data-item-action="duplicate" data-id="${item.id}">Duplicate</button>
-                        <button class="cc-btn" data-item-action="move" data-id="${item.id}">Move</button>
-                        <button class="cc-btn" data-item-action="assembly" data-id="${item.id}">Convert</button>
-                        <button class="cc-btn" data-item-action="takeoff" data-id="${item.id}">Add to Takeoff</button>
-                        <button class="cc-btn" data-item-action="history" data-id="${item.id}">History</button>
-                        <button class="cc-btn danger" data-item-action="delete" data-id="${item.id}">Delete</button>
+                        <div class="cc-row-menu">
+                            <button class="cc-btn cc-row-menu-toggle" type="button" data-item-menu="${item.id}" aria-label="Actions for ${esc(item.name)}" aria-expanded="false"><i class="fas fa-ellipsis-vertical" aria-hidden="true"></i></button>
+                            <div class="cc-row-menu-panel" data-item-menu-panel="${item.id}" role="menu">
+                                <button type="button" data-item-action="edit" data-id="${item.id}" role="menuitem"><i class="fas fa-pen"></i>Edit</button>
+                                <button type="button" data-item-action="duplicate" data-id="${item.id}" role="menuitem"><i class="far fa-copy"></i>Duplicate</button>
+                                <button type="button" data-item-action="move" data-id="${item.id}" role="menuitem"><i class="fas fa-arrow-right-arrow-left"></i>Move</button>
+                                <button type="button" data-item-action="assembly" data-id="${item.id}" role="menuitem"><i class="fas fa-cubes"></i>Convert to assembly</button>
+                                <button type="button" data-item-action="takeoff" data-id="${item.id}" role="menuitem"><i class="fas fa-ruler-combined"></i>Add to Takeoff</button>
+                                <button type="button" data-item-action="history" data-id="${item.id}" role="menuitem"><i class="fas fa-clock-rotate-left"></i>Usage history</button>
+                                <button class="danger" type="button" data-item-action="delete" data-id="${item.id}" role="menuitem"><i class="fas fa-trash"></i>Delete</button>
+                            </div>
+                        </div>
                     </div>
                 </td>
             </tr>
-        `).join('') || '<tr><td colspan="8" style="color:#94a3b8;">No items in this selection.</td></tr>';
+        `).join('') || '<tr class="cc-empty-row"><td colspan="8"><i class="fas fa-box-open" aria-hidden="true"></i>No catalog items match this view.</td></tr>';
+
+        body.querySelectorAll('[data-item-menu]').forEach(button => {
+            button.addEventListener('click', event => {
+                event.stopPropagation();
+                const menu = button.closest('.cc-row-menu');
+                const opening = !menu.classList.contains('open');
+                closeItemMenus();
+                if (!opening) return;
+                menu.classList.add('open');
+                button.setAttribute('aria-expanded', 'true');
+                positionItemMenu(button, menu.querySelector('.cc-row-menu-panel'));
+            });
+        });
 
         body.querySelectorAll('[data-item-action]').forEach(button => {
             button.addEventListener('click', () => itemAction(button.dataset.itemAction, Number(button.dataset.id)));
         });
+    }
+
+    function closeItemMenus() {
+        document.querySelectorAll('.cc-row-menu.open').forEach(menu => menu.classList.remove('open'));
+        document.querySelectorAll('[data-item-menu]').forEach(button => button.setAttribute('aria-expanded', 'false'));
+    }
+
+    function positionItemMenu(button, panel) {
+        if (!panel) return;
+        const rect = button.getBoundingClientRect();
+        const width = 178;
+        const left = Math.max(8, Math.min(window.innerWidth - width - 8, rect.right - width));
+        const estimatedHeight = 238;
+        const top = rect.bottom + estimatedHeight > window.innerHeight ? Math.max(8, rect.top - estimatedHeight - 4) : rect.bottom + 4;
+        panel.style.left = `${left}px`;
+        panel.style.top = `${top}px`;
     }
 
     function renderItemSelects() {
@@ -529,6 +587,21 @@
     }
 
     document.addEventListener('DOMContentLoaded', () => {
+        document.getElementById('ccSearch')?.addEventListener('input', event => {
+            itemQuery = event.target.value;
+            renderItems();
+        });
+        document.getElementById('ccSortBy')?.addEventListener('change', event => {
+            itemSort = event.target.value;
+            renderItems();
+        });
+        document.getElementById('ccSortDir')?.addEventListener('click', event => {
+            itemSortDirection *= -1;
+            const button = event.currentTarget;
+            button.setAttribute('aria-label', itemSortDirection > 0 ? 'Sort ascending' : 'Sort descending');
+            button.querySelector('i').className = itemSortDirection > 0 ? 'fas fa-arrow-up-wide-short' : 'fas fa-arrow-down-wide-short';
+            renderItems();
+        });
         document.querySelectorAll('[data-view]').forEach(btn => {
             btn.addEventListener('click', () => {
                 selection = { view: btn.dataset.view, catalogId: null, groupId: null };
@@ -547,5 +620,14 @@
         document.getElementById('ccItemForm').addEventListener('submit', saveItem);
         document.getElementById('ccMoveItemForm').addEventListener('submit', moveItem);
         load();
+    });
+    document.addEventListener('click', event => {
+        if (!event.target.closest('.cc-row-menu')) closeItemMenus();
+    });
+    document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+            closeItemMenus();
+            closeItemModals();
+        }
     });
 })();
