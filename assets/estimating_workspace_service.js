@@ -166,6 +166,7 @@
             activeEstimateId,
             estimates,
             groups: active.groups,
+            deletedEstimateIds: Array.isArray(raw.deletedEstimateIds) ? [...new Set(raw.deletedEstimateIds.map(String))] : [],
             dirtyEstimateIds: Array.isArray(raw.dirtyEstimateIds) ? raw.dirtyEstimateIds.map(String) : [],
             takeoffSyncDirtyIds: Array.isArray(raw.takeoffSyncDirtyIds) ? raw.takeoffSyncDirtyIds.map(String) : [],
             clientUiUpdatedAt: text(raw.clientUiUpdatedAt, now()),

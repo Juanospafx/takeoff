@@ -89,6 +89,23 @@
         publish();
     }
 
+    function applyDeletedEstimateTombstones(workspace, additionalIds = []) {
+        const deletedIds = new Set([
+            ...(state?.deletedEstimateIds || []),
+            ...(workspace?.deletedEstimateIds || []),
+            ...additionalIds
+        ].map(String));
+        workspace.deletedEstimateIds = [...deletedIds];
+        if (!deletedIds.size) return workspace;
+        workspace.estimates = workspace.estimates.filter(estimate => !deletedIds.has(String(estimate.id)));
+        if (!workspace.estimates.length) return workspace;
+        if (!workspace.estimates.some(estimate => String(estimate.id) === String(workspace.activeEstimateId))) {
+            workspace.activeEstimateId = workspace.estimates[0].id;
+        }
+        Workspace.selectEstimate(workspace, workspace.activeEstimateId);
+        return workspace;
+    }
+
     function publish() {
         const total = summary();
         window.dispatchEvent(new CustomEvent('takeoff:estimating-state-updated', { detail: {
@@ -322,7 +339,7 @@
         try {
             const result = await request('list');
             const remoteSource = result.state || {};
-            const remote = Workspace.workspace(remoteSource, projectId);
+            const remote = applyDeletedEstimateTombstones(Workspace.workspace(remoteSource, projectId));
             const local = state;
             const changedDuringLoad = local.clientUiUpdatedAt !== requestLocalTimestamp;
             // A newer local timestamp alone does not prove there are unsaved edits:
@@ -813,13 +830,24 @@
             const deletedEstimate = state.estimates.find(row => String(row.id) === acknowledgedClientId)
                 || state.estimates.find(row => acknowledgedDbId > 0 && Number(row.dbEstimateId || 0) === acknowledgedDbId);
             const deletedId = String(deletedEstimate?.id || acknowledgedClientId);
-            const removed = deletedEstimate ? Workspace.removeEstimate(state, deletedEstimate.id) : false;
+            state.deletedEstimateIds = [...new Set([...(state.deletedEstimateIds || []), deletedId, String(estimate.id)])];
+            const previousCount = state.estimates.length;
+            state.estimates = state.estimates.filter(row => String(row.id) !== acknowledgedClientId
+                && String(row.id) !== String(estimate.id)
+                && !(acknowledgedDbId > 0 && Number(row.dbEstimateId || 0) === acknowledgedDbId));
+            const removed = state.estimates.length < previousCount;
+            if (removed && state.estimates.length) {
+                if (!state.estimates.some(row => String(row.id) === String(state.activeEstimateId))) {
+                    state.activeEstimateId = state.estimates[0].id;
+                }
+                Workspace.selectEstimate(state, state.activeEstimateId);
+            }
             if (!removed) {
                 // The server committed the delete, but local state changed while the
                 // request was in flight. Reconcile from the authoritative DB list so
                 // a stale card can never remain actionable or be saved again.
                 const latest = await request('list');
-                state = Workspace.workspace(latest.state || {}, projectId);
+                state = applyDeletedEstimateTombstones(Workspace.workspace(latest.state || {}, projectId), [deletedId, String(estimate.id)]);
             }
             dirtyEstimateIds.delete(deletedId);
             dirtyGenerations.delete(deletedId);
@@ -834,6 +862,19 @@
             takeoffSyncDirtyIds.delete(requestedId);
             conflictedEstimateIds.delete(requestedId);
             conflictRemoteEstimates.delete(requestedId);
+            // The DELETE acknowledgement is authoritative. Re-read the database
+            // catalog even when the local splice succeeded so all three footers
+            // converge on exactly the same surviving estimates.
+            if (projectId) {
+                try {
+                    const latest = await request('list');
+                    state = applyDeletedEstimateTombstones(Workspace.workspace(latest.state || {}, projectId), [deletedId, requestedId]);
+                    restoreDirtyTracking();
+                } catch (refreshError) {
+                    // The local tombstone already prevents the committed delete
+                    // from being rendered or resaved while connectivity recovers.
+                }
+            }
             saveLocal();
             render();
             ui.loadState = projectId ? 'saved' : 'local';
@@ -1096,9 +1137,18 @@
     });
     window.addEventListener('storage', event => {
         if (event.key !== storageKey || !event.newValue) return;
-        state = Workspace.workspace(JSON.parse(event.newValue), projectId);
+        const incoming = Workspace.workspace(JSON.parse(event.newValue), projectId);
+        state = applyDeletedEstimateTombstones(incoming);
         restoreDirtyTracking();
-        render(); publish();
+        // Rewrite the canonical filtered snapshot before publishing. Do not call
+        // saveLocal() here because it advances the UI timestamp and could make two
+        // tabs bounce storage events indefinitely.
+        state.groups = current().groups;
+        state.dirtyEstimateIds = [...dirtyEstimateIds];
+        state.takeoffSyncDirtyIds = [...takeoffSyncDirtyIds];
+        localStorage.setItem(storageKey, JSON.stringify(Workspace.clone(state)));
+        render();
+        publish();
     });
 
     window.projectEstimatingSave = async function () {

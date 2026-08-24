@@ -18,6 +18,10 @@ test('Estimating exposes a confirmed delete action and keeps one estimate', () =
     assert.match(client, /deleteAck\?\.clientEstimateId/);
     assert.match(client, /deleteAck\?\.estimateId/);
     assert.match(client, /if \(!removed\)[\s\S]*await request\('list'\)/);
+    assert.match(client, /deletedEstimateIds/);
+    assert.match(client, /applyDeletedEstimateTombstones/);
+    assert.match(client, /state\.estimates = state\.estimates\.filter/);
+    assert.match(client, /const incoming = Workspace\.workspace[\s\S]*applyDeletedEstimateTombstones\(incoming\)[\s\S]*localStorage\.setItem\(storageKey[\s\S]*publish\(\)/);
     assert.match(client, /delete_original: original/);
     assert.match(client, /pendingDeleteId/);
     assert.match(client, /ui\.saving \|\| ui\.saveRequested \|\| dirtyEstimateIds\.size/);
@@ -51,7 +55,7 @@ test('new estimates wait for a database acknowledgement and protect pending navi
     assert.match(client, /Creating estimate in database/);
     assert.match(client, /beforeunload/);
     assert.match(client, /dirtyEstimateIds\.size/);
-    assert.match(page, /project_estimating\.js\?v=estimating-delete-ack-reconcile-20260821-9/);
+    assert.match(page, /project_estimating\.js\?v=estimating-delete-tombstone-20260824-10/);
 });
 
 test('removing an estimate selects another isolated workspace', () => {
