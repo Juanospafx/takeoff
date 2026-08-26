@@ -1365,10 +1365,14 @@ $state = [
 <script src="../assets/project_overview.js?v=project-documents-persistence-20260811-6"></script>
 <script src="../assets/takeoff_estimating_sync_service.js?v=takeoff-estimating-sync-20260803-1"></script>
 <script src="../assets/project_estimate_footer.js?v=estimate-menu-all-tabs-20260820-5"></script>
+<script src="../assets/catalog_item_contract.js?v=catalog-item-contract-20260826-1"></script>
+<script src="../assets/catalog_service.js?v=catalog-service-20260826-1"></script>
+<script src="../assets/takeoff_catalog_adapter.js?v=takeoff-catalog-boundary-20260826-1"></script>
 <script src="../assets/project_takeoff.js?v=estimating-live-footer-20260824-4"></script>
 <script src="../assets/estimate_calculation_service.js?v=estimating-calculation-audit-20260811-1"></script>
 <script src="../assets/estimating_export_service.js?v=estimating-boq-export-20260820-1"></script>
 <script src="../assets/estimating_workspace_service.js?v=estimating-durable-lifecycle-20260821-6"></script>
+<script src="../assets/estimating_catalog_adapter.js?v=estimating-catalog-boundary-20260826-1"></script>
 <script src="../assets/project_estimating.js?v=estimating-authoritative-delete-20260824-16"></script>
 <script src="../assets/project_proposal.js?v=estimating-owner-intents-20260824-7"></script>
 <script src="../assets/global_tools.js"></script>

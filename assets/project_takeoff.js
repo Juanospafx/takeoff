@@ -1373,35 +1373,24 @@
     }
 
     function catalogItemMeta(item) {
-        return {
-            catalogItemId: item?.id || null,
-            catalog_item_id: item?.id || null,
-            unitCost: Number(item?.unit_cost || 0),
-            unit_cost: Number(item?.unit_cost || 0),
-            laborHours: Number(item?.labor_hours || 0),
-            labor_hours: Number(item?.labor_hours || 0),
-            category: item?.group_name || item?.catalog_name || '',
-            description: item?.description || '',
-            catalogName: item?.catalog_name || '',
-            catalogGroupName: item?.group_name || '',
-            catalogNumber: item?.catalog_number || item?.sku || item?.cost_code || '',
-            itemType: item?.item_type || ''
-        };
+        return window.TakeoffCatalogAdapter.catalogItemDtoToLegacyLayerMeta(item);
     }
 
     function applyCatalogItemToLayerForm(item) {
         if (!item) return;
         takeoffState.pendingCatalogItem = item;
         $('layerNameInput').value = item.name || '';
-        setSelectValue($('layerUomInput'), item.unit_of_measure || 'ea');
-        const inferred = inferTakeoffTypeFromUom(item.unit_of_measure);
+        setSelectValue($('layerUomInput'), item.uom || 'ea');
+        const inferred = window.TakeoffCatalogAdapter.measurementType(item, inferTakeoffTypeFromUom(item.uom));
         if (inferred) {
             $('layerTypeInput').value = inferred;
             $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[inferred];
         }
-        if (item.symbol && TAKEOFF_SYMBOLS.includes(item.symbol)) $('layerSymbolInput').value = item.symbol;
-        if (item.color && TAKEOFF_COLORS.some(color => color.value.toLowerCase() === String(item.color).toLowerCase())) {
-            $('layerColorInput').value = item.color;
+        const symbol = item.takeoffDefaults?.symbol;
+        const color = item.takeoffDefaults?.color;
+        if (symbol && TAKEOFF_SYMBOLS.includes(symbol)) $('layerSymbolInput').value = symbol;
+        if (color && TAKEOFF_COLORS.some(option => option.value.toLowerCase() === String(color).toLowerCase())) {
+            $('layerColorInput').value = color;
             updateLayerColorSwatch();
         }
         updateCatalogSelectionIndicator();
@@ -1548,12 +1537,10 @@
         catalogState.error = '';
         renderCatalogBrowser();
         try {
-            const response = await fetch('../api/cost_catalog.php?action=list&view=all', { headers: { Accept: 'application/json' } });
-            const json = await response.json();
-            if (!response.ok || json.status !== 'success') throw new Error(json.msg || 'Unable to load Cost Catalog');
-            catalogState.catalogs = json.data?.catalogs || [];
-            catalogState.groups = json.data?.groups || [];
-            catalogState.items = json.data?.allItems || json.data?.items || [];
+            const snapshot = await window.CatalogService.getSnapshot();
+            catalogState.catalogs = snapshot.catalogs;
+            catalogState.groups = snapshot.categories;
+            catalogState.items = snapshot.items;
             catalogState.loaded = true;
             populateCatalogFilters();
         } catch (e) {
@@ -1569,35 +1556,34 @@
         const categorySelect = $('takeoffCatalogCategory');
         const uomSelect = $('takeoffCatalogUom');
         if (categorySelect) {
-            const categories = Array.from(new Set(catalogState.items.map(item => item.group_name || item.catalog_name || '').filter(Boolean))).sort();
+            const categories = Array.from(new Set(catalogState.items.map(item => item.category.name || item.catalog.name || '').filter(Boolean))).sort();
             categorySelect.innerHTML = '<option value="">All categories</option>' + categories.map(category => `<option value="${esc(category)}">${esc(category)}</option>`).join('');
             categorySelect.value = catalogState.category;
         }
         if (uomSelect) {
-            const uoms = Array.from(new Set(catalogState.items.map(item => item.unit_of_measure || '').filter(Boolean))).sort();
+            const uoms = Array.from(new Set(catalogState.items.map(item => item.uom || '').filter(Boolean))).sort();
             uomSelect.innerHTML = '<option value="">All UoM</option>' + uoms.map(uom => `<option value="${esc(uom)}">${esc(uom)}</option>`).join('');
             uomSelect.value = catalogState.uom;
         }
     }
 
     function catalogSearchMatch(item) {
-        const category = item.group_name || item.catalog_name || '';
+        const category = item.category.name || item.catalog.name || '';
         if (catalogState.category && category !== catalogState.category) return false;
-        if (catalogState.uom && String(item.unit_of_measure || '') !== catalogState.uom) return false;
+        if (catalogState.uom && String(item.uom || '') !== catalogState.uom) return false;
         const q = catalogState.query;
         if (!q) return true;
         return [
             item.name,
             item.description,
-            item.catalog_name,
-            item.group_name,
-            item.sku,
-            item.catalog_number,
-            item.cost_code,
-            item.unit_of_measure,
-            item.item_type,
-            item.manufacturer,
-            item.supplier
+            item.catalog.name,
+            item.category.name,
+            item.supplier.catalogNumber,
+            item.classification.costCode,
+            item.uom,
+            item.type,
+            item.supplier.manufacturer,
+            item.supplier.supplier
         ].join(' ').toLowerCase().includes(q);
     }
 
@@ -1645,17 +1631,18 @@
             return;
         }
         rows.innerHTML = items.slice(0, 250).map(item => {
-            const category = item.group_name || item.catalog_name || '-';
+            const category = item.category.name || item.catalog.name || '-';
+            const unitCost = window.TakeoffCatalogAdapter.legacyUnitCost(item);
             return `<tr data-catalog-item="${esc(item.id)}">
                 <td>
                     <strong>${esc(item.name)}</strong>
-                    <small>${esc(item.catalog_number || item.sku || item.cost_code || '')}</small>
+                    <small>${esc(item.supplier.catalogNumber || item.classification.costCode || '')}</small>
                 </td>
                 <td>${esc(category)}</td>
-                <td>${esc(item.unit_of_measure || 'ea')}</td>
-                <td>${money(item.unit_cost)}</td>
-                <td>${Number(item.labor_hours || 0).toFixed(4)}</td>
-                <td>${esc(item.description || item.item_type || '-')}</td>
+                <td>${esc(item.uom || 'ea')}</td>
+                <td>${money(unitCost)}</td>
+                <td>${Number(item.pricing.laborHoursPerUnit || 0).toFixed(4)}</td>
+                <td>${esc(item.description || item.type || '-')}</td>
                 <td><button class="pro-create-layer-btn" type="button" data-catalog-select="${esc(item.id)}">Select</button></td>
             </tr>`;
         }).join('');

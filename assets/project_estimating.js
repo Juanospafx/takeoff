@@ -636,8 +636,9 @@
     function renderCatalogChoices(query = '') {
         const rows = ui.catalogData?.items || [];
         const normalized = String(query).trim().toLowerCase();
-        const visible = rows.filter(item => !normalized || `${item.name} ${item.description || ''} ${item.catalog_number || ''} ${item.cost_code || ''}`.toLowerCase().includes(normalized));
-        return visible.map(item => `<button type="button" class="est-copy-option" data-est-catalog-item="${esc(item.id)}"><span><strong>${esc(item.name)}</strong><small>${esc(item.catalog_name || '')} · ${esc(item.group_name || '')} · ${esc(item.unit_of_measure || 'ea')} · ${money(item.unit_cost || 0)}</small></span></button>`).join('')
+        const visible = rows.filter(item => !normalized || [item.name, item.description, item.supplier.catalogNumber,
+            item.classification.costCode, item.catalog.name, item.category.name].join(' ').toLowerCase().includes(normalized));
+        return visible.map(item => `<button type="button" class="est-copy-option" data-est-catalog-item="${esc(item.id)}"><span><strong>${esc(item.name)}</strong><small>${esc(item.catalog.name || '')} · ${esc(item.category.name || '')} · ${esc(item.uom || 'ea')} · ${money(item.pricing.materialUnitCost || item.pricing.equipmentUnitCost || item.pricing.legacyUnitCost || 0)}</small></span></button>`).join('')
             || '<div class="est-empty">No catalog items found.</div>';
     }
 
@@ -646,29 +647,18 @@
         ui.catalogTargetGroupId = groupId;
         ui.catalogLoading = true; ui.catalogError = ''; ui.modal = 'catalog'; renderModal();
         try {
-            const response = await fetch('../api/cost_catalog.php?action=list&view=all');
-            const payload = await response.json();
-            if (!response.ok || payload.status !== 'success') throw new Error(payload.msg || 'Cost Catalog unavailable');
-            ui.catalogData = payload.data;
+            ui.catalogData = await window.CatalogService.getSnapshot();
         } catch (error) { ui.catalogError = error.message; }
         ui.catalogLoading = false; renderModal();
     }
 
     function catalogEstimateItem(catalog) {
-        const parts = (ui.catalogData?.assemblyParts || []).filter(part => String(part.assembly_catalog_item_id) === String(catalog.id));
-        const byId = new Map((ui.catalogData?.allItems || []).map(item => [String(item.id), item]));
-        return Workspace.item({ catalogItemId: catalog.id, itemType: catalog.item_type || 'part',
-            isAssembly: String(catalog.item_type).toLowerCase() === 'assembly', name: catalog.name,
-            description: catalog.description || '', budgetCode: catalog.budget_code || '',
-            costCode: catalog.cost_code || catalog.catalog_number || '', costCategory: catalog.cost_type || 'Materials',
-            uom: catalog.unit_of_measure || 'ea', quantity: 0, unitMaterialCost: catalog.unit_cost || 0,
-            unitLabor: catalog.labor_hours || 0, laborUnitType: 'hrs', laborRate: current().settings.globalLaborCost,
-            children: parts.map(part => { const child = byId.get(String(part.part_catalog_item_id)) || {}; return {
-                catalogItemId: part.part_catalog_item_id, name: child.name || part.child_item_name || 'Assembly part',
-                description: child.description || '', costCode: child.cost_code || '', costCategory: child.cost_type || 'Materials',
-                uom: child.unit_of_measure || part.child_item_unit || 'ea', quantity: Number(part.quantity || 0),
-                unitMaterialCost: Number(child.unit_cost ?? part.unit_cost_snapshot ?? 0),
-                unitLabor: Number(child.labor_hours ?? part.unit_labor_time_snapshot ?? 0), laborUnitType: 'hrs' }; }) });
+        const itemsById = new Map((ui.catalogData?.items || []).map(item => [String(item.id), item]));
+        return window.EstimatingCatalogAdapter.catalogItemDtoToEstimatingItem(catalog, {
+            itemsById,
+            globalLaborRate: current().settings.globalLaborCost,
+            workspaceItem: Workspace.item
+        });
     }
 
     async function exportEstimate(mode = 'normal') {
