@@ -51,7 +51,7 @@ No cache is used in this phase. Calls read the API directly, avoiding stale resu
 | Takeoff Browse Catalog | `CatalogService.getSnapshot()` | Migrated |
 | Cost Catalog admin UI | Direct read/write calls in `assets/cost_catalog.js` | Pending; writes require a separate command API design |
 | Estimating Add Item | `CatalogService.getSnapshot()` + `EstimatingCatalogAdapter` | Migrated |
-| BOQ Flat hydration | Direct list fetch in `assets/project_estimating.js`, raw payload consumed by `estimating_export_service.js` | Pending |
+| BOQ Flat hydration | `CatalogService.getSnapshot()` + `BoqCatalogAdapter` | Migrated |
 | BOQ normal | Estimate workspace; no direct catalog fetch | No migration required presently |
 | Editor bootstrap | Catalog/assembly payload from `api/takeoff.php` | Pending; separate backend boundary |
 | Takeoff editor catalog management | Catalog tables exposed through `api/takeoff.php` actions | Pending and outside this read-service phase |
@@ -59,4 +59,4 @@ No cache is used in this phase. Calls read the API directly, avoiding stale resu
 
 ## Future strategy
 
-Migrate BOQ Flat next only after its hydrator accepts canonical DTOs plus canonical components. The administration UI should be migrated later with explicit mutation methods and cache invalidation.
+The administration UI remains a later migration because its write operations require explicit mutation methods and cache invalidation.

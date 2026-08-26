@@ -24,4 +24,4 @@ The UI searches and renders DTO fields only. `EstimatingCatalogAdapter` owns all
 - Equipment calculations use `equipmentQuantity`, not normal item `quantity`. Defining their relationship is a product/calculation decision outside this boundary.
 - Nested assemblies are not expanded recursively. An assembly child can retain assembly identity, but grandchildren are not materialized by this adapter.
 - Component DTOs currently carry cost snapshots and IDs; descriptive fields are enriched from other item DTOs returned in the same snapshot.
-- BOQ Flat still fetches and interprets the raw catalog payload. It was intentionally not migrated here.
+- BOQ Flat now consumes the separate canonical `BoqCatalogAdapter`; Estimating does not reuse that adapter for Add Item.

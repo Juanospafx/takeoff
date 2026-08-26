@@ -62,6 +62,8 @@ test('Browse Catalog loads the contract before Takeoff and consumes canonical fi
     const page = fs.readFileSync(path.join(root, 'pages/project_dashboard.php'), 'utf8');
     const takeoff = fs.readFileSync(path.join(root, 'assets/project_takeoff.js'), 'utf8');
     assert.ok(page.indexOf('catalog_item_contract.js') < page.indexOf('catalog_service.js'));
+    assert.ok(page.indexOf('catalog_item_contract.js') < page.indexOf('catalog_metadata.js'));
+    assert.ok(page.indexOf('catalog_metadata.js') < page.indexOf('takeoff_catalog_adapter.js'));
     assert.ok(page.indexOf('catalog_service.js') < page.indexOf('takeoff_catalog_adapter.js'));
     assert.ok(page.indexOf('takeoff_catalog_adapter.js') < page.indexOf('project_takeoff.js'));
     const boundary = takeoff.slice(takeoff.indexOf('function catalogItemMeta'), takeoff.indexOf('function createTakeoffGroup'));

@@ -6,6 +6,7 @@ const vm = require('node:vm');
 
 const sourcePath = path.join(__dirname, '..', 'assets', 'project_takeoff.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
+const CatalogMetadata = require('../assets/catalog_metadata.js');
 const editor = fs.readFileSync(path.join(__dirname, '..', 'assets', 'editor', 'takeoff.js'), 'utf8');
 const dashboard = fs.readFileSync(path.join(__dirname, '..', 'pages', 'project_dashboard.php'), 'utf8');
 
@@ -37,6 +38,7 @@ function projectTakeoffInternals() {
         }
     };
     sandbox.window = sandbox;
+    sandbox.CatalogMetadata = CatalogMetadata;
     sandbox.window.ProjectState = { projectId: 2, documents: [] };
     vm.runInNewContext(instrumented, sandbox, { filename: sourcePath });
     return sandbox.__takeoffTest;
@@ -111,6 +113,7 @@ test('a persisted calculated quantity is not reused as an additive base quantity
         }
     };
     sandbox.window = sandbox;
+    sandbox.CatalogMetadata = CatalogMetadata;
     sandbox.ProjectState = {
         projectId: 2,
         documents: [],

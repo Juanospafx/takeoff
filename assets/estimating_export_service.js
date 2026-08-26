@@ -7,6 +7,11 @@
         || text(item?.itemType ?? item?.item_type).toLowerCase() === 'assembly';
     const parentId = item => text(item?.parentItemId ?? item?.parent_item_id ?? item?.assemblyParentId);
     const catalogId = item => item?.catalogItemId ?? item?.catalog_item_id ?? '';
+    const semanticType = item => {
+        const type = text(item?.type ?? item?.itemType ?? item?.item_type).toUpperCase();
+        return { PART: 'Part', EQUIPMENT: 'Equipment', LABOR: 'Labor', ASSEMBLY: 'Assembly', OTHER: 'Other' }[type]
+            || (isAssembly(item) ? 'Assembly' : 'Part');
+    };
 
     function catalogColumns(item, quantity, groupName, type) {
         return {
@@ -20,7 +25,9 @@
             Category: text(item?.costCategory ?? item?.cost_type ?? item?.item_type),
             UOM: text(item?.uom ?? item?.unit_of_measure),
             Quantity: number(quantity),
-            'Unit Material Cost': number(item?.unitMaterialCost ?? item?.unitCost ?? item?.unit_cost),
+            // The existing CSV column name is retained for compatibility. Its
+            // value may represent canonical Equipment pricing for Equipment rows.
+            'Unit Material Cost': number(item?.unitMaterialCost ?? item?.unitEquipmentCost ?? item?.unitCost ?? item?.unit_cost),
             'Unit Labor': number(item?.unitLabor ?? item?.unit_labor_time ?? item?.laborHours),
             'Labor Unit': text(item?.laborUnitType ?? item?.laborUnit),
             'Labor Rate': number(item?.laborRate ?? item?.labor_rate),
@@ -92,57 +99,8 @@
             }
         });
         return [...consolidated.values()].map(row => catalogColumns(
-            row.item, row.quantity, [...row.groups].filter(Boolean).join('; '), 'Part'
+            row.item, row.quantity, [...row.groups].filter(Boolean).join('; '), semanticType(row.item)
         ));
-    }
-
-    function withCatalog(estimate, catalogPayload = {}) {
-        const cloned = JSON.parse(JSON.stringify(estimate || {}));
-        const items = new Map((catalogPayload.allItems || []).map(item => [text(item.id), item]));
-        const parts = new Map();
-        (catalogPayload.assemblyParts || []).forEach(part => {
-            const key = text(part.assembly_catalog_item_id);
-            if (!parts.has(key)) parts.set(key, []);
-            parts.get(key).push(part);
-        });
-        function hydrate(item, ancestry = new Set()) {
-            const id = text(catalogId(item));
-            const catalogItem = items.get(id);
-            if (catalogItem) Object.assign(item, {
-                catalogItemId: catalogItem.id,
-                name: catalogItem.name ?? item.name,
-                description: catalogItem.description ?? item.description,
-                budgetCode: catalogItem.budget_code ?? item.budgetCode,
-                costCode: catalogItem.cost_code ?? item.costCode,
-                costCategory: catalogItem.cost_type ?? item.costCategory,
-                uom: catalogItem.unit_of_measure ?? item.uom,
-                unitMaterialCost: catalogItem.unit_cost ?? item.unitMaterialCost,
-                unitLabor: catalogItem.labor_hours ?? item.unitLabor,
-                laborUnitType: catalogItem.labor_hours !== undefined ? 'hrs' : item.laborUnitType,
-                itemType: catalogItem.item_type ?? item.itemType,
-                isAssembly: text(catalogItem.item_type).toLowerCase() === 'assembly' || item.isAssembly === true
-            });
-            const definitions = parts.get(id) || [];
-            if ((!item.children || !item.children.length) && definitions.length && !ancestry.has(id)) {
-                const next = new Set(ancestry); next.add(id);
-                item.children = definitions.flatMap(part => {
-                    const childId = text(part.part_catalog_item_id);
-                    if (!childId || next.has(childId)) return [];
-                    const child = { ...(items.get(childId) || {}),
-                        id: `catalog_part_${text(part.id)}_${childId}`,
-                        catalogItemId: childId,
-                        quantity: number(part.quantity),
-                        unitMaterialCost: part.unit_cost_snapshot ?? items.get(childId)?.unit_cost,
-                        unitLabor: part.unit_labor_time_snapshot ?? items.get(childId)?.labor_hours,
-                        laborUnitType: 'hrs' };
-                    hydrate(child, next);
-                    return [child];
-                });
-            } else (item.children || []).forEach(child => hydrate(child, ancestry));
-            return item;
-        }
-        (cloned.groups || []).forEach(group => (group.items || []).forEach(item => hydrate(item)));
-        return cloned;
     }
 
     function needsCatalog(estimate) {
@@ -169,7 +127,7 @@
             .map(columns => columns.map(escape).join(',')).join('\r\n');
     }
 
-    const service = { normalRows, flatRows, withCatalog, needsCatalog, unresolvedAssemblies, csv };
+    const service = { normalRows, flatRows, needsCatalog, unresolvedAssemblies, csv };
     global.EstimatingExportService = service;
     if (typeof module !== 'undefined') module.exports = service;
 })(typeof window !== 'undefined' ? window : globalThis);

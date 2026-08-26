@@ -3,8 +3,10 @@
 
     const Contract = global.CatalogItemContract
         || (typeof require === 'function' ? require('./catalog_item_contract.js') : null);
+    const Metadata = global.CatalogMetadata
+        || (typeof require === 'function' ? require('./catalog_metadata.js') : null);
 
-    if (!Contract) throw new Error('CatalogItemContract must load before TakeoffCatalogAdapter');
+    if (!Contract || !Metadata) throw new Error('CatalogItemContract and CatalogMetadata must load before TakeoffCatalogAdapter');
 
     function number(value) {
         return Number.isFinite(Number(value)) ? Number(value) : 0;
@@ -33,11 +35,15 @@
         const laborHours = number(dto.pricing.laborHoursPerUnit);
         const metadata = {
             schema: 'CatalogItemDTO/v1',
+            catalogItemId: dto.id,
+            catalogRevision: dto.revision,
             type: dto.type,
             costCategory: dto.costCategory,
-            revision: dto.revision,
-            pricing: { ...dto.pricing },
-            assemblyComponents: dto.assemblyComponents.map(component => ({ ...component }))
+            pricing: Metadata.clone(dto.pricing),
+            takeoffDefaults: Metadata.clone(dto.takeoffDefaults),
+            assemblyComponents: Metadata.clone(dto.assemblyComponents),
+            catalog: Metadata.clone(dto.catalog),
+            category: Metadata.clone(dto.category)
         };
         return {
             catalogItemId: dto.id,
@@ -56,8 +62,8 @@
             costCategory: dto.costCategory,
             equipmentUnitCost: number(dto.pricing.equipmentUnitCost),
             materialUnitCost: number(dto.pricing.materialUnitCost),
-            catalogMetadata: metadata,
-            metadata_json: { catalog_item: metadata }
+            catalogMetadata: Metadata.clone(metadata),
+            metadata_json: { catalog_item: Metadata.clone(metadata) }
         };
     }
 

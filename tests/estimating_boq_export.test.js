@@ -1,6 +1,8 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
 const Exporter = require('../assets/estimating_export_service.js');
+const Contract = require('../assets/catalog_item_contract.js');
+const BoqCatalogAdapter = require('../assets/boq_catalog_adapter.js');
 
 const estimate = { name: 'Electrical Bid', groups: [{ id: 'g1', name: 'Floor 1', items: [
     { id: 'assembly-a', itemType: 'assembly', isAssembly: true, name: 'Device Assembly', quantity: 2,
@@ -58,17 +60,16 @@ test('CSV is Excel-friendly UTF-8 and safely escapes supplier text', () => {
 });
 
 test('BOQ Flat hydrates aggregate assemblies from current Cost Catalog components', () => {
-    const hydrated = Exporter.withCatalog({ groups: [{ name: 'G', items: [
+    const catalogPart = Contract.normalizeCatalogItem({ id: 51, name: 'Catalog Part', item_type: 'part',
+        unit_of_measure: 'ft', unit_cost: 4.25, description: 'Current catalog description', cost_code: 'C-51' });
+    const catalogAssembly = Contract.normalizeCatalogItem({ id: 50, name: 'Catalog Assembly',
+        item_type: 'assembly', unit_of_measure: 'ea', assemblyComponents: [{
+            id: 9, catalogItemId: 51, quantity: 2,
+            pricingSnapshot: { materialUnitCost: 4, laborHoursPerUnit: 0 }
+        }] });
+    const hydrated = BoqCatalogAdapter.hydrateEstimate({ groups: [{ name: 'G', items: [
         { id: 'estimate-assembly', catalogItemId: 50, isAssembly: true, quantity: 3, name: 'Old name' }
-    ] }] }, {
-        allItems: [
-            { id: 50, name: 'Catalog Assembly', item_type: 'assembly', unit_of_measure: 'ea' },
-            { id: 51, name: 'Catalog Part', item_type: 'part', unit_of_measure: 'ft', unit_cost: 4.25,
-                description: 'Current catalog description', cost_code: 'C-51' }
-        ],
-        assemblyParts: [{ id: 9, assembly_catalog_item_id: 50, part_catalog_item_id: 51,
-            quantity: 2, unit_cost_snapshot: 4 }]
-    });
+    ] }] }, { items: [catalogAssembly, catalogPart] });
     const rows = Exporter.flatRows(hydrated);
     assert.equal(rows.length, 1);
     assert.equal(rows[0].Item, 'Catalog Part');

@@ -1366,7 +1366,9 @@ $state = [
 <script src="../assets/takeoff_estimating_sync_service.js?v=takeoff-estimating-sync-20260803-1"></script>
 <script src="../assets/project_estimate_footer.js?v=estimate-menu-all-tabs-20260820-5"></script>
 <script src="../assets/catalog_item_contract.js?v=catalog-item-contract-20260826-1"></script>
+<script src="../assets/catalog_metadata.js?v=catalog-metadata-20260826-1"></script>
 <script src="../assets/catalog_service.js?v=catalog-service-20260826-1"></script>
+<script src="../assets/boq_catalog_adapter.js?v=boq-catalog-boundary-20260826-1"></script>
 <script src="../assets/takeoff_catalog_adapter.js?v=takeoff-catalog-boundary-20260826-1"></script>
 <script src="../assets/project_takeoff.js?v=estimating-live-footer-20260824-4"></script>
 <script src="../assets/estimate_calculation_service.js?v=estimating-calculation-audit-20260811-1"></script>

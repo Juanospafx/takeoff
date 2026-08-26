@@ -151,13 +151,15 @@
         delete copy.handles;
         delete copy.symbolNode;
         delete copy.transformer;
+        copy.metadata_json = window.CatalogMetadata.clone(entry?.metadata_json || {});
+        if (entry?.catalogMetadata) copy.catalogMetadata = window.CatalogMetadata.clone(entry.catalogMetadata);
         return copy;
     }
 
     function persistLayerCostSnapshot(layer) {
         if (!layer) return layer;
         layer.metadata_json = {
-            ...(layer.metadata_json || {}),
+            ...window.CatalogMetadata.clone(layer.metadata_json || {}),
             project_layer_id: layer.metadata_json?.project_layer_id || layer.client_uid,
             unit_cost: num(layer.unit_cost || 0),
             unit_labor_time: num(layer.unit_labor_time || layer.labor_hours || 0),
@@ -168,7 +170,7 @@
     }
 
     function restoreLayerCostSnapshot(layer) {
-        const metadata = layer?.metadata_json || {};
+        const metadata = window.CatalogMetadata.clone(layer?.metadata_json || {});
         const hasSnapshotCost = Object.prototype.hasOwnProperty.call(metadata, 'unit_cost');
         const hasSnapshotLabor = Object.prototype.hasOwnProperty.call(metadata, 'unit_labor_time');
         return {
@@ -176,7 +178,9 @@
             unit_cost: num(hasSnapshotCost ? metadata.unit_cost : (layer.unit_cost ?? 0)),
             unit_labor_time: num(hasSnapshotLabor ? metadata.unit_labor_time : (layer.unit_labor_time ?? layer.labor_hours ?? 0)),
             cost_code: metadata.cost_code || layer.cost_code || '',
-            catalog_item_id: layer.catalog_item_id || metadata.catalog_item_id || null
+            catalog_item_id: layer.catalog_item_id || metadata.catalog_item_id || null,
+            catalogMetadata: window.CatalogMetadata.clone(metadata.catalog_item || layer.catalogMetadata || null),
+            metadata_json: metadata
         };
     }
 
@@ -1485,6 +1489,7 @@
             baseQuantity,
             seed_quantity: baseQuantity,
             catalog_item_id: layer.catalog_item_id || null,
+            catalogMetadata: window.CatalogMetadata.fromLayer(layer),
             unit_cost: num(layer.unit_cost || 0),
             labor_hours: num(layer.unit_labor_time || layer.labor_hours || 0),
             estimate_id: layer.metadata_json?.estimate_id || null,
@@ -3048,11 +3053,12 @@
             visible: payload.visible === false ? 0 : 1,
             locked: payload.locked ? 1 : 0,
             seed_quantity: seedQuantity,
-            metadata_json: { ...(layer?.metadata_json || {}), project_layer_id: externalId,
+            metadata_json: window.CatalogMetadata.mergeMetadata(layer?.metadata_json,
+                payload.catalogMetadata || payload.metadata_json?.catalog_item, { project_layer_id: externalId,
                 base_quantity: seedQuantity,
                 estimate_id: payload.estimate_id || payload.estimateId || null,
                 estimating_item_id: payload.estimating_item_id || payload.estimatingItemId || null,
-                estimating_group_id: payload.estimating_group_id || payload.estimatingGroupId || null },
+                estimating_group_id: payload.estimating_group_id || payload.estimatingGroupId || null }),
         };
         if (layer) Object.assign(layer, data);
         else {
@@ -3098,11 +3104,12 @@
                 visible: payload.visible === false ? 0 : 1,
                 locked: payload.locked ? 1 : 0,
                 seed_quantity: seedQuantity,
-                metadata_json: { ...(layer?.metadata_json || {}), project_layer_id: externalId,
+                metadata_json: window.CatalogMetadata.mergeMetadata(layer?.metadata_json,
+                    payload.catalogMetadata || payload.metadata_json?.catalog_item, { project_layer_id: externalId,
                     base_quantity: seedQuantity,
                     estimate_id: payload.estimate_id || payload.estimateId || null,
                     estimating_item_id: payload.estimating_item_id || payload.estimatingItemId || null,
-                    estimating_group_id: payload.estimating_group_id || payload.estimatingGroupId || null },
+                    estimating_group_id: payload.estimating_group_id || payload.estimatingGroupId || null }),
             };
             if (layer) Object.assign(layer, data);
             else state.layers.push(data);

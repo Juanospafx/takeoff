@@ -429,6 +429,10 @@
         try { return JSON.parse(layer?.metadata_json || '{}') || {}; } catch (_) { return {}; }
     }
 
+    function layerCatalogMetadata(layer) {
+        return window.CatalogMetadata.fromLayer(layer);
+    }
+
     function seedGroupsFromProjectLayers() {
         const groups = [];
         const byName = new Map();
@@ -477,6 +481,8 @@
                 description: layer.description || '',
                 catalogNumber: layer.catalog_number || layer.catalogNumber || layer.sku || layer.cost_code || '',
                 itemType: layer.item_type || layer.itemType || '',
+                catalogMetadata: window.CatalogMetadata.clone(metadata.catalog_item || null),
+                metadata_json: window.CatalogMetadata.clone(metadata),
                 dropLength: Number(layer.dropLength || layer.drop_length || 0),
                 spacing: Number(layer.spacing || 0),
                 height: Number(layer.height || 0),
@@ -951,6 +957,7 @@
             catalog_item_id: layer.catalogItemId || null,
             unit_cost: layer.unitCost || 0,
             labor_hours: layer.laborHours || 0,
+            catalogMetadata: layerCatalogMetadata(layer),
             category: layer.category || '',
             description: layer.description || '',
             dropLength: layer.dropLength || 0,
@@ -1908,6 +1915,10 @@
             // actions are allowed to mutate layer.visible.
             if (remote.unit_of_measure || remote.uom) layer.uom = remote.unit_of_measure || remote.uom;
             if (remote.locked !== undefined) layer.locked = Boolean(remote.locked);
+            if (remote.catalogMetadata) {
+                layer.catalogMetadata = window.CatalogMetadata.clone(remote.catalogMetadata);
+                layer.metadata_json = window.CatalogMetadata.mergeMetadata(layer.metadata_json, remote.catalogMetadata);
+            }
         });
         applyAggregatedCanvasQuantities();
         if (snapshot.activeLayerId && findLayer(snapshot.activeLayerId)) {

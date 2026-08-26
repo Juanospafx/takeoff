@@ -666,10 +666,8 @@
         let estimate = Workspace.clone(current());
         if (mode === 'flat' && Exporter.needsCatalog(estimate)) {
             try {
-                const response = await fetch('../api/cost_catalog.php?action=list&view=all');
-                const payload = await response.json();
-                if (!response.ok || payload.status !== 'success') throw new Error(payload.msg || 'Cost Catalog unavailable');
-                estimate = Exporter.withCatalog(estimate, payload.data);
+                const catalogSnapshot = await window.CatalogService.getSnapshot();
+                estimate = window.BoqCatalogAdapter.hydrateEstimate(estimate, catalogSnapshot);
             } catch (error) {
                 alert(`BOQ Flat could not load the Cost Catalog: ${error.message}`);
                 return;
