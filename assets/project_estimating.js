@@ -27,7 +27,7 @@
     const projectId = resolveProjectId();
     const storageKey = `takeoff.estimating.module.${projectId || 'draft'}`;
     const apiUrl = '../api/project_estimating.php';
-    const ui = { search: '', selected: new Set(), saving: false, saveRequested: false, saveTimer: null, pendingDeleteId: null, loadState: projectId ? 'loading' : 'local',
+    const ui = { search: '', selected: new Set(), saving: false, saveRequested: false, saveTimer: null, pendingDeleteId: null, lastErrorCode: null, loadState: projectId ? 'loading' : 'local',
         message: projectId ? 'Loading estimate' : 'Local draft', collapsed: {}, modal: null,
         catalogTargetGroupId: null, catalogData: null, catalogLoading: false, catalogError: '' };
     let state = readLocal();
@@ -227,6 +227,7 @@
             return;
         }
         ui.saving = true;
+        ui.lastErrorCode = null;
         ui.saveRequested = false;
         ui.loadState = 'saving';
         ui.message = 'Saving…';
@@ -280,6 +281,7 @@
             ui.message = dirtyEstimateIds.size ? 'Unsaved changes' : 'Saved';
             saveLocal();
         } catch (error) {
+            ui.lastErrorCode = error.code || 'request_failed';
             ui.loadState = 'error';
             ui.message = error.code === 'revision_conflict'
                 ? 'This estimate changed elsewhere. Your draft is saved locally; reload or retry after reviewing the latest version.'
@@ -1217,9 +1219,82 @@
             }
             clearTimeout(ui.saveTimer);
             await saveServer();
-            if (ui.loadState === 'error') throw new Error(ui.message);
+            if (ui.loadState === 'error') {
+                const error = new Error(ui.message);
+                error.code = ui.lastErrorCode || 'save_failed';
+                throw error;
+            }
         }
         return true;
+    };
+
+    function catalogDomainOptions(options = {}) {
+        const result = { ...options };
+        delete result.estimateId;
+        return result;
+    }
+
+    window.projectEstimatingPrepareCatalogUpdate = async function (options = {}) {
+        const Application = window.CatalogUpdateApplicationService;
+        const Catalog = window.CatalogService;
+        if (!Application || !Catalog) throw new Error('Catalog update services are unavailable.');
+        await window.projectEstimatingSave();
+        const estimateId = String(options.estimateId || state.activeEstimateId || '');
+        const estimate = state.estimates.find(row => String(row.id) === estimateId);
+        if (!estimate) throw new Application.CatalogUpdateApplicationError(
+            'ESTIMATE_NOT_FOUND', 'The Estimate selected for refresh no longer exists.');
+        const catalog = await Catalog.getSnapshot();
+        return Application.prepareCatalogUpdate(Workspace.clone(estimate), catalog, catalogDomainOptions(options));
+    };
+
+    window.projectEstimatingApplyCatalogUpdate = async function (prepared, options = {}) {
+        const Application = window.CatalogUpdateApplicationService;
+        const Catalog = window.CatalogService;
+        if (!Application || !Catalog) throw new Error('Catalog update services are unavailable.');
+        if (!prepared?.guard) throw new Application.CatalogUpdateApplicationError(
+            'PREVIEW_GUARD_REQUIRED', 'Generate a Cost Catalog preview before applying it.');
+        const sourceId = String(prepared.guard.estimateId || '');
+        const sourceIndex = state.estimates.findIndex(row => String(row.id) === sourceId);
+        if (sourceIndex < 0) throw new Application.CatalogUpdateApplicationError(
+            'ESTIMATE_CHANGED_SINCE_PREVIEW', 'The Estimate no longer exists.');
+        const catalog = await Catalog.getSnapshot();
+        const result = Application.applyCatalogUpdate(Workspace.clone(state.estimates[sourceIndex]), catalog, {
+            ...catalogDomainOptions(prepared.options || {}),
+            ...catalogDomainOptions(options),
+            previewGuard: prepared.guard
+        });
+        const normalized = Workspace.estimate(result.appliedEstimate, projectId,
+            result.strategy === Application.STRATEGY.CREATE_REVISION ? state.estimates.length : sourceIndex);
+        if (result.strategy === Application.STRATEGY.CREATE_REVISION) {
+            state.estimates.forEach(row => { row.isActive = false; });
+            state.estimates.push(normalized);
+            state.activeEstimateId = normalized.id;
+        } else {
+            state.estimates[sourceIndex] = normalized;
+        }
+        Workspace.selectEstimate(state, state.activeEstimateId);
+        markEstimateDirty(normalized.id);
+        saveLocal();
+        render();
+        try {
+            await window.projectEstimatingSave();
+        } catch (cause) {
+            throw new Application.CatalogUpdateApplicationError(
+                cause.code === 'ESTIMATE_CHANGED_SINCE_PREVIEW'
+                    ? 'ESTIMATE_CHANGED_SINCE_PREVIEW' : 'CATALOG_UPDATE_PERSISTENCE_FAILED',
+                cause.message,
+                { cause, estimateId: normalized.id, localDraftPreserved: true }
+            );
+        }
+        const persisted = state.estimates.find(row => String(row.id) === String(normalized.id));
+        return {
+            ...result,
+            estimateId: persisted?.id || result.estimateId,
+            dbEstimateId: persisted?.dbEstimateId || null,
+            serverRevision: Number(persisted?.revision || 0),
+            appliedEstimate: Workspace.clone(persisted || normalized),
+            persisted: true
+        };
     };
 
     window.addEventListener('beforeunload', event => {

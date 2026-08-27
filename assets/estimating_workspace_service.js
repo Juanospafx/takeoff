@@ -55,6 +55,7 @@
             catalogRevision: row.catalogRevision ?? null,
             catalogSnapshot: row.catalogSnapshot ? clone(row.catalogSnapshot) : null,
             overrides: row.overrides ? clone(row.overrides) : null,
+            lastCatalogRefresh: row.lastCatalogRefresh ? clone(row.lastCatalogRefresh) : null,
             itemType,
             isAssembly: row.isAssembly === true || itemType === 'assembly',
             parentItemId: text(row.parentItemId ?? row.parent_item_id ?? row.assemblyParentId) || null,
@@ -119,7 +120,12 @@
             id: text(row.id) || uid('estimate'),
             dbEstimateId: projectId(row.dbEstimateId) || undefined,
             isActive: row.isActive === true,
+            isLocked: row.isLocked === true,
             revision: Math.max(0, numeric(row.revision)),
+            estimateRevision: Math.max(1, numeric(row.estimateRevision, 1)),
+            parentEstimateId: text(row.parentEstimateId) || null,
+            sourceEstimateRevision: row.sourceEstimateRevision === null || row.sourceEstimateRevision === undefined
+                ? null : Math.max(1, numeric(row.sourceEstimateRevision, 1)),
             projectId: currentProjectId,
             name: text(row.name, index ? `Estimate ${index + 1}` : 'Primary Estimate'),
             status: text(row.status, 'draft'),
@@ -139,7 +145,10 @@
                 id: text(entry.id) || uid('audit'),
                 at: text(entry.at ?? entry.timestamp, now()),
                 action: text(entry.action ?? entry.message, 'Updated estimate')
-            })) : []
+            })) : [],
+            catalogRefreshHistory: Array.isArray(row.catalogRefreshHistory) ? clone(row.catalogRefreshHistory).slice(-50) : [],
+            catalogUpdateConflicts: Array.isArray(row.catalogUpdateConflicts) ? clone(row.catalogUpdateConflicts) : [],
+            catalogUpdateSourceGuard: row.catalogUpdateSourceGuard ? clone(row.catalogUpdateSourceGuard) : null
         };
     }
 

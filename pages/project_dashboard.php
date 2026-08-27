@@ -1374,8 +1374,10 @@ $state = [
 <script src="../assets/takeoff_catalog_adapter.js?v=takeoff-catalog-boundary-20260826-1"></script>
 <script src="../assets/project_takeoff.js?v=estimating-live-footer-20260824-4"></script>
 <script src="../assets/estimate_calculation_service.js?v=estimating-calculation-audit-20260811-1"></script>
+<script src="../assets/catalog_update_preview_service.js?v=catalog-update-preview-20260827-1"></script>
 <script src="../assets/estimating_export_service.js?v=estimating-boq-export-20260820-1"></script>
 <script src="../assets/estimating_workspace_service.js?v=estimating-catalog-snapshot-20260827-1"></script>
+<script src="../assets/catalog_update_application_service.js?v=catalog-update-application-20260827-2"></script>
 <script src="../assets/estimating_catalog_adapter.js?v=estimating-catalog-snapshot-20260827-1"></script>
 <script src="../assets/project_estimating.js?v=estimating-authoritative-delete-20260824-16-estimating-catalog-snapshot-20260827-1"></script>
 <script src="../assets/project_proposal.js?v=estimating-owner-intents-20260824-7"></script>

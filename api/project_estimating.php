@@ -24,6 +24,13 @@ class PewRevisionConflict extends RuntimeException {
         $this->conflicts = $conflicts;
     }
 }
+class PewCatalogUpdateStale extends RuntimeException {
+    public $details;
+    public function __construct(array $details) {
+        parent::__construct('The source estimate changed after the Cost Catalog preview.');
+        $this->details = $details;
+    }
+}
 
 function pew_json($data, $status = 200) {
     http_response_code($status);
@@ -423,6 +430,28 @@ function pew_save_estimate(PDO $pdo, $projectId, array $estimate, array $summary
     // stale dbEstimateId as a cache hint, never as authoritative identity.
     $estimateId = pew_resolve_estimate_id($pdo, $projectId, $clientId,
         pew_int(isset($estimate['dbEstimateId']) ? $estimate['dbEstimateId'] : 0));
+    // A historical Estimate refresh creates a new row, so its own revision is
+    // necessarily zero. Validate the source row explicitly inside this same
+    // transaction to prevent creating a revision from a stale preview. Once
+    // the revision exists, its normal optimistic revision check is sufficient.
+    if (!$estimateId && isset($estimate['catalogUpdateSourceGuard']) && is_array($estimate['catalogUpdateSourceGuard'])) {
+        $guard = $estimate['catalogUpdateSourceGuard'];
+        $sourceClientId = pew_text(isset($guard['sourceEstimateId']) ? $guard['sourceEstimateId'] : '', 191);
+        $sourceDbHint = pew_int(isset($guard['sourceDbEstimateId']) ? $guard['sourceDbEstimateId'] : 0);
+        $sourceEstimateId = $sourceClientId !== ''
+            ? pew_resolve_estimate_id($pdo, $projectId, $sourceClientId, $sourceDbHint)
+            : $sourceDbHint;
+        $sourceRow = $sourceEstimateId > 0 ? pew_state_row($pdo, $sourceEstimateId) : null;
+        $expectedSourceRevision = pew_int(isset($guard['sourceServerRevision']) ? $guard['sourceServerRevision'] : -1);
+        if (!$sourceRow || (int)$sourceRow['revision'] !== $expectedSourceRevision) {
+            throw new PewCatalogUpdateStale(array(
+                'sourceEstimateId' => $sourceClientId,
+                'sourceDbEstimateId' => $sourceEstimateId ?: $sourceDbHint,
+                'expectedRevision' => $expectedSourceRevision,
+                'currentRevision' => $sourceRow ? (int)$sourceRow['revision'] : null
+            ));
+        }
+    }
     if (!$estimateId) {
         $createdExtended = pew_best_effort('extended estimate insert', $pdo, function () use ($pdo, $projectId, $estimate) {
             $stmt = $pdo->prepare('INSERT INTO estimates (project_id,estimate_number,name,status,currency_code) VALUES (?,?,?,?,?)');
@@ -646,6 +675,13 @@ try {
             'state' => array('activeEstimateId' => $remainingActiveId, 'estimates' => $remainingEstimates)));
     }
     pew_error('Unknown action.', 404, 'unknown_action');
+} catch (PewCatalogUpdateStale $e) {
+    if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+    pew_json(array('ok' => false, 'success' => false, 'error' => array(
+        'code' => 'ESTIMATE_CHANGED_SINCE_PREVIEW',
+        'message' => 'The source estimate changed after the Cost Catalog preview.',
+        'details' => $e->details
+    )), 409);
 } catch (PewRevisionConflict $e) {
     if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
     pew_json(array('ok' => false, 'success' => false, 'error' => array(
