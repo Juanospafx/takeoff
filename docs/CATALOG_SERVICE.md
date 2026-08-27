@@ -38,7 +38,7 @@ Known codes include `NETWORK_ERROR`, `INVALID_RESPONSE`, `API_ERROR`, `ITEM_NOT_
 
 ## Availability limitation
 
-`activeOnly` and `enabledForProjectsOnly` intentionally fail with `UNSUPPORTED_AVAILABILITY_FILTER`. The current API does not consistently enforce inherited item + category + catalog availability, so the service does not advertise a false frontend guarantee.
+Availability is enforced authoritatively by the API. `activeOnly` maps to `availability=active`; `enabledForProjectsOnly` maps to `availability=project`. Project mode requires an active item, active/enabled catalog, active/enabled complete category ancestry, and an active/effective cost book when one is assigned. Assemblies with unavailable components are excluded and reported in `blockedAssemblies`. The default remains `availability=admin` for the Cost Catalog administration UI; deleted rows are included only with explicit admin-mode `includeDeleted`.
 
 ## Caching
 

@@ -58,9 +58,14 @@ test('API and network failures become normalized CatalogServiceError values', as
     );
 });
 
-test('unsupported availability filters fail explicitly instead of pretending authority', async () => {
-    await assert.rejects(
-        () => Service.listItems({ activeOnly: true, fetchImpl: async () => response(fixture()) }),
-        error => error.code === 'UNSUPPORTED_AVAILABILITY_FILTER'
-    );
+test('availability filters map to authoritative API modes', async () => {
+    const urls = [];
+    const fetchImpl = async url => { urls.push(url); return response(fixture()); };
+    await Service.listItems({ activeOnly: true, fetchImpl });
+    await Service.listItems({ enabledForProjectsOnly: true, fetchImpl });
+    await Service.listItems({ includeDeleted: true, fetchImpl });
+    assert.match(urls[0], /availability=active/);
+    assert.match(urls[1], /availability=project/);
+    assert.match(urls[2], /availability=admin/);
+    assert.match(urls[2], /include_deleted=1/);
 });

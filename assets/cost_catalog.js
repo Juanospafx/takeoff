@@ -4,9 +4,12 @@
     let selection = { view: 'all', catalogId: null, groupId: null };
     let editingItemId = null;
     let movingItemId = null;
+    let detailsItemId = null;
+    let detailsReturnFocus = null;
     let itemQuery = '';
     let itemSort = 'name';
     let itemSortDirection = 1;
+    let itemTypeFilter = 'all';
 
     const esc = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({
         '&': '&amp;',
@@ -54,6 +57,22 @@
         renderTitle();
         renderItemSelects();
         renderAssemblyItemOptions();
+        renderBreadcrumb();
+    }
+
+    function renderBreadcrumb() {
+        const root = document.getElementById('ccBreadcrumb');
+        if (!root) return;
+        const group = currentGroup();
+        const catalog = currentCatalog() || (group && state.catalogs.find(row => Number(row.id) === Number(group.catalog_id)));
+        const parts = [{ label: 'Catalogs', view: 'all' }];
+        if (catalog) parts.push({ label: catalog.name, view: 'catalog', catalogId: catalog.id, current: !group });
+        if (group) parts.push({ label: group.name, current: true });
+        root.innerHTML = `<ol>${parts.map((part, index) => `<li>${index ? '<i class="fas fa-chevron-right" aria-hidden="true"></i>' : ''}${part.current ? `<span aria-current="page">${esc(part.label)}</span>` : `<button type="button" data-breadcrumb-view="${part.view}" ${part.catalogId ? `data-catalog-id="${part.catalogId}"` : ''}>${esc(part.label)}</button>`}</li>`).join('')}</ol>`;
+        root.querySelectorAll('[data-breadcrumb-view]').forEach(button => button.addEventListener('click', () => {
+            selection = button.dataset.breadcrumbView === 'catalog' ? { view: 'catalog', catalogId: Number(button.dataset.catalogId), groupId: null } : { view: 'all', catalogId: null, groupId: null };
+            load();
+        }));
     }
 
     function renderTitle() {
@@ -82,10 +101,12 @@
             btn.classList.toggle('active', selection.view === btn.dataset.view);
         });
         const root = document.getElementById('ccCatalogTree');
+        root.setAttribute('role', 'tree');
+        root.setAttribute('aria-label', 'Catalog and category hierarchy');
         root.innerHTML = state.catalogs.map(catalog => {
             const groups = state.groups.filter(group => Number(group.catalog_id) === Number(catalog.id) && !group.parent_group_id);
             return `
-                <button class="cc-tree-row ${selection.catalogId === Number(catalog.id) && selection.view === 'catalog' ? 'active' : ''}" data-catalog-id="${catalog.id}">
+                <button class="cc-tree-row ${selection.catalogId === Number(catalog.id) && selection.view === 'catalog' ? 'active' : ''}" data-catalog-id="${catalog.id}" role="treeitem" aria-level="1" aria-selected="${selection.catalogId === Number(catalog.id) && selection.view === 'catalog'}">
                     <i class="fas fa-book"></i><span>${esc(catalog.name)}</span><span class="status ${Number(catalog.active) ? '' : 'off'}"></span>
                 </button>
                 ${groups.map(group => renderGroup(group, 'group')).join('')}
@@ -108,7 +129,7 @@
     function renderGroup(group, cls) {
         const children = state.groups.filter(row => Number(row.parent_group_id || 0) === Number(group.id));
         return `
-            <button class="cc-tree-row ${cls} ${selection.groupId === Number(group.id) ? 'active' : ''}" data-group-id="${group.id}">
+            <button class="cc-tree-row ${cls} ${selection.groupId === Number(group.id) ? 'active' : ''}" data-group-id="${group.id}" role="treeitem" aria-level="${cls === 'subgroup' ? 3 : 2}" aria-selected="${selection.groupId === Number(group.id)}" aria-label="Category: ${esc(group.name)}">
                 <i class="fas fa-folder"></i><span>${esc(group.name)}</span><span class="status ${Number(group.active) ? '' : 'off'}"></span>
             </button>
             ${children.map(child => renderGroup(child, 'subgroup')).join('')}
@@ -153,7 +174,8 @@
             if (itemSort === 'catalog') return String(item.catalog_name || '').toLowerCase();
             return String(item.name || '').toLowerCase();
         };
-        const items = state.items.filter(item => !normalizedQuery || [item.name, item.description,
+        const items = state.items.filter(item => itemTypeFilter === 'all' || String(item.item_type || 'part').toLowerCase() === itemTypeFilter)
+            .filter(item => !normalizedQuery || [item.name, item.description,
             item.catalog_name, item.group_name, item.manufacturer, item.catalog_number, item.cost_code]
             .some(value => String(value || '').toLowerCase().includes(normalizedQuery)))
             .slice().sort((a, b) => {
@@ -163,16 +185,37 @@
             });
         const resultCount = document.getElementById('ccResultCount');
         if (resultCount) resultCount.textContent = `${items.length} ${items.length === 1 ? 'item' : 'items'}`;
-        body.innerHTML = items.map(item => `
+        body.innerHTML = items.map(CatalogItemRow).join('') || '<tr class="cc-empty-row"><td colspan="8"><i class="fas fa-box-open" aria-hidden="true"></i>No catalog items match this view.</td></tr>';
+        /* CatalogItemRow owns the row markup; keep listeners below delegated to its data attributes. */
+        body.querySelectorAll('[data-item-menu]').forEach(button => {
+            button.addEventListener('click', event => {
+                event.stopPropagation(); const menu = button.closest('.cc-row-menu'); const opening = !menu.classList.contains('open'); closeItemMenus();
+                if (opening) { menu.classList.add('open'); button.setAttribute('aria-expanded', 'true'); positionItemMenu(button, menu.querySelector('.cc-row-menu-panel')); }
+            });
+        });
+        body.querySelectorAll('[data-item-action]').forEach(button => button.addEventListener('click', () => itemAction(button.dataset.itemAction, Number(button.dataset.id))));
+    }
+
+    function canonicalItemMetrics(item) {
+        const type = String(item.item_type || 'part').toLowerCase();
+        if (type === 'labor') return { primary: `${Number(item.labor_hours || 0).toFixed(4)} hr`, secondary: 'Labor / unit' };
+        if (type === 'equipment') return { primary: money(item.unit_cost), secondary: 'Equipment / unit' };
+        if (type === 'assembly') return { primary: money(item.unit_cost), secondary: `${Number(item.labor_hours || 0).toFixed(4)} hr assembled` };
+        return { primary: money(item.unit_cost), secondary: `${Number(item.labor_hours || 0).toFixed(4)} hr labor` };
+    }
+
+    function CatalogItemRow(item) {
+        const metrics = canonicalItemMetrics(item);
+        return `
             <tr>
                 <td>
-                    <span class="cc-item-name" title="${esc(item.name)}">${esc(item.name)}</span>
+                    <button class="cc-item-name" type="button" data-item-details="${item.id}" title="View ${esc(item.name)} details">${esc(item.name)}</button>
                     <span class="cc-item-meta"><span class="cc-pill">${displayItemType(item.item_type)}</span>
                     ${item.color ? `<span class="cc-swatch" style="background:${esc(item.color)}" title="Item color"></span>` : ''}</span>
                 </td>
                 <td class="cc-muted-cell" title="${esc(item.description || '')}">${esc(item.description || '-')}</td>
                 <td>${esc(item.unit_of_measure || 'ea')}</td>
-                <td class="cc-money">${money(item.unit_cost)}</td>
+                <td class="cc-money"><strong>${metrics.primary}</strong><small>${esc(metrics.secondary)}</small></td>
                 <td>${Number(item.labor_hours || 0).toFixed(4)}</td>
                 <td class="cc-muted-cell">${esc(item.catalog_name || '-')}</td>
                 <td class="cc-muted-cell">${esc(item.group_name || '-')}</td>
@@ -193,24 +236,60 @@
                     </div>
                 </td>
             </tr>
-        `).join('') || '<tr class="cc-empty-row"><td colspan="8"><i class="fas fa-box-open" aria-hidden="true"></i>No catalog items match this view.</td></tr>';
+        `;
+    }
 
-        body.querySelectorAll('[data-item-menu]').forEach(button => {
-            button.addEventListener('click', event => {
-                event.stopPropagation();
-                const menu = button.closest('.cc-row-menu');
-                const opening = !menu.classList.contains('open');
-                closeItemMenus();
-                if (!opening) return;
-                menu.classList.add('open');
-                button.setAttribute('aria-expanded', 'true');
-                positionItemMenu(button, menu.querySelector('.cc-row-menu-panel'));
-            });
-        });
+    function safeExternalUrl(value) {
+        try {
+            const url = new URL(String(value || ''), window.location.href);
+            return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
+        } catch (_) { return ''; }
+    }
 
-        body.querySelectorAll('[data-item-action]').forEach(button => {
-            button.addEventListener('click', () => itemAction(button.dataset.itemAction, Number(button.dataset.id)));
-        });
+    function detailField(label, value) {
+        const display = value === null || value === undefined || value === '' ? 'Not provided' : value;
+        return `<div class="cc-detail-field"><dt>${esc(label)}</dt><dd>${esc(display)}</dd></div>`;
+    }
+
+    function detailLink(label, value) {
+        const url = safeExternalUrl(value);
+        return `<div class="cc-detail-field"><dt>${esc(label)}</dt><dd>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open ${esc(label)} <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>` : 'Not provided'}</dd></div>`;
+    }
+
+    function renderItemDetails(item) {
+        const type = String(item.item_type || 'part').toLowerCase();
+        const metrics = canonicalItemMetrics(item);
+        const common = [detailField('Type', displayItemType(type)), detailField('Description', item.description), detailField('Unit of measure', item.unit_of_measure || 'ea'), detailField('Catalog', item.catalog_name), detailField('Category', item.group_name), detailField('Cost code', item.cost_code), detailField('Catalog number', item.catalog_number), detailField('Manufacturer', item.manufacturer), detailField('Supplier', item.supplier)];
+        const specific = type === 'labor'
+            ? [detailField('Labor time', `${Number(item.labor_hours || 0).toFixed(4)} hr`)]
+            : type === 'equipment'
+                ? [detailField('Equipment cost', money(item.unit_cost))]
+                : [detailField(type === 'assembly' ? 'Assembly cost' : 'Material cost', money(item.unit_cost)), detailField('Labor time', `${Number(item.labor_hours || 0).toFixed(4)} hr`)];
+        const parts = type === 'assembly' ? state.assemblyParts.filter(part => Number(part.assembly_catalog_item_id) === Number(item.id)) : [];
+        const included = type === 'assembly' ? `<section class="cc-detail-section"><h3>Included items</h3><div class="cc-included-items">${parts.map(part => `<article><strong>${esc(part.child_item_name || 'Catalog item')}</strong><span>${esc(part.child_item_unit || 'ea')} · Qty ${Number(part.quantity || 0)}</span><small>${money(part.unit_cost_snapshot)} · ${Number(part.unit_labor_time_snapshot || 0).toFixed(4)} hr</small></article>`).join('') || '<p class="cc-details-empty">No included items.</p>'}</div></section>` : '';
+        return `<section class="cc-detail-summary"><span class="cc-pill">${displayItemType(type)}</span><h3>${esc(item.name)}</h3><p>${esc(item.description || 'No description provided.')}</p><div class="cc-detail-metrics"><strong>${esc(metrics.primary)}</strong><span>${esc(metrics.secondary)}</span></div></section><section class="cc-detail-section"><h3>Item information</h3><dl class="cc-detail-list">${common.join('')}${specific.join('')}${detailField('Taxable', Number(item.taxable) ? 'Yes' : 'No')}${detailLink('EPD', item.epd_url)}${detailLink('Attachment', item.attachment_url)}</dl></section>${included}`;
+    }
+
+    function openItemDetails(itemId, trigger) {
+        const item = (state.allItems?.length ? state.allItems : state.items).find(row => Number(row.id) === Number(itemId));
+        if (!item) return;
+        detailsItemId = Number(item.id); detailsReturnFocus = trigger || document.activeElement;
+        document.getElementById('ccItemDetailsTitle').textContent = item.name;
+        document.getElementById('ccItemDetailsBody').innerHTML = renderItemDetails(item);
+        const drawer = document.getElementById('ccItemDetailsDrawer'); const scrim = document.getElementById('ccItemDetailsScrim');
+        const mobile = window.matchMedia?.('(max-width: 760px)').matches;
+        if (mobile) { drawer.setAttribute('role', 'dialog'); drawer.setAttribute('aria-modal', 'true'); }
+        else { drawer.removeAttribute('role'); drawer.removeAttribute('aria-modal'); }
+        drawer.classList.add('open'); drawer.setAttribute('aria-hidden', 'false'); scrim.hidden = false;
+        document.body.classList.add('cc-details-open'); drawer.focus();
+    }
+
+    function closeItemDetails() {
+        if (detailsItemId === null) return;
+        detailsItemId = null; const drawer = document.getElementById('ccItemDetailsDrawer');
+        drawer.classList.remove('open'); drawer.setAttribute('aria-hidden', 'true'); document.getElementById('ccItemDetailsScrim').hidden = true;
+        drawer.removeAttribute('role'); drawer.removeAttribute('aria-modal');
+        document.body.classList.remove('cc-details-open'); const target = detailsReturnFocus; detailsReturnFocus = null; target?.focus?.();
     }
 
     function closeItemMenus() {
@@ -397,7 +476,7 @@
         document.getElementById('ccItemGroup').value = groupId || '';
         document.getElementById('ccItemName').value = item?.name || '';
         document.getElementById('ccItemDescription').value = item?.description || '';
-        document.getElementById('ccItemType').value = item?.item_type === 'part' ? 'material' : (item?.item_type || 'material');
+        document.getElementById('ccItemType').value = item?.item_type === 'material' ? 'part' : (item?.item_type || 'part');
         document.getElementById('ccItemUom').value = item?.unit_of_measure || 'ea';
         document.getElementById('ccItemUnitCost').value = item?.unit_cost || '0';
         document.getElementById('ccItemLaborHours').value = item?.labor_hours || '0';
@@ -408,6 +487,8 @@
         document.getElementById('ccItemSupplier').value = item?.supplier || '';
         document.getElementById('ccItemCatalogNumber').value = item?.catalog_number || item?.sku || '';
         document.getElementById('ccItemCostCode').value = item?.cost_code || '';
+        document.getElementById('ccItemMasterFormat').value = item?.masterformat || '';
+        document.getElementById('ccItemUniFormat').value = item?.uniformat || '';
         document.getElementById('ccItemSubJobCode').value = item?.sub_job_code || '';
         document.getElementById('ccItemSubJobName').value = item?.sub_job_name || '';
         document.getElementById('ccItemEpdUrl').value = item?.epd_url || '';
@@ -415,6 +496,9 @@
         toggleAssemblySection();
         renderAssemblyParts();
         document.getElementById('ccItemModal').classList.add('open');
+        document.getElementById('ccItemModal').setAttribute('role', 'dialog');
+        document.getElementById('ccItemModal').setAttribute('aria-modal', 'true');
+        document.getElementById('ccItemName').focus();
     }
 
     function isAssemblyType() {
@@ -424,6 +508,10 @@
     function toggleAssemblySection() {
         const section = document.getElementById('ccAssemblySection');
         section.style.display = isAssemblyType() ? 'block' : 'none';
+        const type = document.getElementById('ccItemType').value;
+        document.querySelectorAll('[data-item-specific]').forEach(field => { field.hidden = !field.dataset.itemSpecific.split(' ').includes(type); });
+        document.getElementById('ccItemUnitCost').readOnly = isAssemblyType();
+        document.getElementById('ccItemLaborHours').readOnly = isAssemblyType();
         renderAssemblyParts();
     }
 
@@ -506,6 +594,8 @@
             supplier: document.getElementById('ccItemSupplier').value,
             catalog_number: document.getElementById('ccItemCatalogNumber').value,
             cost_code: document.getElementById('ccItemCostCode').value,
+            masterformat: document.getElementById('ccItemMasterFormat').value,
+            uniformat: document.getElementById('ccItemUniFormat').value,
             sub_job_code: document.getElementById('ccItemSubJobCode').value,
             sub_job_name: document.getElementById('ccItemSubJobName').value,
             epd_url: document.getElementById('ccItemEpdUrl').value,
@@ -595,6 +685,13 @@
             itemSort = event.target.value;
             renderItems();
         });
+        document.getElementById('ccTypeFilter')?.addEventListener('change', event => { itemTypeFilter = event.target.value; renderItems(); });
+        document.getElementById('ccItemsBody')?.addEventListener('click', event => {
+            const trigger = event.target.closest('[data-item-details]');
+            if (trigger) openItemDetails(trigger.dataset.itemDetails, trigger);
+        });
+        document.getElementById('ccCloseItemDetails')?.addEventListener('click', closeItemDetails);
+        document.getElementById('ccItemDetailsScrim')?.addEventListener('click', closeItemDetails);
         document.getElementById('ccSortDir')?.addEventListener('click', event => {
             itemSortDirection *= -1;
             const button = event.currentTarget;
@@ -625,7 +722,17 @@
         if (!event.target.closest('.cc-row-menu')) closeItemMenus();
     });
     document.addEventListener('keydown', event => {
+        if (event.key === 'Tab' && detailsItemId !== null && window.matchMedia?.('(max-width: 760px)').matches) {
+            const drawer = document.getElementById('ccItemDetailsDrawer');
+            const focusable = [...drawer.querySelectorAll('a[href],button:not([disabled]),[tabindex]:not([tabindex="-1"])')];
+            if (focusable.length) {
+                const first = focusable[0]; const last = focusable[focusable.length - 1];
+                if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+                else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+            }
+        }
         if (event.key === 'Escape') {
+            closeItemDetails();
             closeItemMenus();
             closeItemModals();
         }

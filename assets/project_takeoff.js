@@ -1545,7 +1545,7 @@
         catalogState.error = '';
         renderCatalogBrowser();
         try {
-            const snapshot = await window.CatalogService.getSnapshot();
+            const snapshot = await window.CatalogService.getSnapshot({ enabledForProjectsOnly: true });
             catalogState.catalogs = snapshot.catalogs;
             catalogState.groups = snapshot.categories;
             catalogState.items = snapshot.items;

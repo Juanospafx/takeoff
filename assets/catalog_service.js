@@ -35,6 +35,7 @@
             active: flag(row.active),
             enabledForProjects: flag(row.enabled_for_projects),
             locked: flag(row.locked, false),
+            revision: row.revision ?? row.updated_at ?? row.updatedAt ?? null,
             itemCount: Number(row.item_count || 0)
         };
     }
@@ -50,18 +51,21 @@
             sortOrder: Number(row.sort_order || 0),
             active: flag(row.active),
             enabledForProjects: flag(row.enabled_for_projects),
+            revision: row.revision ?? row.updated_at ?? row.updatedAt ?? null,
             itemCount: Number(row.item_count || 0)
         };
     }
 
-    function unsupportedAvailabilityFilters(options) {
-        if (!options?.activeOnly && !options?.enabledForProjectsOnly) return;
-        throw new CatalogServiceError('UNSUPPORTED_AVAILABILITY_FILTER',
-            'The Cost Catalog API does not yet provide authoritative project availability filtering.');
+    function availabilityMode(options = {}) {
+        if (options.enabledForProjectsOnly) return 'project';
+        if (options.activeOnly) return 'active';
+        return ['admin', 'active', 'project'].includes(options.availability) ? options.availability : 'admin';
     }
 
     function endpointUrl(endpoint, options = {}) {
         const params = new URLSearchParams({ action: 'list', view: 'all' });
+        params.set('availability', availabilityMode(options));
+        if (availabilityMode(options) === 'admin' && options.includeDeleted) params.set('include_deleted', '1');
         if (options.catalogId) {
             params.set('view', 'catalog');
             params.set('catalog_id', options.catalogId);
@@ -74,7 +78,6 @@
     }
 
     async function requestPayload(options = {}) {
-        unsupportedAvailabilityFilters(options);
         const fetchImpl = options.fetchImpl || global.fetch;
         if (typeof fetchImpl !== 'function') {
             throw new CatalogServiceError('FETCH_UNAVAILABLE', 'No fetch implementation is available.');
@@ -127,7 +130,10 @@
         return {
             catalogs: (payload.catalogs || []).map(catalogDto),
             categories: (payload.groups || []).map(categoryDto),
-            items: normalizedItems(payload, options)
+            items: normalizedItems(payload, options),
+            blockedAssemblies: Array.isArray(payload.blockedAssemblies) ? payload.blockedAssemblies : [],
+            capabilities: payload.capabilities || {},
+            availability: payload.availability || availabilityMode(options)
         };
     }
 

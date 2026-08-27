@@ -1,0 +1,85 @@
+{
+  "api": {
+    "status": "success",
+    "data": {
+      "catalogs": [
+        {
+          "id": 1,
+          "name": "Electrical",
+          "description": "Golden cost book",
+          "trade": "Electrical",
+          "active": 1,
+          "enabled_for_projects": 1,
+          "locked": 1,
+          "item_count": 10
+        },
+        {
+          "id": 2,
+          "name": "Archived",
+          "active": 0,
+          "enabled_for_projects": 0,
+          "locked": 0,
+          "item_count": 0
+        }
+      ],
+      "groups": [
+        {
+          "id": 5,
+          "catalog_id": 1,
+          "parent_group_id": null,
+          "name": "Raceway",
+          "catalog_name": "Electrical",
+          "sort_order": 7,
+          "active": 1,
+          "enabled_for_projects": 1,
+          "item_count": 10
+        },
+        {
+          "id": 6,
+          "catalog_id": 1,
+          "parent_group_id": 5,
+          "name": "Unavailable child",
+          "catalog_name": "Electrical",
+          "sort_order": 8,
+          "active": 0,
+          "enabled_for_projects": 0,
+          "item_count": 0
+        }
+      ],
+      "allItems": [
+        { "id": 10, "revision": 4, "item_type": "part", "name": "Conduit", "unit_of_measure": "ft", "unit_cost": "5.2500", "labor_hours": "0.1250", "catalog_id": 1, "catalog_name": "Electrical", "catalog_group_id": 5, "group_name": "Raceway" },
+        { "id": 11, "revision": "2026-08-27 10:20:30", "item_type": "part", "name": "Area part", "unit_cost": 2 },
+        { "id": 12, "revision": 2, "item_type": "part", "name": "Endpoint part", "unit_cost": 3 },
+        { "id": 13, "revision": 3, "item_type": "part", "name": "Spacing part", "unit_cost": 4 },
+        { "id": 14, "revision": 8, "item_type": "part", "name": "Nested leaf", "unit_cost": 6 },
+        { "id": 20, "revision": 5, "item_type": "equipment", "name": "Lift", "unit_cost": "125.5000" },
+        { "id": 30, "revision": 6, "item_type": "labor", "name": "Electrician", "labor_rate": "85.0000", "labor_hours": "1.0000" },
+        { "id": 40, "revision": 12, "item_type": "assembly", "name": "Root assembly", "unit_of_measure": "ea" },
+        { "id": 41, "revision": 9, "item_type": "assembly", "name": "Nested assembly", "unit_of_measure": "ea" }
+      ],
+      "assemblyParts": [
+        { "id": 100, "assembly_catalog_item_id": 40, "part_catalog_item_id": 10, "quantity": 2, "ratio_type": "per_unit", "unit_cost_snapshot": 5.25 },
+        { "id": 101, "assembly_catalog_item_id": 40, "part_catalog_item_id": 20, "quantity": 1, "ratio_type": "fixed", "equipment_cost_snapshot": 125.5 },
+        { "id": 102, "assembly_catalog_item_id": 40, "part_catalog_item_id": 30, "quantity": 0.5, "ratio_type": "per_linear_length", "labor_rate_snapshot": 85 },
+        { "id": 103, "assembly_catalog_item_id": 40, "part_catalog_item_id": 11, "quantity": 0.25, "ratio_type": "per_area" },
+        { "id": 104, "assembly_catalog_item_id": 40, "part_catalog_item_id": 12, "quantity": 2, "ratio_type": "per_endpoint" },
+        { "id": 105, "assembly_catalog_item_id": 40, "part_catalog_item_id": 13, "quantity": 1, "ratio_type": "spacing_based", "spacing_value": 30 },
+        { "id": 106, "assembly_catalog_item_id": 40, "part_catalog_item_id": 41, "quantity": 2, "ratio_type": "per_unit" },
+        { "id": 107, "assembly_catalog_item_id": 41, "part_catalog_item_id": 14, "quantity": 3, "ratio_type": "per_unit" }
+      ]
+    }
+  },
+  "expected": {
+    "types": ["PART", "PART", "PART", "PART", "PART", "EQUIPMENT", "LABOR", "ASSEMBLY", "ASSEMBLY"],
+    "revisions": [4, "2026-08-27 10:20:30", 2, 3, 8, 5, 6, 12, 9],
+    "rootLeafQuantities": {
+      "10": 6,
+      "20": 1,
+      "30": 50,
+      "11": 10,
+      "12": 4,
+      "13": 4,
+      "14": 18
+    }
+  }
+}

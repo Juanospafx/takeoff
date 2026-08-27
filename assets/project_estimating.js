@@ -649,7 +649,7 @@
         ui.catalogTargetGroupId = groupId;
         ui.catalogLoading = true; ui.catalogError = ''; ui.modal = 'catalog'; renderModal();
         try {
-            ui.catalogData = await window.CatalogService.getSnapshot();
+            ui.catalogData = await window.CatalogService.getSnapshot({ enabledForProjectsOnly: true });
         } catch (error) { ui.catalogError = error.message; }
         ui.catalogLoading = false; renderModal();
     }
@@ -668,7 +668,7 @@
         let estimate = Workspace.clone(current());
         if (mode === 'flat' && Exporter.needsCatalog(estimate)) {
             try {
-                const catalogSnapshot = await window.CatalogService.getSnapshot();
+                const catalogSnapshot = await window.CatalogService.getSnapshot({ enabledForProjectsOnly: true });
                 estimate = window.BoqCatalogAdapter.hydrateEstimate(estimate, catalogSnapshot);
             } catch (error) {
                 alert(`BOQ Flat could not load the Cost Catalog: ${error.message}`);

@@ -72,7 +72,7 @@ test('Estimating Add Item consumes CatalogService DTOs with the required load or
         'estimating_catalog_adapter.js', 'project_estimating.js'];
     names.slice(1).forEach((name, index) => assert.ok(page.indexOf(names[index]) < page.indexOf(name)));
     const boundary = client.slice(client.indexOf('function renderCatalogChoices'), client.indexOf('async function exportEstimate'));
-    assert.match(boundary, /CatalogService\.getSnapshot\(\)/);
+    assert.match(boundary, /CatalogService\.getSnapshot\(\{ enabledForProjectsOnly: true \}\)/);
     assert.match(boundary, /EstimatingCatalogAdapter\.catalogItemDtoToEstimatingItem/);
     assert.doesNotMatch(boundary, /fetch\([^)]*cost_catalog\.php/);
     assert.doesNotMatch(boundary, /normalizeCatalogItem\(/);

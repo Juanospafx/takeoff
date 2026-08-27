@@ -53,6 +53,7 @@
         </div>
 
         <div id="ccError" class="cc-error" style="display:none;"></div>
+        <nav class="cc-breadcrumb" id="ccBreadcrumb" aria-label="Catalog breadcrumb"></nav>
 
         <section class="cc-context-actions" aria-label="Selected catalog and group actions">
             <div class="cc-panel">
@@ -78,6 +79,7 @@
                     <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
                 </label>
                 <label class="cc-select-field"><span>Sort by</span><select id="ccSortBy"><option value="name">Item name</option><option value="cost">Unit cost</option><option value="labor">Labor time</option><option value="catalog">Catalog</option></select></label>
+                <label class="cc-select-field"><span>Type</span><select id="ccTypeFilter"><option value="all">All types</option><option value="part">Material</option><option value="cable">Cable</option><option value="labor">Labor</option><option value="equipment">Equipment</option><option value="assembly">Assembly</option></select></label>
                 <button class="cc-icon-btn bordered" id="ccSortDir" type="button" aria-label="Sort descending" title="Toggle sort direction"><i class="fas fa-arrow-down-wide-short" aria-hidden="true"></i></button>
                 <span class="cc-result-count" id="ccResultCount" aria-live="polite"></span>
             </div>
@@ -91,6 +93,15 @@
     </main>
 </div>
 
+<div class="cc-details-scrim" id="ccItemDetailsScrim" hidden></div>
+<aside class="cc-details-drawer" id="ccItemDetailsDrawer" aria-labelledby="ccItemDetailsTitle" aria-hidden="true" tabindex="-1">
+    <header class="cc-details-head">
+        <div><span class="cc-eyebrow">Catalog item</span><h2 id="ccItemDetailsTitle">Item details</h2></div>
+        <button class="cc-icon-btn bordered" type="button" id="ccCloseItemDetails" aria-label="Close item details"><i class="fas fa-times" aria-hidden="true"></i></button>
+    </header>
+    <div class="cc-details-body" id="ccItemDetailsBody"></div>
+</aside>
+
 <div class="cc-modal-backdrop" id="ccItemModal">
     <div class="cc-modal">
         <form id="ccItemForm">
@@ -98,7 +109,9 @@
                 <strong id="ccItemModalTitle">Create Catalog Item</strong>
                 <button class="cc-btn" type="button" data-close-item-modal><i class="fas fa-times"></i></button>
             </div>
-            <div class="cc-modal-body">
+            <div class="cc-modal-body" aria-describedby="ccItemFormError">
+                <div class="cc-inline-error" id="ccItemFormError" role="alert" hidden></div>
+                <h3 class="cc-form-section-title">Essential Details</h3>
                 <div class="cc-form-grid">
                     <div class="cc-field full">
                         <label>Name</label>
@@ -113,41 +126,44 @@
                         <select id="ccItemCatalog" required></select>
                     </div>
                     <div class="cc-field">
-                        <label>Group</label>
+                        <label>Category</label>
                         <select id="ccItemGroup"></select>
                     </div>
                     <div class="cc-field">
-                        <label>Item Type</label>
+                        <label>Type</label>
                         <select id="ccItemType">
-                            <option value="material">Material</option>
+                            <option value="part">Part</option>
                             <option value="labor">Labor</option>
                             <option value="equipment">Equipment</option>
                             <option value="assembly">Assembly</option>
                         </select>
                     </div>
-                    <div class="cc-field">
+                    <div class="cc-field"><label>MasterFormat</label><input id="ccItemMasterFormat"></div>
+                    <div class="cc-field"><label>UniFormat</label><input id="ccItemUniFormat"></div>
+                    <div class="cc-field" data-item-specific="part equipment">
                         <label>Unit of Measure</label>
                         <input id="ccItemUom" required value="ea">
                     </div>
-                    <div class="cc-field">
+                    <div class="cc-field" data-item-specific="part labor">
                         <label>Unit Cost</label>
                         <input id="ccItemUnitCost" type="number" min="0" step="0.0001" value="0">
                     </div>
-                    <div class="cc-field">
+                    <div class="cc-field" data-item-specific="part equipment labor">
                         <label>Unit Labor Time</label>
                         <input id="ccItemLaborHours" type="number" min="0" step="0.0001" value="0">
                     </div>
-                    <div class="cc-field">
+                    <div class="cc-field" data-item-specific="part equipment">
                         <label>Taxable</label>
                         <select id="ccItemTaxable">
                             <option value="1">Yes</option>
                             <option value="0">No</option>
                         </select>
                     </div>
-                    <div class="cc-field">
+                    <div class="cc-field" data-item-specific="part equipment">
                         <label>Color</label>
                         <input id="ccItemColor" type="color" value="#2563eb">
                     </div>
+                    <h3 class="cc-form-section-title full">Catalog Details</h3>
                     <div class="cc-field">
                         <label>Symbol</label>
                         <select id="ccItemSymbol">
@@ -187,10 +203,7 @@
                         <label>EPD URL</label>
                         <input id="ccItemEpdUrl" type="url">
                     </div>
-                    <div class="cc-field full">
-                        <label>Attachment</label>
-                        <input id="ccItemAttachmentUrl" type="url">
-                    </div>
+                    <input id="ccItemAttachmentUrl" type="hidden">
                 </div>
                 <section class="cc-assembly-section" id="ccAssemblySection">
                     <div class="cc-section-head">
@@ -255,5 +268,6 @@
 
 <script src="../assets/global_tools.js"></script>
 <script src="../assets/cost_catalog.js?v=procore-catalog-20260824-1"></script>
+<script src="../assets/catalog_admin_service.js?v=catalog-phase6-20260827-1"></script>
 </body>
 </html>

@@ -68,7 +68,7 @@ test('Browse Catalog loads the contract before Takeoff and consumes canonical fi
     assert.ok(page.indexOf('takeoff_catalog_adapter.js') < page.indexOf('project_takeoff.js'));
     const boundary = takeoff.slice(takeoff.indexOf('function catalogItemMeta'), takeoff.indexOf('function createTakeoffGroup'));
     assert.doesNotMatch(boundary, /item\.(?:unit_cost|labor_hours|item_type|cost_type|catalog_group_id|unit_of_measure|group_name|catalog_name)\b/);
-    assert.match(boundary, /CatalogService\.getSnapshot\(\)/);
+    assert.match(boundary, /CatalogService\.getSnapshot\(\{ enabledForProjectsOnly: true \}\)/);
     assert.doesNotMatch(boundary, /fetch\([^)]*cost_catalog\.php/);
     assert.doesNotMatch(boundary, /normalizeCatalogItem\(/);
 });

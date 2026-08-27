@@ -73,7 +73,7 @@ test('canonical BOQ boundary has no fetch, raw assembly parts, or direct normali
     const exportFlow = consumer.slice(exportStart, exportEnd);
     assert.doesNotMatch(adapter, /fetch\s*\(/);
     assert.doesNotMatch(adapter, /assembly_parts|assemblyParts|unit_cost|labor_hours|normalizeCatalogItem\s*\(/);
-    assert.match(exportFlow, /CatalogService\.getSnapshot\(\)/);
+    assert.match(exportFlow, /CatalogService\.getSnapshot\(\{ enabledForProjectsOnly: true \}\)/);
     assert.match(exportFlow, /BoqCatalogAdapter\.hydrateEstimate/);
     assert.doesNotMatch(exportFlow, /cost_catalog\.php|fetch\s*\(|normalizeCatalogItem/);
     const contractAt = dashboard.indexOf('catalog_item_contract.js');
