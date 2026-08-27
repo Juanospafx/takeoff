@@ -1050,6 +1050,7 @@ $state = [
                             <input id="estSearch" type="search" placeholder="Search cost item">
                         </label>
                         <button class="est-btn est-btn-primary" type="button" data-est-action="create-group" title="Create group"><i class="fas fa-folder-plus"></i><span>Create group</span></button>
+                        <button class="est-btn est-catalog-update-trigger" type="button" data-est-action="catalog-update" title="Check this estimate against the Cost Catalog"><i class="fas fa-arrows-rotate" aria-hidden="true"></i><span>Update from Cost Catalog</span></button>
                         <div class="est-menu-wrap">
                             <button class="est-icon-btn" type="button" data-est-action="columns" title="Adjust columns"><i class="fas fa-sliders"></i></button>
                             <div class="est-menu" id="columnMenu"></div>
@@ -1380,6 +1381,7 @@ $state = [
 <script src="../assets/catalog_update_application_service.js?v=catalog-update-application-20260827-2"></script>
 <script src="../assets/estimating_catalog_adapter.js?v=estimating-catalog-snapshot-20260827-1"></script>
 <script src="../assets/project_estimating.js?v=estimating-authoritative-delete-20260824-16-estimating-catalog-snapshot-20260827-1"></script>
+<script src="../assets/catalog_update_ui.js?v=catalog-update-ui-20260827-1"></script>
 <script src="../assets/project_proposal.js?v=estimating-owner-intents-20260824-7"></script>
 <script src="../assets/global_tools.js"></script>
 </body>

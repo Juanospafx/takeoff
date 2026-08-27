@@ -1,0 +1,17 @@
+<!doctype html>
+<html lang="en"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>Catalog Update UI Visual Fixture</title><script>if(new URLSearchParams(location.search).get('theme')==='dark')document.documentElement.dataset.theme='dark'</script><link rel="stylesheet" href="../../assets/project_estimating.css">
+<style>body{margin:0;min-height:100vh}.estimating-page{height:100vh}.fa-spinner:before{content:"↻"}.fa-circle-check:before{content:"✓"}.fa-xmark:before{content:"×"}.fa-arrow-right:before{content:"→"}.fa-shield-halved:before{content:"◆"}.fa-code-branch:before{content:"↗"}.fa-plus:before{content:"+"}</style>
+</head><body class="estimating-page"><div id="estimatingModule"><div class="est-toolbar"><button class="est-btn" data-est-action="catalog-update"><span>Update from Cost Catalog</span></button></div></div>
+<script>
+const price=(field,a,b,override=null)=>({field:'pricing.'+field,previousValue:a,currentValue:b,hasOverride:override!==null,overrideValue:override,effectiveValueAfterIfUpdated:override??b});
+const changes=[
+ {catalogItemId:1,status:'OUTDATED',previousRevision:1,currentRevision:2,warnings:[],changes:[price('materialUnitCost',4.25,4.8,4.1)]},
+ {catalogItemId:2,status:'OUTDATED',previousRevision:1,currentRevision:2,warnings:[],changes:[price('equipmentUnitCost',300,340)]},
+ {catalogItemId:3,status:'OUTDATED',previousRevision:3,currentRevision:4,warnings:[],changes:[{field:'assemblyComponents',componentChanges:[{change:'ADDED',currentValue:{catalogItemId:44,name:'Junction Box'}},{change:'CHANGED',field:'quantity',previousValue:10,currentValue:12}]}]},
+ {catalogItemId:4,status:'MISSING_IN_CATALOG',previousRevision:1,currentRevision:null,warnings:[],changes:[]}
+];
+window.projectEstimatingPrepareCatalogUpdate=async()=>({guard:{estimateId:'e1'},options:{},strategy:{strategy:'CREATE_REVISION'},currentEstimateRevision:3,projectedEstimateRevision:4,preview:{current:{total:18450},projected:{total:19230},difference:{amount:780,percent:4.23},warnings:[],changeSet:{linkedItems:4,outdatedItems:3,unversionedItems:0,missingItems:1,legacyItems:0,changesByType:{pricing:1,equipment:1,labor:0,assemblies:1},itemChanges:changes},itemImpacts:[{catalogItemId:1,name:'EMT Conduit',difference:0},{catalogItemId:2,name:'Lift Rental',difference:40},{catalogItemId:3,name:'Fire Alarm Assembly',difference:740},{catalogItemId:4,name:'Obsolete Connector',difference:0}],projectedEstimate:{groups:[{items:[{catalogItemId:1,name:'EMT Conduit',catalogSnapshot:{type:'PART',category:{name:'Conduit'}}},{catalogItemId:2,name:'Lift Rental',catalogSnapshot:{type:'EQUIPMENT',category:{name:'Equipment'}}},{catalogItemId:3,name:'Fire Alarm Assembly',catalogSnapshot:{type:'ASSEMBLY',category:{name:'Fire Alarm'}}},{catalogItemId:4,name:'Obsolete Connector',catalogSnapshot:{type:'PART',category:{name:'Connectors'}}}]}]}}});
+window.projectEstimatingApplyCatalogUpdate=async()=>({strategy:'CREATE_REVISION'});
+</script><script src="../../assets/catalog_update_ui.js"></script><script>window.addEventListener('load',()=>document.querySelector('[data-est-action="catalog-update"]').click())</script>
+</body></html>
