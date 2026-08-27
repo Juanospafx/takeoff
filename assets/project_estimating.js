@@ -695,7 +695,20 @@
         if (itemRow && itemField && event.target.type === 'number') {
             const found = findItem(itemRow.dataset.itemId);
             if (!found) return;
-            found.item[itemField] = Workspace.numeric(event.target.value);
+            const catalogFields = {
+                unitMaterialCost: 'materialUnitCost',
+                unitEquipmentCost: 'equipmentUnitCost',
+                unitSubcontractorCost: 'subcontractorUnitCost',
+                unitLabor: 'laborHoursPerUnit',
+                laborRate: 'laborRate'
+            };
+            if (found.item.catalogSnapshot && catalogFields[itemField]
+                && window.EstimatingCatalogSnapshotService) {
+                window.EstimatingCatalogSnapshotService.setCatalogOverride(found.item,
+                    catalogFields[itemField], Workspace.numeric(event.target.value));
+            } else {
+                found.item[itemField] = Workspace.numeric(event.target.value);
+            }
             found.item.updatedAt = Workspace.now();
             reactiveChanged(event.target);
             return;
@@ -736,7 +749,17 @@
         if (row && field) {
             const found = findItem(row.dataset.itemId);
             if (!found) return;
-            found.item[field] = event.target.type === 'number' ? Number(event.target.value) : event.target.value;
+            const catalogFields = {
+                unitMaterialCost: 'materialUnitCost', unitEquipmentCost: 'equipmentUnitCost',
+                unitSubcontractorCost: 'subcontractorUnitCost', unitLabor: 'laborHoursPerUnit', laborRate: 'laborRate'
+            };
+            if (event.target.type === 'number' && found.item.catalogSnapshot && catalogFields[field]
+                && window.EstimatingCatalogSnapshotService) {
+                window.EstimatingCatalogSnapshotService.setCatalogOverride(found.item,
+                    catalogFields[field], Number(event.target.value));
+            } else {
+                found.item[field] = event.target.type === 'number' ? Number(event.target.value) : event.target.value;
+            }
             found.item.updatedAt = Workspace.now();
             changed(`Updated ${found.item.name}`);
             return;

@@ -1,4 +1,6 @@
 (function (global) {
+    const CatalogSnapshot = global.EstimatingCatalogSnapshotService
+        || (typeof require === 'function' ? require('./estimating_catalog_snapshot_service.js') : null);
     function number(value) {
         const parsed = Number(value);
         return Number.isFinite(parsed) ? parsed : 0;
@@ -10,7 +12,7 @@
 
     function takeoffItem(layer, group, previous) {
         const quantity = number(layer.quantity);
-        return {
+        const item = {
             ...(previous || {}),
             id: previous?.id || `takeoff_${stringId(layer.id)}`,
             takeoffLayerId: stringId(layer.id),
@@ -31,6 +33,16 @@
             groupId: stringId(group.id),
             groupName: group.name || 'Default Group'
         };
+        if (layer.catalogMetadata && CatalogSnapshot) {
+            const preservedOverrides = previous?.overrides;
+            CatalogSnapshot.attachCatalogMetadata(item, {
+                ...layer.catalogMetadata,
+                uom: layer.catalogMetadata.uom ?? item.uom
+            });
+            if (preservedOverrides) item.overrides = { ...item.overrides, ...preservedOverrides };
+            CatalogSnapshot.refreshEffectiveLegacyFields(item);
+        }
+        return item;
     }
 
     /**

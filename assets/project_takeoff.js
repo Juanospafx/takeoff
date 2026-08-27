@@ -794,6 +794,7 @@
             id: `takeoff_${layer.id}`,
             takeoffLayerId: String(layer.id),
             catalogItemId: layer.catalogItemId || layer.catalog_item_id || null,
+            catalogMetadata: layerCatalogMetadata(layer),
             name: layer.name || 'Takeoff item',
             description: layer.description || '',
             type: itemType,

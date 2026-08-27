@@ -4,6 +4,8 @@
     const Contract = global.CatalogItemContract
         || (typeof require === 'function' ? require('./catalog_item_contract.js') : null);
     if (!Contract) throw new Error('CatalogItemContract must load before EstimatingCatalogAdapter');
+    const CatalogSnapshot = global.EstimatingCatalogSnapshotService
+        || (typeof require === 'function' ? require('./estimating_catalog_snapshot_service.js') : null);
 
     const number = value => Number.isFinite(Number(value)) ? Number(value) : 0;
     const legacyId = value => /^\d+$/.test(String(value || '')) ? Number(value) : value;
@@ -46,7 +48,7 @@
         const type = childDto?.type || fallbackType;
         const category = childDto ? estimatingCategory(childDto)
             : (type === Contract.ITEM_TYPES.EQUIPMENT ? 'Equipment' : 'Materials');
-        return {
+        const child = {
             catalogItemId: legacyId(component.catalogItemId),
             itemType: type.toLowerCase(),
             isAssembly: type === Contract.ITEM_TYPES.ASSEMBLY,
@@ -65,6 +67,13 @@
             laborUnitType: 'hrs',
             laborRate: laborRate(childDto || { pricing: snapshot }, context.globalLaborRate)
         };
+        if (childDto && CatalogSnapshot) {
+            CatalogSnapshot.attachCatalogSnapshot(child, childDto);
+            if (!number(childDto.pricing.laborRate) && number(context.globalLaborRate)) {
+                CatalogSnapshot.setCatalogOverride(child, 'laborRate', context.globalLaborRate);
+            }
+        }
+        return child;
     }
 
     function catalogItemDtoToEstimatingInput(dto, options = {}) {
@@ -75,7 +84,7 @@
                 globalLaborRate: options.globalLaborRate
             }))
             : [];
-        return {
+        const input = {
             catalogItemId: legacyId(dto.id),
             itemType: dto.type.toLowerCase(),
             isAssembly: dto.type === Contract.ITEM_TYPES.ASSEMBLY,
@@ -92,6 +101,11 @@
             children,
             childrenQuantitiesExtended: false
         };
+        if (CatalogSnapshot) CatalogSnapshot.attachCatalogSnapshot(input, dto);
+        if (CatalogSnapshot && !number(dto.pricing.laborRate) && number(options.globalLaborRate)) {
+            CatalogSnapshot.setCatalogOverride(input, 'laborRate', options.globalLaborRate);
+        }
+        return input;
     }
 
     function catalogItemDtoToEstimatingItem(dto, options = {}) {

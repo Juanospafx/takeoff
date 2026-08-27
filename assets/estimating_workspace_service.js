@@ -6,6 +6,8 @@
     const numeric = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
     const text = (value, fallback = '') => value === null || value === undefined ? fallback : String(value);
     const clone = value => JSON.parse(JSON.stringify(value));
+    const CatalogSnapshot = global.EstimatingCatalogSnapshotService
+        || (typeof require === 'function' ? require('./estimating_catalog_snapshot_service.js') : null);
 
     function projectId(value) {
         const parsed = Number(typeof value === 'string' ? value.trim() : value);
@@ -45,11 +47,14 @@
         const quantity = numeric(row.quantity ?? row.originalQuantity);
         const itemType = text(row.itemType ?? row.item_type, row.isAssembly ? 'assembly' : 'part').toLowerCase();
         const childRows = row.children ?? row.assemblyItems ?? row.components;
-        return {
+        const normalized = {
             id: text(row.id) || uid('item'),
             takeoffLayerId: takeoffLayerId || null,
             copiedFromTakeoffLayerId: text(row.copiedFromTakeoffLayerId) || null,
             catalogItemId: row.catalogItemId ?? row.catalog_item_id ?? null,
+            catalogRevision: row.catalogRevision ?? null,
+            catalogSnapshot: row.catalogSnapshot ? clone(row.catalogSnapshot) : null,
+            overrides: row.overrides ? clone(row.overrides) : null,
             itemType,
             isAssembly: row.isAssembly === true || itemType === 'assembly',
             parentItemId: text(row.parentItemId ?? row.parent_item_id ?? row.assemblyParentId) || null,
@@ -70,6 +75,7 @@
             waste: numeric(row.waste ?? row.waste_percentage),
             materialMargin: numeric(row.materialMargin ?? row.margin ?? row.margin_percentage),
             unitEquipmentCost: numeric(row.unitEquipmentCost ?? row.equipment_cost),
+            unitSubcontractorCost: numeric(row.unitSubcontractorCost ?? row.subcontractor_cost),
             equipmentQuantity: numeric(row.equipmentQuantity),
             equipmentMargin: numeric(row.equipmentMargin),
             unitLabor: numeric(row.unitLabor ?? row.unit_labor_time ?? row.laborHours ?? row.labor_hours),
@@ -82,6 +88,7 @@
             notes: text(row.notes),
             updatedAt: text(row.updatedAt ?? row.updated_at, now())
         };
+        return CatalogSnapshot ? CatalogSnapshot.normalizeItemCatalogState(normalized) : normalized;
     }
 
     function category(value) {
