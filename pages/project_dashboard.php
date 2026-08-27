@@ -1364,6 +1364,7 @@ $state = [
 </script>
 <script src="../assets/project_overview.js?v=project-documents-persistence-20260811-6"></script>
 <script src="../assets/estimating_catalog_snapshot_service.js?v=estimating-catalog-snapshot-20260827-1"></script>
+<script src="../assets/catalog_change_detection_service.js?v=catalog-change-detection-20260827-1"></script>
 <script src="../assets/takeoff_estimating_sync_service.js?v=takeoff-estimating-sync-20260827-2"></script>
 <script src="../assets/project_estimate_footer.js?v=estimate-menu-all-tabs-20260820-5"></script>
 <script src="../assets/catalog_item_contract.js?v=catalog-item-contract-20260826-1"></script>
