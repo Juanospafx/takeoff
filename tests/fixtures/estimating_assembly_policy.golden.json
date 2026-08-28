@@ -1,0 +1,6 @@
+{
+  "basic": { "rootQuantity": 2, "childQuantity": 3, "unitCost": 10, "expectedMaterialCost": 60 },
+  "nested": { "rootQuantity": 2, "middleQuantity": 3, "leafQuantity": 4, "unitCost": 5, "expectedMaterialCost": 120 },
+  "extended": { "rootQuantity": 9, "childQuantity": 7, "unitCost": 2, "expectedMaterialCost": 14 },
+  "quantityZero": { "rootQuantity": 0, "childQuantity": 3, "unitCost": 10, "expectedMaterialCost": 0 }
+}

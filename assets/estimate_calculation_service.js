@@ -1,4 +1,6 @@
 (function (global) {
+    const AssemblyAdapter = global.EstimatingAssemblyExpansionAdapter
+        || (typeof require === 'function' ? require('./estimating_assembly_expansion_adapter.js') : null);
     function num(value, fallback = 0) {
         const parsed = Number(value);
         return Number.isFinite(parsed) ? parsed : fallback;
@@ -130,6 +132,31 @@
         };
     }
 
+    function calculateCanonicalAssembly(item, settings = {}, groups = []) {
+        const expansion = AssemblyAdapter.expand(item, groups, settings);
+        if (expansion.errors.length) {
+            const fallback = calculateAssembly(item, settings);
+            return { ...fallback, expansion: { policy: 'CANONICAL', fallback: 'LEGACY',
+                errors: expansion.errors, warnings: expansion.warnings, limitations: [] },
+                validation: [...(fallback.validation || []), ...expansion.errors.map(error => ({ field: 'assembly', ...error }))] };
+        }
+        let totals = emptyTotals();
+        const validation = [];
+        const childRows = expansion.leaves.map(leaf => {
+            const calc = calculatePart(leaf.item, settings);
+            totals = addTotals(totals, calc);
+            validation.push(...(calc.validation || []).map(error => ({ ...error, componentId: leaf.componentId })));
+            return { item: leaf.item, calc, expansion: leaf };
+        });
+        validation.push(...expansion.errors.map(error => ({ field: 'assembly', ...error })));
+        const quantity = num(item.quantity);
+        return { ...totals, baseQuantity: quantity, adjustedQuantity: quantity, wasteQuantity: 0,
+            unitMaterialCost: quantity > 0 ? totals.materialCost / quantity : 0,
+            unitMaterialSales: quantity > 0 ? totals.materialSales / quantity : 0,
+            isAssembly: true, childRows, validation,
+            expansion: { policy: 'CANONICAL', errors: expansion.errors, warnings: expansion.warnings, limitations: [] } };
+    }
+
     function calculateItem(item, settings = {}, explicitChildren) {
         const embeddedChildren = Array.isArray(item?.children) ? item.children
             : (Array.isArray(item?.assemblyItems) ? item.assemblyItems : []);
@@ -198,6 +225,8 @@
             Equipment: emptyTotals()
         };
         const rows = [];
+        const globalRows = (groups || []).flatMap(group => group.items || []);
+        const globalById = new Map(globalRows.map(item => [String(item.id ?? item.catalogItemId ?? ''), item]));
         (groups || []).forEach(group => {
             const items = group.items || [];
             const childrenByParent = new Map();
@@ -210,9 +239,16 @@
             });
             items.forEach(item => {
                 const parentId = item.parentItemId ?? item.parent_item_id ?? item.assemblyParentId;
-                if (parentId !== null && parentId !== undefined && String(parentId) !== '') return;
+                if (parentId !== null && parentId !== undefined && String(parentId) !== '') {
+                    const globalParent = globalById.get(String(parentId));
+                    if (!globalParent || !AssemblyAdapter || AssemblyAdapter.itemPolicy(globalParent, settings) === 'CANONICAL'
+                        || childrenByParent.has(String(parentId))) return;
+                }
                 const flatChildren = childrenByParent.get(String(item.id)) || [];
-                const calc = calculateItem(item, settings, flatChildren.length ? flatChildren : undefined);
+                const canonical = AssemblyAdapter && isAssembly(item)
+                    && AssemblyAdapter.itemPolicy(item, settings) === 'CANONICAL';
+                const calc = canonical ? calculateCanonicalAssembly(item, settings, groups)
+                    : calculateItem(item, settings, flatChildren.length ? flatChildren : undefined);
                 rows.push({ groupId: group.id, groupName: group.name, item, calc });
                 byCategory.Materials = addTotals(byCategory.Materials, componentTotals(calc, 'Materials'));
                 byCategory.Labor = addTotals(byCategory.Labor, componentTotals(calc, 'Labor'));
@@ -233,6 +269,17 @@
         const preTaxMarkups = calculateMarkups(settings.preTaxMarkups, baseMap);
         const preTaxTotal = preTaxMarkups.reduce((sum, markup) => sum + markup.value, 0);
         const taxable = rows.reduce((sum, row) => {
+            if (row.calc.expansion?.policy === 'CANONICAL' && !row.calc.expansion?.fallback) {
+                return row.calc.childRows.reduce((leafSum, childRow) => {
+                    const leaf = childRow.item;
+                    if (leaf.taxable === false) return leafSum;
+                    return {
+                        Materials: leafSum.Materials + (leaf.taxMaterial === false ? 0 : childRow.calc.materialSales),
+                        Labor: leafSum.Labor + (leaf.taxLabor === false ? 0 : childRow.calc.laborSales),
+                        Equipment: leafSum.Equipment + (leaf.taxEquipment === false ? 0 : childRow.calc.equipmentSales)
+                    };
+                }, sum);
+            }
             if (row.item.taxable === false) return sum;
             return {
                 Materials: sum.Materials + (row.item.taxMaterial === false ? 0 : row.calc.materialSales),
@@ -269,7 +316,8 @@
         };
     }
 
-    const service = { num, salesFromCost, emptyTotals, addTotals, isAssembly, calculatePart, calculateAssembly, calculateItem, calculateSummary };
+    const service = { num, salesFromCost, emptyTotals, addTotals, isAssembly, calculatePart, calculateAssembly,
+        calculateCanonicalAssembly, calculateItem, calculateSummary };
     global.EstimateCalculationService = service;
     if (typeof module !== 'undefined') module.exports = service;
 })(typeof window !== 'undefined' ? window : globalThis);

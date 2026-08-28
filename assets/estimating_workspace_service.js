@@ -16,6 +16,8 @@
 
     function settings(input = {}) {
         return {
+            assemblyExpansionPolicy: String(input.assemblyExpansionPolicy ?? input.assembly_expansion_policy ?? 'LEGACY').toUpperCase() === 'CANONICAL'
+                ? 'CANONICAL' : 'LEGACY',
             marginMode: input.marginMode === 'markup' ? 'markup' : 'margin',
             globalLaborCost: numeric(input.globalLaborCost, 85),
             globalLaborSales: numeric(input.globalLaborSales, 110),
@@ -61,6 +63,11 @@
             parentItemId: text(row.parentItemId ?? row.parent_item_id ?? row.assemblyParentId) || null,
             children: Array.isArray(childRows) ? childRows.map(item) : [],
             childrenQuantitiesExtended: row.childrenQuantitiesExtended === true,
+            assemblyExpansionPolicy: String(row.assemblyExpansionPolicy ?? row.assembly_expansion_policy ?? 'LEGACY').toUpperCase() === 'CANONICAL'
+                ? 'CANONICAL' : 'LEGACY',
+            ratioType: text(row.ratioType ?? row.ratio_type, 'per_unit'),
+            spacing: row.spacing === null || row.spacing === undefined ? null : numeric(row.spacing),
+            componentWaste: numeric(row.componentWaste ?? row.wasteFactorPercent ?? row.waste_factor_percent),
             name: text(row.name ?? row.catalog_item_name, 'Cost item'),
             description: text(row.description),
             budgetCode: text(row.budgetCode ?? row.budget_code),
@@ -282,7 +289,7 @@
         return touch(state, 'Deleted estimate');
     }
 
-    const service = { now, uid, numeric, projectId, item, group, estimate, workspace, empty, active, selectEstimate, touch,
+    const service = { now, uid, numeric, projectId, settings, item, group, estimate, workspace, empty, active, selectEstimate, touch,
         audit, reconcileTakeoff, createEstimate, removeEstimate, clone };
     global.EstimatingWorkspaceService = service;
     if (typeof module !== 'undefined') module.exports = service;
