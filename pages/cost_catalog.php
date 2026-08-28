@@ -140,17 +140,23 @@
                     </div>
                     <div class="cc-field"><label>MasterFormat</label><input id="ccItemMasterFormat"></div>
                     <div class="cc-field"><label>UniFormat</label><input id="ccItemUniFormat"></div>
-                    <div class="cc-field" data-item-specific="part equipment">
+                    <div class="cc-field">
                         <label>Unit of Measure</label>
                         <input id="ccItemUom" required value="ea">
                     </div>
-                    <div class="cc-field" data-item-specific="part labor">
-                        <label>Unit Cost</label>
-                        <input id="ccItemUnitCost" type="number" min="0" step="0.0001" value="0">
+                    <div class="cc-field" data-item-specific="part equipment assembly">
+                        <label for="ccItemUnitCost">Unit Cost</label>
+                        <input id="ccItemUnitCost" type="number" min="0" step="0.0001" value="0" aria-describedby="ccItemUnitCostHint">
+                        <small id="ccItemUnitCostHint" class="cc-field-hint"></small>
                     </div>
-                    <div class="cc-field" data-item-specific="part equipment labor">
-                        <label>Unit Labor Time</label>
-                        <input id="ccItemLaborHours" type="number" min="0" step="0.0001" value="0">
+                    <div class="cc-field" data-item-specific="part equipment assembly">
+                        <label for="ccItemLaborHours">Unit Labor Time</label>
+                        <input id="ccItemLaborHours" type="number" min="0" step="0.0001" value="0" aria-describedby="ccItemLaborHoursHint">
+                        <small id="ccItemLaborHoursHint" class="cc-field-hint"></small>
+                    </div>
+                    <div class="cc-field" data-item-specific="labor">
+                        <label for="ccItemLaborRate">Unit Labor Cost per hour</label>
+                        <input id="ccItemLaborRate" type="number" min="0" step="0.0001" value="0">
                     </div>
                     <div class="cc-field" data-item-specific="part equipment">
                         <label>Taxable</label>
@@ -159,12 +165,12 @@
                             <option value="0">No</option>
                         </select>
                     </div>
-                    <div class="cc-field" data-item-specific="part equipment">
+                    <div class="cc-field" data-item-specific="part equipment labor assembly">
                         <label>Color</label>
                         <input id="ccItemColor" type="color" value="#2563eb">
                     </div>
                     <h3 class="cc-form-section-title full">Catalog Details</h3>
-                    <div class="cc-field">
+                    <div class="cc-field" data-item-specific="part equipment assembly">
                         <label>Symbol</label>
                         <select id="ccItemSymbol">
                             <option value="circle">Circle</option>
@@ -204,26 +210,49 @@
                         <input id="ccItemEpdUrl" type="url">
                     </div>
                     <input id="ccItemAttachmentUrl" type="hidden">
+                    <div class="cc-field full cc-pdf-field">
+                        <label for="ccItemPdf">PDF attachment <span class="cc-optional">Optional · maximum 10 MB</span></label>
+                        <input id="ccItemPdf" type="file" accept="application/pdf,.pdf" aria-describedby="ccItemPdfHint ccItemPdfFeedback">
+                        <small id="ccItemPdfHint" class="cc-field-hint">Upload a verified PDF. Selecting a file replaces the current managed PDF when you save.</small>
+                        <div class="cc-pdf-current" id="ccItemPdfCurrent" hidden>
+                            <span id="ccItemPdfName"></span>
+                            <div class="cc-pdf-actions">
+                                <a class="cc-btn" id="ccItemPdfView" target="_blank" rel="noopener">View PDF</a>
+                                <button class="cc-btn danger" id="ccItemPdfRemove" type="button">Remove</button>
+                            </div>
+                        </div>
+                        <div class="cc-pdf-current" id="ccItemLegacyAttachment" hidden>
+                            <span>Legacy attachment (read-only)</span>
+                            <a class="cc-btn" id="ccItemLegacyAttachmentView" target="_blank" rel="noopener">View legacy file</a>
+                        </div>
+                        <small id="ccItemPdfFeedback" class="cc-field-hint" role="status" aria-live="polite"></small>
+                    </div>
                 </div>
                 <section class="cc-assembly-section" id="ccAssemblySection">
                     <div class="cc-section-head">
-                        <strong>Items Included</strong>
+                        <div><strong>Items Included</strong> <button class="cc-link-btn" type="button" id="ccAssemblyAdvanced" aria-pressed="false">Advanced</button></div>
                         <span id="ccAssemblyTotals">Cost $0.00 · Labor 0.0000</span>
                     </div>
-                    <div class="cc-assembly-add">
-                        <select id="ccAssemblyChildItem"></select>
-                        <input id="ccAssemblyQuantity" type="number" min="0.0001" step="0.0001" value="1">
-                        <button class="cc-btn" type="button" id="ccAddAssemblyPart">Add Item</button>
+                    <button class="cc-btn cc-assembly-open" type="button" id="ccOpenAssemblyBrowser">Add Item</button>
+                    <div class="cc-assembly-browser" id="ccAssemblyBrowser" hidden aria-label="Catalog item selector">
+                        <div class="cc-assembly-filters">
+                            <input id="ccAssemblySearch" type="search" placeholder="Search catalog items" aria-label="Search catalog items">
+                            <select id="ccAssemblyCatalogFilter" aria-label="Filter by catalog"></select>
+                            <select id="ccAssemblyCategoryFilter" aria-label="Filter by category"></select>
+                            <select id="ccAssemblyTypeFilter" aria-label="Filter by type"><option value="">All types</option><option value="part">Part</option><option value="labor">Labor</option><option value="equipment">Equipment</option><option value="assembly">Assembly</option></select>
+                        </div>
+                        <div class="cc-assembly-results" id="ccAssemblyResults" role="listbox" aria-label="Available catalog items"></div>
+                        <button class="cc-btn" type="button" id="ccCloseAssemblyBrowser">Close selector</button>
                     </div>
                     <div class="cc-assembly-note" id="ccAssemblyNote"></div>
                     <table class="cc-mini-table">
                         <thead>
                             <tr>
                                 <th>Item</th>
-                                <th>Qty</th>
+                                <th>Quantity</th><th>UoM</th>
                                 <th>Unit Cost</th>
-                                <th>Labor</th>
-                                <th>Total</th>
+                                <th>Unit Labor Time</th>
+                                <th>Extended Cost</th><th>Extended Labor</th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -233,7 +262,7 @@
             </div>
             <div class="cc-modal-foot">
                 <button class="cc-btn" type="button" data-close-item-modal>Cancel</button>
-                <button class="cc-btn primary" type="submit">Save Item</button>
+                <button class="cc-btn primary" id="ccItemSave" type="submit">Save Item</button>
             </div>
         </form>
     </div>
@@ -267,7 +296,9 @@
 </div>
 
 <script src="../assets/global_tools.js"></script>
-<script src="../assets/cost_catalog.js?v=procore-catalog-20260824-1"></script>
+<script src="../assets/catalog_item_contract.js"></script>
+<script src="../assets/assembly_expansion_service.js"></script>
+<script src="../assets/cost_catalog.js?v=assembly-builder-20260828-1"></script>
 <script src="../assets/catalog_admin_service.js?v=catalog-phase6-20260827-1"></script>
 </body>
 </html>

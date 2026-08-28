@@ -11,7 +11,10 @@ const migration = fs.readFileSync(path.join(root, 'db/migrations/2026-08-27_cata
 test('phase 6 unified modal exposes essential and catalog details for four visible types', () => {
     assert.match(page, /Essential Details/); assert.match(page, /Catalog Details/);
     ['part','equipment','labor','assembly'].forEach(type => assert.match(page, new RegExp(`value="${type}"`)));
-    ['ccItemMasterFormat','ccItemUniFormat','ccItemName','ccItemDescription','ccItemUom'].forEach(id => assert.match(page, new RegExp(`id="${id}"`)));
+  ['ccItemMasterFormat','ccItemUniFormat','ccItemName','ccItemDescription','ccItemUom'].forEach(id => assert.match(page, new RegExp(`id="${id}"`)));
+  assert.match(page, /id="ccItemLaborRate"[^>]*type="number"/);
+  assert.match(page, /data-item-specific="part equipment assembly"/);
+  assert.match(page, /data-item-specific="part equipment labor assembly"/);
     assert.match(page, /id="ccItemAttachmentUrl" type="hidden"/);
 });
 

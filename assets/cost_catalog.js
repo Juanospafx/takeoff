@@ -1,15 +1,18 @@
 (function () {
     const apiUrl = '../api/cost_catalog.php';
+    const attachmentApiUrl = '../api/catalog_item_attachment.php';
     let state = { catalogs: [], groups: [], items: [], allItems: [], assemblyParts: [] };
     let selection = { view: 'all', catalogId: null, groupId: null };
     let editingItemId = null;
     let movingItemId = null;
+    let modalReturnFocus = null;
     let detailsItemId = null;
     let detailsReturnFocus = null;
     let itemQuery = '';
     let itemSort = 'name';
     let itemSortDirection = 1;
     let itemTypeFilter = 'all';
+    let assemblyAdvanced = false;
 
     const esc = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({
         '&': '&amp;',
@@ -34,6 +37,38 @@
             if (data.status !== 'success') throw new Error(data.msg || 'Cost Catalog request failed');
             return data;
         });
+    }
+
+    function attachmentRequest(action, itemId, revision, file = null) {
+        const options = { method: 'POST' };
+        if (file) {
+            const form = new FormData(); form.append('action', action); form.append('item_id', itemId); form.append('pdf', file);
+            if (revision !== null && revision !== undefined) form.append('expected_revision', revision);
+            options.body = form;
+        } else {
+            options.headers = { 'Content-Type': 'application/json' };
+            options.body = JSON.stringify({ item_id: itemId, expected_revision: revision });
+        }
+        return fetch(`${attachmentApiUrl}?action=${encodeURIComponent(action)}`, options).then(async response => {
+            const data = await response.json().catch(() => ({}));
+            if (!response.ok || data.status !== 'success') throw new Error(data.msg || 'PDF attachment request failed');
+            return data;
+        });
+    }
+
+    function safeLegacyUrl(value) {
+        try { const url = new URL(value, window.location.href); return ['http:', 'https:'].includes(url.protocol) ? url.href : ''; }
+        catch (_) { return ''; }
+    }
+
+    function renderPdfAttachment(item) {
+        const managed=item?.pdf_attachment || null; const current=document.getElementById('ccItemPdfCurrent');
+        const legacy=document.getElementById('ccItemLegacyAttachment'); const input=document.getElementById('ccItemPdf');
+        input.value=''; document.getElementById('ccItemPdfFeedback').textContent=''; current.hidden=!managed;
+        if(managed){document.getElementById('ccItemPdfName').textContent=`${managed.originalName} · ${(Number(managed.sizeBytes||0)/1048576).toFixed(1)} MB`;document.getElementById('ccItemPdfView').href=managed.viewUrl;}
+        const legacyUrl=!managed?safeLegacyUrl(item?.attachment_url||''):''; legacy.hidden=!legacyUrl;
+        if(legacyUrl)document.getElementById('ccItemLegacyAttachmentView').href=legacyUrl;
+        document.getElementById('ccItemPdfRemove').disabled=!managed||!editingItemId;
     }
 
     function load() {
@@ -317,14 +352,13 @@
     }
 
     function renderAssemblyItemOptions() {
-        const select = document.getElementById('ccAssemblyChildItem');
-        if (!select) return;
-        const source = state.allItems && state.allItems.length ? state.allItems : state.items;
-        select.innerHTML = '<option value="">Search/select item...</option>' + source
-            .filter(item => Number(item.id) !== Number(editingItemId || 0))
-            .map(item => `<option value="${item.id}">${esc(item.name)} - ${money(item.unit_cost)} - ${Number(item.labor_hours || 0).toFixed(4)} labor</option>`)
-            .join('');
+        const catalog=document.getElementById('ccAssemblyCatalogFilter'); if(!catalog)return;
+        const selected=catalog.value;catalog.innerHTML='<option value="">All catalogs</option>'+state.catalogs.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');catalog.value=selected;
+        const category=document.getElementById('ccAssemblyCategoryFilter');const selectedCategory=category.value;category.innerHTML='<option value="">All categories</option>'+state.groups.map(g=>`<option value="${g.id}">${esc(g.name)}</option>`).join('');category.value=selectedCategory;
+        renderAssemblyBrowserResults();
     }
+
+    function renderAssemblyBrowserResults(){const root=document.getElementById('ccAssemblyResults');if(!root)return;const q=(document.getElementById('ccAssemblySearch')?.value||'').toLowerCase();const catalog=document.getElementById('ccAssemblyCatalogFilter')?.value;const category=document.getElementById('ccAssemblyCategoryFilter')?.value;const type=document.getElementById('ccAssemblyTypeFilter')?.value;const source=state.allItems?.length?state.allItems:state.items;const rows=source.filter(i=>Number(i.id)!==Number(editingItemId||0)&&(!q||`${i.name} ${i.description||''}`.toLowerCase().includes(q))&&(!catalog||String(i.catalog_id)===catalog)&&(!category||String(i.catalog_group_id)===category)&&(!type||(i.item_type==='material'?'part':i.item_type)===type));root.innerHTML=rows.map(i=>`<button type="button" role="option" data-assembly-select="${i.id}"><span><strong>${esc(i.name)}</strong><small>${esc(i.catalog_name||'')} · ${esc(i.group_name||'Uncategorized')} · ${displayItemType(i.item_type)}</small></span><span>${money(i.unit_cost)} · ${Number(i.labor_hours||0).toFixed(4)} hr</span></button>`).join('')||'<p>No matching items.</p>';root.querySelectorAll('[data-assembly-select]').forEach(b=>b.addEventListener('click',()=>addAssemblyPart(Number(b.dataset.assemblySelect))));}
 
     function renderGroupSelect(select, catalogId, selectedId = '') {
         const groups = state.groups.filter(group => Number(group.catalog_id) === Number(catalogId));
@@ -466,6 +500,7 @@
     }
 
     function openItemModal(item = null) {
+        modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         editingItemId = item ? Number(item.id) : null;
         document.getElementById('ccItemModalTitle').textContent = editingItemId ? 'Edit Catalog Item' : 'Create Catalog Item';
         document.getElementById('ccItemForm').reset();
@@ -480,6 +515,7 @@
         document.getElementById('ccItemUom').value = item?.unit_of_measure || 'ea';
         document.getElementById('ccItemUnitCost').value = item?.unit_cost || '0';
         document.getElementById('ccItemLaborHours').value = item?.labor_hours || '0';
+        document.getElementById('ccItemLaborRate').value = item?.labor_rate || '0';
         document.getElementById('ccItemTaxable').value = String(item?.taxable ?? '1');
         document.getElementById('ccItemColor').value = item?.color || '#2563eb';
         document.getElementById('ccItemSymbol').value = item?.symbol || 'circle';
@@ -493,6 +529,7 @@
         document.getElementById('ccItemSubJobName').value = item?.sub_job_name || '';
         document.getElementById('ccItemEpdUrl').value = item?.epd_url || '';
         document.getElementById('ccItemAttachmentUrl').value = item?.attachment_url || '';
+        renderPdfAttachment(item);
         toggleAssemblySection();
         renderAssemblyParts();
         document.getElementById('ccItemModal').classList.add('open');
@@ -512,6 +549,8 @@
         document.querySelectorAll('[data-item-specific]').forEach(field => { field.hidden = !field.dataset.itemSpecific.split(' ').includes(type); });
         document.getElementById('ccItemUnitCost').readOnly = isAssemblyType();
         document.getElementById('ccItemLaborHours').readOnly = isAssemblyType();
+        document.getElementById('ccItemUnitCostHint').textContent = isAssemblyType() ? 'Calculated from included items' : '';
+        document.getElementById('ccItemLaborHoursHint').textContent = isAssemblyType() ? 'Calculated from included items' : '';
         renderAssemblyParts();
     }
 
@@ -526,36 +565,45 @@
             return;
         }
         if (!editingItemId) {
-            body.innerHTML = '<tr><td colspan="6" style="color:#94a3b8;">Save the assembly item before adding included items.</td></tr>';
+            body.innerHTML = '<tr><td colspan="8" class="cc-assembly-empty">Save the assembly item before adding included items.</td></tr>';
             note.textContent = 'Create the assembly first, then edit it to add included items.';
             totalsEl.textContent = 'Cost $0.00 - Labor 0.0000';
             return;
         }
         note.textContent = '';
-        const parts = state.assemblyParts.filter(part => Number(part.assembly_catalog_item_id) === Number(editingItemId));
-        let totalCost = 0;
-        let totalLabor = 0;
+        const parts = state.assemblyParts.filter(part => Number(part.assembly_catalog_item_id) === Number(editingItemId)).sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||Number(a.id)-Number(b.id));
+        const source=state.allItems?.length?state.allItems:state.items;let totalCost=0,totalLabor=0;
+        if(window.CatalogItemContract&&window.AssemblyExpansionService){const canonical=source.map(item=>window.CatalogItemContract.normalizeCatalogItem(item,{assemblyParts:state.assemblyParts}));const root=canonical.find(item=>String(item.id)===String(editingItemId));if(root){const preview=window.AssemblyExpansionService.expandAssembly(root,1,{catalogIndex:new Map(canonical.map(item=>[String(item.id),item])),pricingSource:'CURRENT_CATALOG',linearLength:1,area:1,endpointCount:1});preview.leaves.forEach(row=>{const pricing=row.pricing||{};totalCost+=row.pricedQuantity*Number(pricing.materialUnitCost||pricing.equipmentUnitCost||pricing.subcontractorUnitCost||pricing.legacyUnitCost||0);totalLabor+=row.pricedQuantity*Number(pricing.laborHoursPerUnit||0);});note.textContent=preview.errors.length?'Preview blocked: assembly cycle or invalid ratio input.':'Preview uses the canonical assembly expansion engine.';}}
         body.innerHTML = parts.map(part => {
             const qty = Number(part.quantity || 0);
             const unitCost = Number(part.unit_cost_snapshot || 0);
             const labor = Number(part.unit_labor_time_snapshot || 0);
-            totalCost += qty * unitCost;
-            totalLabor += qty * labor;
+            if(!window.AssemblyExpansionService){totalCost+=qty*unitCost;totalLabor+=qty*labor;}
+            const ratio=part.ratio_type||'per_unit';const advanced=assemblyAdvanced?`<div class="cc-component-advanced"><select data-part-ratio="${part.id}" aria-label="Ratio type for ${esc(part.child_item_name)}"><option value="per_unit" ${ratio==='per_unit'?'selected':''}>Per unit</option><option value="fixed" ${ratio==='fixed'?'selected':''}>Fixed</option><option value="per_linear_length" ${ratio==='per_linear_length'?'selected':''}>Per linear</option><option value="per_area" ${ratio==='per_area'?'selected':''}>Per area</option><option value="per_endpoint" ${ratio==='per_endpoint'?'selected':''}>Per endpoint</option><option value="spacing_based" ${ratio==='spacing_based'?'selected':''}>Spacing</option></select>${ratio==='spacing_based'?`<input data-part-spacing="${part.id}" type="number" min="0.0001" step="0.0001" value="${Number(part.spacing_value||1)}" aria-label="Spacing for ${esc(part.child_item_name)}">`:''}<input data-part-waste="${part.id}" type="number" min="0" step="0.01" value="${Number(part.waste_factor_percent||0)}" aria-label="Waste percent for ${esc(part.child_item_name)}"></div>`:'';
             return `
-                <tr>
-                    <td>${esc(part.child_item_name)}</td>
-                    <td>${qty.toFixed(4)}</td>
+                <tr data-part-row="${part.id}">
+                    <td><strong>${esc(part.child_item_name)}</strong>${advanced}</td>
+                    <td><input class="cc-qty-input" data-part-quantity="${part.id}" type="number" min="0.0001" step="0.0001" value="${qty}" aria-label="Quantity for ${esc(part.child_item_name)}"></td>
+                    <td>${esc(part.child_unit_of_measure||'ea')}</td>
                     <td>${money(unitCost)}</td>
                     <td>${labor.toFixed(4)}</td>
                     <td>${money(qty * unitCost)}</td>
-                    <td><button class="cc-btn danger" type="button" data-assembly-part-delete="${part.id}">Remove</button></td>
+                    <td>${(qty*labor).toFixed(4)}</td>
+                    <td><div class="cc-row-actions"><button class="cc-icon-btn bordered" type="button" data-part-move="up" data-part-id="${part.id}" aria-label="Move ${esc(part.child_item_name)} up">↑</button><button class="cc-icon-btn bordered" type="button" data-part-move="down" data-part-id="${part.id}" aria-label="Move ${esc(part.child_item_name)} down">↓</button><button class="cc-btn danger" type="button" data-assembly-part-delete="${part.id}">Remove</button></div></td>
                 </tr>
             `;
-        }).join('') || '<tr><td colspan="6" style="color:#94a3b8;">No items included yet.</td></tr>';
-        totalsEl.textContent = `Cost ${money(totalCost)} - Labor ${totalLabor.toFixed(4)}`;
+        }).join('') || '<tr><td colspan="8" class="cc-assembly-empty">No items included yet.</td></tr>';
+        const stored=(state.allItems?.length?state.allItems:state.items).find(item=>Number(item.id)===Number(editingItemId));
+        const storedCost=Number(stored?.unit_cost||0),storedLabor=Number(stored?.labor_hours||0);
+        document.getElementById('ccItemUnitCost').value=storedCost;document.getElementById('ccItemLaborHours').value=storedLabor;
+        const differs=Math.abs(storedCost-totalCost)>0.0001||Math.abs(storedLabor-totalLabor)>0.0001;
+        totalsEl.textContent=differs?`Stored ${money(storedCost)} / ${storedLabor.toFixed(4)} hr · Canonical preview ${money(totalCost)} / ${totalLabor.toFixed(4)} hr`:`Cost ${money(totalCost)} - Labor ${totalLabor.toFixed(4)}`;
+        if(differs)note.textContent='Canonical preview differs from the legacy stored total; values were not changed automatically.';
         body.querySelectorAll('[data-assembly-part-delete]').forEach(button => {
             button.addEventListener('click', () => deleteAssemblyPart(Number(button.dataset.assemblyPartDelete)));
         });
+        body.querySelectorAll('[data-part-quantity],[data-part-ratio],[data-part-spacing],[data-part-waste]').forEach(input=>input.addEventListener('change',()=>updateAssemblyPart(Number(input.dataset.partQuantity||input.dataset.partRatio||input.dataset.partSpacing||input.dataset.partWaste))));
+        body.querySelectorAll('[data-part-move]').forEach(button=>button.addEventListener('click',()=>moveAssemblyPart(Number(button.dataset.partId),button.dataset.partMove)));
     }
 
     function openMoveItemModal(item) {
@@ -566,18 +614,23 @@
         document.getElementById('ccMoveItemModal').classList.add('open');
     }
 
-    function saveItem(event) {
+    async function saveItem(event) {
         event.preventDefault();
         const unitCost = Number(document.getElementById('ccItemUnitCost').value);
         const laborHours = Number(document.getElementById('ccItemLaborHours').value);
+        const laborRate = Number(document.getElementById('ccItemLaborRate').value);
         const color = document.getElementById('ccItemColor').value;
         if (!document.getElementById('ccItemName').value.trim()) return showError('Name is required');
         if (!document.getElementById('ccItemUom').value.trim()) return showError('Unit of Measure is required');
         if (Number.isNaN(unitCost) || unitCost < 0) return showError('Unit Cost must be a number >= 0');
         if (Number.isNaN(laborHours) || laborHours < 0) return showError('Unit Labor Time must be a number >= 0');
+        if (Number.isNaN(laborRate) || laborRate < 0) return showError('Unit Labor Cost must be a number >= 0');
         if (!/^#[0-9a-fA-F]{6}$/.test(color)) return showError('Color must be a valid hexadecimal value');
 
-        request('save_item', {
+        const pdf=document.getElementById('ccItemPdf').files[0] || null;
+        if(pdf && (pdf.size>10485760 || (pdf.type && pdf.type!=='application/pdf'))) return showError('Choose a PDF of 10 MB or smaller');
+        const saveButton=document.getElementById('ccItemSave'); saveButton.disabled=true; saveButton.textContent=pdf?'Saving and uploading…':'Saving…';
+        try { const data=await request('save_item', {
             id: editingItemId || 0,
             catalog_id: document.getElementById('ccItemCatalog').value,
             catalog_group_id: document.getElementById('ccItemGroup').value,
@@ -587,6 +640,7 @@
             unit_of_measure: document.getElementById('ccItemUom').value,
             unit_cost: unitCost,
             labor_hours: laborHours,
+            labor_rate: laborRate,
             taxable: document.getElementById('ccItemTaxable').value === '1' ? 1 : 0,
             color,
             symbol: document.getElementById('ccItemSymbol').value,
@@ -600,41 +654,41 @@
             sub_job_name: document.getElementById('ccItemSubJobName').value,
             epd_url: document.getElementById('ccItemEpdUrl').value,
             attachment_url: document.getElementById('ccItemAttachmentUrl').value
-        }).then(data => {
+        });
+            if(pdf){document.getElementById('ccItemPdfFeedback').textContent='Uploading PDF…';await attachmentRequest('upload',data.id,data.revision,pdf);}
             const groupId = Number(document.getElementById('ccItemGroup').value || 0);
             const catalogId = Number(document.getElementById('ccItemCatalog').value || 0);
             selection = groupId ? { view: 'group', catalogId: null, groupId } : { view: 'catalog', catalogId, groupId: null };
             state = data.data;
             closeItemModals();
-            render();
-        }).catch(err => showError(err.message));
+            await load();
+        } catch(err) { showError(err.message); document.getElementById('ccItemPdfFeedback').textContent=err.message; }
+        finally { saveButton.disabled=false; saveButton.textContent='Save Item'; }
     }
 
-    function addAssemblyPart() {
+    function addAssemblyPart(childId) {
         if (!editingItemId) return showError('Save the assembly item before adding included items.');
-        const childId = Number(document.getElementById('ccAssemblyChildItem').value || 0);
-        const quantity = Number(document.getElementById('ccAssemblyQuantity').value || 0);
         if (!childId) return showError('Select an item to include in the assembly.');
-        if (Number.isNaN(quantity) || quantity <= 0) return showError('Assembly part quantity must be greater than 0');
         request('add_assembly_part', currentContextPayload({
             assembly_catalog_item_id: editingItemId,
             part_catalog_item_id: childId,
-            quantity
+            quantity:1,
+            sort_order:state.assemblyParts.filter(p=>Number(p.assembly_catalog_item_id)===Number(editingItemId)).length
         })).then(data => {
             state = data.data;
-            const updated = state.items.find(item => Number(item.id) === Number(editingItemId));
-            render();
-            openItemModal(updated || null);
+            document.getElementById('ccAssemblyBrowser').hidden=true;renderAssemblyParts();renderAssemblyItemOptions();
         }).catch(err => showError(err.message));
     }
+
+    function updateAssemblyPart(id){const row=document.querySelector(`[data-part-row="${id}"]`);const ratio=row.querySelector('[data-part-ratio]')?.value||state.assemblyParts.find(p=>Number(p.id)===id)?.ratio_type||'per_unit';request('update_assembly_part',currentContextPayload({id,quantity:Number(row.querySelector('[data-part-quantity]').value),ratio_type:ratio,spacing_value:ratio==='spacing_based'?Number(row.querySelector('[data-part-spacing]')?.value||1):null,waste_factor_percent:Number(row.querySelector('[data-part-waste]')?.value||0)})).then(data=>{state=data.data;renderAssemblyParts();}).catch(err=>showError(err.message));}
+
+    function moveAssemblyPart(id,direction){const parts=state.assemblyParts.filter(p=>Number(p.assembly_catalog_item_id)===Number(editingItemId)).sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||Number(a.id)-Number(b.id));const index=parts.findIndex(p=>Number(p.id)===id),other=direction==='up'?index-1:index+1;if(index<0||other<0||other>=parts.length)return;[parts[index],parts[other]]=[parts[other],parts[index]];request('reorder_assembly_parts',currentContextPayload({assembly_catalog_item_id:editingItemId,ordered_ids:parts.map(p=>p.id)})).then(data=>{state=data.data;renderAssemblyParts();}).catch(err=>showError(err.message));}
 
     function deleteAssemblyPart(id) {
         request('delete_assembly_part', currentContextPayload({ id }))
             .then(data => {
                 state = data.data;
-                const updated = state.items.find(item => Number(item.id) === Number(editingItemId));
-                render();
-                openItemModal(updated || null);
+                renderAssemblyParts();renderAssemblyItemOptions();
             })
             .catch(err => showError(err.message));
     }
@@ -657,6 +711,8 @@
 
     function closeItemModals() {
         document.querySelectorAll('.cc-modal-backdrop').forEach(el => el.classList.remove('open'));
+        if (modalReturnFocus?.isConnected) modalReturnFocus.focus();
+        modalReturnFocus = null;
     }
 
     function mutate(action, payload) {
@@ -712,7 +768,23 @@
         document.getElementById('ccItemCatalog').addEventListener('change', event => renderGroupSelect(document.getElementById('ccItemGroup'), Number(event.target.value)));
         document.getElementById('ccMoveCatalog').addEventListener('change', event => renderGroupSelect(document.getElementById('ccMoveGroup'), Number(event.target.value)));
         document.getElementById('ccItemType').addEventListener('change', toggleAssemblySection);
-        document.getElementById('ccAddAssemblyPart').addEventListener('click', addAssemblyPart);
+        document.getElementById('ccItemPdf').addEventListener('change', event => {
+            const file=event.target.files[0];
+            document.getElementById('ccItemPdfFeedback').textContent=file?`${file.name} selected. It will be uploaded when you save.`:'';
+        });
+        document.getElementById('ccItemPdfRemove').addEventListener('click', async () => {
+            if(!editingItemId || !confirm('Remove the current PDF attachment?'))return;
+            const item=(state.allItems||state.items).find(row=>Number(row.id)===Number(editingItemId));
+            const field=document.querySelector('.cc-pdf-field'); field.classList.add('is-loading');
+            document.getElementById('ccItemPdfFeedback').textContent='Removing PDF…';
+            try { await attachmentRequest('remove',editingItemId,item?.revision??null); await load(); const updated=(state.allItems||state.items).find(row=>Number(row.id)===Number(editingItemId)); renderPdfAttachment(updated); document.getElementById('ccItemPdfFeedback').textContent='PDF removed.'; }
+            catch(err){document.getElementById('ccItemPdfFeedback').textContent=err.message;showError(err.message);}
+            finally{field.classList.remove('is-loading');}
+        });
+        document.getElementById('ccOpenAssemblyBrowser').addEventListener('click',()=>{const browser=document.getElementById('ccAssemblyBrowser');browser.hidden=false;renderAssemblyBrowserResults();document.getElementById('ccAssemblySearch').focus();});
+        document.getElementById('ccCloseAssemblyBrowser').addEventListener('click',()=>{document.getElementById('ccAssemblyBrowser').hidden=true;document.getElementById('ccOpenAssemblyBrowser').focus();});
+        ['ccAssemblySearch','ccAssemblyCatalogFilter','ccAssemblyCategoryFilter','ccAssemblyTypeFilter'].forEach(id=>document.getElementById(id).addEventListener(id==='ccAssemblySearch'?'input':'change',renderAssemblyBrowserResults));
+        document.getElementById('ccAssemblyAdvanced').addEventListener('click',event=>{assemblyAdvanced=!assemblyAdvanced;event.currentTarget.setAttribute('aria-pressed',String(assemblyAdvanced));event.currentTarget.textContent=assemblyAdvanced?'Basic':'Advanced';renderAssemblyParts();});
         document.querySelectorAll('[data-close-item-modal]').forEach(btn => btn.addEventListener('click', closeItemModals));
         document.getElementById('ccItemForm').addEventListener('submit', saveItem);
         document.getElementById('ccMoveItemForm').addEventListener('submit', moveItem);
@@ -722,6 +794,16 @@
         if (!event.target.closest('.cc-row-menu')) closeItemMenus();
     });
     document.addEventListener('keydown', event => {
+        const openModal = document.querySelector('.cc-modal-backdrop.open');
+        if (event.key === 'Tab' && openModal) {
+            const focusable = [...openModal.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')]
+                .filter(el => !el.hidden && el.offsetParent !== null);
+            if (focusable.length) {
+                const first = focusable[0]; const last = focusable[focusable.length - 1];
+                if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+                else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+            }
+        }
         if (event.key === 'Tab' && detailsItemId !== null && window.matchMedia?.('(max-width: 760px)').matches) {
             const drawer = document.getElementById('ccItemDetailsDrawer');
             const focusable = [...drawer.querySelectorAll('a[href],button:not([disabled]),[tabindex]:not([tabindex="-1"])')];

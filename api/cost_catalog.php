@@ -389,7 +389,24 @@ function cc_payload(PDO $pdo, string $view = 'all', int $catalogId = 0, int $gro
         . ' ORDER BY c.name,g.name,ci.name LIMIT 1000';
     $allItems = $pdo->query($itemSql)->fetchAll(PDO::FETCH_ASSOC);
 
+    $pdfAttachments = [];
+    $pdfAttachmentCapable = catalog_ra_table_exists($pdo, 'catalog_item_attachments');
+    if ($pdfAttachmentCapable) {
+        foreach ($pdo->query('SELECT catalog_item_id,original_name,size_bytes,updated_at FROM catalog_item_attachments')->fetchAll(PDO::FETCH_ASSOC) as $attachment) {
+            $pdfAttachments[(string)$attachment['catalog_item_id']] = [
+                'present'=>true,
+                'originalName'=>$attachment['original_name'],
+                'sizeBytes'=>(int)$attachment['size_bytes'],
+                'updatedAt'=>$attachment['updated_at'],
+                'viewUrl'=>'../api/catalog_item_attachment.php?action=view&item_id='.(int)$attachment['catalog_item_id']
+            ];
+        }
+    }
+    foreach ($allItems as &$itemRow) $itemRow['pdf_attachment']=$pdfAttachments[(string)$itemRow['id']]??null;
+    unset($itemRow);
+
     $partWhere = $includeDeleted ? '1=1' : 'ap.deleted_at IS NULL';
+    $assemblyPartOrder = in_array('sort_order', cc_columns($pdo, 'assembly_parts'), true) ? 'ap.sort_order,ap.id' : 'ap.id';
     $assemblyParts = $pdo->query(
         "SELECT ap.*,child.name AS child_item_name,child.unit_of_measure AS child_unit_of_measure,
             child.unit_cost AS child_unit_cost,child.labor_hours AS child_labor_hours,
@@ -397,7 +414,7 @@ function cc_payload(PDO $pdo, string $view = 'all', int $catalogId = 0, int $gro
          FROM assembly_parts ap
          JOIN catalog_items child ON child.id=ap.part_catalog_item_id
          JOIN catalog_items assembly ON assembly.id=ap.assembly_catalog_item_id
-         WHERE $partWhere ORDER BY assembly.name,child.name"
+         WHERE $partWhere ORDER BY assembly.name,$assemblyPartOrder"
     )->fetchAll(PDO::FETCH_ASSOC);
 
     $blockedAssemblies = [];
@@ -444,7 +461,7 @@ function cc_payload(PDO $pdo, string $view = 'all', int $catalogId = 0, int $gro
     $items=array_slice($items,0,250);
 
     $revisioning = isset(catalog_ra_columns($pdo,'catalog_items')['revision']);
-    $capabilities = ['availabilityFiltering'=>true,'revisioning'=>$revisioning,
+    $capabilities = ['availabilityFiltering'=>true,'revisioning'=>$revisioning,'itemPdfAttachments'=>$pdfAttachmentCapable,
         'availabilityModes'=>['admin','active','project'],'projectAssemblies'=>'exclude_blocked'];
     return compact('catalogs','groups','items','allItems','assemblyParts','blockedAssemblies','capabilities','availability');
 }
@@ -459,6 +476,8 @@ try {
         'copy_group'=>'category.copy','delete_group'=>'category.archive','toggle_group'=>'category.toggle',
         'duplicate_item'=>'item.duplicate','delete_item'=>'item.archive','move_item'=>'item.move',
         'convert_item_assembly'=>'item.convert_assembly','add_assembly_part'=>'assembly_component.add',
+        'update_assembly_part'=>'assembly_component.update',
+        'reorder_assembly_parts'=>'assembly_component.reorder',
         'delete_assembly_part'=>'assembly_component.remove'
     ];
     if ($action === 'save_catalog') $legacyCommands[$action] = cc_int($input['id'] ?? 0) ? 'catalog.update' : 'catalog.create';

@@ -18,6 +18,16 @@ function catalog_ra_columns(PDO $pdo, string $table): array
     return $cache[$table];
 }
 
+function catalog_ra_table_exists(PDO $pdo, string $table): bool
+{
+    static $cache = [];
+    if (!array_key_exists($table, $cache)) {
+        $stmt=$pdo->prepare('SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name=? LIMIT 1');
+        $stmt->execute([$table]); $cache[$table]=(bool)$stmt->fetchColumn();
+    }
+    return $cache[$table];
+}
+
 function catalog_ra_has_audit(PDO $pdo): bool
 {
     static $cache;

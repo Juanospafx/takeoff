@@ -1,5 +1,5 @@
 {
-  "timestamp": "2026-08-27T18:31:54.332Z",
+  "timestamp": "2026-08-27T20:47:30.966Z",
   "projectRoot": "C:\\Users\\pablo\\Desktop\\htdocs\\TAKEOFF",
   "structure": {
     "hasPackageJson": false,
@@ -7,5 +7,5 @@
     "hasClaudeConfig": true,
     "hasClaudeFlow": true
   },
-  "scannedAt": 1787855514332
+  "scannedAt": 1787863650968
 }
