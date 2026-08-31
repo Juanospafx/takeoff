@@ -92,6 +92,30 @@ test('quantities update in real time by aggregating every document snapshot once
     assert.equal(takeoffState.groups[0].layers[1].quantity, 7);
 });
 
+test('Count Part quantities survive iframe hydration and use an aggregate fallback without double counting', () => {
+    const { takeoffState, applyAggregatedCanvasQuantities } = projectTakeoffInternals();
+    takeoffState.groups = [{ id: 'parts', layers: [
+        { id: 'persisted-part', itemType: 'part', quantity: 9, baseQuantity: 0 },
+        { id: 'loading-part', itemType: 'part', quantity: 0, baseQuantity: 0 },
+        { id: 'hydrated-part', itemType: 'part', quantity: 0, baseQuantity: 0 }
+    ] }];
+    takeoffState.canvasSnapshots = {
+        active: { estimateId: 'est_primary', layers: [
+            { id: 'loading-part', quantity: 4, shapes: [] },
+            { id: 'hydrated-part', quantity: 2, shapes: [{ quantityValue: 1 }, { quantityValue: 1 }] }
+        ] }
+    };
+
+    applyAggregatedCanvasQuantities();
+
+    assert.equal(takeoffState.groups[0].layers[0].quantity, 9,
+        'a Part on an unhydrated drawing keeps its persisted count');
+    assert.equal(takeoffState.groups[0].layers[1].quantity, 4,
+        'a loading Count uses the editor aggregate until marker objects arrive');
+    assert.equal(takeoffState.groups[0].layers[2].quantity, 2,
+        'hydrated markers are counted exactly once');
+});
+
 test('a persisted calculated quantity is not reused as an additive base quantity', () => {
     // The function runs in the VM, so update the ProjectState object captured
     // by its global through a second instrumented instance.

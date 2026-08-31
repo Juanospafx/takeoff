@@ -1988,14 +1988,28 @@
             (snapshot.layers || []).forEach(remote => {
                 const id = String(remote.id || remote.layerId || '');
                 if (!id) return;
-                const objectTotal = (remote.shapes || remote.takeoffObjects || [])
+                const objects = remote.shapes || remote.takeoffObjects || [];
+                const objectTotal = objects
                     .reduce((sum, obj) => sum + Number(obj.quantityValue || obj.quantity || 0), 0);
-                totals.set(id, (totals.get(id) || 0) + objectTotal);
+                const remoteBase = Number(remote.baseQuantity ?? remote.base_quantity
+                    ?? remote.seedQuantity ?? remote.seed_quantity ?? 0);
+                const remoteMeasured = Math.max(0, Number(remote.quantity || 0) - remoteBase);
+                // Count snapshots from older/editor-loading paths may expose the
+                // aggregate quantity before their marker objects are hydrated.
+                // The aggregate is a safe fallback; never add it on top of the
+                // same objects or the Part would be counted twice.
+                const measured = objects.length ? objectTotal : remoteMeasured;
+                totals.set(id, (totals.get(id) || 0) + measured);
             });
         });
         allLayers().forEach(layer => {
+            // A layer absent from the snapshots has not been observed as empty.
+            // Preserve its persisted quantity until its drawing is hydrated;
+            // overwriting it here made Count/Part items disappear while linear
+            // layers on the active sheet continued to calculate normally.
+            if (!totals.has(String(layer.id))) return;
             const base = Number(layer.baseQuantity || 0);
-            layer.quantity = base + (totals.get(String(layer.id)) || 0);
+            layer.quantity = base + totals.get(String(layer.id));
         });
     }
 
