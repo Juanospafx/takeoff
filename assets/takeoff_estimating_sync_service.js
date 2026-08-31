@@ -92,7 +92,57 @@
         return groups;
     }
 
-    const service = { reconcile, takeoffItem };
+    function reconcileLinkedOnly(existingGroups = [], incomingGroups = []) {
+        const incomingByLayer = new Map();
+        (incomingGroups || []).forEach(group => (group.items || group.layers || []).forEach(layer => {
+            const layerId = stringId(layer.takeoffLayerId ?? layer.id);
+            if (layerId) incomingByLayer.set(layerId, { layer, group });
+        }));
+        const consumed = new Set();
+        const result = (existingGroups || []).map((group, groupIndex) => ({
+            ...group,
+            items: (group.items || []).flatMap(existing => {
+                const layerId = stringId(existing.takeoffLayerId);
+                if (!layerId) return [{ ...existing }];
+                const incoming = incomingByLayer.get(layerId);
+                if (!incoming) return [];
+                consumed.add(layerId);
+                return [takeoffItem({ ...incoming.layer, id: layerId }, incoming.group, existing)];
+            }),
+            sortOrder: group.sortOrder ?? groupIndex
+        }));
+        (incomingGroups || []).forEach((incomingGroup, groupIndex) => {
+            const pending = (incomingGroup.items || incomingGroup.layers || []).filter(layer => {
+                const layerId = stringId(layer.takeoffLayerId ?? layer.id);
+                return layerId && !consumed.has(layerId);
+            });
+            if (!pending.length) return;
+            const incomingGroupId = stringId(incomingGroup.id);
+            const takeoffGroupId = stringId(incomingGroup.takeoffGroupId);
+            let target = result.find(group => (incomingGroupId && stringId(group.id) === incomingGroupId)
+                || (takeoffGroupId && stringId(group.takeoffGroupId) === takeoffGroupId));
+            if (!target) {
+                target = {
+                    id: incomingGroupId || `takeoff_group_${takeoffGroupId || groupIndex}`,
+                    takeoffGroupId: takeoffGroupId || incomingGroupId || null,
+                    name: incomingGroup.name || 'Default Group',
+                    expanded: incomingGroup.expanded !== false && incomingGroup.isExpanded !== false,
+                    sortOrder: incomingGroup.sortOrder ?? result.length,
+                    source: 'takeoff', takeoffMirror: true, items: []
+                };
+                result.push(target);
+            }
+            pending.forEach(layer => {
+                const layerId = stringId(layer.takeoffLayerId ?? layer.id);
+                if (consumed.has(layerId)) return;
+                target.items.push(takeoffItem({ ...layer, id: layerId }, incomingGroup));
+                consumed.add(layerId);
+            });
+        });
+        return result;
+    }
+
+    const service = { reconcile, reconcileLinkedOnly, takeoffItem };
     global.TakeoffEstimatingSyncService = service;
     if (typeof module !== 'undefined') module.exports = service;
 })(typeof window !== 'undefined' ? window : globalThis);

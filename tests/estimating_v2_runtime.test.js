@@ -88,6 +88,26 @@ test('linked-only estimates update existing Takeoff bindings without importing n
     dom.window.close();
 });
 
+test('a versioned estimate-scoped Takeoff snapshot imports a new Part into linked-only', () => {
+    const dom = runtime({ activeEstimateId: 'copy', estimates: [{ id: 'copy', name: 'Copy',
+        takeoffSyncMode: 'linked-only', groups: [{ id: 'g1', name: 'Electrical', items: [
+            { id: 'copper', takeoffLayerId: 'l1', name: 'Copper', quantity: 0 }
+        ] }] }] });
+    dom.window.dispatchEvent(new dom.window.CustomEvent('takeoff:estimating-lines-updated', { detail: {
+        version: 2, projectId: '', activeEstimateId: 'copy', authoritative: true, complete: true,
+        groups: [{ id: 'g1', takeoffGroupId: 'tg1', name: 'Electrical', items: [
+            { id: 'l1', takeoffLayerId: 'l1', name: 'Copper', quantity: 0 },
+            { id: 'l2', takeoffLayerId: 'l2', itemType: 'part', name: 'Duplex Receptacle',
+                quantity: 5, unitMaterialCost: 12, uom: 'ea' }
+        ] }]
+    } }));
+    const saved = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.draft'));
+    const items = saved.estimates[0].groups.flatMap(group => group.items);
+    assert.equal(items.find(item => item.takeoffLayerId === 'l2')?.quantity, 5);
+    assert.ok(dom.window.document.querySelector('[data-item-id="takeoff_l2"]'));
+    dom.window.close();
+});
+
 test('Add Item opens Cost Catalog and the selected item persists with its catalog identity', async () => {
     const dom = runtime();
     dom.window.document.querySelector('[data-est-action="create-group"]').click();

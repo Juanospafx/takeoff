@@ -430,7 +430,11 @@
         return remote;
     }
 
-    function reconcileExistingTakeoffBindings(existingGroups, incomingGroups) {
+    function reconcileExistingTakeoffBindings(existingGroups, incomingGroups, importNewLayers = false) {
+        if (importNewLayers && window.TakeoffEstimatingSyncService?.reconcileLinkedOnly) {
+            return window.TakeoffEstimatingSyncService.reconcileLinkedOnly(existingGroups, incomingGroups)
+                .map(Workspace.group);
+        }
         const incomingByLayer = new Map();
         (incomingGroups || []).forEach(group => (group.items || group.layers || []).forEach(item => {
             const layerId = String(item.takeoffLayerId ?? item.id ?? '');
@@ -457,16 +461,19 @@
     function drainPendingTakeoff() {
         const queued = [...pendingTakeoffByEstimate.entries()];
         pendingTakeoffByEstimate.clear();
-        queued.forEach(([estimateId, groups]) => reconcileGroups(estimateId, groups));
+        queued.forEach(([estimateId, pending]) => reconcileGroups(estimateId,
+            pending?.groups || pending || [], pending?.options || {}));
     }
 
-    function reconcileGroups(estimateId, groups) {
+    function reconcileGroups(estimateId, groups, options = {}) {
         if (!Array.isArray(groups)) return;
         // The iframe commonly publishes its initial snapshot while the current
         // estimate revision is still loading. Apply that snapshot only after the
         // server state is authoritative, otherwise it dirties a stale revision.
         if (ui.loadState === 'loading') {
-            pendingTakeoffByEstimate.set(String(estimateId || ''), Workspace.clone(groups));
+            pendingTakeoffByEstimate.set(String(estimateId || ''), {
+                groups: Workspace.clone(groups), options: { ...options }
+            });
             return;
         }
         const activeId = String(estimateId || '');
@@ -482,7 +489,8 @@
         const currentEstimate = state.estimates[estimateIndex];
         let reconciled;
         if (currentEstimate.takeoffSyncMode === 'linked-only') {
-            reconciled = reconcileExistingTakeoffBindings(currentEstimate.groups, groups);
+            reconciled = reconcileExistingTakeoffBindings(currentEstimate.groups, groups,
+                options.importNewLayers === true);
         } else if (groups.some(group => Array.isArray(group.items))) {
             reconciled = groups.map(Workspace.group);
         } else if (window.TakeoffEstimatingSyncService?.reconcile) {
@@ -1126,7 +1134,10 @@
         if (event.detail?.projectId && String(event.detail.projectId) !== String(projectId)) return;
         if (event.detail?.activeEstimateId && String(event.detail.activeEstimateId) !== String(state.activeEstimateId)) return;
         if (!(event.detail?.groups || []).length && event.detail?.complete !== true) return;
-        reconcileGroups(event.detail?.activeEstimateId || state.activeEstimateId, event.detail?.groups || []);
+        const scopedSnapshot = Boolean(event.detail?.activeEstimateId)
+            && Number(event.detail?.version || 0) >= 2;
+        reconcileGroups(event.detail?.activeEstimateId || state.activeEstimateId,
+            event.detail?.groups || [], { importNewLayers: scopedSnapshot });
     });
     window.addEventListener('takeoff:estimating-link-requested', event => {
         const detail = event.detail || {};

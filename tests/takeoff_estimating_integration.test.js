@@ -44,6 +44,27 @@ test('manual Estimating items survive Takeoff reconciliation', () => {
     assert.equal(groups.flatMap(group => group.items).filter(item => item.id === 'manual-1').length, 1);
 });
 
+test('linked-only imports a newly created Takeoff Part and its count exactly once', () => {
+    const existing = [{ id: 'g1', takeoffGroupId: 'tg1', name: 'Electrical Takeoff Catalog', items: [
+        { id: 'copper-row', takeoffLayerId: 'copper', name: 'Copper', quantity: 0 },
+        { id: 'manual-row', name: 'Manual allowance', quantity: 2 }
+    ] }];
+    const incoming = [{ id: 'g1', takeoffGroupId: 'tg1', name: 'Electrical Takeoff Catalog', items: [
+        { id: 'copper', takeoffLayerId: 'copper', name: 'Copper', quantity: 0, unitCost: 5 },
+        { id: 'duplex', takeoffLayerId: 'duplex', catalogItemId: 44, itemType: 'part',
+            name: 'Duplex Receptacle', quantity: 5, unitCost: 12, uom: 'ea' }
+    ] }];
+    const reconciled = Sync.reconcileLinkedOnly(existing, incoming);
+    const items = reconciled.flatMap(group => group.items);
+    const duplex = items.find(item => item.takeoffLayerId === 'duplex');
+    assert.ok(duplex);
+    assert.equal(duplex.quantity, 5);
+    assert.equal(duplex.unitMaterialCost, 12);
+    assert.ok(items.some(item => item.id === 'manual-row'));
+    const repeated = Sync.reconcileLinkedOnly(reconciled, incoming).flatMap(group => group.items);
+    assert.equal(repeated.filter(item => item.takeoffLayerId === 'duplex').length, 1);
+});
+
 test('empty Takeoff folders are mirrored and same-name manual items stay separate', () => {
     const existing = [{
         id: 'manual-default',
