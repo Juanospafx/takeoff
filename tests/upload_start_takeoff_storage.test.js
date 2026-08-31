@@ -42,3 +42,15 @@ test('document API refuses Start Takeoff when its physical upload is missing', (
   const api = read('api/project_documents.php');
   assert.match(api, /if \(\$action === 'start_takeoff'\)[\s\S]*pdoc_storage_path/);
 });
+
+test('Takeoff bridge tolerates legacy document schemas and returns operable errors', () => {
+  const api = read('api/project_document_takeoff.php');
+  assert.match(api, /SHOW COLUMNS FROM/);
+  assert.match(api, /\['storage_path', 'filepath', 'file_path', 'path'\]/);
+  assert.match(api, /takeoff_active_clause\(\$documentColumns\)/);
+  assert.match(api, /DOCUMENT_SCHEMA_UNAVAILABLE/);
+  assert.match(api, /TAKEOFF_PREPARATION_FAILED/);
+  assert.match(api, /errorId/);
+  assert.match(api, /takeoff_json_error\(422/);
+  assert.match(api, /takeoff_json_error\(415/);
+});
