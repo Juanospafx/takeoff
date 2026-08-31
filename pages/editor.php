@@ -7,6 +7,7 @@ header('Cache-Control: no-store, no-cache, must-revalidate, max-age=0');
 header('Pragma: no-cache');
 header('Expires: 0');
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/files/upload_storage.php';
 
 $id = $_GET['id'] ?? 0;
 
@@ -38,23 +39,12 @@ if ($fileExt === '' && !empty($file['file_type'])) {
         $fileExt = $ft;
     }
 }
-$filePath = str_replace('\\', '/', (string)($file['filepath'] ?? ''));
-if ($filePath !== '') {
-    if (preg_match('~(api/)?uploads/.+$~s', $filePath, $m)) {
-        $filePath = $m[0];
-    }
-    if (strpos($filePath, 'uploads/') === 0) {
-        $expected = __DIR__ . '/../' . $filePath;
-        $legacy = __DIR__ . '/../api/' . $filePath;
-        if (!file_exists($expected) && file_exists($legacy)) {
-            $filePath = 'api/' . $filePath;
-        }
-    }
-    if (strpos($filePath, 'uploads/') === 0 || strpos($filePath, 'api/uploads/') === 0) {
-        $filePath = '../' . $filePath;
-    }
-    $filePath = implode('/', array_map('rawurlencode', explode('/', $filePath)));
+$resolvedDrawing = takeoff_resolve_stored_file((string)($file['filepath'] ?? ''));
+if (!$resolvedDrawing) {
+    http_response_code(404);
+    die("<div style='color:white;text-align:center;padding:50px;font-family:sans-serif;'>Error: The uploaded drawing file is missing. Please upload it again.</div>");
 }
+$filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing['public_path'])));
 ?>
 <!DOCTYPE html>
 <html lang="en">

@@ -17,7 +17,7 @@ test('Start Takeoff resolves project_documents to the files identity consumed by
 
 test('bridge is project-scoped, idempotent and reuses the physical PDF', () => {
     assert.match(api, /FROM project_documents WHERE id=\? AND project_id=\?/);
-    assert.match(api, /FROM files WHERE project_id=\? AND \(filepath=\? OR filepath=\?\)/);
+    assert.match(api, /FROM files WHERE project_id=\? AND deleted_at IS NULL AND \(filepath=\? OR filepath=\?\)/);
     assert.match(api, /if \(!\$file\)[\s\S]*INSERT INTO files/);
     assert.match(api, /JSON_UNESCAPED_SLASHES/);
     assert.match(page, /project_overview\.js\?v=project-documents-persistence-20260811-6/);

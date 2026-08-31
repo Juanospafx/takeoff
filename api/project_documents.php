@@ -135,6 +135,7 @@ if ($action === 'download') {
 if ($action === 'start_takeoff') {
     $document = pdoc_row($pdo, $projectId, $documentId, $source);
     if (!in_array($document['extension'], array('pdf', 'png', 'jpg', 'jpeg', 'webp'), true)) pdoc_error('unsupported_drawing', 'This document type cannot be used for takeoff.', 422);
+    pdoc_storage_path($pdo, $projectId, $documentId, $source);
     pdoc_json(array('ok' => true, 'success' => true, 'document' => $document, 'takeoff' => array(
         'project_id' => $projectId, 'document_id' => $documentId, 'source' => $source,
         'tab' => 'takeoff', 'url' => '../pages/project_dashboard.php?id=' . $projectId . '&tab=takeoff&document_id=' . $documentId

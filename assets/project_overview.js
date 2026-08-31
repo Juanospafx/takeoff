@@ -31,6 +31,7 @@
     let documentDensity = 'comfortable';
     const sessionFiles = new Map();
     const sessionFileUrls = new Map();
+    let startTakeoffInFlight = false;
 
     const $ = (id) => document.getElementById(id);
     const slug = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
@@ -871,6 +872,11 @@
     }
 
     async function startDocumentsTakeoff() {
+        if (startTakeoffInFlight) return;
+        startTakeoffInFlight = true;
+        const startButton = $('documentsStartTakeoffBtn');
+        if (startButton) startButton.disabled = true;
+        try {
         const drawings = drawingDocuments();
         if (!drawings.length) {
             showToast('Upload drawings before starting takeoff.');
@@ -894,23 +900,50 @@
                 if (!response.ok || !result?.success || !result.file?.id) throw new Error(result?.message || `HTTP ${response.status}`);
                 takeoffFileId = Number(result.file.id);
                 const alias = { id: takeoffFileId, source: 'legacy_file', filename: result.file.filename, title: result.file.filename, path: `../${result.file.filepath}`, extension: doc.extension, mime_type: doc.type };
+                window.ProjectState.documents = (window.ProjectState.documents || []).filter(row =>
+                    !(row.source === 'local_metadata' && String(row.id) === String(doc.id)) &&
+                    !(row.source === 'legacy_file' && Number(row.id) === takeoffFileId)
+                );
                 window.ProjectState.documents.push(alias);
+                localDocuments = localDocuments.filter(row => String(row.id) !== String(doc.id));
+                sessionFiles.delete(String(doc.id));
+                const objectUrl = sessionFileUrls.get(String(doc.id));
+                if (objectUrl) URL.revokeObjectURL(objectUrl);
+                sessionFileUrls.delete(String(doc.id));
+                persistLocalDocuments();
             } catch (error) {
                 showToast(error.message || 'Unable to upload this PDF for Takeoff.');
                 return;
             }
         }
-        if (doc.source === 'existing' && doc.originalSource === 'project_document') {
+        if (doc.source === 'existing') {
             try {
+                if (doc.originalSource === 'project_document') {
+                    // project_document_takeoff.php creates or reuses the files-table identity required by editor.php.
+                }
                 const response = await fetch('../api/project_document_takeoff.php', {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-                    body: JSON.stringify({ document_id: doc.backendId, project_id: window.ProjectState?.projectId })
+                    body: JSON.stringify({
+                        document_id: doc.backendId,
+                        project_id: window.ProjectState?.projectId,
+                        source: doc.originalSource || 'legacy_file'
+                    })
                 });
                 const result = await response.json().catch(() => null);
                 if (!response.ok || !result?.success || !result.file?.id) throw new Error(result?.message || `HTTP ${response.status}`);
                 takeoffFileId = Number(result.file.id);
-                const alias = { ...window.ProjectState.documents.find(row => row.source === 'project_document' && Number(row.id) === Number(doc.backendId)), id: takeoffFileId, source: 'legacy_file' };
+                const sourceRow = window.ProjectState.documents.find(row => row.source === doc.originalSource && Number(row.id) === Number(doc.backendId));
+                const alias = {
+                    ...sourceRow,
+                    id: takeoffFileId,
+                    source: 'legacy_file',
+                    filename: result.file.filename || sourceRow?.filename || doc.filename,
+                    title: result.file.filename || sourceRow?.title || doc.name,
+                    path: `../${result.file.filepath}`,
+                    extension: doc.extension,
+                    mime_type: doc.type
+                };
                 if (!window.ProjectState.documents.some(row => row.source === 'legacy_file' && Number(row.id) === takeoffFileId)) window.ProjectState.documents.push(alias);
             } catch (error) {
                 showToast(error.message || 'Unable to prepare this PDF for Takeoff.');
@@ -928,6 +961,10 @@
             frame.style.display = 'block';
         }
         if (empty) empty.style.display = 'none';
+        } finally {
+            startTakeoffInFlight = false;
+            if (startButton) startButton.disabled = false;
+        }
     }
 
     function escapeHtml(value) {
