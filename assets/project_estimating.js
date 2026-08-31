@@ -249,12 +249,23 @@
                     body: JSON.stringify(savePayload(sent.estimates)) });
             } catch (error) {
                 if (error.status !== 404 || !['estimate_not_found', 'stale_estimate_id'].includes(error.code)) throw error;
-                // Compatibility recovery for older deployments that treat a stale
-                // numeric database id as authoritative. Stable client ids remain
-                // unchanged, so retry once as an unmapped estimate.
-                const recoverable = sent.estimates.map(estimate => ({ ...estimate, dbEstimateId: null }));
-                result = await request('save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(savePayload(recoverable)) });
+                // Reconcile against the database before retrying. A 404 can mean
+                // either a stale numeric hint or a browser-only draft. Blindly
+                // retrying the same local identity caused repeated 404 requests.
+                const remote = await request('list');
+                const remoteRows = remote.state?.estimates || remote.estimates || [];
+                const remoteByClientId = new Map(remoteRows.map(estimate => [String(estimate.id), estimate]));
+                const recoverable = sent.estimates.map(estimate => {
+                    const canonical = remoteByClientId.get(String(estimate.id));
+                    return canonical
+                        ? { ...estimate, dbEstimateId: canonical.dbEstimateId, revision: canonical.revision }
+                        : { ...estimate, dbEstimateId: null };
+                });
+                const hasNewDraft = recoverable.some(estimate => !remoteByClientId.has(String(estimate.id)));
+                result = await request(hasNewDraft ? 'create' : 'save', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(savePayload(recoverable))
+                });
             }
             const acknowledgedRows = result.updates || result.state?.estimates || result.estimates || [];
             const acknowledgements = new Map(acknowledgedRows.map(estimate => [String(estimate.id), estimate]));

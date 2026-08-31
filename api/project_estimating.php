@@ -541,6 +541,11 @@ try {
             'state' => array('activeEstimateId' => $activeEstimateId, 'estimates' => $estimates)));
     }
 
+    // `create` is the stale-browser recovery form of the same atomic save
+    // contract. Normalize it here so the established save path remains the
+    // single persistence implementation.
+    $createByClientIdentity = $action === 'create';
+    if ($createByClientIdentity) $action = 'save';
     if ($action === 'save') {
         $pewStage = 'workspace_save';
         pew_method('POST');
@@ -572,6 +577,11 @@ try {
         $requestedActiveId = $workspace && isset($workspace['activeEstimateId']) ? (string)$workspace['activeEstimateId'] : '';
         foreach ($incoming as $estimate) {
             if (!is_array($estimate)) pew_error('Invalid estimate in workspace.', 422, 'invalid_estimate');
+            // Recovery endpoint for a browser draft whose former numeric row no
+            // longer exists. The stable client id remains authoritative; never
+            // reuse the stale numeric hint. If another request already created
+            // the client id, its revision check below still prevents overwrite.
+            if ($createByClientIdentity) $estimate['dbEstimateId'] = null;
             // activeEstimateId is the workspace-level source of truth. Persist a
             // single flag in each lossless estimate snapshot so GET/list can
             // restore the same selection after a full page reload.

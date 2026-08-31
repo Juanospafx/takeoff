@@ -19,9 +19,10 @@
     const defaultExcluded = new Set(['Permit fees unless noted', 'Utility company charges', 'Work not shown in documents']);
     const defaultScope = 'Describe the scope of work for this estimate.';
     const defaults = {
-        groupsOnly: true,
+        schemaVersion: 2,
+        groupsOnly: false,
         lumpSum: false,
-        material: { quantity: false, assemblyItems: false, itemTotalCost: true, combinedUnitCost: false, groupSubtotals: false, manufacturer: false, catalogNumber: false, description: false },
+        material: { quantity: true, assemblyItems: true, itemTotalCost: true, combinedUnitCost: false, groupSubtotals: false, manufacturer: false, catalogNumber: false, description: false },
         groupBy: 'Groups',
         summary: { laborMaterials: true, taxes: true, overhead: true, profit: true, acceptedBy: true, date: true, showDecimals: true, roundTotal: false, priceSqft: false },
         costItems: { groupSubtotals: true, summary: true, estimateTotal: true },
@@ -42,7 +43,17 @@
     function loadSettings() {
         try {
             const saved = JSON.parse(localStorage.getItem(settingsKey) || 'null');
-            return saved ? deepMerge(defaults, saved) : deepMerge(defaults, {});
+            if (!saved) return deepMerge(defaults, {});
+            const migrated = deepMerge(defaults, saved);
+            // Version 1 persisted the old hidden-item defaults automatically,
+            // even when the user never requested a groups-only proposal.
+            if (!saved.schemaVersion) {
+                migrated.schemaVersion = 2;
+                migrated.groupsOnly = false;
+                migrated.material.quantity = true;
+                migrated.material.assemblyItems = true;
+            }
+            return migrated;
         } catch (error) {
             return deepMerge(defaults, {});
         }
@@ -131,6 +142,20 @@
         }
     }
 
+    function activeEstimateModel() {
+        const estimating = readEstimatingModule();
+        return Array.isArray(estimating.estimates)
+            ? estimating.estimates.find(estimate => String(estimate.id) === String(estimating.activeEstimateId)) || null
+            : null;
+    }
+
+    function canonicalEstimateSummary() {
+        const estimate = activeEstimateModel();
+        const calculator = window.EstimateCalculationService;
+        if (!estimate || !calculator?.calculateSummary) return null;
+        return calculator.calculateSummary(estimate.groups || [], estimate.settings || {});
+    }
+
     function getCustomer() {
         const project = state.projectInfo || {};
         const meta = state.projectMeta || {};
@@ -183,9 +208,36 @@
     }
 
     function realItems() {
-        const estimating = readEstimatingModule();
-        const activeEstimate = Array.isArray(estimating.estimates) ? estimating.estimates.find(estimate => String(estimate.id) === String(estimating.activeEstimateId)) : null;
-        const groups = Array.isArray(activeEstimate?.groups) ? activeEstimate.groups : (Array.isArray(estimating.groups) ? estimating.groups : []);
+        const canonical = canonicalEstimateSummary();
+        if (canonical?.rows) {
+            return canonical.rows.flatMap(row => {
+                const parent = itemFromEstimate({ ...row.item, groupName: row.groupName,
+                    materialCost: row.calc.materialSales, laborCost: row.calc.laborSales,
+                    equipmentCost: row.calc.equipmentSales, totalSales: row.calc.totalSales });
+                parent.total = num(row.calc.totalSales);
+                parent.unitCost = parent.quantity ? parent.total / parent.quantity : parent.total;
+                parent.material = num(row.calc.materialSales);
+                parent.labor = num(row.calc.laborSales);
+                parent.equipment = num(row.calc.equipmentSales);
+                const children = proposalSettings.material.assemblyItems && Array.isArray(row.calc.childRows)
+                    ? row.calc.childRows.map(child => {
+                        const item = itemFromEstimate({ ...child.item, groupName: row.groupName,
+                            materialCost: child.calc.materialSales, laborCost: child.calc.laborSales,
+                            equipmentCost: child.calc.equipmentSales, totalSales: child.calc.totalSales });
+                        item.name = `\u21b3 ${item.name}`;
+                        item.total = num(child.calc.totalSales);
+                        item.unitCost = item.quantity ? item.total / item.quantity : item.total;
+                        item.material = num(child.calc.materialSales);
+                        item.labor = num(child.calc.laborSales);
+                        item.equipment = num(child.calc.equipmentSales);
+                        item.isAssemblyChild = true;
+                        return item;
+                    }) : [];
+                return [parent, ...children];
+            });
+        }
+        const activeEstimate = activeEstimateModel();
+        const groups = Array.isArray(activeEstimate?.groups) ? activeEstimate.groups : [];
         if (groups.length) return groups.flatMap(group => (group.items || []).map(item => itemFromEstimate({ ...item, groupName: group.name })));
         return Array.isArray(state.estimateItems) ? state.estimateItems.map(itemFromEstimate) : [];
     }
@@ -221,6 +273,16 @@
     }
 
     function totals(items) {
+        const canonical = canonicalEstimateSummary();
+        if (canonical) return {
+            material: num(canonical.direct?.materialSales),
+            labor: num(canonical.direct?.laborSales),
+            equipment: num(canonical.direct?.equipmentSales),
+            markup: num(canonical.totalMarkups),
+            taxes: num(canonical.totalTax),
+            profit: num(canonical.profit),
+            total: num(canonical.estimateTotal)
+        };
         const estimating = readEstimatingModule();
         const liveSummary = state.estimateSummary || estimating.estimateSummary || {};
         const estimateTotals = state.estimateTotals || {};
@@ -253,7 +315,13 @@
             if (!groups.has(key)) groups.set(key, []);
             groups.get(key).push(item);
         });
-        return [...groups.entries()].map(([name, children]) => ({ name, children, total: children.reduce((sum, item) => sum + num(item.total), 0) }));
+        return [...groups.entries()].map(([name, children]) => ({
+            name,
+            children,
+            // Assembly children are explanatory detail. Their value is already
+            // rolled into the parent row and must not inflate group subtotals.
+            total: children.reduce((sum, item) => sum + (item.isAssemblyChild ? 0 : num(item.total)), 0)
+        }));
     }
 
     function renderToggle(label, path) {

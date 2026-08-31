@@ -56,7 +56,7 @@ test('new estimates wait for a database acknowledgement and protect pending navi
     assert.match(client, /Creating estimate in database/);
     assert.match(client, /beforeunload/);
     assert.match(client, /dirtyEstimateIds\.size/);
-    assert.match(page, /project_estimating\.js\?v=estimating-authoritative-delete-20260824-16/);
+    assert.match(page, /project_estimating\.js\?v=estimating-save-reconcile-20260831-1/);
 });
 
 test('removing an estimate selects another isolated workspace', () => {

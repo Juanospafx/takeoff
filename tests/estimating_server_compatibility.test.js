@@ -82,12 +82,17 @@ test('a stale local dbEstimateId is recovered without updating another project o
     assert.doesNotMatch(save, /if \(\$estimateId\) \{\s*pew_owned_estimate\(/);
 });
 
-test('client retries one legacy 404 using stable estimate identity without a stale database id', () => {
+test('client reconciles one legacy 404 and creates missing browser drafts by stable identity', () => {
     const client = fs.readFileSync(path.join(root, 'assets/project_estimating.js'), 'utf8');
     assert.match(client, /\['estimate_not_found', 'stale_estimate_id'\]\.includes\(error\.code\)/);
+    assert.match(client, /await request\('list'\)/);
+    assert.match(client, /remoteByClientId/);
     assert.match(client, /dbEstimateId: null/);
     assert.doesNotMatch(client, /dbEstimateId: null, revision: 0/);
-    assert.match(client, /savePayload\(recoverable\)/);
+    assert.match(client, /request\(hasNewDraft \? 'create' : 'save'/);
+    assert.match(api, /\$createByClientIdentity = \$action === 'create'/);
+    assert.match(api, /if \(\$createByClientIdentity\) \$action = 'save'/);
+    assert.match(api, /if \(\$createByClientIdentity\) \$estimate\['dbEstimateId'\] = null/);
     assert.match(client, /automaticRebaseKeys/);
     assert.match(client, /ui\.saveRequested = false/);
 });
