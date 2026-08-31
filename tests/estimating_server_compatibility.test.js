@@ -82,6 +82,18 @@ test('a stale local dbEstimateId is recovered without updating another project o
     assert.doesNotMatch(save, /if \(\$estimateId\) \{\s*pew_owned_estimate\(/);
 });
 
+test('new estimate identity is captured before the optional insert savepoint is released', () => {
+    const start = api.indexOf('if (!$estimateId) {', api.indexOf('function pew_save_estimate'));
+    const end = api.indexOf('$current = pew_state_row', start);
+    const creation = api.slice(start, end);
+    assert.match(creation, /&\$createdEstimateId/);
+    assert.match(creation, /\$stmt->execute[\s\S]*\$createdEstimateId = \(int\)\$pdo->lastInsertId\(\)/);
+    assert.match(creation, /if \(\$createdEstimateId < 1\) throw new RuntimeException/);
+    assert.ok(creation.indexOf('$createdEstimateId = (int)$pdo->lastInsertId()')
+        < creation.indexOf('$estimateId = $createdEstimateId'),
+    'the generated id must be captured inside the insert callback');
+});
+
 test('client reconciles one legacy 404 and creates missing browser drafts by stable identity', () => {
     const client = fs.readFileSync(path.join(root, 'assets/project_estimating.js'), 'utf8');
     assert.match(client, /\['estimate_not_found', 'stale_estimate_id'\]\.includes\(error\.code\)/);

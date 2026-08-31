@@ -453,18 +453,26 @@ function pew_save_estimate(PDO $pdo, $projectId, array $estimate, array $summary
         }
     }
     if (!$estimateId) {
-        $createdExtended = pew_best_effort('extended estimate insert', $pdo, function () use ($pdo, $projectId, $estimate) {
+        // Capture the generated id immediately after execute. Some production
+        // PDO/MySQL combinations clear lastInsertId after RELEASE SAVEPOINT;
+        // reading it after pew_best_effort returned produced id=0, followed by
+        // a misleading estimate_not_found 404 and a rolled-back transaction.
+        $createdEstimateId = 0;
+        $createdExtended = pew_best_effort('extended estimate insert', $pdo, function () use ($pdo, $projectId, $estimate, &$createdEstimateId) {
             $stmt = $pdo->prepare('INSERT INTO estimates (project_id,estimate_number,name,status,currency_code) VALUES (?,?,?,?,?)');
             $stmt->execute(array($projectId, pew_text(isset($estimate['code']) ? $estimate['code'] : '', 100) ?: null,
                 pew_text(isset($estimate['name']) ? $estimate['name'] : 'Estimate'), pew_text(isset($estimate['status']) ? $estimate['status'] : 'draft', 50), 'USD'));
+            $createdEstimateId = (int)$pdo->lastInsertId();
         });
         if (!$createdExtended) {
             $pdo->prepare('INSERT INTO estimates (project_id,name,status) VALUES (?,?,?)')->execute(array(
                 $projectId, pew_text(isset($estimate['name']) ? $estimate['name'] : 'Estimate'),
                 pew_text(isset($estimate['status']) ? $estimate['status'] : 'draft', 50)
             ));
+            $createdEstimateId = (int)$pdo->lastInsertId();
         }
-        $estimateId = (int)$pdo->lastInsertId();
+        if ($createdEstimateId < 1) throw new RuntimeException('Database did not return the created estimate identity.');
+        $estimateId = $createdEstimateId;
     }
     $current = pew_state_row($pdo, $estimateId);
     if ($expectedRevision !== null && $current && (int)$expectedRevision !== (int)$current['revision']) {
