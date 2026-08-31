@@ -79,7 +79,7 @@
         state.dirtyEstimateIds = [...dirtyEstimateIds];
         state.takeoffSyncDirtyIds = [...takeoffSyncDirtyIds];
     }
-    function saveLocal() {
+    function saveLocal(options = {}) {
         state.groups = current().groups;
         state.dirtyEstimateIds = [...dirtyEstimateIds];
         state.takeoffSyncDirtyIds = [...takeoffSyncDirtyIds];
@@ -87,7 +87,7 @@
         const stored = Workspace.clone(state);
         if (!stored.pendingProjectCreationSync) delete stored.pendingProjectCreationSync;
         localStorage.setItem(storageKey, JSON.stringify(stored));
-        publish();
+        if (options.publish !== false) publish();
     }
 
     function applyDeletedEstimateTombstones(workspace, additionalIds = []) {
@@ -141,9 +141,38 @@
         conflictedEstimateIds.delete(String(state.activeEstimateId || ''));
         conflictRemoteEstimates.delete(String(state.activeEstimateId || ''));
         Workspace.touch(state);
-        saveLocal();
+        // Persist locally without broadcasting an incomplete field value or
+        // rebuilding the editor on every keystroke.
+        saveLocal({ publish: false });
         scheduleSave();
-        renderPreservingInput(target);
+        renderLiveSummary();
+    }
+
+    function activeEditingElement() {
+        const active = document.activeElement;
+        if (!active) return null;
+        if (root.contains(active) && active.matches('input, textarea, select, [contenteditable="true"]')) return active;
+        if (active.closest?.('[role="dialog"]')) return active;
+        return null;
+    }
+
+    function renderLiveSummary() {
+        const total = summary();
+        const totalElement = $('estimateTotal');
+        if (totalElement) totalElement.textContent = money(total.estimateTotal);
+        const sqft = Number(window.ProjectState?.projectMeta?.square_footage || 0);
+        const sqftElement = $('estimateSqft');
+        if (sqftElement) sqftElement.textContent = sqft ? `${money(total.estimateTotal / sqft)}/sq ft` : '--/sq ft';
+        renderFooter();
+        renderStatus();
+    }
+
+    function renderAfterAsyncSave() {
+        if (activeEditingElement()) {
+            renderLiveSummary();
+            return;
+        }
+        render();
     }
 
     function renderPreservingInput(target) {
@@ -290,7 +319,7 @@
             Workspace.selectEstimate(state, state.activeEstimateId);
             ui.loadState = dirtyEstimateIds.size ? 'pending' : 'saved';
             ui.message = dirtyEstimateIds.size ? 'Unsaved changes' : 'Saved';
-            saveLocal();
+            saveLocal({ publish: !activeEditingElement() });
         } catch (error) {
             ui.lastErrorCode = error.code || 'request_failed';
             ui.loadState = 'error';
@@ -327,10 +356,10 @@
                 }
             }
             if (error.code !== 'revision_conflict') ui.saveRequested = false;
-            saveLocal();
+            saveLocal({ publish: !activeEditingElement() });
         } finally {
             ui.saving = false;
-            render();
+            renderAfterAsyncSave();
             if (ui.pendingDeleteId && ui.loadState !== 'error') {
                 const pendingDeleteId = ui.pendingDeleteId;
                 ui.pendingDeleteId = null;
@@ -752,14 +781,14 @@
         if (event.target.dataset.noteField) {
             estimate.notes[event.target.dataset.noteField] = event.target.value;
             estimate.updatedAt = Workspace.now();
-            saveLocal();
+            saveLocal({ publish: false });
             scheduleSave();
             return;
         }
         if (event.target.dataset.noteList) {
             estimate.notes[event.target.dataset.noteList][Number(event.target.dataset.index)] = event.target.value;
             estimate.updatedAt = Workspace.now();
-            saveLocal();
+            saveLocal({ publish: false });
             scheduleSave();
         }
     });

@@ -15,13 +15,14 @@ test('all numeric calculation inputs recalculate through the central calculation
     assert.match(source, /const calc = Calc\.calculateItem/);
 });
 
-test('reactive rendering preserves the edited control and persists locally and remotely', () => {
+test('reactive editing keeps the live control mounted and persists locally before debounced remote save', () => {
     const reactive = source.slice(source.indexOf('function reactiveChanged'), source.indexOf('function scheduleSave'));
     assert.match(reactive, /Workspace\.touch\(state\)/);
-    assert.match(reactive, /saveLocal\(\)/);
+    assert.match(reactive, /saveLocal\(\{ publish: false \}\)/);
     assert.match(reactive, /scheduleSave\(\)/);
-    assert.match(reactive, /renderPreservingInput\(target\)/);
-    assert.match(reactive, /replacement\?\.focus\(\)/);
+    assert.match(reactive, /renderLiveSummary\(\)/);
+    assert.doesNotMatch(reactive.slice(0, reactive.indexOf('function activeEditingElement')), /renderPreservingInput\(target\)/);
+    assert.match(source, /function renderAfterAsyncSave\(\)[\s\S]*activeEditingElement\(\)[\s\S]*renderLiveSummary\(\)/);
 });
 
 test('invalid margins are visible and block server persistence', () => {

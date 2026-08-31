@@ -125,6 +125,26 @@ test('Add Item opens Cost Catalog and the selected item persists with its catalo
     dom.window.close();
 });
 
+test('typing a multi-digit item price keeps the same editor focused until change is committed', async () => {
+    const dom = runtime();
+    dom.window.document.querySelector('[data-est-action="create-group"]').click();
+    dom.window.document.querySelector('[data-add-item]').click();
+    await new Promise(resolve => dom.window.setTimeout(resolve, 0));
+    dom.window.document.querySelector('[data-est-catalog-item="77"]').click();
+    const price = dom.window.document.querySelector('[data-item-field="unitMaterialCost"]');
+    price.focus();
+    price.value = '1';
+    price.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    price.value = '12';
+    price.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    assert.equal(price.isConnected, true);
+    assert.equal(dom.window.document.activeElement, price);
+    const saved = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.draft'));
+    assert.equal(saved.estimates.find(row => row.id === saved.activeEstimateId)
+        .groups[0].items[0].unitMaterialCost, 12);
+    dom.window.close();
+});
+
 test('project notes persist while the user is typing without rerendering the editor', () => {
     const dom = runtime();
     const editor = dom.window.document.querySelector('[data-note-field="projectNotes"]');
