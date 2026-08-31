@@ -33,6 +33,24 @@ test('EQUIPMENT maps only to equipment pricing and retains identity', () => {
     assert.equal(item.unitEquipmentCost, 100);
     assert.equal(item.unitMaterialCost, 0);
     assert.equal(item.equipmentQuantity, 0);
+    item.quantity = 3;
+    const calculated = Calc.calculateItem(item);
+    assert.equal(calculated.equipmentQuantity, 3);
+    assert.equal(calculated.equipmentCost, 300);
+    assert.equal(calculated.totalCost, 300);
+});
+
+test('ordinary PART, EQUIPMENT and LABOR rows all contribute through the shared quantity', () => {
+    const part = convert({ item_type: 'part', unit_cost: 10 });
+    const equipment = convert({ item_type: 'equipment', unit_cost: 25 });
+    const labor = convert({ item_type: 'labor', labor_rate: 40, labor_hours: 0.5 });
+    [part, equipment, labor].forEach(item => { item.quantity = 4; });
+    const total = Calc.calculateSummary([{ id: 'normal-items', name: 'Normal items',
+        items: [part, equipment, labor] }], {});
+    assert.equal(total.byCategory.Materials.materialCost, 40);
+    assert.equal(total.byCategory.Equipment.equipmentCost, 100);
+    assert.equal(total.byCategory.Labor.laborCost, 80);
+    assert.equal(total.direct.totalCost, 220);
 });
 
 test('LABOR preserves explicit catalog rate and uses global rate only as fallback', () => {

@@ -71,7 +71,16 @@
         if (equipmentMargin >= 100) validation.push({ field: 'equipmentMargin', code: 'margin_must_be_below_100' });
         if (laborMargin >= 100) validation.push({ field: 'laborMargin', code: 'margin_must_be_below_100' });
         const materialSales = salesFromCost(materialCost, materialMargin >= 100 ? 0 : clampMargin(materialMargin), settings.marginMode);
-        const equipmentCost = num(item.equipmentQuantity) * num(item.unitEquipmentCost);
+        const isEquipmentItem = String(item.itemType ?? item.item_type ?? item.costCategory ?? '')
+            .toLowerCase().includes('equip');
+        // Catalog/Takeoff equipment rows use the normal item quantity. The
+        // separate equipmentQuantity field remains an optional explicit driver
+        // for mixed/manual rows, but its normalized default of zero must not
+        // erase a measured Equipment quantity.
+        const explicitEquipmentQuantity = num(item.equipmentQuantity);
+        const effectiveEquipmentQuantity = explicitEquipmentQuantity !== 0
+            ? explicitEquipmentQuantity : (isEquipmentItem ? quantity : 0);
+        const equipmentCost = effectiveEquipmentQuantity * num(item.unitEquipmentCost);
         const equipmentSales = salesFromCost(equipmentCost, equipmentMargin >= 100 ? 0 : clampMargin(equipmentMargin), settings.marginMode);
         // Waste is a material allowance. Labor follows the measured/base quantity;
         // difficulty is the only multiplier applied to required labor time.
@@ -91,6 +100,7 @@
             unitMaterialSales: adjustedQuantity ? materialSales / adjustedQuantity : 0,
             equipmentCost,
             equipmentSales,
+            equipmentQuantity: effectiveEquipmentQuantity,
             baseLaborHours,
             adjustedLaborHours,
             laborCost,

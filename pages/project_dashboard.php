@@ -1404,7 +1404,7 @@ $state = [
 <script src="../assets/project_takeoff.js?v=takeoff-group-modal-20260831-1"></script>
 <script src="../assets/assembly_expansion_service.js?v=assembly-expansion-20260828-1"></script>
 <script src="../assets/estimating_assembly_expansion_adapter.js?v=estimating-assembly-adapter-20260828-1"></script>
-<script src="../assets/estimate_calculation_service.js?v=estimating-calculation-canonical-policy-20260828-1"></script>
+<script src="../assets/estimate_calculation_service.js?v=estimating-normal-item-quantity-20260831-1"></script>
 <script src="../assets/catalog_update_preview_service.js?v=catalog-update-preview-20260827-1"></script>
 <script src="../assets/estimating_export_service.js?v=estimating-boq-export-20260820-1"></script>
 <script src="../assets/estimating_workspace_service.js?v=estimating-catalog-snapshot-20260827-1"></script>
