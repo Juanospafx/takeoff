@@ -372,6 +372,83 @@
 }
 .pro-create-group-btn:hover { border-color: #f97316; color: #ea580c; background: #fff7ed; }
 
+.pro-dialog-open { overflow: hidden; }
+.pro-group-modal {
+    position: fixed;
+    inset: 0;
+    z-index: 5000;
+    display: grid;
+    place-items: center;
+    padding: 20px;
+    background: rgba(15, 23, 42, .58);
+    backdrop-filter: blur(3px);
+}
+.pro-group-modal[hidden] { display: none; }
+.pro-group-dialog {
+    width: min(460px, 100%);
+    overflow: hidden;
+    border: 1px solid #d8dee6;
+    border-radius: 12px;
+    background: #fff;
+    color: #18212f;
+    box-shadow: 0 24px 64px rgba(15, 23, 42, .28);
+}
+.pro-group-dialog-head {
+    display: grid;
+    grid-template-columns: 42px minmax(0, 1fr) 40px;
+    align-items: start;
+    gap: 12px;
+    padding: 20px 20px 16px;
+    border-bottom: 1px solid #e7ebf0;
+}
+.pro-group-dialog-icon {
+    display: grid;
+    place-items: center;
+    width: 42px;
+    height: 42px;
+    border-radius: 9px;
+    background: #eaf4ff;
+    color: #1f6fb2;
+    font-size: 18px;
+}
+.pro-group-dialog h2 { margin: 0; color: #18212f; font-size: 1.08rem; font-weight: 900; }
+.pro-group-dialog p { margin: 5px 0 0; color: #64748b; font-size: .82rem; line-height: 1.45; }
+.pro-group-dialog form { padding: 18px 20px 20px; }
+.pro-group-field { display: grid; gap: 7px; }
+.pro-group-field > span { color: #344256; font-size: .78rem; font-weight: 900; }
+.pro-group-field input {
+    width: 100%;
+    min-height: 44px;
+    padding: 10px 12px;
+    border: 1px solid #cbd5e1;
+    border-radius: 7px;
+    background: #fff;
+    color: #18212f;
+    font: inherit;
+}
+.pro-group-field input:focus { outline: 3px solid rgba(31, 111, 178, .2); border-color: #1f6fb2; }
+.pro-group-field input[aria-invalid="true"] { border-color: #c9362b; outline-color: rgba(201, 54, 43, .16); }
+.pro-group-field-meta { display: flex; justify-content: space-between; gap: 12px; margin-top: 7px; color: #64748b; font-size: .72rem; }
+.pro-group-error { margin-top: 9px; color: #b42318; font-size: .76rem; font-weight: 800; }
+.pro-group-dialog-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 20px; }
+.pro-dialog-secondary,
+.pro-dialog-primary {
+    min-height: 44px;
+    padding: 9px 15px;
+    border: 1px solid #cbd5e1;
+    border-radius: 7px;
+    font: inherit;
+    font-size: .82rem;
+    font-weight: 900;
+    cursor: pointer;
+}
+.pro-dialog-secondary { background: #fff; color: #344256; }
+.pro-dialog-primary { display: inline-flex; align-items: center; gap: 7px; border-color: #1f6fb2; background: #1f6fb2; color: #fff; }
+.pro-dialog-secondary:hover { background: #f8fafc; }
+.pro-dialog-primary:hover { background: #175b93; border-color: #175b93; }
+.pro-dialog-secondary:focus-visible,
+.pro-dialog-primary:focus-visible { outline: 3px solid rgba(31, 111, 178, .24); outline-offset: 2px; }
+
 .pro-search-input {
     flex: 1;
     position: relative;
@@ -485,10 +562,26 @@
     color: #f8fafc;
 }
 [data-theme="dark"] .pro-create-group-btn:hover { border-color: #fb923c; color: #fdba74; background: #273449; }
+[data-theme="dark"] .pro-group-dialog { border-color: #334155; background: #172033; color: #f8fafc; }
+[data-theme="dark"] .pro-group-dialog-head { border-bottom-color: #334155; }
+[data-theme="dark"] .pro-group-dialog h2,
+[data-theme="dark"] .pro-group-field > span { color: #f8fafc; }
+[data-theme="dark"] .pro-group-dialog p,
+[data-theme="dark"] .pro-group-field-meta { color: #b8c4d6; }
+[data-theme="dark"] .pro-group-dialog-icon { background: #203d61; color: #93c5fd; }
+[data-theme="dark"] .pro-group-field input { border-color: #475569; background: #0f172a; color: #f8fafc; }
+[data-theme="dark"] .pro-dialog-secondary { border-color: #475569; background: #1e293b; color: #f8fafc; }
+[data-theme="dark"] .pro-dialog-secondary:hover { background: #273449; }
 
 @media (max-width: 430px) {
     .pro-takeoff-actions-row { grid-template-columns: minmax(102px, .8fr) minmax(0, 1.2fr); }
     .pro-create-group-btn { padding-inline: 9px; font-size: 13px; }
+    .pro-group-modal { align-items: end; padding: 0; }
+    .pro-group-dialog { width: 100%; border-radius: 14px 14px 0 0; }
+    .pro-group-dialog-head { padding: 18px 16px 14px; }
+    .pro-group-dialog form { padding: 16px; }
+    .pro-group-dialog-actions { display: grid; grid-template-columns: 1fr 1fr; }
+    .pro-group-dialog-actions button { justify-content: center; }
 }
 
 .pro-tree-row {

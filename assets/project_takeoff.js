@@ -1663,20 +1663,70 @@
         });
     }
 
-    function createTakeoffGroup() {
-        const name = prompt('Group name', 'New Group');
-        if (!name || !name.trim()) return;
+    let takeoffGroupModalReturnFocus = null;
+
+    function closeTakeoffGroupModal() {
+        const modal = $('takeoffGroupModal');
+        if (!modal || modal.hidden) return;
+        modal.hidden = true;
+        document.body.classList.remove('pro-dialog-open');
+        const input = $('takeoffGroupName');
+        const error = $('takeoffGroupNameError');
+        if (input) { input.value = ''; input.removeAttribute('aria-invalid'); }
+        if (error) { error.hidden = true; error.textContent = ''; }
+        if ($('takeoffGroupNameCount')) $('takeoffGroupNameCount').textContent = '0 / 120';
+        takeoffGroupModalReturnFocus?.focus?.();
+        takeoffGroupModalReturnFocus = null;
+    }
+
+    function openTakeoffGroupModal(trigger = document.activeElement) {
+        const modal = $('takeoffGroupModal');
+        const input = $('takeoffGroupName');
+        if (!modal || !input) return;
+        takeoffGroupModalReturnFocus = trigger;
+        modal.hidden = false;
+        document.body.classList.add('pro-dialog-open');
+        requestAnimationFrame(() => input.focus());
+    }
+
+    function createTakeoffGroup(name) {
+        const normalizedName = String(name || '').trim().replace(/\s+/g, ' ');
+        if (!normalizedName) return false;
+        const estimateId = activeEstimateId();
+        if (takeoffState.groups.some(group => groupBelongsToEstimate(group, estimateId)
+            && String(group.name || '').trim().toLocaleLowerCase() === normalizedName.toLocaleLowerCase())) return false;
         pushTakeoffHistory('create-group');
-        const group = { id: makeId('grp'), estimateId: activeEstimateId(), name: name.trim(), isExpanded: true, isDefault: false, layers: [] };
+        const id = makeId('grp');
+        const estimatingGroupId = `takeoff_group_${id}`;
+        const group = { id, estimatingGroupId, estimateId, name: normalizedName, isExpanded: true, isDefault: false, layers: [] };
         takeoffState.groups.push(group);
         takeoffState.activeGroupId = group.id;
         window.dispatchEvent(new CustomEvent('takeoff:estimating-group-create-requested', { detail: {
-            projectId: String(window.ProjectState?.projectId || ''), estimateId: activeEstimateId(),
-            group: { id: `takeoff_group_${group.id}`, takeoffGroupId: group.id, name: group.name,
+            projectId: String(window.ProjectState?.projectId || ''), estimateId,
+            group: { id: estimatingGroupId, takeoffGroupId: group.id, name: group.name,
                 expanded: true, sortOrder: takeoffState.groups.filter(row => groupBelongsToEstimate(row)).length - 1, items: [] }
         } }));
         saveTakeoffState();
         renderTakeoffPanel();
+        return true;
+    }
+
+    function submitTakeoffGroupModal(event) {
+        event.preventDefault();
+        const input = $('takeoffGroupName');
+        const error = $('takeoffGroupNameError');
+        const name = String(input?.value || '').trim().replace(/\s+/g, ' ');
+        let message = '';
+        if (!name) message = 'Enter a group name.';
+        else if (takeoffState.groups.some(group => groupBelongsToEstimate(group)
+            && String(group.name || '').trim().toLocaleLowerCase() === name.toLocaleLowerCase())) message = 'A group with this name already exists in this estimate.';
+        if (message) {
+            if (error) { error.textContent = message; error.hidden = false; }
+            input?.setAttribute('aria-invalid', 'true');
+            input?.focus();
+            return;
+        }
+        if (createTakeoffGroup(name)) closeTakeoffGroupModal();
     }
 
     function collapseAllTakeoffGroups() {
@@ -2380,7 +2430,7 @@
 
     function handleTakeoffAction(action) {
         document.querySelectorAll('.pro-menu').forEach(menu => menu.classList.remove('open'));
-        if (action === 'create-group') return createTakeoffGroup();
+        if (action === 'create-group') return openTakeoffGroupModal(document.activeElement);
         if (action === 'create-layer') return openLayerModal(takeoffState.activeGroupId);
         if (action === 'collapse-all') return collapseAllTakeoffGroups();
         if (action === 'toggle-global-visibility') return toggleGlobalVisibility();
@@ -3189,6 +3239,19 @@
             button.addEventListener('click', () => handleTakeoffAction(button.dataset.takeoffAction));
         });
 
+        $('takeoffGroupForm')?.addEventListener('submit', submitTakeoffGroupModal);
+        document.querySelectorAll('[data-group-modal-close]').forEach(button => button.addEventListener('click', closeTakeoffGroupModal));
+        $('takeoffGroupName')?.addEventListener('input', event => {
+            const input = event.currentTarget;
+            const error = $('takeoffGroupNameError');
+            input.removeAttribute('aria-invalid');
+            if (error) { error.hidden = true; error.textContent = ''; }
+            if ($('takeoffGroupNameCount')) $('takeoffGroupNameCount').textContent = `${input.value.length} / 120`;
+        });
+        $('takeoffGroupModal')?.addEventListener('click', event => {
+            if (event.target.id === 'takeoffGroupModal') closeTakeoffGroupModal();
+        });
+
         $('takeoffItemSearch')?.addEventListener('input', event => {
             takeoffState.query = event.target.value.trim().toLowerCase();
             renderTakeoffPanel();
@@ -3293,6 +3356,23 @@
             if (event.target.id === 'takeoffLayerModal') closeLayerModal();
         });
         document.addEventListener('keydown', event => {
+            const groupModal = $('takeoffGroupModal');
+            if (groupModal && !groupModal.hidden) {
+                if (event.key === 'Escape') {
+                    event.preventDefault();
+                    closeTakeoffGroupModal();
+                    return;
+                }
+                if (event.key === 'Tab') {
+                    const focusable = [...groupModal.querySelectorAll('button:not([disabled]), input:not([disabled])')];
+                    if (!focusable.length) return;
+                    const first = focusable[0];
+                    const last = focusable[focusable.length - 1];
+                    if (event.shiftKey && document.activeElement === first) { event.preventDefault(); last.focus(); }
+                    else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
+                }
+                return;
+            }
             if (event.key === 'Delete' && !event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey
                 && !event.target?.matches?.('input, textarea, select, option, [contenteditable="true"], [role="textbox"]')) {
                 event.preventDefault();

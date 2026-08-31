@@ -574,7 +574,7 @@ $state = [
         }
     </style>
     <link rel="stylesheet" href="../assets/project_overview.css?v=project-document-menus-20260811-1">
-    <link rel="stylesheet" href="../assets/project_takeoff.css?v=takeoff-actions-grid-20260821-3">
+    <link rel="stylesheet" href="../assets/project_takeoff.css?v=takeoff-group-modal-20260831-1">
     <link rel="stylesheet" href="../assets/project_estimating.css?v=estimating-card-menu-20260820-4">
     <link rel="stylesheet" href="../assets/project_proposal.css?v=proposal-workspace-20260810-1">
 </head>
@@ -1135,6 +1135,34 @@ $state = [
 <input type="file" id="projectUploadInput" class="d-none">
 <input type="file" id="documentsBrowseInput" class="d-none" multiple>
 
+<div class="pro-group-modal" id="takeoffGroupModal" hidden>
+    <div class="pro-group-dialog" role="dialog" aria-modal="true" aria-labelledby="takeoffGroupModalTitle" aria-describedby="takeoffGroupModalDescription">
+        <div class="pro-group-dialog-head">
+            <div class="pro-group-dialog-icon" aria-hidden="true"><i class="fas fa-folder-plus"></i></div>
+            <div>
+                <h2 id="takeoffGroupModalTitle">Create new group</h2>
+                <p id="takeoffGroupModalDescription">Organize related takeoff layers and measurements in one group.</p>
+            </div>
+            <button class="pro-icon-btn" type="button" data-group-modal-close aria-label="Close create group dialog"><i class="fas fa-times"></i></button>
+        </div>
+        <form id="takeoffGroupForm" novalidate>
+            <label class="pro-group-field" for="takeoffGroupName">
+                <span>Group name</span>
+                <input id="takeoffGroupName" name="groupName" type="text" maxlength="120" autocomplete="off" placeholder="For example, Lighting" required aria-describedby="takeoffGroupNameHint takeoffGroupNameError">
+            </label>
+            <div class="pro-group-field-meta">
+                <small id="takeoffGroupNameHint">Use a clear scope or system name.</small>
+                <small id="takeoffGroupNameCount">0 / 120</small>
+            </div>
+            <div class="pro-group-error" id="takeoffGroupNameError" role="alert" hidden></div>
+            <div class="pro-group-dialog-actions">
+                <button class="pro-dialog-secondary" type="button" data-group-modal-close>Cancel</button>
+                <button class="pro-dialog-primary" id="takeoffGroupCreateSubmit" type="submit"><i class="fas fa-folder-plus" aria-hidden="true"></i> Create group</button>
+            </div>
+        </form>
+    </div>
+</div>
+
 <script>
     window.ProjectState = <?= json_encode($state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
 
@@ -1373,7 +1401,7 @@ $state = [
 <script src="../assets/catalog_service.js?v=catalog-service-20260826-1"></script>
 <script src="../assets/boq_catalog_adapter.js?v=boq-catalog-boundary-20260826-1"></script>
 <script src="../assets/takeoff_catalog_adapter.js?v=takeoff-catalog-boundary-20260826-1"></script>
-<script src="../assets/project_takeoff.js?v=estimating-live-footer-20260824-4"></script>
+<script src="../assets/project_takeoff.js?v=takeoff-group-modal-20260831-1"></script>
 <script src="../assets/assembly_expansion_service.js?v=assembly-expansion-20260828-1"></script>
 <script src="../assets/estimating_assembly_expansion_adapter.js?v=estimating-assembly-adapter-20260828-1"></script>
 <script src="../assets/estimate_calculation_service.js?v=estimating-calculation-canonical-policy-20260828-1"></script>
