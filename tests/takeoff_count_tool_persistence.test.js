@@ -16,8 +16,27 @@ test('Point remains active after each count while its item is selected', () => {
 
 test('deselecting the count item clears persistence and returns to Smart', () => {
     const clear = editor.slice(editor.indexOf('window.projectTakeoffClearActiveLayer'), editor.indexOf('window.projectTakeoffSetLayerVisibility'));
-    assert.match(clear, /state\.selectedLayerUid = null/);
-    assert.match(clear, /state\.continuousTool = false/);
-    assert.match(clear, /setTool\('select'\)/);
+    assert.match(clear, /deactivateLayerForInsert\(\)/);
+    const deactivate = editor.slice(editor.indexOf('function deactivateLayerForInsert'), editor.indexOf('function openTakeoffMenu'));
+    assert.match(deactivate, /state\.selectedLayerUid = null/);
+    assert.match(deactivate, /state\.continuousTool = false/);
+    assert.match(deactivate, /setTool\('smart'\)/);
     assert.match(page, /editor\/takeoff\.js\?v=[a-z0-9-]+/i);
+});
+
+test('canvas placement requires matching drawing mode, active layer, and no pan state', () => {
+    const guard = editor.slice(editor.indexOf('function activePlacementLayer'), editor.indexOf('function calculateCountQuantity'));
+    assert.match(guard, /state\.panMode \|\| state\.temporaryPan \|\| state\.annotationPlacement/);
+    assert.match(guard, /const layer = activeLayer\(\)/);
+    assert.match(guard, /return state\.tool === expectedTool \? layer : null/);
+    const click = editor.slice(editor.indexOf("konvaStage.on('click tap'"), editor.indexOf("konvaStage.on('dblclick dbltap'"));
+    assert.match(click, /const layer = activePlacementLayer\(\)/);
+    assert.doesNotMatch(click, /const layer = activeLayer\(\)/);
+});
+
+test('internal layer checkbox deselects instead of reactivating the stale Count layer', () => {
+    const start = editor.lastIndexOf("el.querySelectorAll('[data-layer-check]')");
+    const handlers = editor.slice(start, editor.indexOf("el.querySelectorAll('[data-layer-action]')", start));
+    assert.match(handlers, /if \(box\.checked\) activateLayerForInsert/);
+    assert.match(handlers, /else if[\s\S]*deactivateLayerForInsert\(\)/);
 });

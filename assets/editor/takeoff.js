@@ -255,6 +255,16 @@
         return state.projectControlled ? null : createLayer();
     }
 
+    function activePlacementLayer() {
+        if (state.panMode || state.temporaryPan || state.annotationPlacement) return null;
+        const layer = activeLayer();
+        if (!layer) return null;
+        const expectedTool = layerType(layer) === 'linear'
+            ? 'takeoff_linear'
+            : (layerType(layer) === 'area' ? 'takeoff_area' : 'takeoff_count');
+        return state.tool === expectedTool ? layer : null;
+    }
+
     function calculateCountQuantity(marker) {
         return num(marker.multiplier || 1);
     }
@@ -1988,20 +1998,12 @@
             }
             if (state.tool !== 'takeoff_count' && state.tool !== 'takeoff_linear' && state.tool !== 'takeoff_area') return;
             if (evt.target !== konvaStage && evt.target.getParent() !== konvaLayer) return;
-            const layer = activeLayer();
+            // Geometry creation is allowed only when the interaction mode and
+            // the explicitly active layer agree. Never repair a stale layer or
+            // tool from a canvas click and never fall back to the last item.
+            const layer = activePlacementLayer();
             if (!layer) {
-                showToast('Select a takeoff layer before drawing.', 'error');
                 return;
-            }
-            const activeType = layerType(layer);
-            if (activeType === 'linear' && state.tool !== 'takeoff_linear') {
-                setTool('takeoff_linear');
-            }
-            if (activeType === 'area' && state.tool !== 'takeoff_area') {
-                setTool('takeoff_area');
-            }
-            if (activeType !== 'linear' && activeType !== 'area' && state.tool !== 'takeoff_count') {
-                setTool('takeoff_count');
             }
             const pos = konvaStage.getPointerPosition();
             const world = screenToWorld(pos);
@@ -2406,7 +2408,8 @@
         el.querySelectorAll('[data-layer-check]').forEach(box => {
             box.addEventListener('click', event => event.stopPropagation());
             box.addEventListener('change', () => {
-                activateLayerForInsert(box.dataset.layerCheck);
+                if (box.checked) activateLayerForInsert(box.dataset.layerCheck);
+                else if (String(state.selectedLayerUid || '') === String(box.dataset.layerCheck)) deactivateLayerForInsert();
             });
         });
 
@@ -2559,6 +2562,18 @@
         }
         setTool(type === 'linear' ? 'takeoff_linear' : (type === 'area' ? 'takeoff_area' : 'takeoff_count'));
         showToast(`${layer.name} active`, 'success');
+        renderLayers();
+        emitProjectState();
+        return true;
+    }
+
+    function deactivateLayerForInsert() {
+        if (state.draftLine) finishLinear();
+        if (state.draftArea) finishArea();
+        state.selectedLayerUid = null;
+        state.selectedLayerUids.clear();
+        state.continuousTool = false;
+        setTool('smart');
         renderLayers();
         emitProjectState();
         return true;
@@ -3121,13 +3136,9 @@
 
     window.projectTakeoffClearActiveLayer = function () {
         state.projectControlled = true;
-        state.selectedLayerUid = null;
-        state.selectedLayerUids.clear();
-        state.continuousTool = false;
-        setTool('select');
-        renderLayers();
-        emitProjectState();
+        deactivateLayerForInsert();
         showToast('Active layer cleared', 'success');
+        return true;
     };
 
     window.projectTakeoffSetLayerVisibility = function (layerId, visible) {

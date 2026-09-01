@@ -3750,7 +3750,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
 
 </script>
 <script src="../assets/catalog_metadata.js?v=catalog-metadata-20260826-1"></script>
-<script src="../assets/editor/takeoff.js?v=takeoff-empty-groups-20260821-2"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-placement-state-20260831-1"></script>
 </body>
 </html>
 

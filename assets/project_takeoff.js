@@ -2231,6 +2231,15 @@
         // multi-layer/object selection below, but activate this specific layer
         // in the editor so the next drawing uses its type and catalog data.
         if (selected) setActiveTakeoffLayer(layer.id, false);
+        else if (String(takeoffState.activeLayerId || '') === String(layer.id)) {
+            // Checkbox selection and placement activation are separate state.
+            // Clearing the checkbox for the active layer must also terminate
+            // the editor's drawing mode; otherwise Count keeps using the last
+            // selected layer even though the sidebar presents it as inactive.
+            clearActiveTakeoffLayer(false);
+            selectionState.activeLayerId = selectionState.selectedLayerIds[0] || null;
+            setActiveTool('smart');
+        }
         const selectedIds = callEditor('projectTakeoffSelectGroup', selectionState.selectedLayerIds);
         selectionState.selectedObjectIds = Array.isArray(selectedIds) ? selectedIds : [];
         renderTakeoffPanel();

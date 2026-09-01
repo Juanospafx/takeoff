@@ -1401,7 +1401,7 @@ $state = [
 <script src="../assets/catalog_service.js?v=catalog-service-20260826-1"></script>
 <script src="../assets/boq_catalog_adapter.js?v=boq-catalog-boundary-20260826-1"></script>
 <script src="../assets/takeoff_catalog_adapter.js?v=takeoff-catalog-boundary-20260826-1"></script>
-<script src="../assets/project_takeoff.js?v=takeoff-part-count-quantity-20260831-1"></script>
+<script src="../assets/project_takeoff.js?v=takeoff-placement-state-20260831-1"></script>
 <script src="../assets/assembly_expansion_service.js?v=assembly-expansion-20260828-1"></script>
 <script src="../assets/estimating_assembly_expansion_adapter.js?v=estimating-assembly-adapter-20260828-1"></script>
 <script src="../assets/estimate_calculation_service.js?v=estimating-normal-item-quantity-20260831-1"></script>

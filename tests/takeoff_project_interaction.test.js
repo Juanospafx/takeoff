@@ -49,6 +49,14 @@ test('group and layer checkboxes activate from their change event without bubbli
     assert.match(source, /\[data-layer-select\][\s\S]*?addEventListener\('click',\s*event\s*=>\s*event\.stopPropagation\(\)\)[\s\S]*?addEventListener\('change',\s*\(\)\s*=>\s*toggleLayerSelection\(box\.dataset\.layerSelect,\s*box\.checked\)\)/);
 });
 
+test('unchecking the active dashboard item clears both parent and editor placement state', () => {
+    const toggle = source.slice(source.indexOf('function toggleLayerSelection'), source.indexOf('function toggleLayerLock'));
+    assert.match(toggle, /if \(selected\) setActiveTakeoffLayer\(layer\.id, false\)/);
+    assert.match(toggle, /else if \(String\(takeoffState\.activeLayerId/);
+    assert.match(toggle, /clearActiveTakeoffLayer\(false\)/);
+    assert.match(toggle, /setActiveTool\('smart'\)/);
+});
+
 test('groups support additive selection, persistent bulk deletion, and drag reorder from the chevron', () => {
     assert.match(source, /selectedGroupIds:\s*\[\]/);
     assert.match(source, /groupIds\.add\(String\(group\.id\)\)/);
