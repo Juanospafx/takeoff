@@ -46,6 +46,8 @@
     let takeoffDirtyGeneration = 0;
     let missingScaleWarningShown = false;
     let selectionRectDraft = null;
+    let linearPointerWorld = null;
+    let linearShiftPressed = false;
 
     function trackTakeoffObjects(targets, deleted = false) {
         (targets || []).forEach(target => {
@@ -464,6 +466,40 @@
     function screenToWorld(pos) {
         const vpt = canvas.viewportTransform || [1, 0, 0, 1, 0, 0];
         return { x: (pos.x - vpt[4]) / vpt[0], y: (pos.y - vpt[5]) / vpt[3] };
+    }
+
+    function snapPointTo45(start, cursor, enabled) {
+        if (!enabled || !start || !cursor) return cursor;
+        const dx = cursor.x - start.x;
+        const dy = cursor.y - start.y;
+        const distance = Math.hypot(dx, dy);
+        if (!distance) return { x: start.x, y: start.y };
+        const step = Math.PI / 4;
+        const snappedAngle = Math.round(Math.atan2(dy, dx) / step) * step;
+        return {
+            x: start.x + Math.cos(snappedAngle) * distance,
+            y: start.y + Math.sin(snappedAngle) * distance
+        };
+    }
+
+    function linearPointForPointer(cursor, shiftPressed) {
+        const points = state.draftLine?.points || [];
+        const start = points[points.length - 1];
+        return start ? snapPointTo45(start, cursor, Boolean(shiftPressed)) : cursor;
+    }
+
+    function renderLinearPreview(cursor = linearPointerWorld, shiftPressed = linearShiftPressed) {
+        if (state.tool !== 'takeoff_linear' || !state.draftLine?.preview || !state.draftLine.points.length || !cursor) return false;
+        const point = linearPointForPointer(cursor, shiftPressed);
+        state.draftLine.preview.points([...state.draftLine.points, point].flatMap(value => [value.x, value.y]));
+        const last = state.draftLine.points[state.draftLine.points.length - 1];
+        const partial = pointsLength([last, point]);
+        const total = pointsLength(state.draftLine.points) + partial;
+        state.draftLine.lengthLabel.position({ x: point.x + 12, y: point.y - 28 });
+        state.draftLine.lengthLabel.text(`${formatFeetLabel(partial)} / Total ${formatFeetLabel(total)}`);
+        updateDrawingStatus(point);
+        konvaLayer?.batchDraw();
+        return true;
     }
 
     function normalizeSymbol(symbol) {
@@ -2026,7 +2062,7 @@
             }
             const pos = konvaStage.getPointerPosition();
             const world = screenToWorld(pos);
-            if (layerType(layer) === 'linear') addLinearPoint(world);
+            if (layerType(layer) === 'linear') addLinearPoint(linearPointForPointer(world, evt.evt?.shiftKey || linearShiftPressed));
             else if (layerType(layer) === 'area') addAreaPoint(world);
             else addMarker(world);
         });
@@ -2034,20 +2070,13 @@
             if (state.tool === 'takeoff_linear') finishLinear();
             if (state.tool === 'takeoff_area') finishArea();
         });
-        konvaStage.on('mousemove touchmove', () => {
+        konvaStage.on('mousemove touchmove', evt => {
             const pos = konvaStage.getPointerPosition();
             if (!pos) return;
             const world = screenToWorld(pos);
-            if (state.tool === 'takeoff_linear' && state.draftLine?.preview && state.draftLine.points.length) {
-                state.draftLine.preview.points([...state.draftLine.points, world].flatMap(p => [p.x, p.y]));
-                const last = state.draftLine.points[state.draftLine.points.length - 1];
-                const partial = pointsLength([last, world]);
-                const total = pointsLength(state.draftLine.points) + partial;
-                state.draftLine.lengthLabel.position({ x: world.x + 12, y: world.y - 28 });
-                state.draftLine.lengthLabel.text(`${formatFeetLabel(partial)} · Σ ${formatFeetLabel(total)}`);
-                updateDrawingStatus(world);
-                konvaLayer.batchDraw();
-            }
+            linearPointerWorld = world;
+            linearShiftPressed = Boolean(evt.evt?.shiftKey);
+            renderLinearPreview(world, linearShiftPressed);
             if (state.tool === 'takeoff_area' && state.draftArea?.preview && state.draftArea.points.length) {
                 state.draftArea.preview.points([...state.draftArea.points, world].flatMap(p => [p.x, p.y]));
                 konvaLayer.batchDraw();
@@ -2982,6 +3011,10 @@
             };
         }
         window.addEventListener('keydown', e => {
+            if (e.key === 'Shift' && state.draftLine) {
+                linearShiftPressed = true;
+                renderLinearPreview();
+            }
             if (e.key === 'Escape') {
                 e.preventDefault();
                 state.continuousTool = false;
@@ -3023,6 +3056,11 @@
                 markDirty();
             }
         });
+        window.addEventListener('keyup', e => {
+            if (e.key !== 'Shift') return;
+            linearShiftPressed = false;
+            renderLinearPreview();
+        });
     }
 
     window.setTakeoffInternalView = function(view) {
@@ -3051,6 +3089,7 @@
         calculateItemCost,
         calculateLaborHours,
         calculateTakeoffSummary,
+        snapPointTo45,
     };
 
     window.syncTakeoffInteractionScale = syncTakeoffHandleScale;

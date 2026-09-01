@@ -48,5 +48,5 @@ test('deleting a marker removes its transformer and fallback notes start editabl
 
 test('dashboard and editor bypass the previous cached Takeoff scripts', () => {
     assert.match(dashboard, /project_takeoff\.js\?v=takeoff-duplicate-edit-persistence-20260831-1/);
-    assert.match(page, /editor\/takeoff\.js\?v=takeoff-duplicate-edit-persistence-20260831-1/);
+    assert.match(page, /editor\/takeoff\.js\?v=takeoff-shift-angle-snap-20260831-1/);
 });
