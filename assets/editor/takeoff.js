@@ -1614,7 +1614,15 @@
         if (!layer) return;
         snapshot();
         const copyUid = uid();
-        const copy = { ...layer, client_uid: copyUid, name: `${layer.name} Copy`, metadata_json: { ...(layer.metadata_json || {}), project_layer_id: copyUid } };
+        const copy = {
+            ...JSON.parse(JSON.stringify(layer)),
+            client_uid: copyUid,
+            name: `${layer.name} Copy`,
+            color: window.TakeoffColorPalette.duplicateColor(layer.color, state.layers
+                .filter(item => layerGroup(item) === layerGroup(layer))
+                .map(item => item.color)),
+            metadata_json: { ...JSON.parse(JSON.stringify(layer.metadata_json || {})), project_layer_id: copyUid }
+        };
         state.layers.push(copy);
         state.selectedLayerUid = copy.client_uid;
         markDirty({ pageFallback: true });

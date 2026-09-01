@@ -316,15 +316,7 @@
     const TAKEOFF_SIZES = ['Small', 'Medium', 'Large'];
     const takeoffSizeRadius = size => ({ Small: 7, Medium: 9, Large: 12 }[size]
         || Math.max(4, Math.min(96, Number(size) || 9)));
-    const TAKEOFF_COLORS = [
-        { label: 'Black', value: '#111827' },
-        { label: 'Red', value: '#dc2626' },
-        { label: 'Blue', value: '#2563eb' },
-        { label: 'Green', value: '#16a34a' },
-        { label: 'Orange', value: '#f97316' },
-        { label: 'Purple', value: '#7c3aed' },
-        { label: 'Yellow', value: '#eab308' }
-    ];
+    const TAKEOFF_COLORS = window.TakeoffColorPalette?.COLORS || [];
     const TAKEOFF_TYPE_HELP = {
         Count: 'Use Count for fixtures, receptacles, luminaires, devices, or any item measured by quantity.',
         Linear: 'Use Linear for conduits, cables, piping, or any item measured by length.',
@@ -1832,7 +1824,19 @@
         if (!layer) return;
         pushTakeoffHistory('duplicate-layer');
         const group = findGroup(layer.groupId);
-        const copy = { ...layer, id: makeId('layer'), name: `${layer.name} Copy`, quantity: 0, baseQuantity: 0, shapes: [], takeoffObjects: [] };
+        const copyId = makeId('layer');
+        const copy = {
+            ...JSON.parse(JSON.stringify(layer)),
+            id: copyId,
+            name: `${layer.name} Copy`,
+            color: window.TakeoffColorPalette.duplicateColor(layer.color, (group.layers || []).map(item => item.color)),
+            quantity: 0,
+            baseQuantity: 0,
+            shapes: [],
+            takeoffObjects: [],
+            metadata: { ...(JSON.parse(JSON.stringify(layer.metadata || {}))), project_layer_id: copyId },
+            metadata_json: { ...(JSON.parse(JSON.stringify(layer.metadata_json || {}))), project_layer_id: copyId }
+        };
         group.layers.push(copy);
         setActiveTakeoffLayer(copy.id, false);
         saveTakeoffState();
