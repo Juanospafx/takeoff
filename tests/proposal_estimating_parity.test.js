@@ -17,6 +17,13 @@ test('Proposal uses the canonical Estimating calculator for rows and final total
         'the canonical calculator must load before Proposal');
 });
 
+test('Proposal formats customer quantities as whole numbers without changing raw totals', () => {
+    assert.match(proposal, /QuantityFormatService\.proposal\(item\.quantity\)/);
+    assert.match(proposal, /const quantity = num\(item\.quantity \?\? item\.qty\)/);
+    assert.match(proposal, /quantity \* unitCost/);
+    assert.ok(dashboard.indexOf('quantity_format_service.js') < dashboard.indexOf('project_proposal.js'));
+});
+
 test('Proposal shows estimate items by default and expands assembly detail without double counting', () => {
     assert.match(proposal, /schemaVersion: 2/);
     assert.match(proposal, /groupsOnly: false/);

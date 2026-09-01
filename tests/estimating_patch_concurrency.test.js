@@ -5,7 +5,7 @@ const path = require('node:path');
 const { JSDOM } = require('jsdom');
 
 const root = path.join(__dirname, '..');
-const sources = ['estimate_calculation_service.js', 'project_estimate_footer.js',
+const sources = ['quantity_format_service.js', 'estimate_calculation_service.js', 'project_estimate_footer.js',
     'takeoff_estimating_sync_service.js', 'estimating_workspace_service.js', 'project_estimating.js']
     .map(file => fs.readFileSync(path.join(root, 'assets', file), 'utf8'));
 const clone = value => JSON.parse(JSON.stringify(value));

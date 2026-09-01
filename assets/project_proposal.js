@@ -389,7 +389,7 @@
                     if (proposalSettings.material.catalogNumber && item.catalogNumber) details.push(`Catalog #: ${esc(item.catalogNumber)}`);
                     if (proposalSettings.material.assemblyItems) details.push(esc(item.group || 'Assembly item'));
                     const cells = [`<td><strong>${esc(item.name)}</strong>${details.length ? `<div class="proposal-muted">${details.join('<br>')}</div>` : ''}</td>`];
-                    if (proposalSettings.material.quantity) cells.push(`<td>${esc(item.quantity || '')} ${esc(item.uom || '')}</td>`);
+                    if (proposalSettings.material.quantity) cells.push(`<td>${esc(window.QuantityFormatService.proposal(item.quantity))} ${esc(item.uom || '')}</td>`);
                     if (proposalSettings.material.combinedUnitCost) cells.push(`<td class="amount">${money(item.unitCost)}</td>`);
                     if (proposalSettings.material.itemTotalCost) cells.push(`<td class="amount">${money(item.total)}</td>`);
                     rows.push(`<tr>${cells.join('')}</tr>`);

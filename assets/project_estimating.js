@@ -589,7 +589,10 @@
         const locked = key === 'quantity' && item.takeoffLayerId;
         const margin = key.toLowerCase().includes('margin');
         const invalid = margin && Number(item[key]) >= 100;
-        return `<td><input data-item-field="${key}" ${numericKeys.has(key) ? `type="number" step="0.01" ${margin ? 'max="99.99"' : ''}` : 'type="text"'} value="${esc(item[key])}" ${invalid ? 'aria-invalid="true" title="Margin must be below 100%"' : ''} ${locked ? 'readonly title="Quantity is synchronized from Takeoff"' : ''}></td>`;
+        const displayValue = key === 'quantity'
+            ? window.QuantityFormatService.estimating(item[key])
+            : item[key];
+        return `<td><input data-item-field="${key}" ${numericKeys.has(key) ? `type="number" step="0.01" ${margin ? 'max="99.99"' : ''}` : 'type="text"'} value="${esc(displayValue)}" ${invalid ? 'aria-invalid="true" title="Margin must be below 100%"' : ''} ${locked ? 'readonly title="Quantity is synchronized from Takeoff"' : ''}></td>`;
     }
 
     function renderDetails() {

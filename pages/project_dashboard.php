@@ -1405,15 +1405,16 @@ $state = [
 <script src="../assets/project_takeoff.js?v=takeoff-duplicate-edit-persistence-20260831-1"></script>
 <script src="../assets/assembly_expansion_service.js?v=assembly-expansion-20260828-1"></script>
 <script src="../assets/estimating_assembly_expansion_adapter.js?v=estimating-assembly-adapter-20260828-1"></script>
+<script src="../assets/quantity_format_service.js?v=quantity-context-format-20260831-1"></script>
 <script src="../assets/estimate_calculation_service.js?v=estimating-normal-item-quantity-20260831-1"></script>
 <script src="../assets/catalog_update_preview_service.js?v=catalog-update-preview-20260827-1"></script>
 <script src="../assets/estimating_export_service.js?v=estimating-boq-export-20260820-1"></script>
 <script src="../assets/estimating_workspace_service.js?v=estimating-catalog-snapshot-20260827-1"></script>
 <script src="../assets/catalog_update_application_service.js?v=catalog-update-application-20260827-2"></script>
 <script src="../assets/estimating_catalog_adapter.js?v=estimating-catalog-snapshot-20260827-1"></script>
-<script src="../assets/project_estimating.js?v=estimating-edit-focus-20260831-1"></script>
+<script src="../assets/project_estimating.js?v=quantity-context-format-20260831-1"></script>
 <script src="../assets/catalog_update_ui.js?v=catalog-update-ui-20260827-1"></script>
-<script src="../assets/project_proposal.js?v=proposal-canonical-estimate-20260831-1"></script>
+<script src="../assets/project_proposal.js?v=quantity-context-format-20260831-1"></script>
 <script src="../assets/global_tools.js"></script>
 </body>
 </html>
