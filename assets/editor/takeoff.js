@@ -1720,6 +1720,17 @@
         if (targetLayer && previousType && previousType !== layerType(targetLayer)) {
             clearIncompatibleMeasurements(targetLayer, layerType(targetLayer));
         }
+        if (targetLayer && state.createLayerMode) {
+            // Editing a layer changes its drawing contract as well as its row.
+            // Apply the same values to already-created geometry so the canvas
+            // and the persisted marker/segment rows cannot retain stale values.
+            window.projectTakeoffUpdateLayerObjects?.(targetLayer.client_uid, {
+                symbol: payload.symbol,
+                color: payload.color,
+                symbolSize: symbolRadius(payload.symbol_size),
+                diameter: symbolRadius(payload.symbol_size) * 2
+            });
+        }
         state.createCatalogItemId = null;
         closeCreateLayerModal();
         if (targetLayer) activateLayerForInsert(targetLayer.client_uid);
@@ -3414,7 +3425,10 @@
         });
         applyObjectSelectionVisuals();
         trackTakeoffObjects(targets.map(ref => ({ type: state.markers.includes(ref) ? 'marker' : 'segment', ref })));
-        markDirty({ objectsTracked: true });
+        // A layer edit must persist even when the duplicate has no geometry yet.
+        // The page fallback carries the layer row, while tracked objects carry
+        // marker/segment appearance changes with their stable identities.
+        markDirty({ pageFallback: true, objectsTracked: true });
         renderProperties();
         return true;
     };

@@ -51,3 +51,34 @@ test('both duplicate handlers deep clone and use the shared palette', () => {
     assert.match(dashboardPage, /takeoff_color_palette\.js[\s\S]*?project_takeoff\.js/);
     assert.match(editorPage, /takeoff_color_palette\.js[\s\S]*?editor\/takeoff\.js/);
 });
+
+test('duplicate edits persist layer and geometry appearance before the modal closes', () => {
+    const submit = dashboard.slice(dashboard.indexOf('async function submitLayerModal'), dashboard.indexOf('function openCatalogModal'));
+    assert.match(submit, /projectTakeoffUpdateLayerObjects/);
+    assert.match(submit, /callEditor\('projectTakeoffSave'\)/);
+    assert.match(submit, /await saved/);
+    assert.ok(submit.indexOf("callEditor('projectTakeoffSave')") < submit.indexOf('closeLayerModal()'));
+
+    const update = editor.slice(editor.indexOf('window.projectTakeoffUpdateLayerObjects'), editor.indexOf('window.projectTakeoffMoveSelectionToLayer'));
+    assert.match(update, /patch\.symbol[\s\S]*layer\.symbol/);
+    assert.match(update, /patch\.color[\s\S]*layer\.color/);
+    assert.match(update, /patch\.symbolSize[\s\S]*layer\.symbol_size/);
+    assert.match(update, /targets\.forEach[\s\S]*ref\.color/);
+    assert.match(update, /createMarkerNode\(ref\)/);
+    assert.match(update, /markDirty\(\{ pageFallback: true, objectsTracked: true \}\)/);
+});
+
+test('reopened edit form normalizes persisted editor symbols and numeric sizes', () => {
+    assert.match(dashboard, /const takeoffDisplaySize =/);
+    assert.match(dashboard, /const takeoffDisplaySymbol =/);
+    const modal = dashboard.slice(dashboard.indexOf('function openLayerModal'), dashboard.indexOf('function closeLayerModal'));
+    assert.match(modal, /takeoffDisplaySymbol\(layer\?\.symbol\)/);
+    assert.match(modal, /takeoffDisplaySize\(layer\?\.size\)/);
+});
+
+test('Takeoff API persists editable layer and geometry appearance fields', () => {
+    const api = fs.readFileSync(path.join(root, 'api', 'takeoff.php'), 'utf8');
+    assert.match(api, /takeoff_layers[\s\S]*color[\s\S]*symbol[\s\S]*symbol_size/);
+    assert.match(api, /takeoff_count_markers[\s\S]*symbol[\s\S]*color/);
+    assert.match(api, /takeoff_linear_segments[\s\S]*color[\s\S]*stroke_width/);
+});

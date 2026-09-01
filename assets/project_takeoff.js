@@ -316,6 +316,22 @@
     const TAKEOFF_SIZES = ['Small', 'Medium', 'Large'];
     const takeoffSizeRadius = size => ({ Small: 7, Medium: 9, Large: 12 }[size]
         || Math.max(4, Math.min(96, Number(size) || 9)));
+    const takeoffDisplaySize = size => {
+        if (TAKEOFF_SIZES.includes(size)) return size;
+        const radius = takeoffSizeRadius(size);
+        if (radius <= 7) return 'Small';
+        if (radius >= 12) return 'Large';
+        return 'Medium';
+    };
+    const takeoffDisplaySymbol = symbol => {
+        const raw = String(symbol || '').toLowerCase();
+        if (raw.includes('square')) return 'Square';
+        if (raw.includes('triangle')) return 'Triangle';
+        if (raw.includes('diamond')) return 'Diamond';
+        if (raw.includes('cross')) return 'Cross';
+        if (raw.includes('hollow')) return 'Hollow Circle';
+        return 'Solid Circle';
+    };
     const TAKEOFF_COLORS = window.TakeoffColorPalette?.COLORS || [];
     const TAKEOFF_TYPE_HELP = {
         Count: 'Use Count for fixtures, receptacles, luminaires, devices, or any item measured by quantity.',
@@ -1324,8 +1340,8 @@
         $('layerTypeInput').value = layer?.type || 'Count';
         $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[$('layerTypeInput').value] || TAKEOFF_TYPE_HELP.Count;
         setSelectValue($('layerUomInput'), layer?.uom || typeToUom($('layerTypeInput').value));
-        $('layerSymbolInput').value = layer?.symbol || 'Solid Circle';
-        $('layerSizeInput').value = layer?.size || 'Medium';
+        $('layerSymbolInput').value = takeoffDisplaySymbol(layer?.symbol);
+        $('layerSizeInput').value = takeoffDisplaySize(layer?.size);
         $('layerDiameterInput').value = Number(layer?.markerDiameter || (takeoffSizeRadius(layer?.size || 'Medium') * 2));
         $('layerStrokeInput').value = Number(layer?.strokeWidth || (String(layer?.type || '').includes('Area') ? 3 : 4));
         $('layerColorInput').value = layer?.color || '#111827';
@@ -1399,9 +1415,16 @@
         setTimeout(() => $('layerCreateSubmit')?.focus(), 40);
     }
 
-    function submitLayerModal() {
+    async function submitLayerModal() {
         const name = $('layerNameInput')?.value.trim();
         if (!name) return;
+        const submit = $('layerCreateSubmit');
+        if (submit?.dataset.saving === '1') return;
+        if (submit) {
+            submit.dataset.saving = '1';
+            submit.disabled = true;
+            submit.textContent = 'Saving...';
+        }
         pushTakeoffHistory(takeoffState.editingLayerId ? 'edit-layer' : 'create-layer');
         const type = $('layerTypeInput').value;
         const payload = {
@@ -1419,17 +1442,18 @@
             depth: Number($('layerDepthInput')?.value || 0)
         };
         if (takeoffState.pendingCatalogItem) Object.assign(payload, catalogItemMeta(takeoffState.pendingCatalogItem));
-        if (takeoffState.editingLayerId) {
-            const layer = findLayer(takeoffState.editingLayerId);
+        const editingLayerId = takeoffState.editingLayerId;
+        if (editingLayerId) {
+            const layer = findLayer(editingLayerId);
             if (layer) Object.assign(layer, payload);
-            callEditor('projectTakeoffUpdateLayerObjects', takeoffState.editingLayerId, {
+            callEditor('projectTakeoffUpdateLayerObjects', editingLayerId, {
                 symbol: payload.symbol,
                 color: payload.color,
                 symbolSize: payload.markerDiameter / 2,
                 diameter: payload.markerDiameter,
                 strokeWidth: payload.strokeWidth
             });
-            setActiveTakeoffLayer(takeoffState.editingLayerId, false);
+            setActiveTakeoffLayer(editingLayerId, false);
         } else {
             const group = findGroup(takeoffState.pendingLayerGroupId);
             const layer = {
@@ -1444,9 +1468,24 @@
             takeoffState.activeGroupId = group.id;
             setActiveTakeoffLayer(layer.id, false);
         }
-        closeLayerModal();
-        saveTakeoffState();
-        renderTakeoffPanel();
+        try {
+            // Modal Save is a durable operation, not merely a request for the
+            // editor's delayed autosave. Waiting for this ACK prevents a quick
+            // close/reload from restoring the duplicate's previous appearance.
+            const saved = callEditor('projectTakeoffSave');
+            if (saved && typeof saved.then === 'function') await saved;
+            closeLayerModal();
+            saveTakeoffState();
+            renderTakeoffPanel();
+        } catch (error) {
+            console.warn('Takeoff layer save failed', error);
+            showPrepared('Unable to save Takeoff item changes. Please try again.');
+            if (submit) {
+                submit.dataset.saving = '0';
+                submit.disabled = false;
+                submit.textContent = editingLayerId ? 'Save' : 'Create';
+            }
+        }
     }
 
     function ensureCatalogModal() {

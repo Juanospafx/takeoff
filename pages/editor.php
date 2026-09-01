@@ -3751,7 +3751,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
 </script>
 <script src="../assets/catalog_metadata.js?v=catalog-metadata-20260826-1"></script>
 <script src="../assets/takeoff_color_palette.js?v=takeoff-duplicate-color-20260831-1"></script>
-<script src="../assets/editor/takeoff.js?v=takeoff-duplicate-color-20260831-1"></script>
+<script src="../assets/editor/takeoff.js?v=takeoff-duplicate-edit-persistence-20260831-1"></script>
 </body>
 </html>
 
