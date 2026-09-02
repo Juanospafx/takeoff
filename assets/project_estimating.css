@@ -1801,6 +1801,22 @@
     border-color: var(--est-primary); background: var(--est-surface); outline: none;
 }
 .est-item-row input[readonly] { color: var(--est-muted); cursor: not-allowed; }
+.est-assembly-parent-row td { background: color-mix(in srgb, var(--est-primary-soft, #dbeafe) 38%, var(--est-surface)); }
+.est-assembly-parent-name,
+.est-assembly-component-name { display: flex; align-items: center; gap: 6px; }
+.est-assembly-parent-name input { min-width: 150px; font-weight: 750; }
+.est-assembly-toggle {
+    flex: 0 0 30px; width: 30px; height: 30px; display: inline-grid; place-items: center;
+    border: 0; border-radius: 5px; background: transparent; color: var(--est-muted); cursor: pointer;
+}
+.est-assembly-toggle:hover { color: var(--est-primary); background: var(--est-primary-soft); }
+.est-assembly-toggle:focus-visible { outline: 2px solid var(--est-primary); outline-offset: 1px; }
+.est-assembly-component-row td { background: color-mix(in srgb, var(--est-soft) 65%, var(--est-surface)); color: var(--est-muted); }
+.est-assembly-component-row td:first-child { border-left: 3px solid color-mix(in srgb, var(--est-primary) 45%, transparent); }
+.est-assembly-component-row td span { display: inline-block; padding: 6px 7px; white-space: nowrap; }
+.est-assembly-component-name { position: relative; padding-left: 22px !important; color: var(--est-text) !important; }
+.est-assembly-branch { position: absolute; left: 8px; top: 0; bottom: 0; width: 10px; padding: 0 !important; border-left: 1px solid var(--est-line); }
+.est-assembly-branch::after { content: ''; position: absolute; left: 0; top: 50%; width: 9px; border-top: 1px solid var(--est-line); }
 .est-group-row td { background: var(--est-group-bg, #f1f5f9); font-weight: 700; }
 .est-group-row td:nth-child(2) { display: flex; align-items: center; gap: 8px; }
 .est-group-name { max-width: 260px; font-weight: 700; }

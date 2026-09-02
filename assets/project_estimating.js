@@ -28,7 +28,7 @@
     const storageKey = `takeoff.estimating.module.${projectId || 'draft'}`;
     const apiUrl = '../api/project_estimating.php';
     const ui = { search: '', selected: new Set(), saving: false, saveRequested: false, saveTimer: null, pendingDeleteId: null, lastErrorCode: null, loadState: projectId ? 'loading' : 'local',
-        message: projectId ? 'Loading estimate' : 'Local draft', collapsed: {}, modal: null,
+        message: projectId ? 'Loading estimate' : 'Local draft', collapsed: {}, expandedAssemblies: new Set(), modal: null,
         catalogTargetGroupId: null, catalogData: null, catalogLoading: false, catalogError: '' };
     let state = readLocal();
     const dirtyEstimateIds = new Set(state.dirtyEstimateIds || []);
@@ -71,6 +71,18 @@
             .map(error => ({ ...error, itemId: item.id, itemName: item.name })));
     }
     function findItem(itemId) { return allItems().find(row => row.item.id === itemId) || null; }
+    function duplicateAssembly(item) {
+        const copyTree = (source, parentItemId = null) => {
+            const copy = Workspace.item({ ...Workspace.clone(source), id: Workspace.uid('item'), parentItemId,
+                takeoffLayerId: null, copiedFromTakeoffLayerId: source.takeoffLayerId || null,
+                quantitySource: 'manual', quantitySyncStatus: 'manual' });
+            copy.children = (source.children || []).map(child => copyTree(child, copy.id));
+            return copy;
+        };
+        const duplicate = copyTree(item);
+        duplicate.name = `${item.name} Copy`;
+        return duplicate;
+    }
     function markEstimateDirty(estimateId = state.activeEstimateId) {
         const id = String(estimateId || '');
         if (!id) return;
@@ -564,18 +576,22 @@
         head.innerHTML = `<tr><th class="est-check-col"><input type="checkbox" data-select-all aria-label="Select all"></th>${columns.map(([, label]) => `<th>${esc(label)}</th>`).join('')}<th>Cost</th><th>Sales</th><th>Profit</th><th></th></tr>`;
         const query = ui.search.trim().toLowerCase();
         const html = [];
+        const calculatedRows = Calc.calculateSummary(current().groups, current().settings).rows;
+        const calculatedByItem = new Map(calculatedRows.map(row => [String(row.item.id), row.calc]));
         current().groups.forEach(group => {
-            const visible = group.items.filter(item => !query || `${item.name} ${item.description} ${item.costCode}`.toLowerCase().includes(query));
+            const visible = group.items.filter(item => !query || itemMatchesQuery(item, query));
             html.push(`<tr class="est-group-row" data-group-id="${esc(group.id)}"><td><input type="checkbox" data-group-check="${esc(group.id)}" aria-label="Select group"></td><td colspan="${columns.length + 3}"><button type="button" class="est-group-toggle" data-toggle-group="${esc(group.id)}"><i class="fas fa-chevron-${group.expanded ? 'down' : 'right'}"></i></button><input class="est-group-name" data-group-name="${esc(group.id)}" value="${esc(group.name)}"><span>${visible.length} items</span></td><td><button type="button" class="est-row-action" data-add-item="${esc(group.id)}" title="Add item"><i class="fas fa-plus"></i></button><button type="button" class="est-row-action" data-delete-group="${esc(group.id)}" title="Delete group"><i class="fas fa-trash"></i></button></td></tr>`);
             if (!group.expanded) return;
             visible.forEach(item => {
-                const calc = Calc.calculateItem(item, current().settings);
-                const invalid = (calc.validation || []).length > 0;
-                html.push(`<tr class="est-item-row ${ui.selected.has(item.id) ? 'selected' : ''} ${invalid ? 'est-invalid-row' : ''}" data-item-id="${esc(item.id)}" ${invalid ? 'title="Margins must be below 100%"' : ''}>
-                    <td><input type="checkbox" data-item-check="${esc(item.id)}" ${ui.selected.has(item.id) ? 'checked' : ''}></td>
-                    ${columns.map(([key]) => cell(item, key)).join('')}
-                    <td class="est-money">${money(calc.totalCost)}</td><td class="est-money">${money(calc.totalSales)}</td><td class="est-money">${money(calc.profit)}</td>
-                    <td><button type="button" class="est-row-action" data-delete-item="${esc(item.id)}" title="Delete"><i class="fas fa-trash"></i></button></td></tr>`);
+                const calc = calculatedByItem.get(String(item.id)) || Calc.calculateItem(item, current().settings);
+                html.push(renderItemRow(item, calc));
+                if (!item.isAssembly || !ui.expandedAssemblies.has(String(item.id))) return;
+                const matchingChildIds = query ? new Set((item.children || []).filter(child => itemMatchesQuery(child, query)).map(child => String(child.id))) : null;
+                (calc.childRows || []).forEach((childRow, index) => {
+                    const sourceChild = findDirectAssemblyChild(item, childRow.item, index);
+                    if (matchingChildIds && !itemMatchesQuery(item, query) && sourceChild && !matchingChildIds.has(String(sourceChild.id))) return;
+                    html.push(renderItemRow(childRow.item, childRow.calc, { component: true, parent: item, sourceChild, index }));
+                });
             });
         });
         body.innerHTML = html.join('') || `<tr><td colspan="${columns.length + 5}" class="est-empty">No estimate items. Create a group or add items in Takeoff.</td></tr>`;
@@ -583,7 +599,43 @@
         if (deleteButton) deleteButton.disabled = ui.selected.size === 0;
     }
 
-    function cell(item, key) {
+    function itemMatchesQuery(item, query) {
+        const ownMatch = `${item.name || ''} ${item.description || ''} ${item.costCode || ''}`.toLowerCase().includes(query);
+        return ownMatch || (item.children || []).some(child => itemMatchesQuery(child, query));
+    }
+
+    function findDirectAssemblyChild(parent, calculatedChild, index) {
+        const children = parent.children || [];
+        const id = String(calculatedChild.id || '');
+        const catalogId = String(calculatedChild.catalogItemId || '');
+        return children.find(child => id && String(child.id) === id)
+            || children.find(child => catalogId && String(child.catalogItemId) === catalogId)
+            || children[index] || null;
+    }
+
+    function renderItemRow(item, calc, options = {}) {
+        const component = options.component === true;
+        const assembly = item.isAssembly === true || String(item.itemType || '').toLowerCase() === 'assembly';
+        const invalid = (calc.validation || []).length > 0;
+        const rowId = component ? `${options.parent.id}:component:${options.sourceChild?.id || options.index}` : item.id;
+        const namePrefix = !component && assembly
+            ? `<button type="button" class="est-assembly-toggle" data-toggle-assembly="${esc(item.id)}" aria-expanded="${ui.expandedAssemblies.has(String(item.id))}" aria-label="${ui.expandedAssemblies.has(String(item.id)) ? 'Collapse' : 'Expand'} ${esc(item.name)}"><i class="fas fa-chevron-${ui.expandedAssemblies.has(String(item.id)) ? 'down' : 'right'}" aria-hidden="true"></i></button>`
+            : (component ? '<span class="est-assembly-branch" aria-hidden="true"></span>' : '');
+        const actions = component
+            ? (options.sourceChild ? `<button type="button" class="est-row-action" data-remove-assembly-component="${esc(options.sourceChild.id)}" data-parent-assembly-id="${esc(options.parent.id)}" title="Remove component" aria-label="Remove ${esc(item.name)} from assembly"><i class="fas fa-trash"></i></button>` : '')
+            : `${assembly ? `<button type="button" class="est-row-action" data-duplicate-item="${esc(item.id)}" title="Duplicate assembly" aria-label="Duplicate ${esc(item.name)}"><i class="fas fa-copy"></i></button>` : ''}<button type="button" class="est-row-action" data-delete-item="${esc(item.id)}" title="Delete"><i class="fas fa-trash"></i></button>`;
+        return `<tr class="est-item-row ${assembly && !component ? 'est-assembly-parent-row' : ''} ${component ? 'est-assembly-component-row' : ''} ${!component && ui.selected.has(item.id) ? 'selected' : ''} ${invalid ? 'est-invalid-row' : ''}" data-item-id="${esc(rowId)}" ${component ? `data-parent-assembly-id="${esc(options.parent.id)}" data-assembly-component-row` : ''} ${invalid ? 'title="This item has calculation validation errors"' : ''}>
+            <td>${component ? '' : `<input type="checkbox" data-item-check="${esc(item.id)}" ${ui.selected.has(item.id) ? 'checked' : ''}>`}</td>
+            ${columns.map(([key]) => cell(item, key, { readonly: component, prefix: key === 'name' ? namePrefix : '' })).join('')}
+            <td class="est-money">${money(calc.totalCost)}</td><td class="est-money">${money(calc.totalSales)}</td><td class="est-money">${money(calc.profit)}</td>
+            <td>${actions}</td></tr>`;
+    }
+
+    function cell(item, key, options = {}) {
+        if (options.readonly) {
+            const value = key === 'quantity' ? window.QuantityFormatService.estimating(item[key]) : item[key];
+            return `<td class="${key === 'name' ? 'est-assembly-component-name' : ''}">${options.prefix || ''}<span>${esc(value)}</span></td>`;
+        }
         if (key === 'costCategory') return `<td><select data-item-field="${key}"><option ${item[key] === 'Materials' ? 'selected' : ''}>Materials</option><option ${item[key] === 'Labor' ? 'selected' : ''}>Labor</option><option ${item[key] === 'Equipment' ? 'selected' : ''}>Equipment</option></select></td>`;
         const numericKeys = new Set(['quantity', 'unitMaterialCost', 'waste', 'unitLabor', 'laborRate', 'difficulty', 'materialMargin', 'laborMargin', 'unitEquipmentCost', 'equipmentQuantity', 'equipmentMargin']);
         const locked = key === 'quantity' && item.takeoffLayerId;
@@ -592,7 +644,7 @@
         const displayValue = key === 'quantity'
             ? window.QuantityFormatService.estimating(item[key])
             : item[key];
-        return `<td><input data-item-field="${key}" ${numericKeys.has(key) ? `type="number" step="0.01" ${margin ? 'max="99.99"' : ''}` : 'type="text"'} value="${esc(displayValue)}" ${invalid ? 'aria-invalid="true" title="Margin must be below 100%"' : ''} ${locked ? 'readonly title="Quantity is synchronized from Takeoff"' : ''}></td>`;
+        return `<td class="${key === 'name' && options.prefix ? 'est-assembly-parent-name' : ''}">${options.prefix || ''}<input data-item-field="${key}" ${numericKeys.has(key) ? `type="number" step="0.01" ${margin ? 'max="99.99"' : ''}` : 'type="text"'} value="${esc(displayValue)}" ${invalid ? 'aria-invalid="true" title="Margin must be below 100%"' : ''} ${locked ? 'readonly title="Quantity is synchronized from Takeoff"' : ''}></td>`;
     }
 
     function renderDetails() {
@@ -764,6 +816,9 @@
             }
             found.item.updatedAt = Workspace.now();
             reactiveChanged(event.target);
+            if (itemField === 'quantity' && found.item.isAssembly && ui.expandedAssemblies.has(String(found.item.id))) {
+                renderPreservingInput(event.target);
+            }
             return;
         }
         if (event.target.dataset.setting) {
@@ -1051,10 +1106,45 @@
         if (collapse) { ui.collapsed[collapse] = !ui.collapsed[collapse]; renderDetails(); }
         const toggle = target.closest('[data-toggle-group]')?.dataset.toggleGroup;
         if (toggle) { const group = current().groups.find(row => row.id === toggle); group.expanded = !group.expanded; changed(); }
+        const assemblyToggle = target.closest('[data-toggle-assembly]')?.dataset.toggleAssembly;
+        if (assemblyToggle) {
+            if (ui.expandedAssemblies.has(String(assemblyToggle))) ui.expandedAssemblies.delete(String(assemblyToggle));
+            else ui.expandedAssemblies.add(String(assemblyToggle));
+            renderTable();
+            return;
+        }
         const add = target.closest('[data-add-item]')?.dataset.addItem;
         if (add) addItem(add);
         const deleteItem = target.closest('[data-delete-item]')?.dataset.deleteItem;
         if (deleteItem) { const found = findItem(deleteItem); found.group.items = found.group.items.filter(row => row.id !== deleteItem); changed(`Deleted ${found.item.name}`); }
+        const duplicateItem = target.closest('[data-duplicate-item]')?.dataset.duplicateItem;
+        if (duplicateItem) {
+            const found = findItem(duplicateItem);
+            if (found?.item?.isAssembly) {
+                const index = found.group.items.indexOf(found.item);
+                const duplicate = duplicateAssembly(found.item);
+                found.group.items.splice(index + 1, 0, duplicate);
+                changed(`Duplicated ${found.item.name}`);
+            }
+        }
+        const removeComponent = target.closest('[data-remove-assembly-component]');
+        if (removeComponent) {
+            const found = findItem(removeComponent.dataset.parentAssemblyId);
+            if (found?.item?.isAssembly) {
+                const componentId = String(removeComponent.dataset.removeAssemblyComponent);
+                const childIndex = (found.item.children || []).findIndex(child => String(child.id) === componentId);
+                const removed = childIndex >= 0 ? found.item.children[childIndex] : null;
+                found.item.children = (found.item.children || []).filter(child => String(child.id) !== componentId);
+                if (found.item.catalogSnapshot?.assemblyComponents) {
+                    const components = found.item.catalogSnapshot.assemblyComponents;
+                    const snapshotIndex = removed?.assemblyComponentId !== null && removed?.assemblyComponentId !== undefined
+                        ? components.findIndex(component => String(component.id ?? '') === String(removed.assemblyComponentId))
+                        : childIndex;
+                    if (snapshotIndex >= 0) components.splice(snapshotIndex, 1);
+                }
+                changed(`Removed assembly component from ${found.item.name}`);
+            }
+        }
         const deleteGroup = target.closest('[data-delete-group]')?.dataset.deleteGroup;
         if (deleteGroup && confirm('Delete this group and its items?')) { current().groups = current().groups.filter(row => row.id !== deleteGroup); changed('Deleted group'); }
         const addRow = target.closest('[data-add-note-row]')?.dataset.addNoteRow;

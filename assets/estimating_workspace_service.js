@@ -61,6 +61,7 @@
             itemType,
             isAssembly: row.isAssembly === true || itemType === 'assembly',
             parentItemId: text(row.parentItemId ?? row.parent_item_id ?? row.assemblyParentId) || null,
+            assemblyComponentId: row.assemblyComponentId ?? row.assembly_component_id ?? null,
             children: Array.isArray(childRows) ? childRows.map(item) : [],
             childrenQuantitiesExtended: row.childrenQuantitiesExtended === true,
             assemblyExpansionPolicy: String(row.assemblyExpansionPolicy ?? row.assembly_expansion_policy ?? 'LEGACY').toUpperCase() === 'CANONICAL'

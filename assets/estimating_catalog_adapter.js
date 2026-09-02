@@ -49,6 +49,7 @@
         const category = childDto ? estimatingCategory(childDto)
             : (type === Contract.ITEM_TYPES.EQUIPMENT ? 'Equipment' : 'Materials');
         const child = {
+            assemblyComponentId: component.id ?? null,
             catalogItemId: legacyId(component.catalogItemId),
             itemType: type.toLowerCase(),
             isAssembly: type === Contract.ITEM_TYPES.ASSEMBLY,
@@ -58,6 +59,9 @@
             costCategory: category,
             uom: childDto?.uom || 'ea',
             quantity: number(component.quantity),
+            ratioType: component.ratioType || 'per_unit',
+            spacing: component.spacing ?? null,
+            componentWaste: number(component.waste),
             unitMaterialCost: type === Contract.ITEM_TYPES.PART
                 ? number(childDto?.pricing?.materialUnitCost ?? snapshot.materialUnitCost) : 0,
             unitEquipmentCost: type === Contract.ITEM_TYPES.EQUIPMENT

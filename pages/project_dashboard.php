@@ -575,7 +575,7 @@ $state = [
     </style>
     <link rel="stylesheet" href="../assets/project_overview.css?v=project-document-menus-20260811-1">
     <link rel="stylesheet" href="../assets/project_takeoff.css?v=takeoff-group-modal-20260831-1">
-    <link rel="stylesheet" href="../assets/project_estimating.css?v=estimating-card-menu-20260820-4">
+    <link rel="stylesheet" href="../assets/project_estimating.css?v=estimating-assembly-hierarchy-20260902-1">
     <link rel="stylesheet" href="../assets/project_proposal.css?v=proposal-workspace-20260810-1">
 </head>
 <body>
@@ -1412,7 +1412,7 @@ $state = [
 <script src="../assets/estimating_workspace_service.js?v=estimating-catalog-snapshot-20260827-1"></script>
 <script src="../assets/catalog_update_application_service.js?v=catalog-update-application-20260827-2"></script>
 <script src="../assets/estimating_catalog_adapter.js?v=estimating-catalog-snapshot-20260827-1"></script>
-<script src="../assets/project_estimating.js?v=quantity-context-format-20260831-1"></script>
+<script src="../assets/project_estimating.js?v=estimating-assembly-hierarchy-20260902-1"></script>
 <script src="../assets/catalog_update_ui.js?v=catalog-update-ui-20260827-1"></script>
 <script src="../assets/project_proposal.js?v=quantity-context-format-20260831-1"></script>
 <script src="../assets/global_tools.js"></script>

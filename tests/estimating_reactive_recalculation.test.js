@@ -12,7 +12,7 @@ test('all numeric calculation inputs recalculate through the central calculation
     assert.match(inputHandler, /dataset\.tax[\s\S]*reactiveChanged\(event\.target\)/);
     assert.match(inputHandler, /dataset\.markupValue[\s\S]*reactiveChanged\(event\.target\)/);
     assert.match(source, /function summary\(\) \{ return Calc\.calculateSummary/);
-    assert.match(source, /const calc = Calc\.calculateItem/);
+    assert.match(source, /calculatedByItem[\s\S]*Calc\.calculateItem/);
 });
 
 test('reactive editing keeps the live control mounted and persists locally before debounced remote save', () => {
