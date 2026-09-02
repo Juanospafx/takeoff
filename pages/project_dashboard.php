@@ -1064,6 +1064,7 @@ $state = [
                                 <button type="button" data-est-option="status"><i class="fas fa-circle-check"></i> Change project status</button>
                                 <button type="button" data-est-option="import"><i class="fas fa-file-import"></i> Import</button>
                                 <button type="button" data-est-option="export"><i class="fas fa-file-export"></i> Export</button>
+                                <button type="button" data-est-option="export-bom"><i class="fas fa-file-excel"></i> Export BOM (Excel)</button>
                                 <button type="button" data-est-option="delete-estimate" class="danger"><i class="fas fa-trash"></i> Delete estimate</button>
                             </div>
                         </div>

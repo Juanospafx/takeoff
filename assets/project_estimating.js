@@ -731,7 +731,7 @@
         portal.className = 'est-modal-backdrop';
         if (ui.modal === 'new') portal.innerHTML = `<div class="est-dialog est-copy-modal" role="dialog" aria-modal="true" aria-labelledby="copyEstimateTitle"><header><div><h2 id="copyEstimateTitle">New Estimate</h2><span>Create an independent estimate for this project</span></div><button type="button" aria-label="Close" data-close-modal>&times;</button></header><div class="est-copy-body"><label class="est-copy-name"><span>Name</span><input id="copyEstimateName" type="text" value="${esc(current().name)} Copy" autocomplete="off"></label><fieldset><legend>Starting point</legend><label class="est-copy-option"><input type="radio" name="copyEstimateMode" value="all" checked><span><strong>Copy everything</strong><small>Start with an independent copy of groups, items, quantities, notes and markups.</small></span></label><label class="est-copy-option"><input type="radio" name="copyEstimateMode" value="structure"><span><strong>Groups only</strong><small>Keep only the group structure; Takeoff items are not imported automatically.</small></span></label><label class="est-copy-option"><input type="radio" name="copyEstimateMode" value="blank"><span><strong>Blank</strong><small>Start completely empty; Takeoff items are added only when explicitly linked.</small></span></label></fieldset></div><footer><button type="button" data-close-modal>Cancel</button><button type="button" class="est-btn-primary" data-create-estimate data-est-action="create-estimate-copy">Create estimate</button></footer></div>`;
         if (ui.modal === 'compare') portal.innerHTML = `<div class="est-dialog est-compare" role="dialog" aria-modal="true"><header><h2>Compare Estimates</h2><button type="button" data-close-modal data-modal-close="compareOpen">&times;</button></header><div class="est-compare-grid">${state.estimates.map(row => { const total = Calc.calculateSummary(row.groups, row.settings); return `<article><h3>${esc(row.name)}</h3><p>${row.groups.reduce((sum, group) => sum + group.items.length, 0)} items</p><strong>${money(total.estimateTotal)}</strong><span>${money(total.profit)} profit</span></article>`; }).join('')}</div></div>`;
-        if (ui.modal === 'export') portal.innerHTML = `<div class="est-dialog est-copy-modal" role="dialog" aria-modal="true" aria-labelledby="exportEstimateTitle"><header><div><h2 id="exportEstimateTitle">Export Estimate</h2><span>Download a supplier-ready bill of quantities (CSV)</span></div><button type="button" aria-label="Close" data-close-modal>&times;</button></header><div class="est-copy-body"><fieldset><legend>Export format</legend><label class="est-copy-option"><input type="radio" name="estimateExportMode" value="normal" checked><span><strong>BOQ normal</strong><small>Export the estimate as organized, keeping assemblies as assembly rows.</small></span></label><label class="est-copy-option"><input type="radio" name="estimateExportMode" value="flat"><span><strong>BOQ Flat</strong><small>Break assemblies into parts and consolidate the total quantity of each catalog item.</small></span></label></fieldset></div><footer><button type="button" data-close-modal>Cancel</button><button type="button" class="est-btn-primary" data-download-estimate>Export CSV</button></footer></div>`;
+        if (ui.modal === 'export') portal.innerHTML = `<div class="est-dialog est-copy-modal" role="dialog" aria-modal="true" aria-labelledby="exportEstimateTitle"><header><div><h2 id="exportEstimateTitle">Export Estimate</h2><span>Download a supplier-ready bill of materials or bill of quantities</span></div><button type="button" aria-label="Close" data-close-modal>&times;</button></header><div class="est-copy-body"><fieldset><legend>Export format</legend><label class="est-copy-option"><input type="radio" name="estimateExportMode" value="bom-excel" checked><span><strong>Bill of Materials (BOM - Excel)</strong><small>Summary of all items separated by groups, with hierarchical assemblies and components formatted for Excel (.xls).</small></span></label><label class="est-copy-option"><input type="radio" name="estimateExportMode" value="bom-csv"><span><strong>Bill of Materials (BOM - CSV)</strong><small>Hierarchical BOM with group headers and assembly components as CSV.</small></span></label><label class="est-copy-option"><input type="radio" name="estimateExportMode" value="normal"><span><strong>BOQ normal (CSV)</strong><small>Export the estimate as organized, keeping assemblies as assembly rows.</small></span></label><label class="est-copy-option"><input type="radio" name="estimateExportMode" value="flat"><span><strong>BOQ Flat (CSV)</strong><small>Break assemblies into parts and consolidate the total quantity of each catalog item.</small></span></label></fieldset></div><footer><button type="button" data-close-modal>Cancel</button><button type="button" class="est-btn-primary" data-download-estimate>Export</button></footer></div>`;
         if (ui.modal === 'catalog') portal.innerHTML = `<div class="est-dialog est-copy-modal" role="dialog" aria-modal="true" aria-labelledby="estimateCatalogTitle"><header><div><h2 id="estimateCatalogTitle">Add Cost Catalog Item</h2><span>Select an existing catalog item for this estimate group</span></div><button type="button" aria-label="Close" data-close-modal>&times;</button></header><div class="est-copy-body"><input type="search" data-est-catalog-search placeholder="Search Cost Catalog" autocomplete="off"><div data-est-catalog-results>${ui.catalogLoading ? '<div class="est-empty">Loading Cost Catalog…</div>' : (ui.catalogError ? `<div class="est-empty">${esc(ui.catalogError)}</div>` : renderCatalogChoices(''))}</div></div><footer><button type="button" data-close-modal>Cancel</button></footer></div>`;
         document.body.appendChild(portal);
         portal.querySelector('input, button')?.focus();
@@ -771,28 +771,58 @@
         });
     }
 
-    async function exportEstimate(mode = 'normal') {
+    async function exportEstimate(mode = 'bom-excel') {
         if (!Exporter) return;
         let estimate = Workspace.clone(current());
-        if (mode === 'flat' && Exporter.needsCatalog(estimate)) {
+        if ((mode === 'flat' || mode === 'bom-excel' || mode === 'bom-csv') && Exporter.needsCatalog(estimate)) {
             try {
                 const catalogSnapshot = await window.CatalogService.getSnapshot({ enabledForProjectsOnly: true });
                 estimate = window.BoqCatalogAdapter.hydrateEstimate(estimate, catalogSnapshot);
             } catch (error) {
-                alert(`BOQ Flat could not load the Cost Catalog: ${error.message}`);
+                console.warn('Could not hydrate estimate from catalog snapshot:', error);
+                if (mode === 'flat') {
+                    alert(`BOQ Flat could not load the Cost Catalog: ${error.message}`);
+                    return;
+                }
+            }
+        }
+        if (mode === 'flat') {
+            const unresolved = Exporter.unresolvedAssemblies(estimate);
+            if (unresolved.length) {
+                alert(`BOQ Flat cannot expand these assemblies because they have no Cost Catalog components: ${unresolved.map(item => item.name).join(', ')}`);
                 return;
             }
         }
-        const unresolved = mode === 'flat' ? Exporter.unresolvedAssemblies(estimate) : [];
-        if (unresolved.length) {
-            alert(`BOQ Flat cannot expand these assemblies because they have no Cost Catalog components: ${unresolved.map(item => item.name).join(', ')}`);
+
+        const safeName = current().name.replace(/[^a-z0-9_-]+/gi, '_');
+
+        if (mode === 'bom-excel') {
+            const xml = Exporter.excelXml(estimate, current().settings);
+            const blob = new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8' });
+            const anchor = document.createElement('a');
+            anchor.href = URL.createObjectURL(blob);
+            anchor.download = `${safeName}_BOM.xls`;
+            anchor.click();
+            URL.revokeObjectURL(anchor.href);
             return;
         }
+
+        if (mode === 'bom-csv') {
+            const rows = Exporter.bomRows(estimate, current().settings);
+            const blob = new Blob([Exporter.bomCsv(rows)], { type: 'text/csv;charset=utf-8' });
+            const anchor = document.createElement('a');
+            anchor.href = URL.createObjectURL(blob);
+            anchor.download = `${safeName}_BOM.csv`;
+            anchor.click();
+            URL.revokeObjectURL(anchor.href);
+            return;
+        }
+
         const rows = mode === 'flat' ? Exporter.flatRows(estimate) : Exporter.normalRows(estimate);
         const blob = new Blob([Exporter.csv(rows)], { type: 'text/csv;charset=utf-8' });
         const anchor = document.createElement('a');
         anchor.href = URL.createObjectURL(blob);
-        anchor.download = `${current().name.replace(/[^a-z0-9_-]+/gi, '_')}_${mode === 'flat' ? 'BOQ_Flat' : 'BOQ'}.csv`;
+        anchor.download = `${safeName}_${mode === 'flat' ? 'BOQ_Flat' : 'BOQ'}.csv`;
         anchor.click();
         URL.revokeObjectURL(anchor.href);
     }
@@ -1110,9 +1140,10 @@
         if (option === 'save') saveServer();
         if (option === 'copy') { ui.modal = 'new'; renderModal(); }
         if (option === 'export') { ui.modal = 'export'; renderModal(); }
+        if (option === 'export-bom') exportEstimate('bom-excel');
         if (option === 'delete-estimate') deleteEstimateAuthoritative();
         if (target.closest('[data-download-estimate]')) {
-            const mode = document.querySelector('[name="estimateExportMode"]:checked')?.value || 'normal';
+            const mode = document.querySelector('[name="estimateExportMode"]:checked')?.value || 'bom-excel';
             exportEstimate(mode); ui.modal = null; renderModal();
         }
         const collapse = target.closest('[data-collapse-card]')?.dataset.collapseCard;
