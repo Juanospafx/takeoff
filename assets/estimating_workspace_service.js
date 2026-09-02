@@ -56,6 +56,7 @@
             catalogItemId: row.catalogItemId ?? row.catalog_item_id ?? null,
             catalogRevision: row.catalogRevision ?? null,
             catalogSnapshot: row.catalogSnapshot ? clone(row.catalogSnapshot) : null,
+            catalogMetadata: row.catalogMetadata ? clone(row.catalogMetadata) : null,
             overrides: row.overrides ? clone(row.overrides) : null,
             lastCatalogRefresh: row.lastCatalogRefresh ? clone(row.lastCatalogRefresh) : null,
             itemType,

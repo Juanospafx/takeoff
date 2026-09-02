@@ -102,3 +102,71 @@ test('zero quantity and empty assemblies render safely', () => {
     assert.equal(dom.window.document.querySelectorAll('[data-assembly-component-row]').length, 4);
     dom.window.close();
 });
+
+test('assemblies identified only by itemType expand, recalculate live and duplicate', () => {
+    const state = assemblyState();
+    delete state.estimates[0].groups[0].items[0].isAssembly;
+    state.estimates[0].groups[0].items[0].itemType = 'assembly';
+    const dom = runtime(state);
+    assert.equal(dom.window.document.querySelectorAll('[data-assembly-component-row]').length, 0);
+    dom.window.document.querySelector('[data-toggle-assembly="assembly-a"]').click();
+    assert.equal(dom.window.document.querySelectorAll('[data-assembly-component-row]').length, 4);
+    const quantity = dom.window.document.querySelector('[data-item-id="assembly-a"] [data-item-field="quantity"]');
+    quantity.value = '300';
+    quantity.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
+    assert.deepEqual(values(dom).map(row => row.quantity), ['300', '30', '6', '990']);
+    dom.window.document.querySelector('[data-duplicate-item="assembly-a"]').click();
+    const saved = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.draft'));
+    assert.equal(saved.estimates[0].groups[0].items.length, 2);
+    assert.equal(saved.estimates[0].groups[0].items[1].children.length, 4);
+    dom.window.close();
+});
+
+test('deleting an expanded assembly directly or via bulk delete cleans up expanded set', () => {
+    const state = assemblyState();
+    state.estimates[0].groups[0].items.push({ ...structuredClone(state.estimates[0].groups[0].items[0]), id: 'assembly-b', name: 'Assembly B' });
+    const dom = runtime(state);
+    dom.window.document.querySelector('[data-toggle-assembly="assembly-a"]').click();
+    dom.window.document.querySelector('[data-toggle-assembly="assembly-b"]').click();
+    assert.equal(dom.window.document.querySelectorAll('[data-assembly-component-row]').length, 8);
+    // Delete assembly-a via direct delete
+    dom.window.document.querySelector('[data-delete-item="assembly-a"]').click();
+    assert.equal(dom.window.document.querySelectorAll('[data-item-id="assembly-a"]').length, 0);
+    assert.equal(dom.window.document.querySelectorAll('[data-assembly-component-row]').length, 4);
+    // Delete assembly-b via select + bulk delete
+    const check = dom.window.document.querySelector('[data-item-check="assembly-b"]');
+    check.checked = true;
+    check.dispatchEvent(new dom.window.Event('change', { bubbles: true }));
+    dom.window.document.querySelector('[data-est-action="delete-selected"]').click();
+    assert.equal(dom.window.document.querySelectorAll('[data-item-id="assembly-b"]').length, 0);
+    assert.equal(dom.window.document.querySelectorAll('[data-assembly-component-row]').length, 0);
+    dom.window.close();
+});
+
+test('removing a component synchronizes both catalogSnapshot and catalogMetadata', () => {
+    const state = assemblyState();
+    state.estimates[0].groups[0].items[0].catalogSnapshot = {
+        assemblyComponents: [
+            { id: 'c1', catalogItemId: 11, quantity: 1 },
+            { id: 'c2', catalogItemId: 12, quantity: 0.1 }
+        ]
+    };
+    state.estimates[0].groups[0].items[0].catalogMetadata = {
+        assemblyComponents: [
+            { id: 'c1', catalogItemId: 11, quantity: 1 },
+            { id: 'c2', catalogItemId: 12, quantity: 0.1 }
+        ]
+    };
+    state.estimates[0].groups[0].items[0].children[0].assemblyComponentId = 'c1';
+    state.estimates[0].groups[0].items[0].children[1].assemblyComponentId = 'c2';
+    const dom = runtime(state);
+    dom.window.document.querySelector('[data-toggle-assembly]').click();
+    dom.window.document.querySelector('[data-remove-assembly-component="strap"]').click();
+    const saved = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.draft'));
+    const item = saved.estimates[0].groups[0].items[0];
+    assert.equal(item.children.some(child => child.id === 'strap'), false);
+    assert.equal(item.catalogSnapshot.assemblyComponents.some(comp => comp.id === 'c2'), false);
+    assert.equal(item.catalogMetadata.assemblyComponents.some(comp => comp.id === 'c2'), false);
+    dom.window.close();
+});
+

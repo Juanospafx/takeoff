@@ -71,11 +71,16 @@
             .map(error => ({ ...error, itemId: item.id, itemName: item.name })));
     }
     function findItem(itemId) { return allItems().find(row => row.item.id === itemId) || null; }
+    function isAssemblyItem(item) {
+        return item?.isAssembly === true || String(item?.itemType ?? item?.item_type ?? '').toLowerCase() === 'assembly';
+    }
     function duplicateAssembly(item) {
         const copyTree = (source, parentItemId = null) => {
             const copy = Workspace.item({ ...Workspace.clone(source), id: Workspace.uid('item'), parentItemId,
                 takeoffLayerId: null, copiedFromTakeoffLayerId: source.takeoffLayerId || null,
                 quantitySource: 'manual', quantitySyncStatus: 'manual' });
+            if (source.catalogSnapshot) copy.catalogSnapshot = Workspace.clone(source.catalogSnapshot);
+            if (source.catalogMetadata) copy.catalogMetadata = Workspace.clone(source.catalogMetadata);
             copy.children = (source.children || []).map(child => copyTree(child, copy.id));
             return copy;
         };
@@ -585,7 +590,7 @@
             visible.forEach(item => {
                 const calc = calculatedByItem.get(String(item.id)) || Calc.calculateItem(item, current().settings);
                 html.push(renderItemRow(item, calc));
-                if (!item.isAssembly || !ui.expandedAssemblies.has(String(item.id))) return;
+                if (!isAssemblyItem(item) || !ui.expandedAssemblies.has(String(item.id))) return;
                 const matchingChildIds = query ? new Set((item.children || []).filter(child => itemMatchesQuery(child, query)).map(child => String(child.id))) : null;
                 (calc.childRows || []).forEach((childRow, index) => {
                     const sourceChild = findDirectAssemblyChild(item, childRow.item, index);
@@ -615,7 +620,7 @@
 
     function renderItemRow(item, calc, options = {}) {
         const component = options.component === true;
-        const assembly = item.isAssembly === true || String(item.itemType || '').toLowerCase() === 'assembly';
+        const assembly = isAssemblyItem(item);
         const invalid = (calc.validation || []).length > 0;
         const rowId = component ? `${options.parent.id}:component:${options.sourceChild?.id || options.index}` : item.id;
         const namePrefix = !component && assembly
@@ -816,7 +821,7 @@
             }
             found.item.updatedAt = Workspace.now();
             reactiveChanged(event.target);
-            if (itemField === 'quantity' && found.item.isAssembly && ui.expandedAssemblies.has(String(found.item.id))) {
+            if (itemField === 'quantity' && isAssemblyItem(found.item) && ui.expandedAssemblies.has(String(found.item.id))) {
                 renderPreservingInput(event.target);
             }
             return;
@@ -1084,7 +1089,15 @@
         const action = target.closest('[data-est-action]')?.dataset.estAction;
         if (action === 'create-group') createGroup();
         if (action === 'delete-selected') {
-            current().groups.forEach(group => { group.items = group.items.filter(item => !ui.selected.has(item.id)); });
+            current().groups.forEach(group => {
+                group.items = group.items.filter(item => {
+                    if (ui.selected.has(item.id)) {
+                        ui.expandedAssemblies.delete(String(item.id));
+                        return false;
+                    }
+                    return true;
+                });
+            });
             ui.selected.clear(); changed('Deleted selected items');
         }
         if (action === 'reset-quantities') {
@@ -1116,11 +1129,16 @@
         const add = target.closest('[data-add-item]')?.dataset.addItem;
         if (add) addItem(add);
         const deleteItem = target.closest('[data-delete-item]')?.dataset.deleteItem;
-        if (deleteItem) { const found = findItem(deleteItem); found.group.items = found.group.items.filter(row => row.id !== deleteItem); changed(`Deleted ${found.item.name}`); }
+        if (deleteItem) {
+            const found = findItem(deleteItem);
+            found.group.items = found.group.items.filter(row => row.id !== deleteItem);
+            ui.expandedAssemblies.delete(String(deleteItem));
+            changed(`Deleted ${found.item.name}`);
+        }
         const duplicateItem = target.closest('[data-duplicate-item]')?.dataset.duplicateItem;
         if (duplicateItem) {
             const found = findItem(duplicateItem);
-            if (found?.item?.isAssembly) {
+            if (isAssemblyItem(found?.item)) {
                 const index = found.group.items.indexOf(found.item);
                 const duplicate = duplicateAssembly(found.item);
                 found.group.items.splice(index + 1, 0, duplicate);
@@ -1130,17 +1148,25 @@
         const removeComponent = target.closest('[data-remove-assembly-component]');
         if (removeComponent) {
             const found = findItem(removeComponent.dataset.parentAssemblyId);
-            if (found?.item?.isAssembly) {
+            if (isAssemblyItem(found?.item)) {
                 const componentId = String(removeComponent.dataset.removeAssemblyComponent);
                 const childIndex = (found.item.children || []).findIndex(child => String(child.id) === componentId);
                 const removed = childIndex >= 0 ? found.item.children[childIndex] : null;
                 found.item.children = (found.item.children || []).filter(child => String(child.id) !== componentId);
-                if (found.item.catalogSnapshot?.assemblyComponents) {
-                    const components = found.item.catalogSnapshot.assemblyComponents;
-                    const snapshotIndex = removed?.assemblyComponentId !== null && removed?.assemblyComponentId !== undefined
+                const spliceMatching = components => {
+                    if (!Array.isArray(components)) return;
+                    const matchIndex = removed?.assemblyComponentId !== null && removed?.assemblyComponentId !== undefined
                         ? components.findIndex(component => String(component.id ?? '') === String(removed.assemblyComponentId))
-                        : childIndex;
-                    if (snapshotIndex >= 0) components.splice(snapshotIndex, 1);
+                        : (removed?.catalogItemId !== null && removed?.catalogItemId !== undefined
+                            ? components.findIndex(c => String(c.catalogItemId ?? c.part_catalog_item_id ?? '') === String(removed.catalogItemId))
+                            : childIndex);
+                    if (matchIndex >= 0) components.splice(matchIndex, 1);
+                };
+                if (found.item.catalogSnapshot?.assemblyComponents) {
+                    spliceMatching(found.item.catalogSnapshot.assemblyComponents);
+                }
+                if (found.item.catalogMetadata?.assemblyComponents) {
+                    spliceMatching(found.item.catalogMetadata.assemblyComponents);
                 }
                 changed(`Removed assembly component from ${found.item.name}`);
             }
