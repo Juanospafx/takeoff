@@ -256,32 +256,44 @@
                         <div><strong>Items Included</strong> <button class="cc-link-btn" type="button" id="ccAssemblyAdvanced" aria-pressed="false">Advanced</button></div>
                         <span id="ccAssemblyTotals">Cost $0.00 · Labor 0.0000</span>
                     </div>
-                    <button class="cc-btn cc-assembly-open" type="button" id="ccOpenAssemblyBrowser">Add Item</button>
-                    <div class="cc-assembly-browser" id="ccAssemblyBrowser" hidden aria-label="Catalog item selector">
+                    <button class="cc-btn cc-assembly-open" type="button" id="ccOpenAssemblyBrowser" hidden>Add Item</button>
+                    <div class="cc-assembly-browser" id="ccAssemblyBrowser" aria-label="Catalog item selector">
+                        <div class="cc-assembly-browser-head">
+                            <strong>Add Items to Assembly</strong>
+                            <span class="cc-assembly-browser-hint">Select items below to add them to this assembly</span>
+                        </div>
                         <div class="cc-assembly-filters">
-                            <input id="ccAssemblySearch" type="search" placeholder="Search catalog items" aria-label="Search catalog items">
+                            <input id="ccAssemblySearch" type="search" placeholder="Search Cost Catalog..." aria-label="Search catalog items">
                             <select id="ccAssemblyCatalogFilter" aria-label="Filter by catalog"></select>
                             <select id="ccAssemblyCategoryFilter" aria-label="Filter by category"></select>
                             <select id="ccAssemblyTypeFilter" aria-label="Filter by type"><option value="">All types</option><option value="part">Part</option><option value="labor">Labor</option><option value="equipment">Equipment</option><option value="assembly">Assembly</option></select>
                         </div>
                         <div class="cc-assembly-results" id="ccAssemblyResults" role="listbox" aria-label="Available catalog items"></div>
-                        <button class="cc-btn" type="button" id="ccCloseAssemblyBrowser">Close selector</button>
+                        <button class="cc-btn" type="button" id="ccCloseAssemblyBrowser" hidden>Close selector</button>
+                    </div>
+                    <div class="cc-assembly-selected-header">
+                        <div class="cc-assembly-selected-title">
+                            <strong>Selected Components</strong>
+                            <span class="cc-selected-count-badge" id="ccSelectedComponentsCount">0</span>
+                        </div>
                     </div>
                     <div class="cc-assembly-note" id="ccAssemblyNote"></div>
-                    <table class="cc-mini-table">
-                        <thead>
-                            <tr>
-                                <th>Item</th>
-                                <th>Quantity</th><th>UoM</th>
-                                <th>Unit Cost</th>
-                                <th>Unit Labor Time</th>
-                                <th>Extended Cost</th><th>Extended Labor</th>
-                                <th>Notes</th>
-                                <th></th>
-                            </tr>
-                        </thead>
-                        <tbody id="ccAssemblyPartsBody"></tbody>
-                    </table>
+                    <div class="cc-assembly-table-wrap">
+                        <table class="cc-mini-table">
+                            <thead>
+                                <tr>
+                                    <th>Item</th>
+                                    <th>Quantity</th><th>UoM</th>
+                                    <th>Unit Cost</th>
+                                    <th>Unit Labor Time</th>
+                                    <th>Extended Cost</th><th>Extended Labor</th>
+                                    <th>Notes</th>
+                                    <th></th>
+                                </tr>
+                            </thead>
+                            <tbody id="ccAssemblyPartsBody"></tbody>
+                        </table>
+                    </div>
                 </section>
             </div>
             <div class="cc-modal-foot">

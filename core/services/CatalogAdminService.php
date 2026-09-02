@@ -233,8 +233,78 @@ final class CatalogAdminService
     public function copyCategory(array $p): array {$r=$this->tableRow('catalog_groups',$this->requiredId($p));$this->assertUnlocked((int)$r['catalog_id']);$base=$r['name'].' Copy';$name=$base;$suffix=2;while(true){try{$this->assertUniqueCategoryName((int)$r['catalog_id'],$r['parent_group_id']?(int)$r['parent_group_id']:null,$name);break;}catch(CatalogAdminException $e){if($e->errorCode!=='DUPLICATE_CATEGORY')throw$e;$name=$base.' '.$suffix++;}}$id=$this->insert('catalog_groups',['catalog_id'=>$r['catalog_id'],'parent_group_id'=>$r['parent_group_id'],'name'=>$name,'description'=>$r['description'],'sort_order'=>$r['sort_order'],'active'=>$r['active'],'enabled_for_projects'=>$r['enabled_for_projects'],'metadata_json'=>$r['metadata_json']]);catalog_ra_created($this->pdo,'catalog_groups','category',$id,'category.copied',$p,(int)$r['catalog_id']);return ['id'=>$id,'entity'=>catalog_ra_row($this->pdo,'catalog_groups',$id)];}
     public function reorderCategories(array $p):array{return $this->transaction(function()use($p){$catalogId=$this->requiredId($p,'catalog_id');$parent=(int)($p['parent_group_id']??0)?:null;$this->assertUnlocked($catalogId);$sql='SELECT id FROM catalog_groups WHERE catalog_id=? AND '.($parent?'parent_group_id=?':'parent_group_id IS NULL').' AND deleted_at IS NULL ORDER BY sort_order,id FOR UPDATE';$args=[$catalogId];if($parent)$args[]=$parent;$stmt=$this->pdo->prepare($sql);$stmt->execute($args);$actual=array_map('intval',$stmt->fetchAll(PDO::FETCH_COLUMN));$ids=array_values(array_unique(array_map('intval',is_array($p['ordered_ids']??null)?$p['ordered_ids']:[])));$a=$actual;$b=$ids;sort($a);sort($b);if($a!==$b)throw new CatalogAdminException('VALIDATION_ERROR','Category reorder must include every sibling once.',422);foreach($ids as$order=>$id)catalog_ra_update($this->pdo,'catalog_groups','category',$id,['sort_order'=>$order],'category.reordered',array_merge($p,['expected_revision'=>null]),$catalogId);return['ordered_ids'=>$ids];});}
 
-    public function createItem(array $p): array {$v=$this->itemValues($p);$id=$this->insert('catalog_items',$v);catalog_ra_created($this->pdo,'catalog_items','item',$id,'item.created',$p,(int)$v['catalog_id']);return ['id'=>$id,'entity'=>catalog_ra_row($this->pdo,'catalog_items',$id)];}
-    public function updateItem(array $p): array {$id=$this->requiredId($p);$old=$this->tableRow('catalog_items',$id);$merged=array_merge($old,$p);$v=$this->itemValues($merged);return ['id'=>$id,'entity'=>catalog_ra_update($this->pdo,'catalog_items','item',$id,$v,'item.updated',$p,(int)$v['catalog_id'])];}
+    public function createItem(array $p): array {return $this->transaction(function()use($p){$v=$this->itemValues($p);$id=$this->insert('catalog_items',$v);catalog_ra_created($this->pdo,'catalog_items','item',$id,'item.created',$p,(int)$v['catalog_id']);$components=$p['components']??$p['assembly_components']??null;if(is_string($components))$components=json_decode($components,true)?:[];if(strtolower((string)$v['item_type'])==='assembly'&&is_array($components)){$this->syncAssemblyComponents($id,(int)$v['catalog_id'],$components,$p);}return ['id'=>$id,'entity'=>catalog_ra_row($this->pdo,'catalog_items',$id)];});}
+    public function updateItem(array $p): array {return $this->transaction(function()use($p){$id=$this->requiredId($p);$old=$this->tableRow('catalog_items',$id);$merged=array_merge($old,$p);$v=$this->itemValues($merged);$entity=catalog_ra_update($this->pdo,'catalog_items','item',$id,$v,'item.updated',$p,(int)$v['catalog_id']);$components=$p['components']??$p['assembly_components']??null;if(is_string($components))$components=json_decode($components,true)?:[];if((strtolower((string)$v['item_type'])==='assembly'||strtolower((string)($old['item_type']??''))==='assembly')&&is_array($components)){$this->syncAssemblyComponents($id,(int)$v['catalog_id'],$components,$p);$entity=catalog_ra_row($this->pdo,'catalog_items',$id);}return ['id'=>$id,'entity'=>$entity];});}
+    public function syncAssemblyComponents(int $assemblyId, int $catalogId, array $components, array $p): void
+    {
+        $this->assertUnlocked($catalogId);
+        $seen = [];
+        $sanitized = [];
+        foreach ($components as $index => $c) {
+            if (!is_array($c)) continue;
+            $cid = (int)($c['itemId'] ?? $c['part_catalog_item_id'] ?? $c['id'] ?? 0);
+            if ($cid <= 0) throw new CatalogAdminException('VALIDATION_ERROR', 'Each assembly component must have a valid item ID.', 422, ['field' => 'components']);
+            if (isset($seen[$cid])) continue;
+            $seen[$cid] = true;
+            if ($cid === $assemblyId) throw new CatalogAdminException('ASSEMBLY_SELF_REFERENCE', 'Assembly cannot contain itself.', 422);
+            $this->assertNoAssemblyCycle($assemblyId, $cid);
+            $child = $this->tableRow('catalog_items', $cid);
+            if ((int)$child['catalog_id'] !== $catalogId) throw new CatalogAdminException('ITEM_CATALOG_MISMATCH', 'Assembly component must belong to the same catalog.');
+            $ratio = (float)($c['ratio'] ?? $c['quantity'] ?? 1);
+            if (!is_finite($ratio) || $ratio < 0) throw new CatalogAdminException('VALIDATION_ERROR', 'Component ratio must be a number greater than or equal to 0.', 422, ['field' => 'quantity']);
+            $ratioType = strtolower((string)($c['ratio_type'] ?? $c['ratioType'] ?? 'per_unit'));
+            $allowedRatios = ['fixed', 'per_unit', 'per_linear_length', 'per_area', 'per_endpoint', 'spacing_based'];
+            if (!in_array($ratioType, $allowedRatios, true)) $ratioType = 'per_unit';
+            $sanitized[$cid] = [
+                'part_catalog_item_id' => $cid,
+                'quantity' => $ratio,
+                'ratio_type' => $ratioType,
+                'spacing_value' => $ratioType === 'spacing_based' ? (float)($c['spacing_value'] ?? $c['spacing'] ?? 1) : null,
+                'waste_factor_percent' => (float)($c['waste_factor_percent'] ?? $c['waste'] ?? 0),
+                'sort_order' => (int)($c['sort_order'] ?? $index),
+                'notes' => isset($c['notes']) ? (string)$c['notes'] : null,
+                'child' => $child
+            ];
+        }
+        $stmt = $this->pdo->prepare('SELECT * FROM assembly_parts WHERE assembly_catalog_item_id = ? AND deleted_at IS NULL FOR UPDATE');
+        $stmt->execute([$assemblyId]);
+        $existing = $stmt->fetchAll(PDO::FETCH_ASSOC);
+        $existingByPartId = [];
+        foreach ($existing as $row) $existingByPartId[(int)$row['part_catalog_item_id']] = $row;
+        $now = date('Y-m-d H:i:s');
+        foreach ($existingByPartId as $cid => $row) {
+            if (!isset($sanitized[$cid])) {
+                $componentInput = $p; unset($componentInput['expected_revision']);
+                catalog_ra_update($this->pdo, 'assembly_parts', 'assembly_component', (int)$row['id'], ['deleted_at' => $now], 'assembly_component.archived', $componentInput, $catalogId);
+            }
+        }
+        $columns = catalog_ra_columns($this->pdo, 'assembly_parts');
+        foreach ($sanitized as $cid => $info) {
+            $values = [
+                'quantity' => $info['quantity'],
+                'ratio_type' => $info['ratio_type'],
+                'spacing_value' => $info['spacing_value'],
+                'waste_factor_percent' => $info['waste_factor_percent'],
+                'sort_order' => $info['sort_order'],
+                'notes' => $info['notes']
+            ];
+            $values = array_intersect_key($values, $columns);
+            $componentInput = $p; unset($componentInput['expected_revision']);
+            if (isset($existingByPartId[$cid])) {
+                $partId = (int)$existingByPartId[$cid]['id'];
+                catalog_ra_update($this->pdo, 'assembly_parts', 'assembly_component', $partId, $values, 'assembly_component.updated', $componentInput, $catalogId);
+            } else {
+                $child = $info['child'];
+                $values['assembly_catalog_item_id'] = $assemblyId;
+                $values['part_catalog_item_id'] = $cid;
+                $values['unit_cost_snapshot'] = (float)$child['unit_cost'];
+                $values['unit_labor_time_snapshot'] = (float)$child['labor_hours'];
+                $newId = $this->insert('assembly_parts', array_intersect_key($values, $columns));
+                catalog_ra_created($this->pdo, 'assembly_parts', 'assembly_component', $newId, 'assembly_component.created', $componentInput, $catalogId);
+            }
+        }
+        $this->recalculateAssembly($assemblyId, $p, 'assembly.components_synced');
+    }
     public function archiveItem(array $p): array {$id=$this->requiredId($p);$r=$this->tableRow('catalog_items',$id);$this->assertUnlocked((int)$r['catalog_id']);return ['id'=>$id,'entity'=>catalog_ra_update($this->pdo,'catalog_items','item',$id,['deleted_at'=>date('Y-m-d H:i:s')],'item.archived',$p,(int)$r['catalog_id'])];}
     public function restoreItem(array $p): array {$id=$this->requiredId($p);$r=$this->tableRow('catalog_items',$id,false);$this->assertUnlocked((int)$r['catalog_id']);return ['id'=>$id,'entity'=>catalog_ra_update($this->pdo,'catalog_items','item',$id,['deleted_at'=>null],'item.restored',$p,(int)$r['catalog_id'])];}
     public function moveItem(array $p): array {$id=$this->requiredId($p);$old=$this->tableRow('catalog_items',$id);$cid=$this->requiredId($p,'catalog_id');$this->assertUnlocked((int)$old['catalog_id']);$this->assertUnlocked($cid);$gid=(int)($p['catalog_group_id']??0)?:null;$this->categoryForCatalog($gid,$cid);return ['id'=>$id,'entity'=>catalog_ra_update($this->pdo,'catalog_items','item',$id,['catalog_id'=>$cid,'catalog_group_id'=>$gid],'item.moved',$p,$cid)];}

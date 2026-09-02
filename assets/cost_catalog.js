@@ -21,6 +21,7 @@
     let entityEditor = null;
     let archivingCategoryId = null;
     let assemblyPartsByAssembly = new Map();
+    let stagedAssemblyComponents = new Map();
     function rebuildAssemblyIndex(){assemblyPartsByAssembly=new Map();state.assemblyParts.forEach(part=>{const key=Number(part.assembly_catalog_item_id);if(!assemblyPartsByAssembly.has(key))assemblyPartsByAssembly.set(key,[]);assemblyPartsByAssembly.get(key).push(part);});assemblyPartsByAssembly.forEach(parts=>parts.sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||Number(a.id)-Number(b.id)));}
 
     const esc = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({
@@ -353,14 +354,127 @@
         renderGroupSelect(document.getElementById('ccMoveGroup'), Number(document.getElementById('ccMoveCatalog').value || selection.catalogId || 0));
     }
 
-    function renderAssemblyItemOptions() {
-        const catalog=document.getElementById('ccAssemblyCatalogFilter'); if(!catalog)return;
-        const selected=catalog.value;catalog.innerHTML='<option value="">All catalogs</option>'+state.catalogs.map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');catalog.value=selected;
-        const category=document.getElementById('ccAssemblyCategoryFilter');const selectedCategory=category.value;category.innerHTML='<option value="">All categories</option>'+state.groups.map(g=>`<option value="${g.id}">${esc(g.name)}</option>`).join('');category.value=selectedCategory;
+    function initStagedAssemblyComponents(item = null) {
+        stagedAssemblyComponents.clear();
+        if (!item || String(item.item_type || '').toLowerCase() !== 'assembly') return;
+        rebuildAssemblyIndex();
+        const parts = assemblyPartsByAssembly.get(Number(item.id)) || [];
+        const source = state.allItems?.length ? state.allItems : state.items;
+        parts.forEach((part, index) => {
+            const childId = Number(part.part_catalog_item_id);
+            const childItem = source.find(row => Number(row.id) === childId);
+            stagedAssemblyComponents.set(childId, {
+                id: part.id ? Number(part.id) : null,
+                itemId: childId,
+                name: part.child_item_name || childItem?.name || 'Item',
+                unit: part.child_unit_of_measure || childItem?.unit_of_measure || 'ea',
+                unitCost: Number(childItem?.unit_cost ?? part.unit_cost_snapshot ?? 0),
+                laborHours: Number(childItem?.labor_hours ?? part.unit_labor_time_snapshot ?? 0),
+                ratio: Number(part.quantity ?? 1),
+                ratioType: part.ratio_type || 'per_unit',
+                spacingValue: part.spacing_value !== null && part.spacing_value !== undefined ? Number(part.spacing_value) : null,
+                wasteFactorPercent: Number(part.waste_factor_percent || 0),
+                notes: part.notes || '',
+                sortOrder: Number(part.sort_order ?? index)
+            });
+        });
+    }
+
+    function toggleAssemblyComponentSelection(childId) {
+        childId = Number(childId);
+        if (!childId) return;
+        if (stagedAssemblyComponents.has(childId)) {
+            stagedAssemblyComponents.delete(childId);
+        } else {
+            const source = state.allItems?.length ? state.allItems : state.items;
+            const childItem = source.find(row => Number(row.id) === childId);
+            if (!childItem) return;
+            stagedAssemblyComponents.set(childId, {
+                id: null,
+                itemId: childId,
+                name: childItem.name,
+                unit: childItem.unit_of_measure || 'ea',
+                unitCost: Number(childItem.unit_cost || 0),
+                laborHours: Number(childItem.labor_hours || 0),
+                ratio: 1,
+                ratioType: 'per_unit',
+                spacingValue: null,
+                wasteFactorPercent: 0,
+                notes: '',
+                sortOrder: stagedAssemblyComponents.size
+            });
+        }
+        renderAssemblyParts();
         renderAssemblyBrowserResults();
     }
 
-    function renderAssemblyBrowserResults(){const root=document.getElementById('ccAssemblyResults');if(!root)return;const q=(document.getElementById('ccAssemblySearch')?.value||'').toLowerCase();const catalog=document.getElementById('ccAssemblyCatalogFilter')?.value;const category=document.getElementById('ccAssemblyCategoryFilter')?.value;const type=document.getElementById('ccAssemblyTypeFilter')?.value;const source=state.allItems?.length?state.allItems:state.items;const rows=source.filter(i=>Number(i.id)!==Number(editingItemId||0)&&(!q||`${i.name} ${i.description||''}`.toLowerCase().includes(q))&&(!catalog||String(i.catalog_id)===catalog)&&(!category||String(i.catalog_group_id)===category)&&(!type||(i.item_type==='material'?'part':i.item_type)===type));root.innerHTML=rows.map(i=>`<button type="button" role="option" data-assembly-select="${i.id}"><span><strong>${esc(i.name)}</strong><small>${esc(i.catalog_name||'')} · ${esc(i.group_name||'Uncategorized')} · ${displayItemType(i.item_type)}</small></span><span>${money(i.unit_cost)} · ${Number(i.labor_hours||0).toFixed(4)} hr</span></button>`).join('')||'<p>No matching items.</p>';root.querySelectorAll('[data-assembly-select]').forEach(b=>b.addEventListener('click',()=>addAssemblyPart(Number(b.dataset.assemblySelect))));}
+    function renderAssemblyItemOptions() {
+        const catalog = document.getElementById('ccAssemblyCatalogFilter');
+        if (!catalog) return;
+        const currentItemCatalog = document.getElementById('ccItemCatalog')?.value || '';
+        const selected = catalog.value || currentItemCatalog;
+        catalog.innerHTML = '<option value="">All catalogs</option>' + state.catalogs.map(c => `<option value="${c.id}">${esc(c.name)}</option>`).join('');
+        catalog.value = selected;
+        const category = document.getElementById('ccAssemblyCategoryFilter');
+        const selectedCategory = category.value;
+        category.innerHTML = '<option value="">All categories</option>' + state.groups.map(g => `<option value="${g.id}">${esc(g.name)}</option>`).join('');
+        category.value = selectedCategory;
+        renderAssemblyBrowserResults();
+    }
+
+    function renderAssemblyBrowserResults() {
+        const root = document.getElementById('ccAssemblyResults');
+        if (!root) return;
+        const q = (document.getElementById('ccAssemblySearch')?.value || '').toLowerCase().trim();
+        const catalog = document.getElementById('ccAssemblyCatalogFilter')?.value;
+        const category = document.getElementById('ccAssemblyCategoryFilter')?.value;
+        const type = document.getElementById('ccAssemblyTypeFilter')?.value;
+        const source = state.allItems?.length ? state.allItems : state.items;
+        const rows = source.filter(i => {
+            if (Number(i.id) === Number(editingItemId || 0)) return false;
+            if (String(i.item_type || '').toLowerCase() === 'assembly') return false;
+            if (q) {
+                const text = `${i.name || ''} ${i.description || ''} ${i.cost_code || ''} ${i.catalog_number || ''} ${i.sku || ''} ${i.sub_job_code || ''} ${i.masterformat || ''}`.toLowerCase();
+                if (!text.includes(q)) return false;
+            }
+            if (catalog && String(i.catalog_id) !== catalog) return false;
+            if (category && String(i.catalog_group_id) !== category) return false;
+            if (type && (i.item_type === 'material' ? 'part' : i.item_type) !== type) return false;
+            return true;
+        });
+
+        root.innerHTML = rows.map(i => {
+            const isSelected = stagedAssemblyComponents.has(Number(i.id));
+            return `
+                <div class="cc-assembly-item-row ${isSelected ? 'is-selected' : ''}" role="option" aria-selected="${isSelected}" data-assembly-select="${i.id}">
+                    <div class="cc-assembly-item-check-cell">
+                        <input type="checkbox" class="cc-assembly-item-checkbox" data-assembly-item-check="${i.id}" ${isSelected ? 'checked' : ''} aria-label="Select ${esc(i.name)}">
+                    </div>
+                    <div class="cc-assembly-item-main">
+                        <strong class="cc-assembly-item-title">${esc(i.name)}</strong>
+                        <small class="cc-assembly-item-sub">${esc(i.catalog_name || '')} · ${esc(i.group_name || 'Uncategorized')} · ${displayItemType(i.item_type)} · Unit: ${esc(i.unit_of_measure || 'ea')}${i.cost_code ? ` · ${esc(i.cost_code)}` : ''}</small>
+                    </div>
+                    <div class="cc-assembly-item-pricing">
+                        <span class="cc-money">${money(i.unit_cost)}</span>
+                        <small>${Number(i.labor_hours || 0).toFixed(4)} hr</small>
+                    </div>
+                </div>
+            `;
+        }).join('') || '<p class="cc-assembly-no-results">No matching items.</p>';
+
+        root.querySelectorAll('[data-assembly-select]').forEach(row => {
+            row.addEventListener('click', event => {
+                if (event.target.matches('input[type="checkbox"]')) return;
+                toggleAssemblyComponentSelection(Number(row.dataset.assemblySelect));
+            });
+        });
+        root.querySelectorAll('[data-assembly-item-check]').forEach(cb => {
+            cb.addEventListener('click', event => {
+                event.stopPropagation();
+                toggleAssemblyComponentSelection(Number(cb.dataset.assemblyItemCheck));
+            });
+        });
+    }
 
     function renderGroupSelect(select, catalogId, selectedId = '') {
         const groups = state.groups.filter(group => Number(group.catalog_id) === Number(catalogId));
@@ -498,8 +612,10 @@
         document.getElementById('ccItemAttributes').value=typeof item?.attributes_json==='string'?item.attributes_json:JSON.stringify(item?.attributes_json||{},null,2);
         document.getElementById('ccItemNotes').value=item?.notes||'';
         renderPdfAttachment(item);
+        initStagedAssemblyComponents(item);
         toggleAssemblySection();
         renderAssemblyParts();
+        renderAssemblyItemOptions();
         document.getElementById('ccItemModal').classList.add('open');
         document.getElementById('ccItemModal').setAttribute('role', 'dialog');
         document.getElementById('ccItemModal').setAttribute('aria-modal', 'true');
@@ -520,6 +636,7 @@
         document.getElementById('ccItemUnitCostHint').textContent = isAssemblyType() ? 'Calculated from included items' : '';
         document.getElementById('ccItemLaborHoursHint').textContent = isAssemblyType() ? 'Calculated from included items' : '';
         renderAssemblyParts();
+        renderAssemblyBrowserResults();
     }
 
     function renderAssemblyParts() {
@@ -527,54 +644,162 @@
         const body = document.getElementById('ccAssemblyPartsBody');
         const note = document.getElementById('ccAssemblyNote');
         const totalsEl = document.getElementById('ccAssemblyTotals');
+        const countEl = document.getElementById('ccSelectedComponentsCount');
         if (!body || !note || !totalsEl) return;
         if (!isAssemblyType()) {
             body.innerHTML = '';
             note.textContent = '';
+            if (countEl) countEl.textContent = '0';
             return;
         }
-        if (!editingItemId) {
-            body.innerHTML = '<tr><td colspan="9" class="cc-assembly-empty">Save the assembly item before adding included items.</td></tr>';
-            note.textContent = 'Create the assembly first, then edit it to add included items.';
-            totalsEl.textContent = 'Cost $0.00 - Labor 0.0000';
-            return;
-        }
+
+        const components = Array.from(stagedAssemblyComponents.values());
+        if (countEl) countEl.textContent = String(components.length);
         note.textContent = '';
-        const parts = assemblyPartsByAssembly.get(Number(editingItemId))||[];
-        const source=state.allItems?.length?state.allItems:state.items;let totalCost=0,totalLabor=0,canonicalValid=false;
-        if(window.CatalogItemContract&&window.AssemblyExpansionService){const canonical=source.map(item=>window.CatalogItemContract.normalizeCatalogItem(item,{assemblyParts:state.assemblyParts}));const root=canonical.find(item=>String(item.id)===String(editingItemId));if(root){const preview=window.AssemblyExpansionService.expandAssembly(root,1,{catalogIndex:new Map(canonical.map(item=>[String(item.id),item])),pricingSource:'CURRENT_CATALOG',linearLength:1,area:1,endpointCount:1});preview.leaves.forEach(row=>{const pricing=row.pricing||{};totalCost+=row.pricedQuantity*(Number(pricing.materialUnitCost||0)+Number(pricing.equipmentUnitCost||0)+Number(pricing.subcontractorUnitCost||0)+Number(pricing.legacyUnitCost||0));totalLabor+=row.pricedQuantity*Number(pricing.laborHoursPerUnit||0);});canonicalValid=!preview.errors.length;note.textContent=canonicalValid?'Totals use current component prices through the canonical assembly engine.':'Canonical calculation is blocked by a cycle, missing component, or invalid ratio input.';}}
-        body.innerHTML = parts.map(part => {
-            const qty = Number(part.quantity || 0);
-            const currentChild=source.find(item=>Number(item.id)===Number(part.part_catalog_item_id));
-            const unitCost = Number(currentChild?.unit_cost ?? part.unit_cost_snapshot ?? 0);
-            const labor = Number(currentChild?.labor_hours ?? part.unit_labor_time_snapshot ?? 0);
-            if(!window.AssemblyExpansionService){totalCost+=qty*unitCost;totalLabor+=qty*labor;}
-            const ratio=part.ratio_type||'per_unit';const advanced=assemblyAdvanced?`<div class="cc-component-advanced"><select data-part-ratio="${part.id}" aria-label="Ratio type for ${esc(part.child_item_name)}"><option value="per_unit" ${ratio==='per_unit'?'selected':''}>Per unit</option><option value="fixed" ${ratio==='fixed'?'selected':''}>Fixed</option><option value="per_linear_length" ${ratio==='per_linear_length'?'selected':''}>Per linear</option><option value="per_area" ${ratio==='per_area'?'selected':''}>Per area</option><option value="per_endpoint" ${ratio==='per_endpoint'?'selected':''}>Per endpoint</option><option value="spacing_based" ${ratio==='spacing_based'?'selected':''}>Spacing</option></select>${ratio==='spacing_based'?`<input data-part-spacing="${part.id}" type="number" min="0.0001" step="0.0001" value="${Number(part.spacing_value||1)}" aria-label="Spacing for ${esc(part.child_item_name)}">`:''}<input data-part-waste="${part.id}" type="number" min="0" step="0.01" value="${Number(part.waste_factor_percent||0)}" aria-label="Waste percent for ${esc(part.child_item_name)}"></div>`:'';
+
+        const source = state.allItems?.length ? state.allItems : state.items;
+        let totalCost = 0, totalLabor = 0, canonicalValid = false;
+
+        if (window.CatalogItemContract && window.AssemblyExpansionService && editingItemId) {
+            const canonical = source.map(item => window.CatalogItemContract.normalizeCatalogItem(item, { assemblyParts: state.assemblyParts }));
+            const root = canonical.find(item => String(item.id) === String(editingItemId));
+            if (root) {
+                const preview = window.AssemblyExpansionService.expandAssembly(root, 1, {
+                    catalogIndex: new Map(canonical.map(item => [String(item.id), item])),
+                    pricingSource: 'CURRENT_CATALOG',
+                    linearLength: 1,
+                    area: 1,
+                    endpointCount: 1
+                });
+                preview.leaves.forEach(row => {
+                    const pricing = row.pricing || {};
+                    totalCost += row.pricedQuantity * (Number(pricing.materialUnitCost || 0) + Number(pricing.equipmentUnitCost || 0) + Number(pricing.subcontractorUnitCost || 0) + Number(pricing.legacyUnitCost || 0));
+                    totalLabor += row.pricedQuantity * Number(pricing.laborHoursPerUnit || 0);
+                });
+                canonicalValid = !preview.errors.length;
+                note.textContent = canonicalValid ? 'Totals use current component prices through the canonical assembly engine.' : 'Canonical calculation is blocked by a cycle, missing component, or invalid ratio input.';
+            }
+        }
+
+        let calculatedCost = 0, calculatedLabor = 0;
+        components.forEach(comp => {
+            const qty = Number(comp.ratio || 0);
+            calculatedCost += qty * Number(comp.unitCost || 0);
+            calculatedLabor += qty * Number(comp.laborHours || 0);
+        });
+
+        if (!canonicalValid) {
+            totalCost = calculatedCost;
+            totalLabor = calculatedLabor;
+        }
+
+        body.innerHTML = components.map((part, index) => {
+            const qty = Number(part.ratio ?? 1);
+            const unitCost = Number(part.unitCost || 0);
+            const labor = Number(part.laborHours || 0);
+            const ratio = part.ratioType || 'per_unit';
+            const advanced = assemblyAdvanced ? `<div class="cc-component-advanced"><select data-part-ratio="${part.itemId}" aria-label="Ratio type for ${esc(part.name)}"><option value="per_unit" ${ratio === 'per_unit' ? 'selected' : ''}>Per unit</option><option value="fixed" ${ratio === 'fixed' ? 'selected' : ''}>Fixed</option><option value="per_linear_length" ${ratio === 'per_linear_length' ? 'selected' : ''}>Per linear</option><option value="per_area" ${ratio === 'per_area' ? 'selected' : ''}>Per area</option><option value="per_endpoint" ${ratio === 'per_endpoint' ? 'selected' : ''}>Per endpoint</option><option value="spacing_based" ${ratio === 'spacing_based' ? 'selected' : ''}>Spacing</option></select>${ratio === 'spacing_based' ? `<input data-part-spacing="${part.itemId}" type="number" min="0.0001" step="0.0001" value="${Number(part.spacingValue || 1)}" aria-label="Spacing for ${esc(part.name)}">` : ''}<input data-part-waste="${part.itemId}" type="number" min="0" step="0.01" value="${Number(part.wasteFactorPercent || 0)}" aria-label="Waste percent for ${esc(part.name)}"></div>` : '';
+
             return `
-                <tr data-part-row="${part.id}">
-                    <td><strong>${esc(part.child_item_name)}</strong>${advanced}</td>
-                    <td><input class="cc-qty-input" data-part-quantity="${part.id}" type="number" min="0.0001" step="0.0001" value="${qty}" aria-label="Quantity for ${esc(part.child_item_name)}"></td>
-                    <td>${esc(part.child_unit_of_measure||'ea')}</td>
+                <tr data-part-row="${part.itemId}">
+                    <td><strong>${esc(part.name)}</strong>${advanced}</td>
+                    <td><input class="cc-qty-input" data-part-quantity="${part.itemId}" type="number" min="0" step="0.0001" value="${qty}" aria-label="Quantity for ${esc(part.name)}"></td>
+                    <td>${esc(part.unit || 'ea')}</td>
                     <td>${money(unitCost)}</td>
                     <td>${labor.toFixed(4)}</td>
                     <td>${money(qty * unitCost)}</td>
-                    <td>${(qty*labor).toFixed(4)}</td>
-                    <td><input class="cc-component-note" data-part-notes="${part.id}" value="${esc(part.notes||'')}" aria-label="Notes for ${esc(part.child_item_name)}"></td>
-                    <td><div class="cc-row-actions"><button class="cc-icon-btn bordered" type="button" data-part-move="up" data-part-id="${part.id}" aria-label="Move ${esc(part.child_item_name)} up">↑</button><button class="cc-icon-btn bordered" type="button" data-part-move="down" data-part-id="${part.id}" aria-label="Move ${esc(part.child_item_name)} down">↓</button><button class="cc-btn danger" type="button" data-assembly-part-delete="${part.id}">Remove</button></div></td>
+                    <td>${(qty * labor).toFixed(4)}</td>
+                    <td><input class="cc-component-note" data-part-notes="${part.itemId}" value="${esc(part.notes || '')}" aria-label="Notes for ${esc(part.name)}"></td>
+                    <td><div class="cc-row-actions"><button class="cc-icon-btn bordered" type="button" data-part-move="up" data-part-id="${part.itemId}" aria-label="Move ${esc(part.name)} up">↑</button><button class="cc-icon-btn bordered" type="button" data-part-move="down" data-part-id="${part.itemId}" aria-label="Move ${esc(part.name)} down">↓</button><button class="cc-btn danger" type="button" data-assembly-part-delete="${part.itemId}">Remove</button></div></td>
                 </tr>
             `;
-        }).join('') || '<tr><td colspan="9" class="cc-assembly-empty">No items included yet.</td></tr>';
-        const stored=(state.allItems?.length?state.allItems:state.items).find(item=>Number(item.id)===Number(editingItemId));
-        const storedCost=canonicalValid?totalCost:Number(stored?.unit_cost||0),storedLabor=canonicalValid?totalLabor:Number(stored?.labor_hours||0);
-        document.getElementById('ccItemUnitCost').value=storedCost;document.getElementById('ccItemLaborHours').value=storedLabor;
-        const differs=Math.abs(storedCost-totalCost)>0.0001||Math.abs(storedLabor-totalLabor)>0.0001;
-        totalsEl.textContent=differs?`Stored ${money(storedCost)} / ${storedLabor.toFixed(4)} hr · Canonical preview ${money(totalCost)} / ${totalLabor.toFixed(4)} hr`:`Cost ${money(totalCost)} - Labor ${totalLabor.toFixed(4)}`;
-        if(differs)note.textContent='Canonical preview differs from the legacy stored total; values were not changed automatically.';
+        }).join('') || '<tr><td colspan="9" class="cc-assembly-empty">No items included yet. Select items from the list above to add them to this assembly.</td></tr>';
+
+        const stored = editingItemId ? (state.allItems?.length ? state.allItems : state.items).find(item => Number(item.id) === Number(editingItemId)) : null;
+        const storedCost = canonicalValid ? totalCost : Number(stored?.unit_cost || totalCost);
+        const storedLabor = canonicalValid ? totalLabor : Number(stored?.labor_hours || totalLabor);
+        document.getElementById('ccItemUnitCost').value = totalCost;
+        document.getElementById('ccItemLaborHours').value = totalLabor;
+
+        totalsEl.textContent = `Cost ${money(totalCost)} · Labor ${totalLabor.toFixed(4)}`;
+
         body.querySelectorAll('[data-assembly-part-delete]').forEach(button => {
-            button.addEventListener('click', () => deleteAssemblyPart(Number(button.dataset.assemblyPartDelete)));
+            button.addEventListener('click', () => {
+                const itemId = Number(button.dataset.assemblyPartDelete);
+                stagedAssemblyComponents.delete(itemId);
+                renderAssemblyParts();
+                renderAssemblyBrowserResults();
+            });
         });
-        body.querySelectorAll('[data-part-quantity],[data-part-ratio],[data-part-spacing],[data-part-waste],[data-part-notes]').forEach(input=>input.addEventListener('change',()=>updateAssemblyPart(Number(input.dataset.partQuantity||input.dataset.partRatio||input.dataset.partSpacing||input.dataset.partWaste||input.dataset.partNotes))));
-        body.querySelectorAll('[data-part-move]').forEach(button=>button.addEventListener('click',()=>moveAssemblyPart(Number(button.dataset.partId),button.dataset.partMove)));
+
+        body.querySelectorAll('[data-part-quantity]').forEach(input => {
+            input.addEventListener('input', () => {
+                const itemId = Number(input.dataset.partQuantity);
+                const comp = stagedAssemblyComponents.get(itemId);
+                if (comp) {
+                    comp.ratio = input.value === '' ? '' : Number(input.value);
+                    updateAssemblyTotalsPreview();
+                }
+            });
+            input.addEventListener('change', () => {
+                const itemId = Number(input.dataset.partQuantity);
+                const comp = stagedAssemblyComponents.get(itemId);
+                if (comp) {
+                    comp.ratio = Number(input.value || 0);
+                    renderAssemblyParts();
+                }
+            });
+        });
+
+        body.querySelectorAll('[data-part-ratio]').forEach(sel => {
+            sel.addEventListener('change', () => {
+                const comp = stagedAssemblyComponents.get(Number(sel.dataset.partRatio));
+                if (comp) { comp.ratioType = sel.value; renderAssemblyParts(); }
+            });
+        });
+        body.querySelectorAll('[data-part-spacing]').forEach(inp => {
+            inp.addEventListener('change', () => {
+                const comp = stagedAssemblyComponents.get(Number(inp.dataset.partSpacing));
+                if (comp) { comp.spacingValue = Number(inp.value); }
+            });
+        });
+        body.querySelectorAll('[data-part-waste]').forEach(inp => {
+            inp.addEventListener('change', () => {
+                const comp = stagedAssemblyComponents.get(Number(inp.dataset.partWaste));
+                if (comp) { comp.wasteFactorPercent = Number(inp.value); }
+            });
+        });
+        body.querySelectorAll('[data-part-notes]').forEach(inp => {
+            inp.addEventListener('change', () => {
+                const comp = stagedAssemblyComponents.get(Number(inp.dataset.partNotes));
+                if (comp) { comp.notes = inp.value; }
+            });
+        });
+        body.querySelectorAll('[data-part-move]').forEach(button => {
+            button.addEventListener('click', () => {
+                const itemId = Number(button.dataset.partId);
+                const direction = button.dataset.partMove;
+                const entries = Array.from(stagedAssemblyComponents.entries());
+                const index = entries.findIndex(([cid]) => cid === itemId);
+                const other = direction === 'up' ? index - 1 : index + 1;
+                if (index < 0 || other < 0 || other >= entries.length) return;
+                [entries[index], entries[other]] = [entries[other], entries[index]];
+                stagedAssemblyComponents = new Map(entries);
+                renderAssemblyParts();
+            });
+        });
+    }
+
+    function updateAssemblyTotalsPreview() {
+        let totalCost = 0, totalLabor = 0;
+        stagedAssemblyComponents.forEach(comp => {
+            const qty = Number(comp.ratio || 0);
+            totalCost += qty * Number(comp.unitCost || 0);
+            totalLabor += qty * Number(comp.laborHours || 0);
+        });
+        document.getElementById('ccItemUnitCost').value = totalCost;
+        document.getElementById('ccItemLaborHours').value = totalLabor;
+        document.getElementById('ccAssemblyTotals').textContent = `Cost ${money(totalCost)} · Labor ${totalLabor.toFixed(4)}`;
     }
 
     function openMoveItemModal(item) {
@@ -601,44 +826,68 @@
         for(const id of numericIds){const input=document.getElementById(id);if(input.value!==''&&(!Number.isFinite(Number(input.value))||Number(input.value)<0))return showItemFormError(`${input.closest('.cc-field').querySelector('label').textContent} must be a number greater than or equal to 0.`);}
         let attributes={};try{attributes=JSON.parse(document.getElementById('ccItemAttributes').value||'{}');if(!attributes||Array.isArray(attributes)||typeof attributes!=='object')throw new Error();}catch(_){return showItemFormError('Attributes must be a valid JSON object.');}
 
+        if (isAssemblyType()) {
+            for (const comp of stagedAssemblyComponents.values()) {
+                const ratioNum = Number(comp.ratio);
+                if (comp.ratio === '' || comp.ratio === null || !Number.isFinite(ratioNum) || ratioNum < 0) {
+                    return showItemFormError(`Component "${comp.name}" must have a valid quantity ratio greater than or equal to 0.`);
+                }
+            }
+        }
+
         const pdf=document.getElementById('ccItemPdf').files[0] || null;
         if(pdf && (pdf.size>10485760 || (pdf.type && pdf.type!=='application/pdf'))) return showError('Choose a PDF of 10 MB or smaller');
         const saveButton=document.getElementById('ccItemSave'); saveButton.disabled=true; saveButton.textContent=pdf?'Saving and uploading…':'Saving…';
-        try { const existing=(state.allItems?.length?state.allItems:state.items).find(row=>Number(row.id)===Number(editingItemId)); const data=await request('save_item', revisionPayload(existing,{
-            id: editingItemId || 0,
-            catalog_id: document.getElementById('ccItemCatalog').value,
-            catalog_group_id: document.getElementById('ccItemGroup').value,
-            name: document.getElementById('ccItemName').value,
-            description: document.getElementById('ccItemDescription').value,
-            item_type: document.getElementById('ccItemType').value,
-            unit_of_measure: document.getElementById('ccItemUom').value,
-            measurement_type:document.getElementById('ccItemMeasurementType').value,
-            unit_cost: unitCost,
-            material_cost:Number(document.getElementById('ccItemMaterialCost').value||0),
-            labor_cost:Number(document.getElementById('ccItemLaborCost').value||0),
-            equipment_cost:Number(document.getElementById('ccItemEquipmentCost').value||0),
-            labor_hours: laborHours,
-            labor_rate: laborRate,
-            markup_percent:Number(document.getElementById('ccItemMarkup').value||0),
-            waste_factor_percent:Number(document.getElementById('ccItemWaste').value||0),
-            taxable: document.getElementById('ccItemTaxable').value === '1' ? 1 : 0,
-            color,
-            symbol: document.getElementById('ccItemSymbol').value,
-            marker_size:document.getElementById('ccItemMarkerSize').value,
-            size:document.getElementById('ccItemSize').value,diameter:document.getElementById('ccItemDiameter').value,trade_size:document.getElementById('ccItemTradeSize').value,
-            thickness:document.getElementById('ccItemThickness').value,gauge:document.getElementById('ccItemGauge').value,material:document.getElementById('ccItemMaterial').value,
-            manufacturer: document.getElementById('ccItemManufacturer').value,
-            supplier: document.getElementById('ccItemSupplier').value,
-            catalog_number: document.getElementById('ccItemCatalogNumber').value,
-            cost_code: document.getElementById('ccItemCostCode').value,
-            masterformat: document.getElementById('ccItemMasterFormat').value,
-            uniformat: document.getElementById('ccItemUniFormat').value,
-            sub_job_code: document.getElementById('ccItemSubJobCode').value,
-            sub_job_name: document.getElementById('ccItemSubJobName').value,
-            epd_url: document.getElementById('ccItemEpdUrl').value,
-            attachment_url: document.getElementById('ccItemAttachmentUrl').value,
-            tags_json:document.getElementById('ccItemTags').value.split(',').map(value=>value.trim()).filter(Boolean),attributes_json:attributes,notes:document.getElementById('ccItemNotes').value
-        }));
+        try {
+            const existing=(state.allItems?.length?state.allItems:state.items).find(row=>Number(row.id)===Number(editingItemId));
+            const componentsPayload = isAssemblyType() ? Array.from(stagedAssemblyComponents.values()).map((comp, idx) => ({
+                id: comp.id,
+                itemId: comp.itemId,
+                part_catalog_item_id: comp.itemId,
+                quantity: Number(comp.ratio || 0),
+                ratio_type: comp.ratioType || 'per_unit',
+                spacing_value: comp.spacingValue,
+                waste_factor_percent: comp.wasteFactorPercent || 0,
+                notes: comp.notes || '',
+                sort_order: idx
+            })) : null;
+
+            const data=await request('save_item', revisionPayload(existing,{
+                id: editingItemId || 0,
+                catalog_id: document.getElementById('ccItemCatalog').value,
+                catalog_group_id: document.getElementById('ccItemGroup').value,
+                name: document.getElementById('ccItemName').value,
+                description: document.getElementById('ccItemDescription').value,
+                item_type: document.getElementById('ccItemType').value,
+                unit_of_measure: document.getElementById('ccItemUom').value,
+                measurement_type:document.getElementById('ccItemMeasurementType').value,
+                unit_cost: unitCost,
+                material_cost:Number(document.getElementById('ccItemMaterialCost').value||0),
+                labor_cost:Number(document.getElementById('ccItemLaborCost').value||0),
+                equipment_cost:Number(document.getElementById('ccItemEquipmentCost').value||0),
+                labor_hours: laborHours,
+                labor_rate: laborRate,
+                markup_percent:Number(document.getElementById('ccItemMarkup').value||0),
+                waste_factor_percent:Number(document.getElementById('ccItemWaste').value||0),
+                taxable: document.getElementById('ccItemTaxable').value === '1' ? 1 : 0,
+                color,
+                symbol: document.getElementById('ccItemSymbol').value,
+                marker_size:document.getElementById('ccItemMarkerSize').value,
+                size:document.getElementById('ccItemSize').value,diameter:document.getElementById('ccItemDiameter').value,trade_size:document.getElementById('ccItemTradeSize').value,
+                thickness:document.getElementById('ccItemThickness').value,gauge:document.getElementById('ccItemGauge').value,material:document.getElementById('ccItemMaterial').value,
+                manufacturer: document.getElementById('ccItemManufacturer').value,
+                supplier: document.getElementById('ccItemSupplier').value,
+                catalog_number: document.getElementById('ccItemCatalogNumber').value,
+                cost_code: document.getElementById('ccItemCostCode').value,
+                masterformat: document.getElementById('ccItemMasterFormat').value,
+                uniformat: document.getElementById('ccItemUniFormat').value,
+                sub_job_code: document.getElementById('ccItemSubJobCode').value,
+                sub_job_name: document.getElementById('ccItemSubJobName').value,
+                epd_url: document.getElementById('ccItemEpdUrl').value,
+                attachment_url: document.getElementById('ccItemAttachmentUrl').value,
+                tags_json:document.getElementById('ccItemTags').value.split(',').map(value=>value.trim()).filter(Boolean),attributes_json:attributes,notes:document.getElementById('ccItemNotes').value,
+                components: componentsPayload
+            }));
             if(pdf){document.getElementById('ccItemPdfFeedback').textContent='Uploading PDF…';await attachmentRequest('upload',data.id,data.revision,pdf);}
             const groupId = Number(document.getElementById('ccItemGroup').value || 0);
             const catalogId = Number(document.getElementById('ccItemCatalog').value || 0);
@@ -653,17 +902,7 @@
     function showItemFormError(message){const el=document.getElementById('ccItemFormError');el.textContent=message;el.hidden=false;el.scrollIntoView?.({block:'nearest'});}
 
     function addAssemblyPart(childId) {
-        if (!editingItemId) return showError('Save the assembly item before adding included items.');
-        if (!childId) return showError('Select an item to include in the assembly.');
-        request('add_assembly_part', assemblyContext({
-            assembly_catalog_item_id: editingItemId,
-            part_catalog_item_id: childId,
-            quantity:1,
-            sort_order:state.assemblyParts.filter(p=>Number(p.assembly_catalog_item_id)===Number(editingItemId)).length
-        })).then(data => {
-            state = data.data;
-            document.getElementById('ccAssemblyBrowser').hidden=true;renderAssemblyParts();renderAssemblyItemOptions();
-        }).catch(err => showError(err.message));
+        toggleAssemblyComponentSelection(childId);
     }
 
     function updateAssemblyPart(id){const row=document.querySelector(`[data-part-row="${id}"]`);const ratio=row.querySelector('[data-part-ratio]')?.value||state.assemblyParts.find(p=>Number(p.id)===id)?.ratio_type||'per_unit';request('update_assembly_part',assemblyContext({id,quantity:Number(row.querySelector('[data-part-quantity]').value),ratio_type:ratio,spacing_value:ratio==='spacing_based'?Number(row.querySelector('[data-part-spacing]')?.value||1):null,waste_factor_percent:Number(row.querySelector('[data-part-waste]')?.value||0),notes:row.querySelector('[data-part-notes]')?.value||''})).then(data=>{state=data.data;renderAssemblyParts();}).catch(err=>showItemFormError(err.message));}
@@ -671,12 +910,9 @@
     function moveAssemblyPart(id,direction){const parts=state.assemblyParts.filter(p=>Number(p.assembly_catalog_item_id)===Number(editingItemId)).sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||Number(a.id)-Number(b.id));const index=parts.findIndex(p=>Number(p.id)===id),other=direction==='up'?index-1:index+1;if(index<0||other<0||other>=parts.length)return;[parts[index],parts[other]]=[parts[other],parts[index]];request('reorder_assembly_parts',assemblyContext({assembly_catalog_item_id:editingItemId,ordered_ids:parts.map(p=>p.id)})).then(data=>{state=data.data;renderAssemblyParts();}).catch(err=>showItemFormError(err.message));}
 
     function deleteAssemblyPart(id) {
-        request('delete_assembly_part', assemblyContext({ id }))
-            .then(data => {
-                state = data.data;
-                renderAssemblyParts();renderAssemblyItemOptions();
-            })
-            .catch(err => showError(err.message));
+        stagedAssemblyComponents.delete(Number(id));
+        renderAssemblyParts();
+        renderAssemblyBrowserResults();
     }
 
     function moveItem(event) {
@@ -696,6 +932,7 @@
     }
 
     function closeItemModals() {
+        stagedAssemblyComponents.clear();
         document.querySelectorAll('.cc-modal-backdrop').forEach(el => el.classList.remove('open'));
         if (modalReturnFocus?.isConnected) modalReturnFocus.focus();
         modalReturnFocus = null;
@@ -760,9 +997,9 @@
         document.getElementById('ccAddCatalogTop').addEventListener('click', () => openEntityModal('catalog'));
         document.getElementById('ccAddGroup').addEventListener('click', () => openEntityModal('category'));
         document.getElementById('ccAddItem').addEventListener('click', () => openItemModal());
-        document.getElementById('ccItemCatalog').addEventListener('change', event => renderGroupSelect(document.getElementById('ccItemGroup'), Number(event.target.value)));
+        document.getElementById('ccItemCatalog').addEventListener('change', event => { renderGroupSelect(document.getElementById('ccItemGroup'), Number(event.target.value)); renderAssemblyItemOptions(); });
         document.getElementById('ccMoveCatalog').addEventListener('change', event => renderGroupSelect(document.getElementById('ccMoveGroup'), Number(event.target.value)));
-        document.getElementById('ccItemType').addEventListener('change', toggleAssemblySection);
+        document.getElementById('ccItemType').addEventListener('change', () => { toggleAssemblySection(); renderAssemblyItemOptions(); });
         document.getElementById('ccItemPdf').addEventListener('change', event => {
             const file=event.target.files[0];
             document.getElementById('ccItemPdfFeedback').textContent=file?`${file.name} selected. It will be uploaded when you save.`:'';
