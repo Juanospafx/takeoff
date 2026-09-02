@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/session.php';
 require_once __DIR__ . '/../core/services/CatalogAdminService.php';
 
 const CATALOG_PDF_MAX_BYTES = 10485760;
@@ -71,7 +72,7 @@ try {
         try {
             $payload=['item_id'=>$id,'storage_name'=>$storage,'original_name'=>cia_safe_original_name((string)($file['name']??'')),
                 'size_bytes'=>$size,'sha256'=>hash_file('sha256',$destination),'expected_revision'=>$_POST['expected_revision']??null,
-                'request_id'=>catalog_ra_request_id($_POST)];
+                'request_id'=>catalog_ra_request_id($_POST),'actor_user_id'=>!empty($_SESSION['user_id'])?(int)$_SESSION['user_id']:null];
             $result=$service->replaceItemPdf($payload);
         } catch (Throwable $e) { @unlink($destination); throw $e; }
         $old=$result['previous_storage_name']??null; if ($old && $old!==$storage) { try { @unlink(cia_storage_path((string)$old,true)); } catch(Throwable $ignored) {} }

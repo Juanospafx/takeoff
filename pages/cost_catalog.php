@@ -78,8 +78,12 @@
                     <input id="ccSearch" type="search" placeholder="Search catalog items" autocomplete="off">
                     <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
                 </label>
-                <label class="cc-select-field"><span>Sort by</span><select id="ccSortBy"><option value="name">Item name</option><option value="cost">Unit cost</option><option value="labor">Labor time</option><option value="catalog">Catalog</option></select></label>
-                <label class="cc-select-field"><span>Type</span><select id="ccTypeFilter"><option value="all">All types</option><option value="part">Material</option><option value="cable">Cable</option><option value="labor">Labor</option><option value="equipment">Equipment</option><option value="assembly">Assembly</option></select></label>
+                <label class="cc-select-field"><span>Sort by</span><select id="ccSortBy"><option value="name">Item name</option><option value="cost">Unit cost</option><option value="labor">Labor time</option><option value="catalog">Catalog</option><option value="created">Date created</option><option value="updated">Date updated</option></select></label>
+                <label class="cc-select-field"><span>Type</span><select id="ccTypeFilter"><option value="all">All types</option><option value="part">Part / Material</option><option value="labor">Labor</option><option value="equipment">Equipment</option><option value="assembly">Assembly</option></select></label>
+                <label class="cc-select-field"><span>Measurement</span><select id="ccMeasurementFilter"><option value="all">All measurements</option><option value="count">Count</option><option value="linear">Linear</option><option value="area">Area</option><option value="volume">Volume</option></select></label>
+                <label class="cc-select-field"><span>Status</span><select id="ccStatusFilter"><option value="active">Active</option><option value="all">Active + archived</option><option value="archived">Archived</option></select></label>
+                <label class="cc-select-field"><span>UoM</span><select id="ccUomFilter"><option value="all">All units</option></select></label>
+                <button class="cc-btn" id="ccClearFilters" type="button">Clear filters</button>
                 <button class="cc-icon-btn bordered" id="ccSortDir" type="button" aria-label="Sort descending" title="Toggle sort direction"><i class="fas fa-arrow-down-wide-short" aria-hidden="true"></i></button>
                 <span class="cc-result-count" id="ccResultCount" aria-live="polite"></span>
             </div>
@@ -144,6 +148,10 @@
                         <label>Unit of Measure</label>
                         <input id="ccItemUom" required value="ea">
                     </div>
+                    <div class="cc-field">
+                        <label>Measurement Type</label>
+                        <select id="ccItemMeasurementType"><option value="count">Count</option><option value="linear">Linear</option><option value="area">Area</option><option value="volume">Volume</option></select>
+                    </div>
                     <div class="cc-field" data-item-specific="part equipment assembly">
                         <label for="ccItemUnitCost">Unit Cost</label>
                         <input id="ccItemUnitCost" type="number" min="0" step="0.0001" value="0" aria-describedby="ccItemUnitCostHint">
@@ -158,6 +166,11 @@
                         <label for="ccItemLaborRate">Unit Labor Cost per hour</label>
                         <input id="ccItemLaborRate" type="number" min="0" step="0.0001" value="0">
                     </div>
+                    <div class="cc-field" data-item-specific="part"><label>Material Cost</label><input id="ccItemMaterialCost" type="number" min="0" step="0.0001" value="0"></div>
+                    <div class="cc-field" data-item-specific="labor"><label>Labor Cost</label><input id="ccItemLaborCost" type="number" min="0" step="0.0001" value="0"></div>
+                    <div class="cc-field" data-item-specific="equipment"><label>Equipment Cost</label><input id="ccItemEquipmentCost" type="number" min="0" step="0.0001" value="0"></div>
+                    <div class="cc-field"><label>Markup %</label><input id="ccItemMarkup" type="number" min="0" step="0.01" value="0"></div>
+                    <div class="cc-field"><label>Waste %</label><input id="ccItemWaste" type="number" min="0" step="0.01" value="0"></div>
                     <div class="cc-field" data-item-specific="part equipment">
                         <label>Taxable</label>
                         <select id="ccItemTaxable">
@@ -181,6 +194,13 @@
                             <option value="line">Line</option>
                         </select>
                     </div>
+                    <div class="cc-field"><label>Default marker size</label><input id="ccItemMarkerSize" type="number" min="0" step="0.1"></div>
+                    <div class="cc-field" data-item-specific="part"><label>Size</label><input id="ccItemSize"></div>
+                    <div class="cc-field" data-item-specific="part"><label>Diameter</label><input id="ccItemDiameter"></div>
+                    <div class="cc-field" data-item-specific="part"><label>Trade Size</label><input id="ccItemTradeSize"></div>
+                    <div class="cc-field" data-item-specific="part"><label>Thickness</label><input id="ccItemThickness"></div>
+                    <div class="cc-field" data-item-specific="part"><label>Gauge</label><input id="ccItemGauge"></div>
+                    <div class="cc-field" data-item-specific="part"><label>Material</label><input id="ccItemMaterial"></div>
                     <div class="cc-field">
                         <label>Manufacturer</label>
                         <input id="ccItemManufacturer">
@@ -209,6 +229,9 @@
                         <label>EPD URL</label>
                         <input id="ccItemEpdUrl" type="url">
                     </div>
+                    <div class="cc-field full"><label>Tags <span class="cc-optional">Comma separated</span></label><input id="ccItemTags"></div>
+                    <div class="cc-field full"><label>Attributes <span class="cc-optional">JSON object</span></label><textarea id="ccItemAttributes" rows="3" placeholder='{"voltage":"120V"}'></textarea></div>
+                    <div class="cc-field full"><label>Notes</label><textarea id="ccItemNotes" rows="3"></textarea></div>
                     <input id="ccItemAttachmentUrl" type="hidden">
                     <div class="cc-field full cc-pdf-field">
                         <label for="ccItemPdf">PDF attachment <span class="cc-optional">Optional · maximum 10 MB</span></label>
@@ -253,6 +276,7 @@
                                 <th>Unit Cost</th>
                                 <th>Unit Labor Time</th>
                                 <th>Extended Cost</th><th>Extended Labor</th>
+                                <th>Notes</th>
                                 <th></th>
                             </tr>
                         </thead>
@@ -264,6 +288,33 @@
                 <button class="cc-btn" type="button" data-close-item-modal>Cancel</button>
                 <button class="cc-btn primary" id="ccItemSave" type="submit">Save Item</button>
             </div>
+        </form>
+    </div>
+</div>
+
+<div class="cc-modal-backdrop" id="ccEntityModal">
+    <div class="cc-modal small" role="dialog" aria-modal="true" aria-labelledby="ccEntityTitle">
+        <form id="ccEntityForm">
+            <div class="cc-modal-head"><strong id="ccEntityTitle">Catalog</strong><button class="cc-btn" type="button" data-close-entity-modal aria-label="Close"><i class="fas fa-times"></i></button></div>
+            <div class="cc-modal-body"><div class="cc-inline-error" id="ccEntityError" role="alert" hidden></div><div class="cc-form-grid">
+                <div class="cc-field full"><label>Name</label><input id="ccEntityName" required></div>
+                <div class="cc-field full"><label>Description</label><textarea id="ccEntityDescription" rows="3"></textarea></div>
+                <div class="cc-field" data-entity-category><label>Catalog</label><select id="ccEntityCatalog"></select></div>
+                <div class="cc-field" data-entity-category><label>Parent category</label><select id="ccEntityParent"></select></div>
+                <div class="cc-field"><label><input id="ccEntityActive" type="checkbox" checked> Active</label></div>
+                <div class="cc-field"><label><input id="ccEntityEnabled" type="checkbox" checked> Enabled for projects</label></div>
+            </div></div>
+            <div class="cc-modal-foot"><button class="cc-btn" type="button" data-close-entity-modal>Cancel</button><button class="cc-btn primary" id="ccEntitySave" type="submit">Save</button></div>
+        </form>
+    </div>
+</div>
+
+<div class="cc-modal-backdrop" id="ccArchiveCategoryModal">
+    <div class="cc-modal small" role="dialog" aria-modal="true" aria-labelledby="ccArchiveCategoryTitle">
+        <form id="ccArchiveCategoryForm">
+            <div class="cc-modal-head"><strong id="ccArchiveCategoryTitle">Archive category</strong><button class="cc-btn" type="button" data-close-category-archive aria-label="Close"><i class="fas fa-times"></i></button></div>
+            <div class="cc-modal-body"><p id="ccArchiveCategoryImpact"></p><div class="cc-field"><label>Move affected items to</label><select id="ccArchiveCategoryTarget"><option value="">Uncategorized</option></select></div><label class="cc-check-row"><input id="ccArchiveCategoryTree" type="checkbox"> Archive all subcategories</label><div class="cc-inline-error" id="ccArchiveCategoryError" role="alert" hidden></div></div>
+            <div class="cc-modal-foot"><button class="cc-btn" type="button" data-close-category-archive>Cancel</button><button class="cc-btn danger" id="ccArchiveCategorySubmit" type="submit">Archive category</button></div>
         </form>
     </div>
 </div>

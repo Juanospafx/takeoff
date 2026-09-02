@@ -195,10 +195,17 @@
                 measurementType: normalizeMeasurementType(raw.takeoffDefaults?.measurementType
                     ?? raw.measurement_type ?? raw.takeoff_type),
                 symbol: text(raw.takeoffDefaults?.symbol ?? raw.symbol) || null,
-                color: text(raw.takeoffDefaults?.color ?? raw.color) || null
+                color: text(raw.takeoffDefaults?.color ?? raw.color) || null,
+                markerSize: firstDefined(raw.takeoffDefaults || {}, ['markerSize'], firstDefined(raw, ['marker_size', 'markerSize'], null)) === null
+                    ? null : number(firstDefined(raw.takeoffDefaults || {}, ['markerSize'], firstDefined(raw, ['marker_size', 'markerSize'])))
+            },
+            physical: {
+                size: text(raw.size), diameter: text(raw.diameter), tradeSize: text(raw.tradeSize ?? raw.trade_size),
+                thickness: text(raw.thickness), gauge: text(raw.gauge), material: text(raw.material)
             },
             attributes: normalizeAttributes(raw),
             tags: normalizeTags(raw),
+            notes: text(raw.notes),
             assemblyComponents: componentsFor(raw, options).map(normalizeAssemblyComponent),
             legacy: {
                 itemType: text(raw.item_type),

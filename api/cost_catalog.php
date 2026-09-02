@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/session.php';
 require_once __DIR__ . '/../core/services/CatalogAdminService.php';
 
 header('Content-Type: application/json; charset=utf-8');
@@ -9,6 +10,7 @@ header('Content-Type: application/json; charset=utf-8');
 $input = json_decode(file_get_contents('php://input'), true);
 if (!is_array($input)) $input = [];
 $input['request_id'] = catalog_ra_request_id($input);
+$input['actor_user_id'] = !empty($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
 $action = $_GET['action'] ?? $_POST['action'] ?? $input['action'] ?? 'list';
 
 function cc_json(array $payload, int $status = 200): void
@@ -32,13 +34,6 @@ function cc_str($value): ?string
 function cc_columns(PDO $pdo, string $table): array
 {
     return $pdo->query("SHOW COLUMNS FROM `$table`")->fetchAll(PDO::FETCH_COLUMN);
-}
-
-function cc_add_column(PDO $pdo, string $table, string $column, string $sql): void
-{
-    if (!in_array($column, cc_columns($pdo, $table), true)) {
-        $pdo->exec($sql);
-    }
 }
 
 function cc_item_type_for_db(PDO $pdo, $value): string
@@ -80,190 +75,6 @@ function cc_recalculate_assembly(PDO $pdo, int $assemblyItemId, array $input = [
         'unit_cost' => (float)$totals['unit_cost'],
         'labor_hours' => (float)$totals['labor_hours']
     ], $action, $input, null, true);
-}
-
-function cc_ensure_schema(PDO $pdo): void
-{
-    $pdo->exec("CREATE TABLE IF NOT EXISTS catalogs (
-        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-        name VARCHAR(191) NOT NULL,
-        description TEXT NULL,
-        trade VARCHAR(100) NULL,
-        active TINYINT(1) NOT NULL DEFAULT 1,
-        metadata_json JSON NULL,
-        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        deleted_at TIMESTAMP NULL DEFAULT NULL,
-        PRIMARY KEY (id),
-        KEY idx_catalogs_active_deleted (active, deleted_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-    $pdo->exec("CREATE TABLE IF NOT EXISTS cost_catalogs (
-        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-        catalog_id BIGINT UNSIGNED NOT NULL,
-        name VARCHAR(191) NOT NULL,
-        description TEXT NULL,
-        currency_code CHAR(3) NOT NULL DEFAULT 'USD',
-        effective_from DATE NULL,
-        effective_to DATE NULL,
-        active TINYINT(1) NOT NULL DEFAULT 1,
-        metadata_json JSON NULL,
-        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        deleted_at TIMESTAMP NULL DEFAULT NULL,
-        PRIMARY KEY (id),
-        KEY idx_cost_catalogs_catalog (catalog_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-    $pdo->exec("CREATE TABLE IF NOT EXISTS catalog_groups (
-        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-        catalog_id BIGINT UNSIGNED NOT NULL,
-        parent_group_id BIGINT UNSIGNED NULL,
-        name VARCHAR(191) NOT NULL,
-        description TEXT NULL,
-        sort_order INT NOT NULL DEFAULT 0,
-        metadata_json JSON NULL,
-        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        deleted_at TIMESTAMP NULL DEFAULT NULL,
-        PRIMARY KEY (id),
-        KEY idx_catalog_groups_catalog (catalog_id),
-        KEY idx_catalog_groups_parent (parent_group_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-    $pdo->exec("CREATE TABLE IF NOT EXISTS catalog_items (
-        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-        catalog_id BIGINT UNSIGNED NOT NULL,
-        cost_catalog_id BIGINT UNSIGNED NULL,
-        catalog_group_id BIGINT UNSIGNED NULL,
-        sku VARCHAR(100) NULL,
-        name VARCHAR(191) NOT NULL,
-        description TEXT NULL,
-        item_type ENUM('part','assembly','labor','equipment','subcontractor','travel','custom') NOT NULL DEFAULT 'part',
-        cost_type VARCHAR(100) NULL,
-        unit_of_measure VARCHAR(50) NOT NULL DEFAULT 'ea',
-        unit_cost DECIMAL(18,4) NOT NULL DEFAULT 0,
-        labor_hours DECIMAL(18,4) NOT NULL DEFAULT 0,
-        color VARCHAR(50) NULL,
-        symbol VARCHAR(50) NULL,
-        taxable TINYINT(1) NOT NULL DEFAULT 1,
-        manufacturer VARCHAR(191) NULL,
-        supplier VARCHAR(191) NULL,
-        catalog_number VARCHAR(100) NULL,
-        sub_job_code VARCHAR(100) NULL,
-        sub_job_name VARCHAR(191) NULL,
-        epd_url VARCHAR(1024) NULL,
-        attachment_url VARCHAR(1024) NULL,
-        active TINYINT(1) NOT NULL DEFAULT 1,
-        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        deleted_at TIMESTAMP NULL DEFAULT NULL,
-        PRIMARY KEY (id),
-        KEY idx_catalog_items_catalog (catalog_id),
-        KEY idx_catalog_items_group (catalog_group_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-    $pdo->exec("CREATE TABLE IF NOT EXISTS assembly_parts (
-        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-        assembly_catalog_item_id BIGINT UNSIGNED NOT NULL,
-        part_catalog_item_id BIGINT UNSIGNED NOT NULL,
-        quantity DECIMAL(18,6) NOT NULL DEFAULT 1,
-        unit_cost_snapshot DECIMAL(18,4) NOT NULL DEFAULT 0,
-        unit_labor_time_snapshot DECIMAL(18,4) NOT NULL DEFAULT 0,
-        ratio_type ENUM('fixed','per_unit','per_linear_length','per_area','per_endpoint','spacing_based') NOT NULL DEFAULT 'per_unit',
-        spacing_value DECIMAL(18,6) NULL,
-        waste_factor_percent DECIMAL(9,4) NOT NULL DEFAULT 0,
-        notes TEXT NULL,
-        metadata_json JSON NULL,
-        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        deleted_at TIMESTAMP NULL DEFAULT NULL,
-        PRIMARY KEY (id),
-        KEY idx_assembly_parts_assembly (assembly_catalog_item_id),
-        KEY idx_assembly_parts_part (part_catalog_item_id)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-    cc_add_column($pdo, 'catalogs', 'trade', "ALTER TABLE catalogs ADD COLUMN trade VARCHAR(100) NULL");
-    cc_add_column($pdo, 'catalogs', 'active', "ALTER TABLE catalogs ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1");
-    cc_add_column($pdo, 'catalogs', 'locked', "ALTER TABLE catalogs ADD COLUMN locked TINYINT(1) NOT NULL DEFAULT 0");
-    cc_add_column($pdo, 'catalogs', 'enabled_for_projects', "ALTER TABLE catalogs ADD COLUMN enabled_for_projects TINYINT(1) NOT NULL DEFAULT 1");
-    cc_add_column($pdo, 'catalogs', 'metadata_json', "ALTER TABLE catalogs ADD COLUMN metadata_json JSON NULL");
-    cc_add_column($pdo, 'catalogs', 'deleted_at', "ALTER TABLE catalogs ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL");
-
-    cc_add_column($pdo, 'catalog_groups', 'parent_group_id', "ALTER TABLE catalog_groups ADD COLUMN parent_group_id BIGINT UNSIGNED NULL");
-    cc_add_column($pdo, 'catalog_groups', 'sort_order', "ALTER TABLE catalog_groups ADD COLUMN sort_order INT NOT NULL DEFAULT 0");
-    cc_add_column($pdo, 'catalog_groups', 'active', "ALTER TABLE catalog_groups ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1");
-    cc_add_column($pdo, 'catalog_groups', 'enabled_for_projects', "ALTER TABLE catalog_groups ADD COLUMN enabled_for_projects TINYINT(1) NOT NULL DEFAULT 1");
-    cc_add_column($pdo, 'catalog_groups', 'metadata_json', "ALTER TABLE catalog_groups ADD COLUMN metadata_json JSON NULL");
-    cc_add_column($pdo, 'catalog_groups', 'deleted_at', "ALTER TABLE catalog_groups ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL");
-
-    cc_add_column($pdo, 'catalog_items', 'cost_catalog_id', "ALTER TABLE catalog_items ADD COLUMN cost_catalog_id BIGINT UNSIGNED NULL");
-    cc_add_column($pdo, 'catalog_items', 'catalog_group_id', "ALTER TABLE catalog_items ADD COLUMN catalog_group_id BIGINT UNSIGNED NULL");
-    cc_add_column($pdo, 'catalog_items', 'sku', "ALTER TABLE catalog_items ADD COLUMN sku VARCHAR(100) NULL");
-    cc_add_column($pdo, 'catalog_items', 'item_type', "ALTER TABLE catalog_items ADD COLUMN item_type VARCHAR(50) NOT NULL DEFAULT 'part'");
-    cc_add_column($pdo, 'catalog_items', 'unit_of_measure', "ALTER TABLE catalog_items ADD COLUMN unit_of_measure VARCHAR(50) NOT NULL DEFAULT 'ea'");
-    cc_add_column($pdo, 'catalog_items', 'unit_cost', "ALTER TABLE catalog_items ADD COLUMN unit_cost DECIMAL(18,4) NOT NULL DEFAULT 0");
-    cc_add_column($pdo, 'catalog_items', 'labor_hours', "ALTER TABLE catalog_items ADD COLUMN labor_hours DECIMAL(18,4) NOT NULL DEFAULT 0");
-    cc_add_column($pdo, 'catalog_items', 'cost_code', "ALTER TABLE catalog_items ADD COLUMN cost_code VARCHAR(100) NULL");
-    cc_add_column($pdo, 'catalog_items', 'color', "ALTER TABLE catalog_items ADD COLUMN color VARCHAR(50) NULL");
-    cc_add_column($pdo, 'catalog_items', 'symbol', "ALTER TABLE catalog_items ADD COLUMN symbol VARCHAR(50) NULL");
-    cc_add_column($pdo, 'catalog_items', 'taxable', "ALTER TABLE catalog_items ADD COLUMN taxable TINYINT(1) NOT NULL DEFAULT 1");
-    cc_add_column($pdo, 'catalog_items', 'manufacturer', "ALTER TABLE catalog_items ADD COLUMN manufacturer VARCHAR(191) NULL");
-    cc_add_column($pdo, 'catalog_items', 'supplier', "ALTER TABLE catalog_items ADD COLUMN supplier VARCHAR(191) NULL");
-    cc_add_column($pdo, 'catalog_items', 'catalog_number', "ALTER TABLE catalog_items ADD COLUMN catalog_number VARCHAR(100) NULL");
-    cc_add_column($pdo, 'catalog_items', 'sub_job_code', "ALTER TABLE catalog_items ADD COLUMN sub_job_code VARCHAR(100) NULL");
-    cc_add_column($pdo, 'catalog_items', 'sub_job_name', "ALTER TABLE catalog_items ADD COLUMN sub_job_name VARCHAR(191) NULL");
-    cc_add_column($pdo, 'catalog_items', 'epd_url', "ALTER TABLE catalog_items ADD COLUMN epd_url VARCHAR(1024) NULL");
-    cc_add_column($pdo, 'catalog_items', 'attachment_url', "ALTER TABLE catalog_items ADD COLUMN attachment_url VARCHAR(1024) NULL");
-    cc_add_column($pdo, 'catalog_items', 'active', "ALTER TABLE catalog_items ADD COLUMN active TINYINT(1) NOT NULL DEFAULT 1");
-    cc_add_column($pdo, 'catalog_items', 'deleted_at', "ALTER TABLE catalog_items ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL");
-
-    try {
-        $pdo->exec("ALTER TABLE catalog_items MODIFY item_type ENUM('part','material','assembly','labor','equipment','subcontractor','travel','custom') NOT NULL DEFAULT 'material'");
-    } catch (Throwable $ignored) {
-        // Existing installations may keep the older ENUM; saves map material to part when needed.
-    }
-
-    cc_add_column($pdo, 'assembly_parts', 'unit_cost_snapshot', "ALTER TABLE assembly_parts ADD COLUMN unit_cost_snapshot DECIMAL(18,4) NOT NULL DEFAULT 0");
-    cc_add_column($pdo, 'assembly_parts', 'unit_labor_time_snapshot', "ALTER TABLE assembly_parts ADD COLUMN unit_labor_time_snapshot DECIMAL(18,4) NOT NULL DEFAULT 0");
-    cc_add_column($pdo, 'assembly_parts', 'deleted_at', "ALTER TABLE assembly_parts ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL");
-
-    $count = (int)$pdo->query("SELECT COUNT(*) FROM catalogs WHERE deleted_at IS NULL")->fetchColumn();
-    if ($count === 0) {
-        $catalogs = ['Electrical', 'Plumbing', 'Fire Sprinkler', 'Low Voltage', 'Residential Electrical'];
-        $stmt = $pdo->prepare("INSERT INTO catalogs (name, description, trade, active, locked, enabled_for_projects) VALUES (?, ?, ?, 1, 0, 1)");
-        foreach ($catalogs as $name) {
-            $stmt->execute([$name, $name . ' cost catalog', $name]);
-            $catalogId = (int)$pdo->lastInsertId();
-            $pdo->prepare("INSERT INTO cost_catalogs (catalog_id, name, description, currency_code, active) VALUES (?, ?, ?, 'USD', 1)")
-                ->execute([$catalogId, $name . ' Cost Book', 'Default cost book']);
-        }
-    }
-
-    $electricalId = (int)$pdo->query("SELECT id FROM catalogs WHERE name = 'Electrical' AND deleted_at IS NULL LIMIT 1")->fetchColumn();
-    if ($electricalId > 0) {
-        $stmtCount = $pdo->prepare("SELECT COUNT(*) FROM catalog_groups WHERE catalog_id = ? AND deleted_at IS NULL");
-        $stmtCount->execute([$electricalId]);
-        if ((int)$stmtCount->fetchColumn() === 0) {
-            $groups = ['EMT', 'EMT Assemblies', 'EMT Extras', 'PVC', 'RMC', 'Feeders Assemblies', 'Fire Alarm', 'Gear and Panelboards', 'General Controls', 'Lighting', 'Controls', 'Rough-in'];
-            $stmt = $pdo->prepare("INSERT INTO catalog_groups (catalog_id, name, sort_order, active, enabled_for_projects) VALUES (?, ?, ?, 1, 1)");
-            foreach ($groups as $index => $name) $stmt->execute([$electricalId, $name, ($index + 1) * 10]);
-        }
-
-        $itemCountStmt = $pdo->prepare("SELECT COUNT(*) FROM catalog_items WHERE catalog_id = ? AND deleted_at IS NULL");
-        $itemCountStmt->execute([$electricalId]);
-        if ((int)$itemCountStmt->fetchColumn() === 0) {
-            $emtGroup = (int)$pdo->query("SELECT id FROM catalog_groups WHERE catalog_id = $electricalId AND name = 'EMT' LIMIT 1")->fetchColumn();
-            $lightingGroup = (int)$pdo->query("SELECT id FROM catalog_groups WHERE catalog_id = $electricalId AND name = 'Lighting' LIMIT 1")->fetchColumn();
-            $items = [
-                [$electricalId, $emtGroup, 'EMT Conduit 1/2 inch', 'Electrical metallic tubing', 'ft', 0.85, 0.0100, cc_item_type_for_db($pdo, 'material'), '#2563eb', 'line'],
-                [$electricalId, $emtGroup, 'EMT Connector 1/2 inch', 'Compression connector', 'ea', 1.15, 0.0200, cc_item_type_for_db($pdo, 'material'), '#16a34a', 'circle'],
-                [$electricalId, $lightingGroup, 'Lighting Fixture A Assembly', 'Fixture package placeholder', 'ea', 125.00, 0.7500, cc_item_type_for_db($pdo, 'assembly'), '#f59e0b', 'square'],
-            ];
-            $stmt = $pdo->prepare("INSERT INTO catalog_items (catalog_id, catalog_group_id, name, description, unit_of_measure, unit_cost, labor_hours, item_type, color, symbol, active) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, 1)");
-            foreach ($items as $item) $stmt->execute($item);
-        }
-    }
 }
 
 function cc_item_input(PDO $pdo, array $input): array
@@ -466,15 +277,16 @@ function cc_payload(PDO $pdo, string $view = 'all', int $catalogId = 0, int $gro
     return compact('catalogs','groups','items','allItems','assemblyParts','blockedAssemblies','capabilities','availability');
 }
 try {
-    cc_ensure_schema($pdo);
+    // Schema is deployment-owned. Apply db/migrations before serving this endpoint;
+    // request-time CREATE/ALTER repair is intentionally disabled.
 
     // Backwards-compatible adapter: the legacy UI keeps its action names and
     // response payload, while every mutation is executed by the same domain
     // service used by api/catalog_admin.php.
     $legacyCommands = [
-        'copy_catalog'=>'catalog.copy','delete_catalog'=>'catalog.archive','toggle_catalog'=>'catalog.toggle',
-        'copy_group'=>'category.copy','delete_group'=>'category.archive','toggle_group'=>'category.toggle',
-        'duplicate_item'=>'item.duplicate','delete_item'=>'item.archive','move_item'=>'item.move',
+        'copy_catalog'=>'catalog.copy','delete_catalog'=>'catalog.archive','restore_catalog'=>'catalog.restore','toggle_catalog'=>'catalog.toggle','reorder_catalogs'=>'catalog.reorder',
+        'copy_group'=>'category.copy','delete_group'=>'category.archive','restore_group'=>'category.restore','toggle_group'=>'category.toggle','reorder_groups'=>'category.reorder',
+        'duplicate_item'=>'item.duplicate','delete_item'=>'item.archive','restore_item'=>'item.restore','move_item'=>'item.move',
         'convert_item_assembly'=>'item.convert_assembly','add_assembly_part'=>'assembly_component.add',
         'update_assembly_part'=>'assembly_component.update',
         'reorder_assembly_parts'=>'assembly_component.reorder',
@@ -490,7 +302,8 @@ try {
             $view = (string)($input['view'] ?? 'all');
             $catalogId = cc_int($input['catalog_id'] ?? ($result['entity']['catalog_id'] ?? 0));
             $groupId = cc_int($input['group_id'] ?? $input['catalog_group_id'] ?? ($result['entity']['catalog_group_id'] ?? 0));
-            cc_json(['status'=>'success','id'=>$resultId,'revision'=>$result['entity']['revision'] ?? null,
+            cc_json(['status'=>'success','id'=>$resultId,'revision'=>$result['entity']['revision'] ?? ($result['assembly']['revision'] ?? null),'merged'=>$result['merged']??false,
+                'affected_items'=>$result['affected_items']??null,'affected_categories'=>$result['affected_categories']??null,
                 'data'=>cc_payload($pdo, $view, $catalogId, $groupId)]);
         } catch (CatalogRevisionConflict $e) {
             cc_json(['status'=>'error','code'=>'revision_conflict','msg'=>$e->getMessage(),'current'=>$e->current],409);

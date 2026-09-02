@@ -12,7 +12,16 @@
     let itemSort = 'name';
     let itemSortDirection = 1;
     let itemTypeFilter = 'all';
+    let measurementFilter = 'all';
+    let statusFilter = 'active';
+    let uomFilter = 'all';
     let assemblyAdvanced = false;
+    const expandedCatalogs = new Set();
+    const expandedGroups = new Set();
+    let entityEditor = null;
+    let archivingCategoryId = null;
+    let assemblyPartsByAssembly = new Map();
+    function rebuildAssemblyIndex(){assemblyPartsByAssembly=new Map();state.assemblyParts.forEach(part=>{const key=Number(part.assembly_catalog_item_id);if(!assemblyPartsByAssembly.has(key))assemblyPartsByAssembly.set(key,[]);assemblyPartsByAssembly.get(key).push(part);});assemblyPartsByAssembly.forEach(parts=>parts.sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||Number(a.id)-Number(b.id)));}
 
     const esc = (value) => String(value ?? '').replace(/[&<>"']/g, ch => ({
         '&': '&amp;',
@@ -33,8 +42,7 @@
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action, ...payload })
-        }).then(r => r.json()).then(data => {
-            if (data.status !== 'success') throw new Error(data.msg || 'Cost Catalog request failed');
+        }).then(async r => { const data=await r.json().catch(()=>({})); if(!r.ok||data.status!=='success'){const error=new Error(data.msg||'Cost Catalog request failed');error.code=data.code||'request_failed';error.status=r.status;error.current=data.current||null;error.details=data.details||null;throw error;} return data; }).then(data => {
             return data;
         });
     }
@@ -73,6 +81,7 @@
 
     function load() {
         const params = new URLSearchParams({ action: 'list', view: selection.view });
+        if (statusFilter !== 'active') params.set('include_deleted', '1');
         if (selection.catalogId) params.set('catalog_id', selection.catalogId);
         if (selection.groupId) params.set('group_id', selection.groupId);
         return fetch(`${apiUrl}?${params.toString()}`)
@@ -86,6 +95,7 @@
     }
 
     function render() {
+        rebuildAssemblyIndex();
         renderTree();
         renderActions();
         renderItems();
@@ -138,36 +148,31 @@
         const root = document.getElementById('ccCatalogTree');
         root.setAttribute('role', 'tree');
         root.setAttribute('aria-label', 'Catalog and category hierarchy');
-        root.innerHTML = state.catalogs.map(catalog => {
-            const groups = state.groups.filter(group => Number(group.catalog_id) === Number(catalog.id) && !group.parent_group_id);
+        const childrenByParent=new Map();
+        state.groups.forEach(group=>{const key=`${group.catalog_id}:${Number(group.parent_group_id||0)}`;if(!childrenByParent.has(key))childrenByParent.set(key,[]);childrenByParent.get(key).push(group);});
+        childrenByParent.forEach(rows=>rows.sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||String(a.name).localeCompare(String(b.name))));
+        root.innerHTML = state.catalogs.slice().sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||String(a.name).localeCompare(String(b.name))).map(catalog => {
+            const groups = childrenByParent.get(`${catalog.id}:0`)||[];
+            const expanded=expandedCatalogs.has(Number(catalog.id))||selection.catalogId===Number(catalog.id)||groups.some(g=>Number(g.id)===Number(selection.groupId));
             return `
-                <button class="cc-tree-row ${selection.catalogId === Number(catalog.id) && selection.view === 'catalog' ? 'active' : ''}" data-catalog-id="${catalog.id}" role="treeitem" aria-level="1" aria-selected="${selection.catalogId === Number(catalog.id) && selection.view === 'catalog'}">
-                    <i class="fas fa-book"></i><span>${esc(catalog.name)}</span><span class="status ${Number(catalog.active) ? '' : 'off'}"></span>
-                </button>
-                ${groups.map(group => renderGroup(group, 'group')).join('')}
+                <div class="cc-tree-node ${catalog.deleted_at?'archived':''}" role="treeitem" aria-level="1" aria-expanded="${expanded}" aria-selected="${selection.catalogId === Number(catalog.id) && selection.view === 'catalog'}">
+                  <button class="cc-tree-toggle" data-tree-toggle-catalog="${catalog.id}" aria-label="${expanded?'Collapse':'Expand'} ${esc(catalog.name)}"><i class="fas fa-chevron-${expanded?'down':'right'}"></i></button>
+                  <button class="cc-tree-row ${selection.catalogId === Number(catalog.id) && selection.view === 'catalog' ? 'active' : ''}" data-catalog-id="${catalog.id}"><i class="fas fa-book"></i><span>${esc(catalog.name)}</span><span class="status ${Number(catalog.active) ? '' : 'off'}"></span></button>
+                </div>
+                ${expanded?groups.map(group => renderGroup(group, 2, childrenByParent)).join(''):''}
             `;
         }).join('');
-        root.querySelectorAll('[data-catalog-id]').forEach(button => {
-            button.addEventListener('click', () => {
-                selection = { view: 'catalog', catalogId: Number(button.dataset.catalogId), groupId: null };
-                load();
-            });
-        });
-        root.querySelectorAll('[data-group-id]').forEach(button => {
-            button.addEventListener('click', () => {
-                selection = { view: 'group', catalogId: null, groupId: Number(button.dataset.groupId) };
-                load();
-            });
-        });
     }
 
-    function renderGroup(group, cls) {
-        const children = state.groups.filter(row => Number(row.parent_group_id || 0) === Number(group.id));
+    function renderGroup(group, level, childrenByParent) {
+        const children = childrenByParent.get(`${group.catalog_id}:${group.id}`)||[];
+        const expanded=expandedGroups.has(Number(group.id))||children.some(child=>Number(child.id)===Number(selection.groupId));
         return `
-            <button class="cc-tree-row ${cls} ${selection.groupId === Number(group.id) ? 'active' : ''}" data-group-id="${group.id}" role="treeitem" aria-level="${cls === 'subgroup' ? 3 : 2}" aria-selected="${selection.groupId === Number(group.id)}" aria-label="Category: ${esc(group.name)}">
-                <i class="fas fa-folder"></i><span>${esc(group.name)}</span><span class="status ${Number(group.active) ? '' : 'off'}"></span>
-            </button>
-            ${children.map(child => renderGroup(child, 'subgroup')).join('')}
+            <div class="cc-tree-node cc-tree-level-${level} ${group.deleted_at?'archived':''}" role="treeitem" aria-level="${level}" ${children.length?`aria-expanded="${expanded}"`:''} aria-selected="${selection.groupId === Number(group.id)}">
+              ${children.length?`<button class="cc-tree-toggle" data-tree-toggle-group="${group.id}" aria-label="${expanded?'Collapse':'Expand'} ${esc(group.name)}"><i class="fas fa-chevron-${expanded?'down':'right'}"></i></button>`:'<span class="cc-tree-toggle-spacer"></span>'}
+              <button class="cc-tree-row group ${selection.groupId === Number(group.id) ? 'active' : ''}" data-group-id="${group.id}" aria-label="Category: ${esc(group.name)}"><i class="fas fa-folder"></i><span>${esc(group.name)}</span><span class="status ${Number(group.active) ? '' : 'off'}"></span></button>
+            </div>
+            ${expanded?children.map(child => renderGroup(child, level+1,childrenByParent)).join(''):''}
         `;
     }
 
@@ -182,8 +187,8 @@
             <button class="cc-btn" data-catalog-action="add">Add Catalog</button>
             <button class="cc-btn" data-catalog-action="rename" ${!catalog ? 'disabled' : ''}>Rename</button>
             <button class="cc-btn" data-catalog-action="copy" ${!catalog ? 'disabled' : ''}>Copy</button>
-            <button class="cc-btn" data-catalog-action="move" ${!catalog ? 'disabled' : ''}>Move</button>
-            <button class="cc-btn danger" data-catalog-action="delete" ${!catalog ? 'disabled' : ''}>Delete</button>
+            <button class="cc-btn" data-catalog-action="up" ${!catalog ? 'disabled' : ''}>Move up</button><button class="cc-btn" data-catalog-action="down" ${!catalog ? 'disabled' : ''}>Move down</button>
+            <button class="cc-btn ${catalog?.deleted_at?'':'danger'}" data-catalog-action="${catalog?.deleted_at?'restore':'delete'}" ${!catalog ? 'disabled' : ''}>${catalog?.deleted_at?'Restore':'Archive'}</button>
             <button class="cc-btn" data-catalog-action="active" ${!catalog ? 'disabled' : ''}>${catalog && Number(catalog.active) ? 'Deactivate' : 'Activate'}</button>
             <button class="cc-btn" data-catalog-action="enabled" ${!catalog ? 'disabled' : ''}>${catalog && Number(catalog.enabled_for_projects) ? 'Disable Projects' : 'Enable Projects'}</button>
         `;
@@ -192,27 +197,33 @@
             <button class="cc-btn" data-group-action="rename" ${!group ? 'disabled' : ''}>Rename</button>
             <button class="cc-btn" data-group-action="copy" ${!group ? 'disabled' : ''}>Copy</button>
             <button class="cc-btn" data-group-action="move" ${!group ? 'disabled' : ''}>Move</button>
-            <button class="cc-btn danger" data-group-action="delete" ${!group ? 'disabled' : ''}>Delete</button>
+            <button class="cc-btn" data-group-action="up" ${!group ? 'disabled' : ''}>Move up</button><button class="cc-btn" data-group-action="down" ${!group ? 'disabled' : ''}>Move down</button>
+            <button class="cc-btn ${group?.deleted_at?'':'danger'}" data-group-action="${group?.deleted_at?'restore':'delete'}" ${!group ? 'disabled' : ''}>${group?.deleted_at?'Restore':'Archive'}</button>
             <button class="cc-btn" data-group-action="active" ${!group ? 'disabled' : ''}>Toggle</button>
             <button class="cc-btn" data-group-action="enabled" ${!group ? 'disabled' : ''}>Enabled for projects</button>
         `;
-        document.querySelectorAll('[data-catalog-action]').forEach(btn => btn.addEventListener('click', () => catalogAction(btn.dataset.catalogAction)));
-        document.querySelectorAll('[data-group-action]').forEach(btn => btn.addEventListener('click', () => groupAction(btn.dataset.groupAction)));
     }
 
     function renderItems() {
         const body = document.getElementById('ccItemsBody');
-        const normalizedQuery = itemQuery.trim().toLowerCase();
+        const normalizeSearch=value=>String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
+        const normalizedQuery = normalizeSearch(itemQuery);
         const valueForSort = item => {
             if (itemSort === 'cost') return Number(item.unit_cost || 0);
             if (itemSort === 'labor') return Number(item.labor_hours || 0);
             if (itemSort === 'catalog') return String(item.catalog_name || '').toLowerCase();
+            if (itemSort === 'created') return String(item.created_at || '');
+            if (itemSort === 'updated') return String(item.updated_at || '');
             return String(item.name || '').toLowerCase();
         };
-        const items = state.items.filter(item => itemTypeFilter === 'all' || String(item.item_type || 'part').toLowerCase() === itemTypeFilter)
+        const normalizeType=item=>String(item.item_type||'part').toLowerCase()==='material'?'part':String(item.item_type||'part').toLowerCase();
+        const items = state.items.filter(item => itemTypeFilter === 'all' || normalizeType(item) === itemTypeFilter)
+            .filter(item=>measurementFilter==='all'||String(item.measurement_type||'count')===measurementFilter)
+            .filter(item=>uomFilter==='all'||String(item.unit_of_measure||'ea')===uomFilter)
+            .filter(item=>statusFilter==='all'||(statusFilter==='archived'?Boolean(item.deleted_at):!item.deleted_at))
             .filter(item => !normalizedQuery || [item.name, item.description,
-            item.catalog_name, item.group_name, item.manufacturer, item.catalog_number, item.cost_code]
-            .some(value => String(value || '').toLowerCase().includes(normalizedQuery)))
+            item.catalog_name, item.group_name, item.manufacturer,item.supplier,item.catalog_number,item.cost_code,item.masterformat,item.uniformat]
+            .some(value => normalizeSearch(value).includes(normalizedQuery)))
             .slice().sort((a, b) => {
                 const left = valueForSort(a);
                 const right = valueForSort(b);
@@ -221,14 +232,7 @@
         const resultCount = document.getElementById('ccResultCount');
         if (resultCount) resultCount.textContent = `${items.length} ${items.length === 1 ? 'item' : 'items'}`;
         body.innerHTML = items.map(CatalogItemRow).join('') || '<tr class="cc-empty-row"><td colspan="8"><i class="fas fa-box-open" aria-hidden="true"></i>No catalog items match this view.</td></tr>';
-        /* CatalogItemRow owns the row markup; keep listeners below delegated to its data attributes. */
-        body.querySelectorAll('[data-item-menu]').forEach(button => {
-            button.addEventListener('click', event => {
-                event.stopPropagation(); const menu = button.closest('.cc-row-menu'); const opening = !menu.classList.contains('open'); closeItemMenus();
-                if (opening) { menu.classList.add('open'); button.setAttribute('aria-expanded', 'true'); positionItemMenu(button, menu.querySelector('.cc-row-menu-panel')); }
-            });
-        });
-        body.querySelectorAll('[data-item-action]').forEach(button => button.addEventListener('click', () => itemAction(button.dataset.itemAction, Number(button.dataset.id))));
+        const uom=document.getElementById('ccUomFilter');const current=uom.value;uom.innerHTML='<option value="all">All units</option>'+[...new Set(state.allItems.map(item=>item.unit_of_measure||'ea'))].sort().map(value=>`<option value="${esc(value)}">${esc(value)}</option>`).join('');uom.value=[...uom.options].some(o=>o.value===current)?current:'all';
     }
 
     function canonicalItemMetrics(item) {
@@ -242,7 +246,7 @@
     function CatalogItemRow(item) {
         const metrics = canonicalItemMetrics(item);
         return `
-            <tr>
+            <tr class="${item.deleted_at?'cc-archived-row':''}">
                 <td>
                     <button class="cc-item-name" type="button" data-item-details="${item.id}" title="View ${esc(item.name)} details">${esc(item.name)}</button>
                     <span class="cc-item-meta"><span class="cc-pill">${displayItemType(item.item_type)}</span>
@@ -262,10 +266,8 @@
                                 <button type="button" data-item-action="edit" data-id="${item.id}" role="menuitem"><i class="fas fa-pen"></i>Edit</button>
                                 <button type="button" data-item-action="duplicate" data-id="${item.id}" role="menuitem"><i class="far fa-copy"></i>Duplicate</button>
                                 <button type="button" data-item-action="move" data-id="${item.id}" role="menuitem"><i class="fas fa-arrow-right-arrow-left"></i>Move</button>
-                                <button type="button" data-item-action="assembly" data-id="${item.id}" role="menuitem"><i class="fas fa-cubes"></i>Convert to assembly</button>
-                                <button type="button" data-item-action="takeoff" data-id="${item.id}" role="menuitem"><i class="fas fa-ruler-combined"></i>Add to Takeoff</button>
-                                <button type="button" data-item-action="history" data-id="${item.id}" role="menuitem"><i class="fas fa-clock-rotate-left"></i>Usage history</button>
-                                <button class="danger" type="button" data-item-action="delete" data-id="${item.id}" role="menuitem"><i class="fas fa-trash"></i>Delete</button>
+                                ${String(item.item_type).toLowerCase()!=='assembly'&&!item.deleted_at?`<button type="button" data-item-action="assembly" data-id="${item.id}" role="menuitem"><i class="fas fa-cubes"></i>Convert to assembly</button>`:''}
+                                ${item.deleted_at?`<button type="button" data-item-action="restore" data-id="${item.id}" role="menuitem"><i class="fas fa-rotate-left"></i>Restore</button>`:`<button class="danger" type="button" data-item-action="delete" data-id="${item.id}" role="menuitem"><i class="fas fa-box-archive"></i>Archive</button>`}
                             </div>
                         </div>
                     </div>
@@ -294,13 +296,13 @@
     function renderItemDetails(item) {
         const type = String(item.item_type || 'part').toLowerCase();
         const metrics = canonicalItemMetrics(item);
-        const common = [detailField('Type', displayItemType(type)), detailField('Description', item.description), detailField('Unit of measure', item.unit_of_measure || 'ea'), detailField('Catalog', item.catalog_name), detailField('Category', item.group_name), detailField('Cost code', item.cost_code), detailField('Catalog number', item.catalog_number), detailField('Manufacturer', item.manufacturer), detailField('Supplier', item.supplier)];
+        const common = [detailField('Type', displayItemType(type)), detailField('Description', item.description), detailField('Unit of measure', item.unit_of_measure || 'ea'),detailField('Measurement type',item.measurement_type||'count'), detailField('Catalog', item.catalog_name), detailField('Category', item.group_name), detailField('Cost code', item.cost_code), detailField('Catalog number', item.catalog_number), detailField('Manufacturer', item.manufacturer), detailField('Supplier', item.supplier),detailField('Size',item.size),detailField('Diameter',item.diameter),detailField('Trade size',item.trade_size),detailField('Thickness',item.thickness),detailField('Gauge',item.gauge),detailField('Material',item.material),detailField('Markup',`${Number(item.markup_percent||0)}%`),detailField('Waste',`${Number(item.waste_factor_percent||0)}%`),detailField('Notes',item.notes)];
         const specific = type === 'labor'
             ? [detailField('Labor time', `${Number(item.labor_hours || 0).toFixed(4)} hr`)]
             : type === 'equipment'
                 ? [detailField('Equipment cost', money(item.unit_cost))]
                 : [detailField(type === 'assembly' ? 'Assembly cost' : 'Material cost', money(item.unit_cost)), detailField('Labor time', `${Number(item.labor_hours || 0).toFixed(4)} hr`)];
-        const parts = type === 'assembly' ? state.assemblyParts.filter(part => Number(part.assembly_catalog_item_id) === Number(item.id)) : [];
+        const parts = type === 'assembly' ? (assemblyPartsByAssembly.get(Number(item.id))||[]) : [];
         const included = type === 'assembly' ? `<section class="cc-detail-section"><h3>Included items</h3><div class="cc-included-items">${parts.map(part => `<article><strong>${esc(part.child_item_name || 'Catalog item')}</strong><span>${esc(part.child_item_unit || 'ea')} · Qty ${Number(part.quantity || 0)}</span><small>${money(part.unit_cost_snapshot)} · ${Number(part.unit_labor_time_snapshot || 0).toFixed(4)} hr</small></article>`).join('') || '<p class="cc-details-empty">No included items.</p>'}</div></section>` : '';
         return `<section class="cc-detail-summary"><span class="cc-pill">${displayItemType(type)}</span><h3>${esc(item.name)}</h3><p>${esc(item.description || 'No description provided.')}</p><div class="cc-detail-metrics"><strong>${esc(metrics.primary)}</strong><span>${esc(metrics.secondary)}</span></div></section><section class="cc-detail-section"><h3>Item information</h3><dl class="cc-detail-list">${common.join('')}${specific.join('')}${detailField('Taxable', Number(item.taxable) ? 'Yes' : 'No')}${detailLink('EPD', item.epd_url)}${detailLink('Attachment', item.attachment_url)}</dl></section>${included}`;
     }
@@ -366,7 +368,7 @@
     }
 
     function displayItemType(type) {
-        return type === 'part' ? 'material' : esc(type || 'material');
+        const normalized=String(type||'part').toLowerCase();return normalized==='material'||normalized==='part'?'Part':esc(normalized);
     }
 
     function currentCatalog() {
@@ -387,107 +389,56 @@
 
     function catalogAction(action) {
         const catalog = currentCatalog();
-        if (action === 'add') return saveCatalog();
+        if (action === 'add') return openEntityModal('catalog');
         if (!catalog) return;
-        if (action === 'rename') return saveCatalog(catalog);
-        if (action === 'copy') return mutate('copy_catalog', { id: catalog.id });
-        if (action === 'move') return alert('Move catalog is reserved for catalog ordering.');
+        if (action === 'rename') return openEntityModal('catalog',catalog);
+        if (action === 'copy') return mutate('copy_catalog', revisionPayload(catalog,{ id: catalog.id }));
+        if (action === 'up'||action==='down') return reorderEntity('catalog',catalog,action);
         if (action === 'delete') {
-            if (!confirm(`Delete catalog "${catalog.name}"? Locked catalogs are protected.`)) return;
-            return mutate('delete_catalog', { id: catalog.id });
+            if (!confirm(`Archive catalog "${catalog.name}"? Its historical references will be preserved.`)) return;
+            return mutate('delete_catalog', revisionPayload(catalog,{ id: catalog.id }));
         }
-        if (action === 'active') return mutate('toggle_catalog', { id: catalog.id, field: 'active' });
-        if (action === 'enabled') return mutate('toggle_catalog', { id: catalog.id, field: 'enabled_for_projects' });
-    }
-
-    function saveCatalog(catalog = null) {
-        const name = prompt('Catalog name', catalog?.name || '');
-        if (!name) return;
-        const description = prompt('Description', catalog?.description || '') || '';
-        request('save_catalog', {
-            id: catalog?.id || 0,
-            name,
-            description,
-            trade: catalog?.trade || name,
-            active: catalog ? Number(catalog.active) : 1,
-            locked: catalog ? Number(catalog.locked) : 0,
-            enabled_for_projects: catalog ? Number(catalog.enabled_for_projects) : 1
-        }).then(data => {
-            selection = { view: 'catalog', catalogId: Number(data.id), groupId: null };
-            state = data.data;
-            render();
-        }).catch(err => showError(err.message));
+        if(action==='restore')return mutate('restore_catalog',revisionPayload(catalog,{id:catalog.id}));
+        if (action === 'active') return mutate('toggle_catalog', revisionPayload(catalog,{ id: catalog.id, field: 'active' }));
+        if (action === 'enabled') return mutate('toggle_catalog', revisionPayload(catalog,{ id: catalog.id, field: 'enabled_for_projects' }));
     }
 
     function groupAction(action) {
         const group = currentGroup();
-        if (action === 'add') return saveGroup();
+        if (action === 'add') return openEntityModal('category');
         if (!group) return;
-        if (action === 'rename') return saveGroup(group);
-        if (action === 'copy') return mutate('copy_group', { id: group.id });
-        if (action === 'move') return moveGroup(group);
-        if (action === 'delete') {
-            if (!confirm(`Delete group "${group.name}"? Items will remain but lose this group selection.`)) return;
-            return mutate('delete_group', { id: group.id });
-        }
-        if (action === 'active') return mutate('toggle_group', { id: group.id, field: 'active' });
-        if (action === 'enabled') return mutate('toggle_group', { id: group.id, field: 'enabled_for_projects' });
+        if (action === 'rename'||action==='move') return openEntityModal('category',group);
+        if (action === 'copy') return mutate('copy_group', revisionPayload(group,{ id: group.id }));
+        if(action==='up'||action==='down')return reorderEntity('category',group,action);
+        if (action === 'delete') return openCategoryArchive(group);
+        if(action==='restore')return mutate('restore_group',revisionPayload(group,{id:group.id}));
+        if (action === 'active') return mutate('toggle_group', revisionPayload(group,{ id: group.id, field: 'active' }));
+        if (action === 'enabled') return mutate('toggle_group', revisionPayload(group,{ id: group.id, field: 'enabled_for_projects' }));
     }
 
-    function saveGroup(group = null) {
-        const fallbackCatalog = currentCatalog() || (group ? state.catalogs.find(c => Number(c.id) === Number(group.catalog_id)) : state.catalogs[0]);
-        if (!fallbackCatalog) return showError('Create a catalog before adding groups.');
-        const name = prompt('Group name', group?.name || '');
-        if (!name) return;
-        request('save_group', {
-            id: group?.id || 0,
-            catalog_id: group?.catalog_id || fallbackCatalog.id,
-            parent_group_id: group?.parent_group_id || '',
-            name,
-            description: group?.description || '',
-            sort_order: group?.sort_order || 0,
-            active: group ? Number(group.active) : 1,
-            enabled_for_projects: group ? Number(group.enabled_for_projects) : 1
-        }).then(data => {
-            selection = { view: 'group', catalogId: null, groupId: Number(data.id) };
-            state = data.data;
-            render();
-        }).catch(err => showError(err.message));
-    }
+    function revisionPayload(entity,payload={}){return entity?.revision!==undefined&&entity?.revision!==null?{...payload,expected_revision:Number(entity.revision)}:payload;}
 
-    function moveGroup(group) {
-        const catalogId = prompt('Move to catalog id', group.catalog_id);
-        if (!catalogId) return;
-        const parentGroupId = prompt('Parent group id for subgroup, or blank for top level', group.parent_group_id || '');
-        request('save_group', {
-            id: group.id,
-            catalog_id: catalogId,
-            parent_group_id: parentGroupId,
-            name: group.name,
-            description: group.description || '',
-            sort_order: group.sort_order || 0,
-            active: Number(group.active),
-            enabled_for_projects: Number(group.enabled_for_projects)
-        }).then(data => {
-            selection = { view: 'group', catalogId: null, groupId: Number(data.id) };
-            state = data.data;
-            render();
-        }).catch(err => showError(err.message));
-    }
+    function openEntityModal(kind,entity=null){if(kind==='category'&&!state.catalogs.length)return showError('Create a catalog before adding categories.');entityEditor={kind,entity};const modal=document.getElementById('ccEntityModal');document.getElementById('ccEntityTitle').textContent=`${entity?'Edit':'Create'} ${kind==='catalog'?'Catalog':'Category'}`;document.getElementById('ccEntityName').value=entity?.name||'';document.getElementById('ccEntityDescription').value=entity?.description||'';document.getElementById('ccEntityActive').checked=entity?Number(entity.active)!==0:true;document.getElementById('ccEntityEnabled').checked=entity?Number(entity.enabled_for_projects)!==0:true;document.querySelectorAll('[data-entity-category]').forEach(el=>el.hidden=kind!=='category');const catalog=document.getElementById('ccEntityCatalog');catalog.innerHTML=state.catalogs.filter(c=>!c.deleted_at).map(c=>`<option value="${c.id}">${esc(c.name)}</option>`).join('');catalog.value=String(entity?.catalog_id||selectedCatalogForNewItem());renderEntityParents(entity);document.getElementById('ccEntityError').hidden=true;modal.classList.add('open');document.getElementById('ccEntityName').focus();}
+    function renderEntityParents(entity=null){const catalogId=Number(document.getElementById('ccEntityCatalog').value||0),select=document.getElementById('ccEntityParent');select.innerHTML='<option value="">Top level</option>'+state.groups.filter(g=>Number(g.catalog_id)===catalogId&&!g.deleted_at&&Number(g.id)!==Number(entity?.id||0)).map(g=>`<option value="${g.id}">${esc(g.name)}</option>`).join('');select.value=String(entity?.parent_group_id||'');}
+    async function saveEntity(event){event.preventDefault();const {kind,entity}=entityEditor||{};if(!kind)return;const button=document.getElementById('ccEntitySave'),error=document.getElementById('ccEntityError');button.disabled=true;error.hidden=true;const payload=revisionPayload(entity,{id:entity?.id||0,name:document.getElementById('ccEntityName').value.trim(),description:document.getElementById('ccEntityDescription').value.trim(),active:document.getElementById('ccEntityActive').checked?1:0,enabled_for_projects:document.getElementById('ccEntityEnabled').checked?1:0});if(kind==='catalog'){payload.trade=entity?.trade||payload.name;payload.locked=Number(entity?.locked||0);payload.sort_order=Number(entity?.sort_order||0);}else{payload.catalog_id=Number(document.getElementById('ccEntityCatalog').value);payload.parent_group_id=document.getElementById('ccEntityParent').value;payload.sort_order=Number(entity?.sort_order||0);}try{const data=await request(kind==='catalog'?'save_catalog':'save_group',payload);state=data.data;selection=kind==='catalog'?{view:'catalog',catalogId:Number(data.id),groupId:null}:{view:'group',catalogId:null,groupId:Number(data.id)};closeEntityModal();render();}catch(err){error.textContent=err.code==='revision_conflict'?'This record changed elsewhere. Your entries were kept; reload the catalog before trying again.':err.message;error.hidden=false;}finally{button.disabled=false;}}
+    function closeEntityModal(){document.getElementById('ccEntityModal').classList.remove('open');entityEditor=null;}
+    function reorderEntity(kind,entity,direction){const list=(kind==='catalog'?state.catalogs:state.groups.filter(g=>Number(g.catalog_id)===Number(entity.catalog_id)&&Number(g.parent_group_id||0)===Number(entity.parent_group_id||0))).filter(row=>!row.deleted_at).slice().sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||Number(a.id)-Number(b.id));const index=list.findIndex(row=>Number(row.id)===Number(entity.id)),other=direction==='up'?index-1:index+1;if(index<0||other<0||other>=list.length)return;[list[index],list[other]]=[list[other],list[index]];mutate(kind==='catalog'?'reorder_catalogs':'reorder_groups',kind==='catalog'?{ordered_ids:list.map(row=>row.id)}:{catalog_id:entity.catalog_id,parent_group_id:entity.parent_group_id||'',ordered_ids:list.map(row=>row.id)});}
+    function openCategoryArchive(group){archivingCategoryId=Number(group.id);const descendants=state.groups.filter(g=>Number(g.parent_group_id||0)===Number(group.id));const items=state.allItems.filter(i=>Number(i.catalog_group_id||0)===Number(group.id));document.getElementById('ccArchiveCategoryImpact').textContent=`${items.length} cost item(s) and ${descendants.length} direct subcategory(ies) are affected. Items will be moved, never deleted.`;const target=document.getElementById('ccArchiveCategoryTarget');target.innerHTML='<option value="">Uncategorized</option>'+state.groups.filter(g=>Number(g.catalog_id)===Number(group.catalog_id)&&Number(g.id)!==Number(group.id)&&!g.deleted_at).map(g=>`<option value="${g.id}">${esc(g.name)}</option>`).join('');document.getElementById('ccArchiveCategoryTree').checked=descendants.length>0;document.getElementById('ccArchiveCategoryModal').classList.add('open');}
+    async function archiveCategory(event){event.preventDefault();const group=state.groups.find(g=>Number(g.id)===archivingCategoryId),error=document.getElementById('ccArchiveCategoryError');if(!group)return;error.hidden=true;try{const data=await request('delete_group',revisionPayload(group,{id:group.id,target_group_id:document.getElementById('ccArchiveCategoryTarget').value,archive_tree:document.getElementById('ccArchiveCategoryTree').checked?1:0}));state=data.data;selection={view:'catalog',catalogId:Number(group.catalog_id),groupId:null};closeCategoryArchive();render();}catch(err){error.textContent=err.message;error.hidden=false;}}
+    function closeCategoryArchive(){document.getElementById('ccArchiveCategoryModal').classList.remove('open');archivingCategoryId=null;}
 
     function itemAction(action, id) {
-        const item = state.items.find(row => Number(row.id) === id);
+        const item = (state.allItems?.length?state.allItems:state.items).find(row => Number(row.id) === id);
         if (!item) return;
         if (action === 'edit') return openItemModal(item);
-        if (action === 'duplicate') return mutate('duplicate_item', { id });
+        if (action === 'duplicate') return mutate('duplicate_item', revisionPayload(item,{ id }));
         if (action === 'move') return openMoveItemModal(item);
-        if (action === 'assembly') return mutate('convert_item_assembly', currentContextPayload({ id }));
+        if (action === 'assembly') return mutate('convert_item_assembly', currentContextPayload(revisionPayload(item,{ id })));
         if (action === 'delete') {
             if (!confirm(`Delete item "${item.name}"?`)) return;
-            return mutate('delete_item', currentContextPayload({ id }));
+            return mutate('delete_item', currentContextPayload(revisionPayload(item,{ id })));
         }
-        if (action === 'takeoff') return alert('This item is ready for takeoff layer selection in the Takeoff task.');
-        if (action === 'history') return alert('Usage history will be populated when takeoff and estimates start consuming catalog items.');
+        if(action==='restore')return mutate('restore_item',currentContextPayload(revisionPayload(item,{id})));
     }
 
     function currentContextPayload(extra = {}) {
@@ -498,6 +449,7 @@
             group_id: selection.groupId || ''
         };
     }
+    function assemblyContext(extra={}){const parent=(state.allItems?.length?state.allItems:state.items).find(row=>Number(row.id)===Number(editingItemId));return currentContextPayload(revisionPayload(parent,extra));}
 
     function openItemModal(item = null) {
         modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
@@ -513,12 +465,25 @@
         document.getElementById('ccItemDescription').value = item?.description || '';
         document.getElementById('ccItemType').value = item?.item_type === 'material' ? 'part' : (item?.item_type || 'part');
         document.getElementById('ccItemUom').value = item?.unit_of_measure || 'ea';
+        document.getElementById('ccItemMeasurementType').value = item?.measurement_type || 'count';
         document.getElementById('ccItemUnitCost').value = item?.unit_cost || '0';
+        document.getElementById('ccItemMaterialCost').value = item?.material_cost || '0';
+        document.getElementById('ccItemLaborCost').value = item?.labor_cost || '0';
+        document.getElementById('ccItemEquipmentCost').value = item?.equipment_cost || '0';
         document.getElementById('ccItemLaborHours').value = item?.labor_hours || '0';
         document.getElementById('ccItemLaborRate').value = item?.labor_rate || '0';
+        document.getElementById('ccItemMarkup').value = item?.markup_percent || '0';
+        document.getElementById('ccItemWaste').value = item?.waste_factor_percent || '0';
         document.getElementById('ccItemTaxable').value = String(item?.taxable ?? '1');
         document.getElementById('ccItemColor').value = item?.color || '#2563eb';
         document.getElementById('ccItemSymbol').value = item?.symbol || 'circle';
+        document.getElementById('ccItemMarkerSize').value = item?.marker_size ?? '';
+        document.getElementById('ccItemSize').value = item?.size || '';
+        document.getElementById('ccItemDiameter').value = item?.diameter || '';
+        document.getElementById('ccItemTradeSize').value = item?.trade_size || '';
+        document.getElementById('ccItemThickness').value = item?.thickness || '';
+        document.getElementById('ccItemGauge').value = item?.gauge || '';
+        document.getElementById('ccItemMaterial').value = item?.material || '';
         document.getElementById('ccItemManufacturer').value = item?.manufacturer || '';
         document.getElementById('ccItemSupplier').value = item?.supplier || '';
         document.getElementById('ccItemCatalogNumber').value = item?.catalog_number || item?.sku || '';
@@ -529,6 +494,9 @@
         document.getElementById('ccItemSubJobName').value = item?.sub_job_name || '';
         document.getElementById('ccItemEpdUrl').value = item?.epd_url || '';
         document.getElementById('ccItemAttachmentUrl').value = item?.attachment_url || '';
+        let tags=[];try{tags=typeof item?.tags_json==='string'?JSON.parse(item.tags_json||'[]'):(item?.tags_json||[]);}catch(_){tags=[];}document.getElementById('ccItemTags').value=Array.isArray(tags)?tags.map(tag=>typeof tag==='string'?tag:(tag.name||'')).filter(Boolean).join(', '):'';
+        document.getElementById('ccItemAttributes').value=typeof item?.attributes_json==='string'?item.attributes_json:JSON.stringify(item?.attributes_json||{},null,2);
+        document.getElementById('ccItemNotes').value=item?.notes||'';
         renderPdfAttachment(item);
         toggleAssemblySection();
         renderAssemblyParts();
@@ -555,6 +523,7 @@
     }
 
     function renderAssemblyParts() {
+        rebuildAssemblyIndex();
         const body = document.getElementById('ccAssemblyPartsBody');
         const note = document.getElementById('ccAssemblyNote');
         const totalsEl = document.getElementById('ccAssemblyTotals');
@@ -565,19 +534,20 @@
             return;
         }
         if (!editingItemId) {
-            body.innerHTML = '<tr><td colspan="8" class="cc-assembly-empty">Save the assembly item before adding included items.</td></tr>';
+            body.innerHTML = '<tr><td colspan="9" class="cc-assembly-empty">Save the assembly item before adding included items.</td></tr>';
             note.textContent = 'Create the assembly first, then edit it to add included items.';
             totalsEl.textContent = 'Cost $0.00 - Labor 0.0000';
             return;
         }
         note.textContent = '';
-        const parts = state.assemblyParts.filter(part => Number(part.assembly_catalog_item_id) === Number(editingItemId)).sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||Number(a.id)-Number(b.id));
-        const source=state.allItems?.length?state.allItems:state.items;let totalCost=0,totalLabor=0;
-        if(window.CatalogItemContract&&window.AssemblyExpansionService){const canonical=source.map(item=>window.CatalogItemContract.normalizeCatalogItem(item,{assemblyParts:state.assemblyParts}));const root=canonical.find(item=>String(item.id)===String(editingItemId));if(root){const preview=window.AssemblyExpansionService.expandAssembly(root,1,{catalogIndex:new Map(canonical.map(item=>[String(item.id),item])),pricingSource:'CURRENT_CATALOG',linearLength:1,area:1,endpointCount:1});preview.leaves.forEach(row=>{const pricing=row.pricing||{};totalCost+=row.pricedQuantity*Number(pricing.materialUnitCost||pricing.equipmentUnitCost||pricing.subcontractorUnitCost||pricing.legacyUnitCost||0);totalLabor+=row.pricedQuantity*Number(pricing.laborHoursPerUnit||0);});note.textContent=preview.errors.length?'Preview blocked: assembly cycle or invalid ratio input.':'Preview uses the canonical assembly expansion engine.';}}
+        const parts = assemblyPartsByAssembly.get(Number(editingItemId))||[];
+        const source=state.allItems?.length?state.allItems:state.items;let totalCost=0,totalLabor=0,canonicalValid=false;
+        if(window.CatalogItemContract&&window.AssemblyExpansionService){const canonical=source.map(item=>window.CatalogItemContract.normalizeCatalogItem(item,{assemblyParts:state.assemblyParts}));const root=canonical.find(item=>String(item.id)===String(editingItemId));if(root){const preview=window.AssemblyExpansionService.expandAssembly(root,1,{catalogIndex:new Map(canonical.map(item=>[String(item.id),item])),pricingSource:'CURRENT_CATALOG',linearLength:1,area:1,endpointCount:1});preview.leaves.forEach(row=>{const pricing=row.pricing||{};totalCost+=row.pricedQuantity*(Number(pricing.materialUnitCost||0)+Number(pricing.equipmentUnitCost||0)+Number(pricing.subcontractorUnitCost||0)+Number(pricing.legacyUnitCost||0));totalLabor+=row.pricedQuantity*Number(pricing.laborHoursPerUnit||0);});canonicalValid=!preview.errors.length;note.textContent=canonicalValid?'Totals use current component prices through the canonical assembly engine.':'Canonical calculation is blocked by a cycle, missing component, or invalid ratio input.';}}
         body.innerHTML = parts.map(part => {
             const qty = Number(part.quantity || 0);
-            const unitCost = Number(part.unit_cost_snapshot || 0);
-            const labor = Number(part.unit_labor_time_snapshot || 0);
+            const currentChild=source.find(item=>Number(item.id)===Number(part.part_catalog_item_id));
+            const unitCost = Number(currentChild?.unit_cost ?? part.unit_cost_snapshot ?? 0);
+            const labor = Number(currentChild?.labor_hours ?? part.unit_labor_time_snapshot ?? 0);
             if(!window.AssemblyExpansionService){totalCost+=qty*unitCost;totalLabor+=qty*labor;}
             const ratio=part.ratio_type||'per_unit';const advanced=assemblyAdvanced?`<div class="cc-component-advanced"><select data-part-ratio="${part.id}" aria-label="Ratio type for ${esc(part.child_item_name)}"><option value="per_unit" ${ratio==='per_unit'?'selected':''}>Per unit</option><option value="fixed" ${ratio==='fixed'?'selected':''}>Fixed</option><option value="per_linear_length" ${ratio==='per_linear_length'?'selected':''}>Per linear</option><option value="per_area" ${ratio==='per_area'?'selected':''}>Per area</option><option value="per_endpoint" ${ratio==='per_endpoint'?'selected':''}>Per endpoint</option><option value="spacing_based" ${ratio==='spacing_based'?'selected':''}>Spacing</option></select>${ratio==='spacing_based'?`<input data-part-spacing="${part.id}" type="number" min="0.0001" step="0.0001" value="${Number(part.spacing_value||1)}" aria-label="Spacing for ${esc(part.child_item_name)}">`:''}<input data-part-waste="${part.id}" type="number" min="0" step="0.01" value="${Number(part.waste_factor_percent||0)}" aria-label="Waste percent for ${esc(part.child_item_name)}"></div>`:'';
             return `
@@ -589,12 +559,13 @@
                     <td>${labor.toFixed(4)}</td>
                     <td>${money(qty * unitCost)}</td>
                     <td>${(qty*labor).toFixed(4)}</td>
+                    <td><input class="cc-component-note" data-part-notes="${part.id}" value="${esc(part.notes||'')}" aria-label="Notes for ${esc(part.child_item_name)}"></td>
                     <td><div class="cc-row-actions"><button class="cc-icon-btn bordered" type="button" data-part-move="up" data-part-id="${part.id}" aria-label="Move ${esc(part.child_item_name)} up">↑</button><button class="cc-icon-btn bordered" type="button" data-part-move="down" data-part-id="${part.id}" aria-label="Move ${esc(part.child_item_name)} down">↓</button><button class="cc-btn danger" type="button" data-assembly-part-delete="${part.id}">Remove</button></div></td>
                 </tr>
             `;
-        }).join('') || '<tr><td colspan="8" class="cc-assembly-empty">No items included yet.</td></tr>';
+        }).join('') || '<tr><td colspan="9" class="cc-assembly-empty">No items included yet.</td></tr>';
         const stored=(state.allItems?.length?state.allItems:state.items).find(item=>Number(item.id)===Number(editingItemId));
-        const storedCost=Number(stored?.unit_cost||0),storedLabor=Number(stored?.labor_hours||0);
+        const storedCost=canonicalValid?totalCost:Number(stored?.unit_cost||0),storedLabor=canonicalValid?totalLabor:Number(stored?.labor_hours||0);
         document.getElementById('ccItemUnitCost').value=storedCost;document.getElementById('ccItemLaborHours').value=storedLabor;
         const differs=Math.abs(storedCost-totalCost)>0.0001||Math.abs(storedLabor-totalLabor)>0.0001;
         totalsEl.textContent=differs?`Stored ${money(storedCost)} / ${storedLabor.toFixed(4)} hr · Canonical preview ${money(totalCost)} / ${totalLabor.toFixed(4)} hr`:`Cost ${money(totalCost)} - Labor ${totalLabor.toFixed(4)}`;
@@ -602,7 +573,7 @@
         body.querySelectorAll('[data-assembly-part-delete]').forEach(button => {
             button.addEventListener('click', () => deleteAssemblyPart(Number(button.dataset.assemblyPartDelete)));
         });
-        body.querySelectorAll('[data-part-quantity],[data-part-ratio],[data-part-spacing],[data-part-waste]').forEach(input=>input.addEventListener('change',()=>updateAssemblyPart(Number(input.dataset.partQuantity||input.dataset.partRatio||input.dataset.partSpacing||input.dataset.partWaste))));
+        body.querySelectorAll('[data-part-quantity],[data-part-ratio],[data-part-spacing],[data-part-waste],[data-part-notes]').forEach(input=>input.addEventListener('change',()=>updateAssemblyPart(Number(input.dataset.partQuantity||input.dataset.partRatio||input.dataset.partSpacing||input.dataset.partWaste||input.dataset.partNotes))));
         body.querySelectorAll('[data-part-move]').forEach(button=>button.addEventListener('click',()=>moveAssemblyPart(Number(button.dataset.partId),button.dataset.partMove)));
     }
 
@@ -620,17 +591,20 @@
         const laborHours = Number(document.getElementById('ccItemLaborHours').value);
         const laborRate = Number(document.getElementById('ccItemLaborRate').value);
         const color = document.getElementById('ccItemColor').value;
+        const numericIds=['ccItemMaterialCost','ccItemLaborCost','ccItemEquipmentCost','ccItemMarkup','ccItemWaste','ccItemMarkerSize'];
         if (!document.getElementById('ccItemName').value.trim()) return showError('Name is required');
         if (!document.getElementById('ccItemUom').value.trim()) return showError('Unit of Measure is required');
         if (Number.isNaN(unitCost) || unitCost < 0) return showError('Unit Cost must be a number >= 0');
         if (Number.isNaN(laborHours) || laborHours < 0) return showError('Unit Labor Time must be a number >= 0');
         if (Number.isNaN(laborRate) || laborRate < 0) return showError('Unit Labor Cost must be a number >= 0');
         if (!/^#[0-9a-fA-F]{6}$/.test(color)) return showError('Color must be a valid hexadecimal value');
+        for(const id of numericIds){const input=document.getElementById(id);if(input.value!==''&&(!Number.isFinite(Number(input.value))||Number(input.value)<0))return showItemFormError(`${input.closest('.cc-field').querySelector('label').textContent} must be a number greater than or equal to 0.`);}
+        let attributes={};try{attributes=JSON.parse(document.getElementById('ccItemAttributes').value||'{}');if(!attributes||Array.isArray(attributes)||typeof attributes!=='object')throw new Error();}catch(_){return showItemFormError('Attributes must be a valid JSON object.');}
 
         const pdf=document.getElementById('ccItemPdf').files[0] || null;
         if(pdf && (pdf.size>10485760 || (pdf.type && pdf.type!=='application/pdf'))) return showError('Choose a PDF of 10 MB or smaller');
         const saveButton=document.getElementById('ccItemSave'); saveButton.disabled=true; saveButton.textContent=pdf?'Saving and uploading…':'Saving…';
-        try { const data=await request('save_item', {
+        try { const existing=(state.allItems?.length?state.allItems:state.items).find(row=>Number(row.id)===Number(editingItemId)); const data=await request('save_item', revisionPayload(existing,{
             id: editingItemId || 0,
             catalog_id: document.getElementById('ccItemCatalog').value,
             catalog_group_id: document.getElementById('ccItemGroup').value,
@@ -638,12 +612,21 @@
             description: document.getElementById('ccItemDescription').value,
             item_type: document.getElementById('ccItemType').value,
             unit_of_measure: document.getElementById('ccItemUom').value,
+            measurement_type:document.getElementById('ccItemMeasurementType').value,
             unit_cost: unitCost,
+            material_cost:Number(document.getElementById('ccItemMaterialCost').value||0),
+            labor_cost:Number(document.getElementById('ccItemLaborCost').value||0),
+            equipment_cost:Number(document.getElementById('ccItemEquipmentCost').value||0),
             labor_hours: laborHours,
             labor_rate: laborRate,
+            markup_percent:Number(document.getElementById('ccItemMarkup').value||0),
+            waste_factor_percent:Number(document.getElementById('ccItemWaste').value||0),
             taxable: document.getElementById('ccItemTaxable').value === '1' ? 1 : 0,
             color,
             symbol: document.getElementById('ccItemSymbol').value,
+            marker_size:document.getElementById('ccItemMarkerSize').value,
+            size:document.getElementById('ccItemSize').value,diameter:document.getElementById('ccItemDiameter').value,trade_size:document.getElementById('ccItemTradeSize').value,
+            thickness:document.getElementById('ccItemThickness').value,gauge:document.getElementById('ccItemGauge').value,material:document.getElementById('ccItemMaterial').value,
             manufacturer: document.getElementById('ccItemManufacturer').value,
             supplier: document.getElementById('ccItemSupplier').value,
             catalog_number: document.getElementById('ccItemCatalogNumber').value,
@@ -653,8 +636,9 @@
             sub_job_code: document.getElementById('ccItemSubJobCode').value,
             sub_job_name: document.getElementById('ccItemSubJobName').value,
             epd_url: document.getElementById('ccItemEpdUrl').value,
-            attachment_url: document.getElementById('ccItemAttachmentUrl').value
-        });
+            attachment_url: document.getElementById('ccItemAttachmentUrl').value,
+            tags_json:document.getElementById('ccItemTags').value.split(',').map(value=>value.trim()).filter(Boolean),attributes_json:attributes,notes:document.getElementById('ccItemNotes').value
+        }));
             if(pdf){document.getElementById('ccItemPdfFeedback').textContent='Uploading PDF…';await attachmentRequest('upload',data.id,data.revision,pdf);}
             const groupId = Number(document.getElementById('ccItemGroup').value || 0);
             const catalogId = Number(document.getElementById('ccItemCatalog').value || 0);
@@ -662,14 +646,16 @@
             state = data.data;
             closeItemModals();
             await load();
-        } catch(err) { showError(err.message); document.getElementById('ccItemPdfFeedback').textContent=err.message; }
+        } catch(err) { showItemFormError(err.code==='revision_conflict'?'This item changed elsewhere. Your entries are still here; reload to review the current version before saving again.':err.message); document.getElementById('ccItemPdfFeedback').textContent=err.message; }
         finally { saveButton.disabled=false; saveButton.textContent='Save Item'; }
     }
+
+    function showItemFormError(message){const el=document.getElementById('ccItemFormError');el.textContent=message;el.hidden=false;el.scrollIntoView?.({block:'nearest'});}
 
     function addAssemblyPart(childId) {
         if (!editingItemId) return showError('Save the assembly item before adding included items.');
         if (!childId) return showError('Select an item to include in the assembly.');
-        request('add_assembly_part', currentContextPayload({
+        request('add_assembly_part', assemblyContext({
             assembly_catalog_item_id: editingItemId,
             part_catalog_item_id: childId,
             quantity:1,
@@ -680,12 +666,12 @@
         }).catch(err => showError(err.message));
     }
 
-    function updateAssemblyPart(id){const row=document.querySelector(`[data-part-row="${id}"]`);const ratio=row.querySelector('[data-part-ratio]')?.value||state.assemblyParts.find(p=>Number(p.id)===id)?.ratio_type||'per_unit';request('update_assembly_part',currentContextPayload({id,quantity:Number(row.querySelector('[data-part-quantity]').value),ratio_type:ratio,spacing_value:ratio==='spacing_based'?Number(row.querySelector('[data-part-spacing]')?.value||1):null,waste_factor_percent:Number(row.querySelector('[data-part-waste]')?.value||0)})).then(data=>{state=data.data;renderAssemblyParts();}).catch(err=>showError(err.message));}
+    function updateAssemblyPart(id){const row=document.querySelector(`[data-part-row="${id}"]`);const ratio=row.querySelector('[data-part-ratio]')?.value||state.assemblyParts.find(p=>Number(p.id)===id)?.ratio_type||'per_unit';request('update_assembly_part',assemblyContext({id,quantity:Number(row.querySelector('[data-part-quantity]').value),ratio_type:ratio,spacing_value:ratio==='spacing_based'?Number(row.querySelector('[data-part-spacing]')?.value||1):null,waste_factor_percent:Number(row.querySelector('[data-part-waste]')?.value||0),notes:row.querySelector('[data-part-notes]')?.value||''})).then(data=>{state=data.data;renderAssemblyParts();}).catch(err=>showItemFormError(err.message));}
 
-    function moveAssemblyPart(id,direction){const parts=state.assemblyParts.filter(p=>Number(p.assembly_catalog_item_id)===Number(editingItemId)).sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||Number(a.id)-Number(b.id));const index=parts.findIndex(p=>Number(p.id)===id),other=direction==='up'?index-1:index+1;if(index<0||other<0||other>=parts.length)return;[parts[index],parts[other]]=[parts[other],parts[index]];request('reorder_assembly_parts',currentContextPayload({assembly_catalog_item_id:editingItemId,ordered_ids:parts.map(p=>p.id)})).then(data=>{state=data.data;renderAssemblyParts();}).catch(err=>showError(err.message));}
+    function moveAssemblyPart(id,direction){const parts=state.assemblyParts.filter(p=>Number(p.assembly_catalog_item_id)===Number(editingItemId)).sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||Number(a.id)-Number(b.id));const index=parts.findIndex(p=>Number(p.id)===id),other=direction==='up'?index-1:index+1;if(index<0||other<0||other>=parts.length)return;[parts[index],parts[other]]=[parts[other],parts[index]];request('reorder_assembly_parts',assemblyContext({assembly_catalog_item_id:editingItemId,ordered_ids:parts.map(p=>p.id)})).then(data=>{state=data.data;renderAssemblyParts();}).catch(err=>showItemFormError(err.message));}
 
     function deleteAssemblyPart(id) {
-        request('delete_assembly_part', currentContextPayload({ id }))
+        request('delete_assembly_part', assemblyContext({ id }))
             .then(data => {
                 state = data.data;
                 renderAssemblyParts();renderAssemblyItemOptions();
@@ -695,11 +681,11 @@
 
     function moveItem(event) {
         event.preventDefault();
-        request('move_item', {
+        const item=(state.allItems?.length?state.allItems:state.items).find(row=>Number(row.id)===Number(movingItemId));request('move_item', revisionPayload(item,{
             id: movingItemId,
             catalog_id: document.getElementById('ccMoveCatalog').value,
             catalog_group_id: document.getElementById('ccMoveGroup').value
-        }).then(data => {
+        })).then(data => {
             const groupId = Number(document.getElementById('ccMoveGroup').value || 0);
             const catalogId = Number(document.getElementById('ccMoveCatalog').value || 0);
             selection = groupId ? { view: 'group', catalogId: null, groupId } : { view: 'catalog', catalogId, groupId: null };
@@ -719,11 +705,12 @@
         request(action, payload)
             .then(data => {
                 state = data.data;
-                if (data.id && action.includes('catalog')) selection = { view: 'catalog', catalogId: Number(data.id), groupId: null };
-                if (data.id && action.includes('group')) selection = { view: 'group', catalogId: null, groupId: Number(data.id) };
+                if (data.id && action.includes('catalog')&&!action.startsWith('delete_')) selection = { view: 'catalog', catalogId: Number(data.id), groupId: null };
+                if (data.id && action.includes('group')&&!action.startsWith('delete_')) selection = { view: 'group', catalogId: null, groupId: Number(data.id) };
+                if(action.startsWith('delete_catalog'))selection={view:'all',catalogId:null,groupId:null};
                 render();
             })
-            .catch(err => showError(err.message));
+            .catch(err => showError(err.code==='revision_conflict'?'This record was updated elsewhere. Reload and review the latest version before retrying.':err.message));
     }
 
     function showError(message) {
@@ -742,10 +729,18 @@
             renderItems();
         });
         document.getElementById('ccTypeFilter')?.addEventListener('change', event => { itemTypeFilter = event.target.value; renderItems(); });
+        document.getElementById('ccMeasurementFilter')?.addEventListener('change',event=>{measurementFilter=event.target.value;renderItems();});
+        document.getElementById('ccUomFilter')?.addEventListener('change',event=>{uomFilter=event.target.value;renderItems();});
+        document.getElementById('ccStatusFilter')?.addEventListener('change',event=>{statusFilter=event.target.value;load();});
+        document.getElementById('ccClearFilters')?.addEventListener('click',()=>{itemQuery='';itemTypeFilter=measurementFilter=uomFilter='all';statusFilter='active';document.getElementById('ccSearch').value='';document.getElementById('ccTypeFilter').value='all';document.getElementById('ccMeasurementFilter').value='all';document.getElementById('ccUomFilter').value='all';document.getElementById('ccStatusFilter').value='active';load();});
         document.getElementById('ccItemsBody')?.addEventListener('click', event => {
             const trigger = event.target.closest('[data-item-details]');
             if (trigger) openItemDetails(trigger.dataset.itemDetails, trigger);
+            const menuTrigger=event.target.closest('[data-item-menu]');if(menuTrigger){event.stopPropagation();const menu=menuTrigger.closest('.cc-row-menu'),opening=!menu.classList.contains('open');closeItemMenus();if(opening){menu.classList.add('open');menuTrigger.setAttribute('aria-expanded','true');positionItemMenu(menuTrigger,menu.querySelector('.cc-row-menu-panel'));}}
+            const action=event.target.closest('[data-item-action]');if(action)itemAction(action.dataset.itemAction,Number(action.dataset.id));
         });
+        document.getElementById('ccCatalogTree')?.addEventListener('click',event=>{const catalogToggle=event.target.closest('[data-tree-toggle-catalog]');if(catalogToggle){const id=Number(catalogToggle.dataset.treeToggleCatalog);expandedCatalogs.has(id)?expandedCatalogs.delete(id):expandedCatalogs.add(id);return renderTree();}const groupToggle=event.target.closest('[data-tree-toggle-group]');if(groupToggle){const id=Number(groupToggle.dataset.treeToggleGroup);expandedGroups.has(id)?expandedGroups.delete(id):expandedGroups.add(id);return renderTree();}const catalog=event.target.closest('[data-catalog-id]');if(catalog){selection={view:'catalog',catalogId:Number(catalog.dataset.catalogId),groupId:null};expandedCatalogs.add(Number(catalog.dataset.catalogId));return load();}const group=event.target.closest('[data-group-id]');if(group){const row=state.groups.find(g=>Number(g.id)===Number(group.dataset.groupId));selection={view:'group',catalogId:null,groupId:Number(group.dataset.groupId)};if(row)expandedCatalogs.add(Number(row.catalog_id));return load();}});
+        document.querySelector('.cc-context-actions')?.addEventListener('click',event=>{const catalog=event.target.closest('[data-catalog-action]');if(catalog)return catalogAction(catalog.dataset.catalogAction);const group=event.target.closest('[data-group-action]');if(group)return groupAction(group.dataset.groupAction);});
         document.getElementById('ccCloseItemDetails')?.addEventListener('click', closeItemDetails);
         document.getElementById('ccItemDetailsScrim')?.addEventListener('click', closeItemDetails);
         document.getElementById('ccSortDir')?.addEventListener('click', event => {
@@ -761,9 +756,9 @@
                 load();
             });
         });
-        document.getElementById('ccAddCatalog').addEventListener('click', () => saveCatalog());
-        document.getElementById('ccAddCatalogTop').addEventListener('click', () => saveCatalog());
-        document.getElementById('ccAddGroup').addEventListener('click', () => saveGroup());
+        document.getElementById('ccAddCatalog').addEventListener('click', () => openEntityModal('catalog'));
+        document.getElementById('ccAddCatalogTop').addEventListener('click', () => openEntityModal('catalog'));
+        document.getElementById('ccAddGroup').addEventListener('click', () => openEntityModal('category'));
         document.getElementById('ccAddItem').addEventListener('click', () => openItemModal());
         document.getElementById('ccItemCatalog').addEventListener('change', event => renderGroupSelect(document.getElementById('ccItemGroup'), Number(event.target.value)));
         document.getElementById('ccMoveCatalog').addEventListener('change', event => renderGroupSelect(document.getElementById('ccMoveGroup'), Number(event.target.value)));
@@ -788,12 +783,16 @@
         document.querySelectorAll('[data-close-item-modal]').forEach(btn => btn.addEventListener('click', closeItemModals));
         document.getElementById('ccItemForm').addEventListener('submit', saveItem);
         document.getElementById('ccMoveItemForm').addEventListener('submit', moveItem);
+        document.getElementById('ccEntityForm').addEventListener('submit',saveEntity);document.querySelectorAll('[data-close-entity-modal]').forEach(button=>button.addEventListener('click',closeEntityModal));document.getElementById('ccEntityCatalog').addEventListener('change',()=>renderEntityParents(entityEditor?.entity));
+        document.getElementById('ccArchiveCategoryForm').addEventListener('submit',archiveCategory);document.querySelectorAll('[data-close-category-archive]').forEach(button=>button.addEventListener('click',closeCategoryArchive));
         load();
     });
     document.addEventListener('click', event => {
         if (!event.target.closest('.cc-row-menu')) closeItemMenus();
     });
     document.addEventListener('keydown', event => {
+        const treeControl=event.target.closest?.('#ccCatalogTree button');
+        if(treeControl){const controls=[...document.querySelectorAll('#ccCatalogTree button:not(.cc-tree-toggle)')];const index=controls.indexOf(treeControl);if(event.key==='ArrowDown'||event.key==='ArrowUp'||event.key==='Home'||event.key==='End'){event.preventDefault();const target=event.key==='Home'?controls[0]:event.key==='End'?controls.at(-1):controls[index+(event.key==='ArrowDown'?1:-1)];target?.focus();}else if(event.key==='ArrowRight'){const node=treeControl.closest('[role="treeitem"]');if(node?.getAttribute('aria-expanded')==='false'){event.preventDefault();node.querySelector('.cc-tree-toggle')?.click();}}else if(event.key==='ArrowLeft'){const node=treeControl.closest('[role="treeitem"]');if(node?.getAttribute('aria-expanded')==='true'){event.preventDefault();node.querySelector('.cc-tree-toggle')?.click();}}else if((event.key==='Enter'||event.key===' ')&&treeControl){event.preventDefault();treeControl.click();}}
         const openModal = document.querySelector('.cc-modal-backdrop.open');
         if (event.key === 'Tab' && openModal) {
             const focusable = [...openModal.querySelectorAll('a[href],button:not([disabled]),input:not([disabled]):not([type="hidden"]),select:not([disabled]),textarea:not([disabled]),[tabindex]:not([tabindex="-1"])')]
@@ -817,6 +816,7 @@
             closeItemDetails();
             closeItemMenus();
             closeItemModals();
+            closeEntityModal();closeCategoryArchive();
         }
     });
 })();

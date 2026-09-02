@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/session.php';
 require_once __DIR__ . '/../core/services/CatalogAdminService.php';
 header('Content-Type: application/json; charset=utf-8');
 
@@ -12,6 +13,7 @@ $input = json_decode(file_get_contents('php://input'), true);
 if (!is_array($input)) catalog_admin_json(['success'=>false,'error'=>['code'=>'INVALID_JSON','message'=>'A JSON body is required.']], 400);
 $command = trim((string)($input['command'] ?? ''));
 $payload = is_array($input['payload'] ?? null) ? $input['payload'] : $input;
+$payload['actor_user_id'] = !empty($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
 $payload['request_id'] = trim((string)($input['requestId'] ?? $input['request_id'] ?? $payload['request_id'] ?? ''));
 if (array_key_exists('expectedRevision', $input) && !array_key_exists('expected_revision', $payload)) $payload['expected_revision'] = $input['expectedRevision'];
 

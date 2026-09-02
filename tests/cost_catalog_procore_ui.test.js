@@ -29,9 +29,10 @@ test('Cost Catalog exposes compact searchable sortable table controls', () => {
 test('row actions use an accessible overflow menu without losing commands', () => {
     assert.match(client, /data-item-menu=/);
     assert.match(client, /aria-expanded="false"/);
-    ['edit', 'duplicate', 'move', 'assembly', 'takeoff', 'history', 'delete'].forEach(action => {
+    ['edit', 'duplicate', 'move', 'assembly', 'delete', 'restore'].forEach(action => {
         assert.match(client, new RegExp(`data-item-action="${action}"`));
     });
+    assert.doesNotMatch(client, /data-item-action="(?:takeoff|history)"/);
     assert.match(client, /event\.key === 'Escape'/);
     assert.match(css, /:focus-visible/);
     assert.match(css, /prefers-reduced-motion/);
