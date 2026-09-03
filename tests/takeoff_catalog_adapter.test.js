@@ -72,3 +72,42 @@ test('Browse Catalog loads the contract before Takeoff and consumes canonical fi
     assert.doesNotMatch(boundary, /fetch\([^)]*cost_catalog\.php/);
     assert.doesNotMatch(boundary, /normalizeCatalogItem\(/);
 });
+
+test('Copper THHN 600 KCMIL with partial or missing sub-objects does not throw and preserves metadata', () => {
+    const wireItem = {
+        id: 88,
+        name: 'Copper THHN 600 KCMIL',
+        unit_of_measure: 'mft',
+        unit_cost: 4500.00,
+        labor_hours: 12.0,
+        category: null,
+        catalog: null,
+        supplier: null,
+        classification: null,
+        pricing: {
+            materialUnitCost: 4500.00,
+            laborHoursPerUnit: 12.0
+        }
+    };
+    const meta = Adapter.catalogItemDtoToLegacyLayerMeta(wireItem);
+    assert.equal(meta.catalogItemId, 88);
+    assert.equal(meta.unitCost, 4500.00);
+    assert.equal(meta.laborHours, 12.0);
+    assert.equal(meta.category, '');
+    assert.equal(meta.catalogName, '');
+    assert.equal(meta.catalogNumber, '');
+});
+
+test('completely raw item without pricing object gracefully falls back to unit_cost', () => {
+    const rawItem = {
+        id: 101,
+        name: 'Bare Copper 500 MCM',
+        unit_cost: 3200,
+        labor_hours: 8
+    };
+    const meta = Adapter.catalogItemDtoToLegacyLayerMeta(rawItem);
+    assert.equal(meta.catalogItemId, 101);
+    assert.equal(meta.unitCost, 3200);
+    assert.equal(meta.laborHours, 8);
+});
+

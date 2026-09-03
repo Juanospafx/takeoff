@@ -202,16 +202,21 @@ try {
             $data = project_input_data($input);
             if ($data['name'] === '') project_json(['status' => 'error', 'msg' => 'Project name is required'], 422);
 
+            $existingCols = $pdo->query("SHOW COLUMNS FROM projects")->fetchAll(PDO::FETCH_COLUMN);
+            $filteredData = array_filter($data, function ($key) use ($existingCols) {
+                return in_array($key, $existingCols, true);
+            }, ARRAY_FILTER_USE_KEY);
+
             if ($id > 0) {
                 $set = implode(', ', array_map(function ($column) {
                     return "$column = ?";
-                }, array_keys($data)));
+                }, array_keys($filteredData)));
                 $stmt = $pdo->prepare("UPDATE projects SET $set WHERE id = ?");
-                $stmt->execute(array_merge(array_values($data), [$id]));
+                $stmt->execute(array_merge(array_values($filteredData), [$id]));
             } else {
-                $columns = array_keys($data);
+                $columns = array_keys($filteredData);
                 $stmt = $pdo->prepare("INSERT INTO projects (" . implode(', ', $columns) . ") VALUES (" . implode(', ', array_fill(0, count($columns), '?')) . ")");
-                $stmt->execute(array_values($data));
+                $stmt->execute(array_values($filteredData));
                 $id = (int)$pdo->lastInsertId();
             }
 

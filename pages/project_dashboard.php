@@ -112,7 +112,7 @@ if (!$project && $isDraftProject) {
         'id' => 0,
         'project_template_id' => isset($_GET['template_id']) ? (int)$_GET['template_id'] : null,
         'project_number' => '',
-        'name' => 'New Project',
+        'name' => trim((string)($_GET['name'] ?? '')) ?: 'New Project',
         'description' => '',
         'status' => 'to_do',
         'client_name' => '',
@@ -718,45 +718,81 @@ $state = [
                     <section class="overview-card">
                         <div class="overview-card-head">
                             <h2>Notes</h2>
+                            <button class="btn-outline-dark btn-sm" type="button" id="addNoteBtnHead"><i class="fas fa-plus"></i> Add note</button>
                         </div>
-                        <?php if (empty($projectNotes)): ?>
-                            <div class="overview-empty">
-                                <p>No notes yet</p>
-                                <button class="btn-outline-dark" type="button" id="addNoteBtn"><i class="fas fa-plus"></i> Add note</button>
+                        <div id="overviewNotesComposer" class="overview-composer" style="display:none; padding:12px; border-bottom:1px solid rgba(255,255,255,0.08);">
+                            <textarea id="overviewNoteContent" class="form-control mb-2" rows="3" placeholder="Write a note..."></textarea>
+                            <div class="d-flex justify-content-end gap-2">
+                                <button type="button" class="btn-ghost btn-sm" id="cancelNoteBtn">Cancel</button>
+                                <button type="button" class="btn-main btn-sm" id="saveNoteBtn">Add Note</button>
                             </div>
-                        <?php else: ?>
-                            <div class="overview-list">
-                                <?php foreach ($projectNotes as $note): ?>
-                                    <div class="overview-list-item">
-                                        <strong><?= htmlspecialchars($note['user'] ?? 'User') ?></strong>
-                                        <span><?= htmlspecialchars($note['timestamp'] ?? '') ?></span>
+                        </div>
+                        <div id="overviewNotesList" class="overview-list">
+                            <?php if (empty($projectNotes)): ?>
+                                <div class="overview-empty" id="overviewNotesEmpty">
+                                    <p>No notes yet</p>
+                                    <button class="btn-outline-dark" type="button" id="addNoteBtn"><i class="fas fa-plus"></i> Add note</button>
+                                </div>
+                            <?php else: ?>
+                                <?php foreach ($projectNotes as $idx => $note): ?>
+                                    <div class="overview-list-item" data-note-index="<?= $idx ?>">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <strong><?= htmlspecialchars($note['user'] ?? 'User') ?></strong>
+                                            <div class="d-flex align-items-center gap-2">
+                                                <span><?= htmlspecialchars($note['timestamp'] ?? '') ?></span>
+                                                <button type="button" class="btn-ghost btn-sm text-danger p-0" data-delete-note="<?= $idx ?>" title="Delete note"><i class="fas fa-trash"></i></button>
+                                            </div>
+                                        </div>
                                         <p><?= htmlspecialchars($note['content'] ?? '') ?></p>
                                     </div>
                                 <?php endforeach; ?>
-                            </div>
-                        <?php endif; ?>
+                            <?php endif; ?>
+                        </div>
                     </section>
 
                     <section class="overview-card">
                         <div class="overview-card-head">
-                            <h2>Tasks</h2>
-                            <span class="overview-count"><?= count($projectTasks) ?></span>
-                        </div>
-                        <?php if (empty($projectTasks)): ?>
-                            <div class="overview-empty">
-                                <p>No tasks yet</p>
-                                <button class="btn-outline-dark" type="button" id="createTaskBtn"><i class="fas fa-plus"></i> Create first task</button>
+                            <div class="d-flex align-items-center gap-2">
+                                <h2>Tasks</h2>
+                                <span class="overview-count" id="overviewTaskCount"><?= count($projectTasks) ?></span>
                             </div>
-                        <?php else: ?>
-                            <div class="overview-list">
-                                <?php foreach ($projectTasks as $task): ?>
-                                    <div class="overview-list-item">
-                                        <strong><?= htmlspecialchars($task['title'] ?? '') ?></strong>
-                                        <span><?= htmlspecialchars($task['responsible'] ?? '') ?> <?= htmlspecialchars($task['due_date'] ?? '') ?></span>
+                            <button class="btn-outline-dark btn-sm" type="button" id="createTaskBtnHead"><i class="fas fa-plus"></i> New task</button>
+                        </div>
+                        <div id="overviewTaskComposer" class="overview-composer" style="display:none; padding:12px; border-bottom:1px solid rgba(255,255,255,0.08);">
+                            <input id="overviewTaskTitle" class="form-control mb-2" placeholder="Task title..." required>
+                            <div class="row g-2 mb-2">
+                                <div class="col-md-6">
+                                    <input id="overviewTaskAssignee" class="form-control" placeholder="Assignee (e.g. Juan Estevez)">
+                                </div>
+                                <div class="col-md-6">
+                                    <input id="overviewTaskDue" class="form-control" type="date">
+                                </div>
+                            </div>
+                            <div class="d-flex justify-content-end gap-2">
+                                <button type="button" class="btn-ghost btn-sm" id="cancelTaskBtn">Cancel</button>
+                                <button type="button" class="btn-main btn-sm" id="saveTaskBtn">Add Task</button>
+                            </div>
+                        </div>
+                        <div id="overviewTasksList" class="overview-list">
+                            <?php if (empty($projectTasks)): ?>
+                                <div class="overview-empty" id="overviewTasksEmpty">
+                                    <p>No tasks yet</p>
+                                    <button class="btn-outline-dark" type="button" id="createTaskBtn"><i class="fas fa-plus"></i> Create first task</button>
+                                </div>
+                            <?php else: ?>
+                                <?php foreach ($projectTasks as $idx => $task): ?>
+                                    <div class="overview-list-item" data-task-index="<?= $idx ?>">
+                                        <div class="d-flex justify-content-between align-items-center">
+                                            <strong><?= htmlspecialchars($task['title'] ?? '') ?></strong>
+                                            <div class="d-flex align-items-center gap-2">
+                                                <span><?= htmlspecialchars($task['responsible'] ?? '') ?> <?= htmlspecialchars($task['due_date'] ?? '') ?></span>
+                                                <button type="button" class="btn-ghost btn-sm text-danger p-0" data-delete-task="<?= $idx ?>" title="Delete task"><i class="fas fa-trash"></i></button>
+                                            </div>
+                                        </div>
                                     </div>
                                 <?php endforeach; ?>
-                            </div>
-                        <?php endif; ?>
+                            <?php endif; ?>
+                        </div>
                     </section>
                 </div>
             </div>

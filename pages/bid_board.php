@@ -132,6 +132,10 @@
                     <label><input type="radio" name="bbProjectMode" value="empty"> Create empty new project</label>
                 </div>
                 <div class="bb-form-grid">
+                    <div class="bb-field full">
+                        <label for="bbProjectName">Project Name</label>
+                        <input id="bbProjectName" type="text" placeholder="Project Name" required value="New Project">
+                    </div>
                     <div class="bb-field full" id="bbProjectTemplateWrap">
                         <label>Template</label>
                         <select id="bbProjectTemplate"></select>

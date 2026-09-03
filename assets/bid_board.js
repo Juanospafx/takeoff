@@ -461,9 +461,12 @@
 
     function openCreateProject() {
         document.getElementById('bbProjectForm').reset();
+        const nameInput = document.getElementById('bbProjectName');
+        if (nameInput) nameInput.value = 'New Project';
         document.querySelector('input[name="bbProjectMode"][value="template"]').checked = true;
         toggleProjectTemplate();
         document.getElementById('bbProjectModal').classList.add('open');
+        setTimeout(() => nameInput?.focus?.(), 40);
     }
 
     function toggleProjectTemplate() {
@@ -471,23 +474,50 @@
         document.getElementById('bbProjectTemplateWrap').style.display = mode === 'template' ? 'block' : 'none';
     }
 
-    function createProjectDraft(event) {
+    async function createProjectDraft(event) {
         event.preventDefault();
         const mode = document.querySelector('input[name="bbProjectMode"]:checked')?.value || 'empty';
         const templateId = mode === 'template' ? document.getElementById('bbProjectTemplate').value : '';
         const template = (state.templates || []).find(row => String(row.id) === String(templateId));
+        const projectName = document.getElementById('bbProjectName')?.value.trim() || 'New Project';
+        const submitBtn = event.target.querySelector('button[type="submit"]');
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.textContent = 'Creating...';
+        }
         const draft = {
             mode,
             project_template_id: templateId,
             template_name: template?.name || '',
-            name: 'New Project',
+            name: projectName,
             status: 'to_do',
             measurement_system: 'US',
             estimate_pricing: 'Unlocked',
             created_at: new Date().toISOString()
         };
         localStorage.setItem('takeoff.projectDraft', JSON.stringify(draft));
-        window.location.href = `project_dashboard.php?draft=1${templateId ? `&template_id=${encodeURIComponent(templateId)}` : ''}`;
+        try {
+            const res = await postProjectAction('save', {
+                name: projectName,
+                project_template_id: templateId || null,
+                status: 'to_do',
+                metadata_json: JSON.stringify({
+                    estimator: 'Juan Estevez',
+                    measurement_system: 'US',
+                    estimate_pricing: 'Unlocked',
+                    notes: [],
+                    tasks: []
+                })
+            });
+            if (res && res.id) {
+                localStorage.removeItem('takeoff.projectDraft');
+                window.location.href = `project_dashboard.php?id=${encodeURIComponent(res.id)}&tab=overview`;
+                return;
+            }
+        } catch (e) {
+            console.warn('Direct project creation fallback to draft', e);
+        }
+        window.location.href = `project_dashboard.php?draft=1${templateId ? `&template_id=${encodeURIComponent(templateId)}` : ''}&name=${encodeURIComponent(projectName)}`;
     }
 
     function closeModals() {

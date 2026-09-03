@@ -144,6 +144,7 @@
     }
 
     window.projectTakeoffFitToScreen = fitTakeoffToScreen;
+    window.projectTakeoffSaveState = saveTakeoffState;
 
     const viewerState = {
         isGridVisible: false,
@@ -609,11 +610,12 @@
     }
 
     function findLayer(layerId) {
-        return allLayers().find(layer => layer.id === layerId) || null;
+        const id = String(layerId ?? '');
+        return allLayers().find(layer => String(layer.id) === id) || null;
     }
 
     function groupForLayer(layer) {
-        return takeoffState.groups.find(group => group.id === layer?.groupId)
+        return takeoffState.groups.find(group => String(group.id) === String(layer?.groupId))
             || takeoffState.groups.find(group => groupBelongsToEstimate(group, layer?.estimateId))
             || defaultGroup(layer?.estimateId || activeEstimateId());
     }
@@ -1261,8 +1263,12 @@
                     <div class="pro-field">
                         <label for="layerColorInput">Color</label>
                         <div class="pro-color-select">
-                            <span id="layerColorSwatch"></span>
-                            <select id="layerColorInput">${TAKEOFF_COLORS.map(color => `<option value="${color.value}">${color.label}</option>`).join('')}</select>
+                            <span id="layerColorSwatch" title="Click to pick custom color" style="cursor:pointer;"></span>
+                            <select id="layerColorInput">
+                                ${TAKEOFF_COLORS.map(color => `<option value="${color.value}">${color.label}</option>`).join('')}
+                                <option value="__custom__">Custom color...</option>
+                            </select>
+                            <input type="color" id="layerCustomColorPicker" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                         </div>
                     </div>
                 </div>
@@ -1292,7 +1298,22 @@
             updateLayerTypeFields(type);
             updateLayerSubmitState();
         });
-        $('layerColorInput').addEventListener('change', updateLayerColorSwatch);
+        $('layerColorInput').addEventListener('change', () => {
+            if ($('layerColorInput').value === '__custom__') {
+                $('layerCustomColorPicker')?.click();
+            } else {
+                updateLayerColorSwatch();
+            }
+        });
+        $('layerColorSwatch')?.addEventListener('click', () => {
+            $('layerCustomColorPicker')?.click();
+        });
+        $('layerCustomColorPicker')?.addEventListener('input', event => {
+            setLayerColor(event.target.value);
+        });
+        $('layerCustomColorPicker')?.addEventListener('change', event => {
+            setLayerColor(event.target.value);
+        });
         $('layerCreateSubmit').addEventListener('click', submitLayerModal);
         ensureCatalogModal();
     }
@@ -1344,7 +1365,7 @@
         $('layerSizeInput').value = takeoffDisplaySize(layer?.size);
         $('layerDiameterInput').value = Number(layer?.markerDiameter || (takeoffSizeRadius(layer?.size || 'Medium') * 2));
         $('layerStrokeInput').value = Number(layer?.strokeWidth || (String(layer?.type || '').includes('Area') ? 3 : 4));
-        $('layerColorInput').value = layer?.color || '#111827';
+        setLayerColor(layer?.color || '#111827');
         $('layerDropInput').value = layer?.dropLength || '';
         $('layerSpacingInput').value = layer?.spacing || '';
         $('layerHeightInput').value = layer?.height || '';
@@ -1365,9 +1386,32 @@
         takeoffState.pendingCatalogItem = null;
     }
 
+    function setLayerColor(color) {
+        const input = $('layerColorInput');
+        const picker = $('layerCustomColorPicker');
+        if (!input) return;
+        const hex = String(color || '#111827').trim();
+        let match = Array.from(input.options).find(opt => opt.value.toLowerCase() === hex.toLowerCase());
+        if (!match && hex !== '__custom__') {
+            const opt = document.createElement('option');
+            opt.value = hex;
+            opt.textContent = `Custom (${hex})`;
+            const customOpt = input.querySelector('option[value="__custom__"]');
+            if (customOpt) input.insertBefore(opt, customOpt);
+            else input.appendChild(opt);
+            match = opt;
+        }
+        if (match) input.value = match.value;
+        if (picker && hex.startsWith('#') && (hex.length === 7 || hex.length === 4)) {
+            picker.value = hex.length === 4 ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}` : hex;
+        }
+        updateLayerColorSwatch();
+    }
+
     function updateLayerColorSwatch() {
         const swatch = $('layerColorSwatch');
-        if (swatch) swatch.style.background = $('layerColorInput')?.value || '#111827';
+        const color = ($('layerColorInput')?.value === '__custom__' ? $('layerCustomColorPicker')?.value : $('layerColorInput')?.value) || '#111827';
+        if (swatch) swatch.style.background = color;
     }
 
     function updateLayerSubmitState() {
@@ -1402,12 +1446,11 @@
             $('layerTypeInput').value = inferred;
             $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[inferred];
         }
-        const symbol = item.takeoffDefaults?.symbol;
-        const color = item.takeoffDefaults?.color;
+        const symbol = item.takeoffDefaults?.symbol || item.symbol;
+        const color = item.takeoffDefaults?.color || item.color;
         if (symbol && TAKEOFF_SYMBOLS.includes(symbol)) $('layerSymbolInput').value = symbol;
-        if (color && TAKEOFF_COLORS.some(option => option.value.toLowerCase() === String(color).toLowerCase())) {
-            $('layerColorInput').value = color;
-            updateLayerColorSwatch();
+        if (color) {
+            setLayerColor(color);
         }
         updateCatalogSelectionIndicator();
         updateLayerSubmitState();
@@ -1420,55 +1463,66 @@
         if (!name) return;
         const submit = $('layerCreateSubmit');
         if (submit?.dataset.saving === '1') return;
+        const editingLayerId = takeoffState.editingLayerId;
         if (submit) {
             submit.dataset.saving = '1';
             submit.disabled = true;
             submit.textContent = 'Saving...';
         }
-        pushTakeoffHistory(takeoffState.editingLayerId ? 'edit-layer' : 'create-layer');
-        const type = $('layerTypeInput').value;
-        const payload = {
-            name,
-            type,
-            uom: $('layerUomInput').value || typeToUom(type),
-            symbol: $('layerSymbolInput').value || 'Solid Circle',
-            size: $('layerSizeInput').value || 'Medium',
-            markerDiameter: Math.max(8, Math.min(192, Number($('layerDiameterInput')?.value || 18))),
-            strokeWidth: Math.max(1, Math.min(20, Number($('layerStrokeInput')?.value || 4))),
-            color: $('layerColorInput').value || '#111827',
-            dropLength: Number($('layerDropInput')?.value || 0),
-            spacing: Number($('layerSpacingInput')?.value || 0),
-            height: Number($('layerHeightInput')?.value || 0),
-            depth: Number($('layerDepthInput')?.value || 0)
-        };
-        if (takeoffState.pendingCatalogItem) Object.assign(payload, catalogItemMeta(takeoffState.pendingCatalogItem));
-        const editingLayerId = takeoffState.editingLayerId;
-        if (editingLayerId) {
-            const layer = findLayer(editingLayerId);
-            if (layer) Object.assign(layer, payload);
-            callEditor('projectTakeoffUpdateLayerObjects', editingLayerId, {
-                symbol: payload.symbol,
-                color: payload.color,
-                symbolSize: payload.markerDiameter / 2,
-                diameter: payload.markerDiameter,
-                strokeWidth: payload.strokeWidth
-            });
-            setActiveTakeoffLayer(editingLayerId, false);
-        } else {
-            const group = findGroup(takeoffState.pendingLayerGroupId);
-            const layer = {
-                id: makeId('layer'),
-                groupId: group.id,
-                estimateId: activeEstimateId(),
-                quantity: 0,
-                ...payload
-            };
-            group.layers.push(layer);
-            group.isExpanded = true;
-            takeoffState.activeGroupId = group.id;
-            setActiveTakeoffLayer(layer.id, false);
-        }
         try {
+            pushTakeoffHistory(editingLayerId ? 'edit-layer' : 'create-layer');
+            const type = $('layerTypeInput').value;
+            const chosenColor = ($('layerColorInput')?.value === '__custom__'
+                ? $('layerCustomColorPicker')?.value
+                : $('layerColorInput')?.value) || '#111827';
+            const payload = {
+                name,
+                type,
+                uom: $('layerUomInput').value || typeToUom(type),
+                symbol: $('layerSymbolInput').value || 'Solid Circle',
+                size: $('layerSizeInput').value || 'Medium',
+                markerDiameter: Math.max(8, Math.min(192, Number($('layerDiameterInput')?.value || 18))),
+                strokeWidth: Math.max(1, Math.min(20, Number($('layerStrokeInput')?.value || 4))),
+                color: chosenColor,
+                dropLength: Number($('layerDropInput')?.value || 0),
+                spacing: Number($('layerSpacingInput')?.value || 0),
+                height: Number($('layerHeightInput')?.value || 0),
+                depth: Number($('layerDepthInput')?.value || 0)
+            };
+            if (takeoffState.pendingCatalogItem) {
+                try {
+                    Object.assign(payload, catalogItemMeta(takeoffState.pendingCatalogItem));
+                } catch (metaError) {
+                    console.warn('catalogItemMeta failed', metaError);
+                    payload.catalogItemId = takeoffState.pendingCatalogItem.id;
+                    payload.catalog_item_id = takeoffState.pendingCatalogItem.id;
+                }
+            }
+            if (editingLayerId) {
+                const layer = findLayer(editingLayerId);
+                if (layer) Object.assign(layer, payload);
+                callEditor('projectTakeoffUpdateLayerObjects', editingLayerId, {
+                    symbol: payload.symbol,
+                    color: payload.color,
+                    symbolSize: payload.markerDiameter / 2,
+                    diameter: payload.markerDiameter,
+                    strokeWidth: payload.strokeWidth
+                });
+                setActiveTakeoffLayer(editingLayerId, false);
+            } else {
+                const group = findGroup(takeoffState.pendingLayerGroupId);
+                const layer = {
+                    id: makeId('layer'),
+                    groupId: group.id,
+                    estimateId: activeEstimateId(),
+                    quantity: 0,
+                    ...payload
+                };
+                group.layers.push(layer);
+                group.isExpanded = true;
+                takeoffState.activeGroupId = group.id;
+                setActiveTakeoffLayer(layer.id, false);
+            }
             // Modal Save is a durable operation, not merely a request for the
             // editor's delayed autosave. Waiting for this ACK prevents a quick
             // close/reload from restoring the duplicate's previous appearance.
@@ -1480,9 +1534,10 @@
         } catch (error) {
             console.warn('Takeoff layer save failed', error);
             showPrepared('Unable to save Takeoff item changes. Please try again.');
+        } finally {
             if (submit) {
                 submit.dataset.saving = '0';
-                submit.disabled = false;
+                submit.disabled = !$('layerNameInput')?.value.trim();
                 submit.textContent = editingLayerId ? 'Save' : 'Create';
             }
         }
@@ -2505,6 +2560,21 @@
         if (action === 'upload-drawing') return document.querySelector('[data-tab="documents"]')?.click();
         if (action === 'save-workspace') {
             saveTakeoffState();
+            try {
+                const saved = callEditor('projectTakeoffSave');
+                if (saved && typeof saved.then === 'function') {
+                    saved.catch(e => console.warn('Canvas save warning:', e));
+                }
+            } catch (e) {
+                console.warn('Canvas save error:', e);
+            }
+            if (typeof window.projectEstimatingSave === 'function') {
+                try {
+                    window.projectEstimatingSave().catch?.(e => console.warn('Estimating save warning:', e));
+                } catch (e) {
+                    console.warn('Estimating save error:', e);
+                }
+            }
             callEditor('projectTakeoffSnapshot');
             return showPrepared('Workspace saved.');
         }

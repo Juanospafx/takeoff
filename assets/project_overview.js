@@ -114,13 +114,28 @@
         }
 
         try {
-            const takeoffFrame = document.getElementById('takeoffFrame');
-            const saveTakeoff = takeoffFrame?.contentWindow?.projectTakeoffSave;
-            if (typeof saveTakeoff === 'function') {
-                await saveTakeoff.call(takeoffFrame.contentWindow);
+            try {
+                const takeoffFrame = document.getElementById('takeoffFrame');
+                const saveTakeoff = takeoffFrame?.contentWindow?.projectTakeoffSave;
+                if (typeof saveTakeoff === 'function') {
+                    await saveTakeoff.call(takeoffFrame.contentWindow);
+                }
+            } catch (takeoffErr) {
+                console.warn('Takeoff iframe save ignored or unavailable:', takeoffErr);
+            }
+            if (typeof window.projectTakeoffSaveState === 'function') {
+                try {
+                    window.projectTakeoffSaveState();
+                } catch (stateErr) {
+                    console.warn('Takeoff state save warning:', stateErr);
+                }
             }
             if (typeof window.projectEstimatingSave === 'function') {
-                await window.projectEstimatingSave();
+                try {
+                    await window.projectEstimatingSave();
+                } catch (estErr) {
+                    console.warn('Estimating save error:', estErr);
+                }
             }
             const wasDraft = Number(window.ProjectState?.projectId || 0) === 0;
             const result = await request('save', payload);
@@ -291,29 +306,178 @@
         markDirty();
     }
 
-    function addNote() {
-        const content = prompt('Add note');
+    function renderNotes() {
+        const list = $('overviewNotesList');
+        if (!list) return;
+        if (!notes.length) {
+            list.innerHTML = `
+                <div class="overview-empty" id="overviewNotesEmpty">
+                    <p>No notes yet</p>
+                    <button class="btn-outline-dark" type="button" id="addNoteBtn"><i class="fas fa-plus"></i> Add note</button>
+                </div>`;
+            $('addNoteBtn')?.addEventListener('click', openNoteComposer);
+            return;
+        }
+        list.innerHTML = notes.map((note, idx) => `
+            <div class="overview-list-item" data-note-index="${idx}">
+                <div class="d-flex justify-content-between align-items-center">
+                    <strong>${escapeHtml(note.user || 'User')}</strong>
+                    <div class="d-flex align-items-center gap-2">
+                        <span>${escapeHtml(note.timestamp || '')}</span>
+                        <button type="button" class="btn-ghost btn-sm text-danger p-0" data-delete-note="${idx}" title="Delete note"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>
+                <p>${escapeHtml(note.content || '')}</p>
+            </div>`).join('');
+        list.querySelectorAll('[data-delete-note]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = Number(btn.dataset.deleteNote);
+                if (Number.isInteger(idx) && idx >= 0 && idx < notes.length) {
+                    notes.splice(idx, 1);
+                    markDirty();
+                    renderNotes();
+                }
+            });
+        });
+    }
+
+    function openNoteComposer() {
+        const composer = $('overviewNotesComposer');
+        if (composer) {
+            composer.style.display = 'block';
+            const textarea = $('overviewNoteContent');
+            if (textarea) {
+                textarea.value = '';
+                textarea.focus();
+            }
+        } else {
+            const content = prompt('Add note');
+            if (!content) return;
+            notes.push({
+                user: $('poEstimator')?.value || 'Juan Estevez',
+                timestamp: new Date().toLocaleString(),
+                content
+            });
+            markDirty();
+            renderNotes();
+            showToast('Note added locally. Press Save Project to persist it.');
+        }
+    }
+
+    function closeNoteComposer() {
+        const composer = $('overviewNotesComposer');
+        if (composer) composer.style.display = 'none';
+        const textarea = $('overviewNoteContent');
+        if (textarea) textarea.value = '';
+    }
+
+    function saveNoteFromComposer() {
+        const textarea = $('overviewNoteContent');
+        const content = textarea?.value.trim();
         if (!content) return;
         notes.push({
             user: $('poEstimator')?.value || 'Juan Estevez',
             timestamp: new Date().toLocaleString(),
             content
         });
+        closeNoteComposer();
         markDirty();
+        renderNotes();
         showToast('Note added locally. Press Save Project to persist it.');
     }
 
-    function createTask() {
-        const title = prompt('Task title');
+    function addNote() {
+        openNoteComposer();
+    }
+
+    function renderTasks() {
+        const list = $('overviewTasksList');
+        const countBadge = $('overviewTaskCount');
+        if (countBadge) countBadge.textContent = String(tasks.length);
+        if (!list) return;
+        if (!tasks.length) {
+            list.innerHTML = `
+                <div class="overview-empty" id="overviewTasksEmpty">
+                    <p>No tasks yet</p>
+                    <button class="btn-outline-dark" type="button" id="createTaskBtn"><i class="fas fa-plus"></i> Create first task</button>
+                </div>`;
+            $('createTaskBtn')?.addEventListener('click', openTaskComposer);
+            return;
+        }
+        list.innerHTML = tasks.map((task, idx) => `
+            <div class="overview-list-item" data-task-index="${idx}">
+                <div class="d-flex justify-content-between align-items-center">
+                    <strong>${escapeHtml(task.title || '')}</strong>
+                    <div class="d-flex align-items-center gap-2">
+                        <span>${escapeHtml(task.responsible || '')} ${escapeHtml(task.due_date || '')}</span>
+                        <button type="button" class="btn-ghost btn-sm text-danger p-0" data-delete-task="${idx}" title="Delete task"><i class="fas fa-trash"></i></button>
+                    </div>
+                </div>
+            </div>`).join('');
+        list.querySelectorAll('[data-delete-task]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = Number(btn.dataset.deleteTask);
+                if (Number.isInteger(idx) && idx >= 0 && idx < tasks.length) {
+                    tasks.splice(idx, 1);
+                    markDirty();
+                    renderTasks();
+                }
+            });
+        });
+    }
+
+    function openTaskComposer() {
+        const composer = $('overviewTaskComposer');
+        if (composer) {
+            composer.style.display = 'block';
+            const titleInput = $('overviewTaskTitle');
+            if (titleInput) {
+                titleInput.value = '';
+                titleInput.focus();
+            }
+            const assignee = $('overviewTaskAssignee');
+            if (assignee && !assignee.value) assignee.value = $('poEstimator')?.value || 'Juan Estevez';
+        } else {
+            const title = prompt('Task title');
+            if (!title) return;
+            tasks.push({
+                title,
+                responsible: $('poEstimator')?.value || 'Juan Estevez',
+                due_date: '',
+                status: 'open'
+            });
+            markDirty();
+            renderTasks();
+            showToast('Task added locally. Press Save Project to persist it.');
+        }
+    }
+
+    function closeTaskComposer() {
+        const composer = $('overviewTaskComposer');
+        if (composer) composer.style.display = 'none';
+        const titleInput = $('overviewTaskTitle');
+        if (titleInput) titleInput.value = '';
+    }
+
+    function saveTaskFromComposer() {
+        const title = $('overviewTaskTitle')?.value.trim();
         if (!title) return;
+        const responsible = $('overviewTaskAssignee')?.value.trim() || $('poEstimator')?.value || 'Juan Estevez';
+        const due = $('overviewTaskDue')?.value || '';
         tasks.push({
             title,
-            responsible: $('poEstimator')?.value || 'Juan Estevez',
-            due_date: '',
+            responsible,
+            due_date: due,
             status: 'open'
         });
+        closeTaskComposer();
         markDirty();
+        renderTasks();
         showToast('Task added locally. Press Save Project to persist it.');
+    }
+
+    function createTask() {
+        openTaskComposer();
     }
 
     function showToast(message) {
@@ -1007,8 +1171,14 @@
         $('saveProjectBtn')?.addEventListener('click', saveProject);
         $('addCustomerBtn')?.addEventListener('click', showCustomerFields);
         $('addProjectAddressBtn')?.addEventListener('click', showCustomerFields);
-        $('addNoteBtn')?.addEventListener('click', addNote);
-        $('createTaskBtn')?.addEventListener('click', createTask);
+        $('addNoteBtn')?.addEventListener('click', openNoteComposer);
+        $('addNoteBtnHead')?.addEventListener('click', openNoteComposer);
+        $('cancelNoteBtn')?.addEventListener('click', closeNoteComposer);
+        $('saveNoteBtn')?.addEventListener('click', saveNoteFromComposer);
+        $('createTaskBtn')?.addEventListener('click', openTaskComposer);
+        $('createTaskBtnHead')?.addEventListener('click', openTaskComposer);
+        $('cancelTaskBtn')?.addEventListener('click', closeTaskComposer);
+        $('saveTaskBtn')?.addEventListener('click', saveTaskFromComposer);
 
         document.querySelectorAll('[data-upload-category]').forEach(button => {
             button.addEventListener('click', event => {
@@ -1101,6 +1271,9 @@
                 renderProjectHeaderMeta();
             });
         });
+
+        renderNotes();
+        renderTasks();
 
         window.addEventListener('beforeunload', event => {
             if (!isDirty) return;

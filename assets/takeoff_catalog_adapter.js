@@ -13,10 +13,14 @@
     }
 
     function legacyUnitCost(dto) {
-        if (dto.type === Contract.ITEM_TYPES.PART) return number(dto.pricing.materialUnitCost);
-        if (dto.type === Contract.ITEM_TYPES.EQUIPMENT) return number(dto.pricing.equipmentUnitCost);
-        if (dto.type === Contract.ITEM_TYPES.SUBCONTRACTOR) return number(dto.pricing.subcontractorUnitCost);
-        return number(dto.pricing.legacyUnitCost);
+        if (!dto) return 0;
+        if (dto.unit_cost !== undefined) return number(dto.unit_cost);
+        if (dto.unitCost !== undefined) return number(dto.unitCost);
+        const pricing = dto.pricing || {};
+        if (dto.type === Contract.ITEM_TYPES.PART) return number(pricing.materialUnitCost ?? pricing.legacyUnitCost);
+        if (dto.type === Contract.ITEM_TYPES.EQUIPMENT) return number(pricing.equipmentUnitCost ?? pricing.legacyUnitCost);
+        if (dto.type === Contract.ITEM_TYPES.SUBCONTRACTOR) return number(pricing.subcontractorUnitCost ?? pricing.legacyUnitCost);
+        return number(pricing.legacyUnitCost ?? pricing.materialUnitCost);
     }
 
     function measurementType(dto, legacyFallback = '') {
@@ -31,8 +35,10 @@
     // generic unitCost field, so Equipment uses it while catalogMetadata keeps
     // the canonical cost bucket and type available for a later layer migration.
     function catalogItemDtoToLegacyLayerMeta(dto) {
+        if (!dto) return {};
         const unitCost = legacyUnitCost(dto);
-        const laborHours = number(dto.pricing.laborHoursPerUnit);
+        const pricing = dto.pricing || {};
+        const laborHours = number(pricing.laborHoursPerUnit ?? dto.labor_hours ?? dto.laborHours);
         const metadata = {
             schema: 'CatalogItemDTO/v1',
             catalogItemId: dto.id,
@@ -52,16 +58,16 @@
             unit_cost: unitCost,
             laborHours,
             labor_hours: laborHours,
-            laborRate: number(dto.pricing.laborRate),
-            category: dto.category.name || dto.catalog.name || '',
-            description: dto.description,
-            catalogName: dto.catalog.name,
-            catalogGroupName: dto.category.name,
-            catalogNumber: dto.supplier.catalogNumber || dto.classification.costCode || '',
-            itemType: dto.type,
-            costCategory: dto.costCategory,
-            equipmentUnitCost: number(dto.pricing.equipmentUnitCost),
-            materialUnitCost: number(dto.pricing.materialUnitCost),
+            laborRate: number(pricing.laborRate ?? dto.laborRate),
+            category: dto.category?.name || dto.catalog?.name || (typeof dto.category === 'string' ? dto.category : '') || '',
+            description: dto.description || '',
+            catalogName: dto.catalog?.name || (typeof dto.catalog === 'string' ? dto.catalog : '') || '',
+            catalogGroupName: dto.category?.name || (typeof dto.category === 'string' ? dto.category : '') || '',
+            catalogNumber: dto.supplier?.catalogNumber || dto.classification?.costCode || dto.catalog_number || '',
+            itemType: dto.type || 'material',
+            costCategory: dto.costCategory || '',
+            equipmentUnitCost: number(pricing.equipmentUnitCost),
+            materialUnitCost: number(pricing.materialUnitCost ?? unitCost),
             catalogMetadata: Metadata.clone(metadata),
             metadata_json: { catalog_item: Metadata.clone(metadata) }
         };

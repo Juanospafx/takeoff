@@ -1841,12 +1841,24 @@
             if (!item) return;
             state.createCatalogItemId = item.id;
             document.getElementById('takeoffCreateName').value = item.name || '';
-            document.getElementById('takeoffCreateUom').value = item.unit_of_measure || 'ea';
+            const uomSelect = document.getElementById('takeoffCreateUom');
+            const uomVal = (item.unit_of_measure || 'ea').trim();
+            if (uomSelect) {
+                let match = Array.from(uomSelect.options).find(o => o.value.toLowerCase() === uomVal.toLowerCase());
+                if (!match) {
+                    const opt = document.createElement('option');
+                    opt.value = uomVal;
+                    opt.textContent = uomVal;
+                    uomSelect.appendChild(opt);
+                }
+                uomSelect.value = match ? match.value : uomVal;
+            }
             document.getElementById('takeoffCreateColor').value = item.color || '#2563eb';
             document.getElementById('takeoffCreateSymbol').value = item.symbol || 'circle';
-            if (!document.getElementById('takeoffCreateType').value) {
-                document.getElementById('takeoffCreateType').value = item.unit_of_measure === 'ft' || item.unit_of_measure === 'lf' ? 'linear' : 'count';
-            }
+            const uomLower = uomVal.toLowerCase();
+            const isLinear = ['ft', 'lf', 'mft', 'kft', 'cft', 'm', 'km', 'linear'].includes(uomLower);
+            const isArea = ['sf', 'sq ft', 'sqft', 'sy', 'sq yd', 'm2', 'area'].includes(uomLower);
+            document.getElementById('takeoffCreateType').value = isLinear ? 'linear' : (isArea ? 'area' : 'count');
             updateCreateMeta(item);
             validateCreateLayerModal();
             closeCatalogBrowser();
@@ -3354,7 +3366,7 @@
     };
 
     window.projectTakeoffSetLayerLocked = function (layerId, locked) {
-        const layer = state.layers.find(row => String(row.client_uid) === String(layerId) || String(row.metadata_json?.project_layer_id) === String(layerId));
+        const layer = state.layers.find(row => String(row.client_uid) === String(layerId) || String(row.metadata_json?.project_layer_id) === String(layerId) || String(row.id) === String(layerId));
         if (!layer) return false;
         snapshot();
         layer.locked = locked ? 1 : 0;
@@ -3379,7 +3391,7 @@
     };
 
     window.projectTakeoffGetLayerLockState = function (layerId) {
-        const layer = state.layers.find(row => String(row.client_uid) === String(layerId) || String(row.metadata_json?.project_layer_id) === String(layerId));
+        const layer = state.layers.find(row => String(row.client_uid) === String(layerId) || String(row.metadata_json?.project_layer_id) === String(layerId) || String(row.id) === String(layerId));
         if (!layer) return { locked: false, layerLocked: false, objectCount: 0 };
         const objects = [
             ...state.markers.filter(marker => String(marker.layer_client_uid) === String(layer.client_uid)),
