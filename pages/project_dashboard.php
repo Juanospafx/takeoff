@@ -248,6 +248,91 @@ if ($projectId > 0 && dash_table_exists($pdo, 'takeoff_layers')) {
     $takeoffLayers = $stmt->fetchAll(PDO::FETCH_ASSOC);
 }
 
+$takeoffLocations = [];
+if (!empty($takeoffLayers)) {
+    $layerMapById = [];
+    foreach ($takeoffLayers as $tl) {
+        $layerMapById[(int)$tl['id']] = $tl;
+    }
+    $layerIds = array_keys($layerMapById);
+    $inPlaceholders = implode(',', array_fill(0, count($layerIds), '?'));
+
+    if (dash_table_exists($pdo, 'takeoff_count_markers')) {
+        try {
+            $stmtM = $pdo->prepare("
+                SELECT layer_id, page_number, COUNT(id) AS mark_count, SUM(quantity * COALESCE(multiplier, 1)) AS total_qty
+                FROM takeoff_count_markers
+                WHERE layer_id IN ($inPlaceholders)
+                GROUP BY layer_id, page_number
+            ");
+            $stmtM->execute($layerIds);
+            foreach ($stmtM->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $lid = (int)$row['layer_id'];
+                $pg = (int)$row['page_number'];
+                if (!isset($takeoffLocations[$lid])) {
+                    $tl = $layerMapById[$lid] ?? [];
+                    $takeoffLocations[$lid] = [
+                        'layerId' => $lid,
+                        'drawingId' => (int)($tl['drawing_id'] ?? 0),
+                        'name' => $tl['name'] ?? '',
+                        'color' => $tl['color'] ?? '#2563eb',
+                        'symbol' => $tl['symbol'] ?? 'circle',
+                        'type' => $tl['type'] ?? 'count',
+                        'uom' => $tl['unit_of_measure'] ?? 'ea',
+                        'pages' => []
+                    ];
+                }
+                $takeoffLocations[$lid]['pages'][$pg] = [
+                    'count' => (int)$row['mark_count'],
+                    'quantity' => (float)$row['total_qty']
+                ];
+            }
+        } catch (Throwable $e) {
+            // Tolerate schema variations in older environments
+        }
+    }
+
+    if (dash_table_exists($pdo, 'takeoff_linear_segments')) {
+        try {
+            $stmtS = $pdo->prepare("
+                SELECT layer_id, page_number, COUNT(id) AS mark_count, SUM(total_length * COALESCE(multiplier, 1)) AS total_qty
+                FROM takeoff_linear_segments
+                WHERE layer_id IN ($inPlaceholders)
+                GROUP BY layer_id, page_number
+            ");
+            $stmtS->execute($layerIds);
+            foreach ($stmtS->fetchAll(PDO::FETCH_ASSOC) as $row) {
+                $lid = (int)$row['layer_id'];
+                $pg = (int)$row['page_number'];
+                if (!isset($takeoffLocations[$lid])) {
+                    $tl = $layerMapById[$lid] ?? [];
+                    $takeoffLocations[$lid] = [
+                        'layerId' => $lid,
+                        'drawingId' => (int)($tl['drawing_id'] ?? 0),
+                        'name' => $tl['name'] ?? '',
+                        'color' => $tl['color'] ?? '#2563eb',
+                        'symbol' => $tl['symbol'] ?? 'circle',
+                        'type' => $tl['type'] ?? 'linear',
+                        'uom' => $tl['unit_of_measure'] ?? 'ft',
+                        'pages' => []
+                    ];
+                }
+                if (isset($takeoffLocations[$lid]['pages'][$pg])) {
+                    $takeoffLocations[$lid]['pages'][$pg]['count'] += (int)$row['mark_count'];
+                    $takeoffLocations[$lid]['pages'][$pg]['quantity'] += (float)$row['total_qty'];
+                } else {
+                    $takeoffLocations[$lid]['pages'][$pg] = [
+                        'count' => (int)$row['mark_count'],
+                        'quantity' => (float)$row['total_qty']
+                    ];
+                }
+            }
+        } catch (Throwable $e) {
+            // Tolerate schema variations in older environments
+        }
+    }
+}
+
 $estimateItems = [];
 if ($projectId > 0 && dash_table_exists($pdo, 'estimate_items') && dash_table_exists($pdo, 'estimates')) {
     $stmt = $pdo->prepare("
@@ -363,6 +448,7 @@ $state = [
     'selectedDrawingId' => $selectedDocumentId,
     'takeoffGroups' => [],
     'takeoffLayers' => $takeoffLayers,
+    'takeoffLocations' => $takeoffLocations,
     'takeoffMeasurements' => [],
     'estimateItems' => $estimateItems,
     'estimateTotals' => [
@@ -930,27 +1016,60 @@ $state = [
                                     <div class="pro-drawing-dropdown-head">
                                         <div>
                                             <div class="pro-drawing-crumbs">Drawing Sources <i class="fas fa-chevron-right"></i> Estimating Tool</div>
-                                            <strong>Drawings</strong>
+                                            <strong>Drawings &amp; Sheets</strong>
                                         </div>
                                         <button class="pro-icon-btn" type="button" data-drawing-close aria-label="Close drawing selector"><i class="fas fa-times"></i></button>
                                     </div>
+                                    <div class="pro-drawing-active-bar" id="takeoffDrawingActiveBar">
+                                        <div class="pro-drawing-active-info" id="takeoffDrawingActiveInfo">
+                                            <span class="pro-drawing-active-label">Item Activo:</span>
+                                            <span class="pro-drawing-active-pill" id="takeoffDrawingActivePill" title="Item actualmente seleccionado para cotización">
+                                                <span class="pro-drawing-active-dot" id="takeoffDrawingActiveDot"></span>
+                                                <span id="takeoffDrawingActiveText">Ningún item seleccionado</span>
+                                            </span>
+                                        </div>
+                                        <div class="pro-drawing-filters">
+                                            <button class="pro-drawing-filter-btn active" id="takeoffFilterAllSheets" type="button" data-drawing-filter="all">Todas las Hojas</button>
+                                            <button class="pro-drawing-filter-btn" id="takeoffFilterItemSheets" type="button" data-drawing-filter="item">Solo con este Item <span class="pro-filter-count" id="takeoffFilterItemCount">0</span></button>
+                                        </div>
+                                    </div>
                                     <div class="pro-drawing-search">
-                                        <input id="takeoffDrawingSearch" type="search" placeholder="Search drawing">
+                                        <input id="takeoffDrawingSearch" type="search" placeholder="Search drawing or sheet...">
                                         <i class="fas fa-magnifying-glass"></i>
                                     </div>
                                     <div class="pro-drawing-grid">
                                         <div class="pro-drawing-col">
-                                            <div class="pro-drawing-col-title">Directory</div>
+                                            <div class="pro-drawing-col-title">Directory <span class="pro-col-badge" id="takeoffDocTotalCount">0</span></div>
                                             <div id="takeoffDocumentList" class="pro-drawing-list"></div>
                                         </div>
                                         <div class="pro-drawing-col">
-                                            <div class="pro-drawing-col-title">Sheets</div>
+                                            <div class="pro-drawing-col-title">Sheets <span class="pro-col-badge" id="takeoffSheetTotalCount">0</span></div>
                                             <div id="takeoffSheetList" class="pro-drawing-list"></div>
                                         </div>
                                         <div class="pro-drawing-preview">
-                                            <div class="pro-drawing-col-title">Preview</div>
-                                            <div id="takeoffSheetPreview" class="pro-preview-box">
-                                                <span>Select a sheet</span>
+                                            <div class="pro-drawing-col-title">Preview &amp; Takeoff</div>
+                                            <div class="pro-preview-container">
+                                                <div id="takeoffSheetPreview" class="pro-preview-box">
+                                                    <span>Select a sheet</span>
+                                                </div>
+                                                <div class="pro-preview-details" id="takeoffPreviewDetails">
+                                                    <div class="pro-preview-sheet-header">
+                                                        <h4 id="takeoffPreviewTitle">Sheet Preview</h4>
+                                                        <span class="pro-preview-sheet-sub" id="takeoffPreviewSub">Selecciona una hoja para ver sus marcas</span>
+                                                    </div>
+                                                    <div class="pro-preview-takeoff-section">
+                                                        <div class="pro-preview-section-title">
+                                                            <span><i class="fas fa-layer-group"></i> Items en esta hoja</span>
+                                                            <span class="pro-preview-item-count" id="takeoffPreviewItemCount">0 items</span>
+                                                        </div>
+                                                        <div class="pro-preview-items-list" id="takeoffPreviewItemsList">
+                                                            <div class="pro-preview-empty-takeoff">Sin marcas en esta hoja</div>
+                                                        </div>
+                                                    </div>
+                                                    <button class="pro-open-sheet-btn" id="takeoffOpenSheetBtn" type="button" disabled>
+                                                        <i class="fas fa-arrow-right-to-bracket"></i> Abrir Hoja
+                                                    </button>
+                                                </div>
                                             </div>
                                         </div>
                                     </div>

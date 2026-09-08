@@ -162,6 +162,8 @@
         selectedPage: 1,
         browseDocumentId: Number(window.ProjectState?.selectedDocumentId || 0),
         query: '',
+        filterMode: 'all',
+        previewPage: 1,
         pdfReady: null,
         pdfLoading: null,
         pdfDocs: new Map(),
@@ -265,6 +267,78 @@
         return `${doc.name} - Page ${pageNumber}`;
     }
 
+    function getSheetTakeoffSummary(docId, pageNumber) {
+        const activeId = String(takeoffState.activeLayerId || selectionState.activeLayerId || '');
+        const numDocId = Number(docId);
+        const numPage = Number(pageNumber);
+
+        const layerMap = new Map();
+
+        // 1. Check live snapshots for this drawing
+        const activeEst = typeof activeEstimateId === 'function' ? activeEstimateId() : '';
+        const snapshotKey = `${activeEst}:${numDocId}`;
+        const liveSnapshot = (takeoffState.canvasSnapshots && takeoffState.canvasSnapshots[snapshotKey])
+            || Object.values(takeoffState.canvasSnapshots || {}).find(s => Number(s.drawingId || s.drawing_id) === numDocId);
+
+        if (liveSnapshot && Array.isArray(liveSnapshot.layers) && liveSnapshot.layers.length > 0) {
+            liveSnapshot.layers.forEach(remote => {
+                const lid = String(remote.id || remote.layerId || '');
+                const layer = typeof findLayer === 'function' ? findLayer(lid) : null;
+                const shapes = (remote.shapes || remote.takeoffObjects || []).filter(s => Number(s.pageNumber) === numPage);
+                if (!shapes.length) return;
+                const markCount = shapes.length;
+                const quantity = shapes.reduce((sum, s) => sum + Number(s.quantityValue || s.quantity || 1), 0);
+                layerMap.set(lid, {
+                    layerId: lid,
+                    name: layer?.name || remote.name || 'Item de Takeoff',
+                    color: layer?.color || remote.color || '#2563eb',
+                    symbol: layer?.symbol || remote.symbol || 'Solid Circle',
+                    type: layer?.type || remote.type || 'Count',
+                    uom: layer?.uom || remote.unit_of_measure || remote.uom || 'ea',
+                    markCount,
+                    quantity,
+                    isActive: Boolean(activeId && lid === activeId)
+                });
+            });
+        } else {
+            // 2. Fall back to server-seeded takeoffLocations
+            const locations = window.ProjectState?.takeoffLocations || {};
+            Object.entries(locations).forEach(([lid, loc]) => {
+                const layer = typeof findLayer === 'function' ? findLayer(lid) : null;
+                const layerDocId = Number(loc.drawingId || loc.drawing_id || layer?.drawing_id || 0);
+                if (layerDocId !== 0 && layerDocId !== numDocId) return;
+
+                const pageData = loc.pages?.[numPage] || loc.pages?.[String(numPage)];
+                if (pageData && (Number(pageData.count || 0) > 0 || Number(pageData.quantity || 0) > 0)) {
+                    layerMap.set(String(lid), {
+                        layerId: String(lid),
+                        name: layer?.name || loc.name || 'Item de Takeoff',
+                        color: layer?.color || loc.color || '#2563eb',
+                        symbol: layer?.symbol || loc.symbol || 'Solid Circle',
+                        type: layer?.type || loc.type || 'Count',
+                        uom: layer?.uom || loc.uom || loc.unit_of_measure || 'ea',
+                        markCount: Number(pageData.count || 0),
+                        quantity: Number(pageData.quantity || 0),
+                        isActive: Boolean(activeId && String(lid) === activeId)
+                    });
+                }
+            });
+        }
+
+        const layers = Array.from(layerMap.values());
+        const totalMarks = layers.reduce((sum, l) => sum + l.markCount, 0);
+        const activeLayerEntry = activeId ? layerMap.get(activeId) : null;
+        const activeItemMarks = activeLayerEntry ? activeLayerEntry.markCount : 0;
+
+        return {
+            totalMarks,
+            layers,
+            activeItemMarks,
+            hasActiveItem: activeItemMarks > 0,
+            hasAnyTakeoff: layers.length > 0 || totalMarks > 0
+        };
+    }
+
     function buildSheets(doc) {
         if (!doc) return [];
         const count = doc.pageCount || (doc.extension === 'pdf' ? 0 : 1);
@@ -272,13 +346,15 @@
         return Array.from({ length: count }, (_, index) => {
             const pageNumber = index + 1;
             const saved = doc.sheets?.[index] || {};
+            const summary = getSheetTakeoffSummary(doc.id, pageNumber);
             return {
                 id: `${doc.id}:${pageNumber}`,
                 documentId: doc.id,
                 name: saved.name || sheetName(doc, pageNumber),
                 pageNumber,
                 thumbnailUrl: saved.thumbnailUrl,
-                hasTakeoffs: Boolean(saved.hasTakeoffs),
+                hasTakeoffs: summary.hasAnyTakeoff || Boolean(saved.hasTakeoffs),
+                takeoffSummary: summary,
                 hasComments: Boolean(saved.hasComments)
             };
         });
@@ -2036,6 +2112,7 @@
         saveTakeoffState();
         if (rerender) renderTakeoffPanel();
         renderActiveLayerToolbar();
+        if ($('takeoffDrawingDropdown')?.classList.contains('open')) renderDrawingDropdown();
     }
 
     function selectTakeoffContext(layerId, rerender = true) {
@@ -2045,6 +2122,7 @@
         takeoffState.activeGroupId = layer.groupId;
         if (rerender) renderTakeoffPanel();
         renderActiveLayerToolbar();
+        if ($('takeoffDrawingDropdown')?.classList.contains('open')) renderDrawingDropdown();
     }
 
     function clearActiveTakeoffLayer(rerender = true) {
@@ -2053,6 +2131,7 @@
         saveTakeoffState();
         if (rerender) renderTakeoffPanel();
         renderActiveLayerToolbar();
+        if ($('takeoffDrawingDropdown')?.classList.contains('open')) renderDrawingDropdown();
     }
 
     function toggleLayerVisibility(layerId, visible) {
@@ -3042,7 +3121,51 @@
         $('takeoffSheetSelect')?.setAttribute('aria-expanded', 'false');
     }
 
+    function renderActiveDrawingItemBar() {
+        const activeLayer = typeof findLayer === 'function' ? findLayer(takeoffState.activeLayerId || selectionState.activeLayerId) : null;
+        const dot = $('takeoffDrawingActiveDot');
+        const text = $('takeoffDrawingActiveText');
+        const pill = $('takeoffDrawingActivePill');
+        const countBadge = $('takeoffFilterItemCount');
+        const filterItemBtn = $('takeoffFilterItemSheets');
+
+        if (activeLayer) {
+            if (dot) dot.style.background = activeLayer.color || '#2563eb';
+            if (text) text.textContent = activeLayer.name || 'Item sin nombre';
+            if (pill) {
+                pill.title = `Item activo: ${activeLayer.name} (${activeLayer.type || 'conteo'})`;
+                pill.style.borderColor = `${activeLayer.color || '#2563eb'}60`;
+            }
+
+            const doc = browsingDrawingDoc();
+            let matchCount = 0;
+            if (doc) {
+                const sheets = buildSheets(doc);
+                matchCount = sheets.filter(s => s.takeoffSummary?.hasActiveItem).length;
+            }
+            if (countBadge) countBadge.textContent = matchCount;
+            if (filterItemBtn) filterItemBtn.disabled = false;
+        } else {
+            if (dot) dot.style.background = '#94a3b8';
+            if (text) text.textContent = 'Ningún item seleccionado';
+            if (pill) {
+                pill.title = 'Selecciona un item en Takeoff para ver sus marcas en los planos';
+                pill.style.borderColor = '#e2e8f0';
+            }
+            if (countBadge) countBadge.textContent = '0';
+            if (filterItemBtn) {
+                filterItemBtn.disabled = true;
+                if (drawingState.filterMode === 'item') {
+                    drawingState.filterMode = 'all';
+                    $('takeoffFilterAllSheets')?.classList.add('active');
+                    $('takeoffFilterItemSheets')?.classList.remove('active');
+                }
+            }
+        }
+    }
+
     function renderDrawingDropdown() {
+        renderActiveDrawingItemBar();
         renderDocumentList();
         renderSheetList();
     }
@@ -3069,6 +3192,9 @@
     function renderDocumentList() {
         const box = $('takeoffDocumentList');
         if (!box) return;
+        const totalCountBadge = $('takeoffDocTotalCount');
+        if (totalCountBadge) totalCountBadge.textContent = drawingState.documents.length;
+
         if (!drawingState.documents.length) {
             box.innerHTML = `<div class="pro-drawing-empty">
                 <strong>No drawings uploaded yet</strong>
@@ -3076,17 +3202,36 @@
             </div>`;
             return;
         }
+
+        const activeLayer = typeof findLayer === 'function' ? findLayer(takeoffState.activeLayerId || selectionState.activeLayerId) : null;
+
         const docs = drawingState.documents.filter(doc => {
             if (!drawingState.query) return true;
             if (matchesDrawingQuery(doc)) return true;
             return buildSheets(doc).some(sheet => matchesDrawingQuery(doc, sheet));
         });
-        box.innerHTML = docs.map(doc => `
-            <button class="pro-drawing-row ${doc.id === drawingState.browseDocumentId ? 'active' : ''}" type="button" data-drawing-doc="${doc.id}">
-                <span class="pro-drawing-name">${esc(doc.name)}</span>
-                <span class="pro-drawing-count">${doc.pageCount || (doc.extension === 'pdf' ? '...' : '1')}</span>
-            </button>
-        `).join('') || '<div class="pro-drawing-empty">No drawings match your search.</div>';
+
+        box.innerHTML = docs.map(doc => {
+            const isSelected = doc.id === drawingState.browseDocumentId;
+            let docHasActiveItem = false;
+            let docHasAnyTakeoff = false;
+            if (doc.sheets && doc.sheets.length > 0) {
+                docHasActiveItem = doc.sheets.some(s => s.takeoffSummary?.hasActiveItem);
+                docHasAnyTakeoff = doc.sheets.some(s => s.takeoffSummary?.hasAnyTakeoff);
+            }
+            return `
+            <button class="pro-drawing-row ${isSelected ? 'active' : ''}" type="button" data-drawing-doc="${doc.id}" title="${esc(doc.name)}">
+                <span class="pro-drawing-info">
+                    <i class="fas fa-file-lines pro-doc-icon"></i>
+                    <span class="pro-drawing-name">${esc(doc.name)}</span>
+                </span>
+                <span class="pro-drawing-meta">
+                    ${docHasActiveItem ? `<span class="pro-drawing-item-dot" style="background: ${activeLayer?.color || '#2563eb'}" title="Contiene marcas de ${esc(activeLayer?.name || 'item activo')}"></span>` : (docHasAnyTakeoff ? `<span class="pro-drawing-takeoff-dot" title="Contiene marcas de takeoff"></span>` : '')}
+                    <span class="pro-drawing-count">${doc.pageCount || (doc.extension === 'pdf' ? '...' : '1')}</span>
+                </span>
+            </button>`;
+        }).join('') || '<div class="pro-drawing-empty">No drawings match your search.</div>';
+
         box.querySelectorAll('[data-drawing-doc]').forEach(button => {
             button.addEventListener('click', () => {
                 drawingState.browseDocumentId = Number(button.dataset.drawingDoc);
@@ -3116,23 +3261,59 @@
             box.innerHTML = '<div class="pro-drawing-empty">Loading sheet list...</div>';
             return;
         }
-        const sheets = buildSheets(doc).filter(sheet => matchesDrawingQuery(doc, sheet));
+
+        const activeLayer = typeof findLayer === 'function' ? findLayer(takeoffState.activeLayerId || selectionState.activeLayerId) : null;
+        let sheets = buildSheets(doc).filter(sheet => matchesDrawingQuery(doc, sheet));
+
+        const totalSheetBadge = $('takeoffSheetTotalCount');
+        if (totalSheetBadge) totalSheetBadge.textContent = sheets.length;
+
+        if (drawingState.filterMode === 'item') {
+            sheets = sheets.filter(sheet => sheet.takeoffSummary?.hasActiveItem);
+        }
+
         box.innerHTML = sheets.map(sheet => {
-            const isActive = doc.id === drawingState.selectedDocumentId && sheet.pageNumber === drawingState.selectedPage;
-            return `<button class="pro-sheet-row ${isActive ? 'active' : ''}" type="button" data-drawing-page="${sheet.pageNumber}">
-                <span class="pro-sheet-name">${esc(sheet.name)}</span>
+            const isCurrentEditorSheet = doc.id === drawingState.selectedDocumentId && sheet.pageNumber === drawingState.selectedPage;
+            const isPreviewActive = sheet.pageNumber === (drawingState.previewPage || 1);
+            const summary = sheet.takeoffSummary || getSheetTakeoffSummary(doc.id, sheet.pageNumber);
+            const hasActiveMarks = summary.hasActiveItem;
+            const activeCount = summary.activeItemMarks;
+
+            return `<button class="pro-sheet-row ${isPreviewActive ? 'active' : ''} ${isCurrentEditorSheet ? 'is-editor-open' : ''}" type="button" data-drawing-page="${sheet.pageNumber}" title="${esc(sheet.name)}">
+                <span class="pro-sheet-info">
+                    <span class="pro-sheet-page-badge">Pág. ${sheet.pageNumber}</span>
+                    <span class="pro-sheet-name">${esc(sheet.name)}</span>
+                </span>
                 <span class="pro-sheet-icons">
-                    ${sheet.hasTakeoffs ? '<i class="fas fa-layer-group" title="Has takeoffs"></i>' : ''}
-                    ${sheet.hasComments ? '<i class="fas fa-comment" title="Has comments"></i>' : ''}
+                    ${hasActiveMarks ? `
+                        <span class="pro-sheet-item-mark" style="--mark-color: ${activeLayer?.color || '#2563eb'}" title="${activeCount} ${activeCount === 1 ? 'marca' : 'marcas'} de ${esc(activeLayer?.name || 'item activo')}">
+                            <span class="pro-mark-dot" style="background: ${activeLayer?.color || '#2563eb'}"></span>
+                            ${activeCount}
+                        </span>
+                    ` : (summary.hasAnyTakeoff ? `
+                        <span class="pro-sheet-takeoff-tag" title="${summary.layers.length} ${summary.layers.length === 1 ? 'item' : 'items'} de cotización (${summary.totalMarks} marcas)">
+                            <i class="fas fa-layer-group"></i> ${summary.layers.length}
+                        </span>
+                    ` : '')}
+                    ${sheet.hasComments ? '<i class="fas fa-comment pro-comment-icon" title="Comentarios"></i>' : ''}
+                    ${isCurrentEditorSheet ? '<span class="pro-sheet-current-tag" title="Hoja abierta en el visor"><i class="fas fa-eye"></i></span>' : ''}
                 </span>
             </button>`;
-        }).join('') || '<div class="pro-drawing-empty">No sheets match your search.</div>';
+        }).join('') || `<div class="pro-drawing-empty">${drawingState.filterMode === 'item' ? 'Ninguna hoja contiene marcas del item activo.' : 'No sheets match your search.'}</div>`;
+
         box.querySelectorAll('[data-drawing-page]').forEach(button => {
             button.addEventListener('mouseenter', () => renderSheetPreview(doc, Number(button.dataset.drawingPage)));
             button.addEventListener('focus', () => renderSheetPreview(doc, Number(button.dataset.drawingPage)));
-            button.addEventListener('click', () => selectDrawingSheet(doc, Number(button.dataset.drawingPage)));
+            button.addEventListener('click', () => {
+                const pg = Number(button.dataset.drawingPage);
+                renderSheetPreview(doc, pg);
+            });
+            button.addEventListener('dblclick', () => {
+                selectDrawingSheet(doc, Number(button.dataset.drawingPage));
+            });
         });
-        const previewPage = doc.id === drawingState.selectedDocumentId ? drawingState.selectedPage : 1;
+
+        const previewPage = drawingState.previewPage || (doc.id === drawingState.selectedDocumentId ? drawingState.selectedPage : 1);
         renderSheetPreview(doc, previewPage);
     }
 
@@ -3149,27 +3330,80 @@
     async function renderSheetPreview(doc, pageNumber) {
         const box = $('takeoffSheetPreview');
         if (!box || !doc) return;
+        drawingState.previewPage = Math.max(1, Number(pageNumber) || 1);
+
+        // Update sheet row active state in list
+        document.querySelectorAll('#takeoffSheetList .pro-sheet-row').forEach(row => {
+            if (Number(row.dataset.drawingPage) === drawingState.previewPage) {
+                row.classList.add('active');
+            } else {
+                row.classList.remove('active');
+            }
+        });
+
+        // Update preview headers
+        const titleEl = $('takeoffPreviewTitle');
+        const subEl = $('takeoffPreviewSub');
+        if (titleEl) titleEl.textContent = sheetName(doc, drawingState.previewPage);
+        if (subEl) subEl.textContent = `Hoja ${drawingState.previewPage} de ${doc.pageCount || 1} • ${esc(doc.name)}`;
+
+        // Update Takeoff Items breakdown on this sheet
+        const summary = getSheetTakeoffSummary(doc.id, drawingState.previewPage);
+        const countEl = $('takeoffPreviewItemCount');
+        const listEl = $('takeoffPreviewItemsList');
+        const openBtn = $('takeoffOpenSheetBtn');
+
+        if (countEl) countEl.textContent = `${summary.layers.length} ${summary.layers.length === 1 ? 'item' : 'items'} (${summary.totalMarks} marcas)`;
+        if (listEl) {
+            if (!summary.layers.length) {
+                listEl.innerHTML = '<div class="pro-preview-empty-takeoff"><i class="fas fa-circle-info"></i> Sin marcas de cotización en esta hoja</div>';
+            } else {
+                listEl.innerHTML = summary.layers.map(l => `
+                    <div class="pro-preview-item-row ${l.isActive ? 'is-active-item' : ''}">
+                        <span class="pro-preview-item-symbol" style="background: ${l.color}22; color: ${l.color};">
+                            ${typeof symbolGlyph === 'function' ? symbolGlyph(l) : '<i class="fas fa-circle"></i>'}
+                        </span>
+                        <div class="pro-preview-item-info">
+                            <span class="pro-preview-item-name" title="${esc(l.name)}">
+                                ${esc(l.name)}
+                                ${l.isActive ? '<span class="pro-active-badge">Item Activo</span>' : ''}
+                            </span>
+                            <span class="pro-preview-item-qty">
+                                ${Number(l.quantity || 0).toLocaleString(undefined, { maximumFractionDigits: 2 })} ${esc(l.uom)} &bull; ${l.markCount} ${l.markCount === 1 ? 'marca' : 'marcas'}
+                            </span>
+                        </div>
+                    </div>
+                `).join('');
+            }
+        }
+
+        if (openBtn) {
+            openBtn.disabled = false;
+            openBtn.onclick = () => selectDrawingSheet(doc, drawingState.previewPage);
+        }
+
+        // Render thumbnail
         const requestId = ++drawingState.thumbnailRequest;
         showPreviewLoading();
         if (doc.extension !== 'pdf') {
             box.innerHTML = `<img src="${esc(doc.fileUrl)}" alt="${esc(doc.name)}">`;
             return;
         }
-        const key = `${doc.id}:${pageNumber}`;
+        const key = `${doc.id}:${drawingState.previewPage}`;
         try {
             if (drawingState.thumbnailCache.has(key)) {
                 if (requestId === drawingState.thumbnailRequest) {
-                    box.innerHTML = `<img src="${drawingState.thumbnailCache.get(key)}" alt="${esc(sheetName(doc, pageNumber))}">`;
+                    box.innerHTML = `<img src="${drawingState.thumbnailCache.get(key)}" alt="${esc(sheetName(doc, drawingState.previewPage))}">`;
                 }
                 return;
             }
             let dataUrl = null;
             if (doc.id === drawingState.selectedDocumentId) {
-                dataUrl = await Promise.resolve(callEditor('takeoffRenderThumbnail', pageNumber));
+                dataUrl = await Promise.resolve(callEditor('takeoffRenderThumbnail', drawingState.previewPage));
             }
             if (!dataUrl) {
                 const pdf = await getPdfDocument(doc);
-                const page = await pdf.getPage(pageNumber);
+                const page = await pdf.getPage(drawingState.previewPage);
                 const viewport = page.getViewport({ scale: 0.18 });
                 const canvas = document.createElement('canvas');
                 const ctx = canvas.getContext('2d', { alpha: false });
@@ -3186,7 +3420,7 @@
                 drawingState.thumbnailCache.delete(drawingState.thumbnailCache.keys().next().value);
             }
             if (requestId === drawingState.thumbnailRequest) {
-                box.innerHTML = `<img src="${dataUrl}" alt="${esc(sheetName(doc, pageNumber))}">`;
+                box.innerHTML = `<img src="${dataUrl}" alt="${esc(sheetName(doc, drawingState.previewPage))}">`;
             }
         } catch (e) {
             console.warn('Thumbnail failed', e);
@@ -3278,6 +3512,24 @@
         });
         document.querySelector('[data-drawing-close]')?.addEventListener('click', closeDrawingDropdown);
         $('takeoffDrawingDropdown')?.addEventListener('click', event => event.stopPropagation());
+        $('takeoffFilterAllSheets')?.addEventListener('click', () => {
+            drawingState.filterMode = 'all';
+            $('takeoffFilterAllSheets')?.classList.add('active');
+            $('takeoffFilterItemSheets')?.classList.remove('active');
+            renderSheetList();
+        });
+        $('takeoffFilterItemSheets')?.addEventListener('click', () => {
+            const activeLayer = typeof findLayer === 'function' ? findLayer(takeoffState.activeLayerId || selectionState.activeLayerId) : null;
+            if (!activeLayer) return;
+            drawingState.filterMode = 'item';
+            $('takeoffFilterItemSheets')?.classList.add('active');
+            $('takeoffFilterAllSheets')?.classList.remove('active');
+            renderSheetList();
+        });
+        $('takeoffOpenSheetBtn')?.addEventListener('click', () => {
+            const doc = browsingDrawingDoc();
+            if (doc) selectDrawingSheet(doc, drawingState.previewPage || 1);
+        });
         $('takeoffDrawingSearch')?.addEventListener('input', event => {
             clearTimeout(event.target._takeoffSearchTimer);
             event.target._takeoffSearchTimer = setTimeout(() => {
