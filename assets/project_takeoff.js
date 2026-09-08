@@ -747,8 +747,28 @@
                 const itemId = String(item.id || '');
                 if (!itemId) return;
                 const layerId = String(item.takeoffLayerId || `estitem_${estimateId}_${itemId}`);
-                let layer = allLayers().find(row => String(row.estimateId || '') === estimateId
-                    && (String(row.id) === layerId || String(row.estimatingItemId || '') === itemId));
+                const layerMatchesEstimatingItem = (row) => {
+                    if (String(row.estimatingItemId || '') === itemId) return true;
+                    const itemKeys = [
+                        String(item.takeoffLayerId || ''),
+                        item.takeoffLayerId && String(item.takeoffLayerId).startsWith('takeoff_') ? String(item.takeoffLayerId).slice(8) : '',
+                        itemId.startsWith('takeoff_') ? itemId.slice(8) : '',
+                        String(item.source_layer_key || '')
+                    ].filter(Boolean);
+                    if (itemKeys.length) {
+                        const rowKeys = [
+                            String(row.id || ''),
+                            String(row.integration_key || ''),
+                            String(row.client_uid || ''),
+                            String(row.metadata_json?.project_layer_id || ''),
+                            String(row.metadata?.project_layer_id || '')
+                        ].filter(Boolean);
+                        if (itemKeys.some(k => rowKeys.includes(k))) return true;
+                    }
+                    return String(row.id) === layerId;
+                };
+                let layer = allLayers().find(row => (String(row.estimateId || '') === estimateId || !row.estimateId)
+                    && layerMatchesEstimatingItem(row));
                 if (!layer) {
                     layer = { id: layerId, groupId: group.id, estimateId, estimatingItemId: itemId,
                         name: item.name || 'Cost item', type: inferTakeoffTypeFromUom(item.uom) || 'Count',
@@ -851,11 +871,26 @@
                 if (item.takeoffLayerId) {
                     const key = String(item.takeoffLayerId);
                     if (!existingByLayerId.has(key)) existingByLayerId.set(key, item);
+                    if (key.startsWith('takeoff_') && !existingByLayerId.has(key.slice(8))) {
+                        existingByLayerId.set(key.slice(8), item);
+                    }
+                    if (item.source_layer_key && !existingByLayerId.has(String(item.source_layer_key))) {
+                        existingByLayerId.set(String(item.source_layer_key), item);
+                    }
+                    if (item.id && String(item.id).startsWith('takeoff_') && !existingByLayerId.has(String(item.id).slice(8))) {
+                        existingByLayerId.set(String(item.id).slice(8), item);
+                    }
                     return;
                 }
                 const linkedLayer = layerByEstimatingItemId.get(String(item.id));
                 if (linkedLayer) {
                     existingByLayerId.set(String(linkedLayer.id), item);
+                    if (linkedLayer.integration_key) existingByLayerId.set(String(linkedLayer.integration_key), item);
+                    return;
+                }
+                if (item.id && String(item.id).startsWith('takeoff_')) {
+                    const rawKey = String(item.id).slice(8);
+                    if (!existingByLayerId.has(rawKey)) existingByLayerId.set(rawKey, item);
                     return;
                 }
                 const name = group.name || 'Default Group';
@@ -877,7 +912,11 @@
                 return true;
             }).map(layer => {
                 const line = estimateLineFromLayer(layer);
-                const existing = existingByLayerId.get(String(layer.id));
+                const existing = existingByLayerId.get(String(layer.id))
+                    || (layer.integration_key ? existingByLayerId.get(String(layer.integration_key)) : null)
+                    || (layer.client_uid ? existingByLayerId.get(String(layer.client_uid)) : null)
+                    || (layer.metadata_json?.project_layer_id ? existingByLayerId.get(String(layer.metadata_json.project_layer_id)) : null)
+                    || (layer.estimatingItemId ? existingByLayerId.get(String(layer.estimatingItemId)) : null);
                 const synchronized = window.TakeoffEstimatingSyncService?.takeoffItem
                     ? window.TakeoffEstimatingSyncService.takeoffItem({ ...line, id: layer.id },
                         { id: groupId, name: groupName }, existing)
@@ -1500,7 +1539,11 @@
             }
             if (editingLayerId) {
                 const layer = findLayer(editingLayerId);
-                if (layer) Object.assign(layer, payload);
+                if (layer) {
+                    Object.assign(layer, payload);
+                    if (payload.unitCost !== undefined) layer.unitCost = payload.unitCost;
+                    if (payload.laborHours !== undefined) layer.laborHours = payload.laborHours;
+                }
                 callEditor('projectTakeoffUpdateLayerObjects', editingLayerId, {
                     symbol: payload.symbol,
                     color: payload.color,
@@ -1523,6 +1566,7 @@
                 takeoffState.activeGroupId = group.id;
                 setActiveTakeoffLayer(layer.id, false);
             }
+            syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
             // Modal Save is a durable operation, not merely a request for the
             // editor's delayed autosave. Waiting for this ACK prevents a quick
             // close/reload from restoring the duplicate's previous appearance.
@@ -1944,6 +1988,8 @@
         if (!name || !name.trim()) return;
         pushTakeoffHistory('rename-layer');
         layer.name = name.trim();
+        syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
+        callEditor('projectTakeoffSave');
         saveTakeoffState();
         renderTakeoffPanel();
     }
@@ -1955,6 +2001,9 @@
         if (!color) return;
         pushTakeoffHistory('change-layer-color');
         layer.color = color.trim();
+        callEditor('projectTakeoffUpdateLayerObjects', layer.id, { color: layer.color });
+        syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
+        callEditor('projectTakeoffSave');
         saveTakeoffState();
         renderTakeoffPanel();
     }
@@ -1971,6 +2020,8 @@
         layer.groupId = target.id;
         target.layers.push(layer);
         target.isExpanded = true;
+        syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
+        callEditor('projectTakeoffSave');
         saveTakeoffState();
         renderTakeoffPanel();
     }

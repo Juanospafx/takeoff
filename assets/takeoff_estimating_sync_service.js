@@ -40,6 +40,18 @@
                 uom: layer.catalogMetadata.uom ?? item.uom
             });
             if (preservedOverrides) item.overrides = { ...item.overrides, ...preservedOverrides };
+            const effectiveLabor = number(layer.unitLabor ?? layer.laborHours ?? layer.labor_hours);
+            const effectiveMaterial = number(layer.unitMaterialCost ?? layer.unitCost ?? layer.unit_cost);
+            if (item.catalogSnapshot) {
+                if (effectiveLabor > 0 && effectiveLabor !== number(item.catalogSnapshot.laborHoursPerUnit)) {
+                    item.overrides = item.overrides || {};
+                    item.overrides.laborHoursPerUnit = effectiveLabor;
+                }
+                if (effectiveMaterial > 0 && effectiveMaterial !== number(item.catalogSnapshot.materialUnitCost)) {
+                    item.overrides = item.overrides || {};
+                    item.overrides.materialUnitCost = effectiveMaterial;
+                }
+            }
             CatalogSnapshot.refreshEffectiveLegacyFields(item);
         }
         return item;

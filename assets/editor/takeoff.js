@@ -3161,14 +3161,17 @@
         layers.forEach(payload => {
             if (!payload?.id) return;
             const externalId = String(payload.id);
-            let layer = state.layers.find(row => row.client_uid === externalId || row.metadata_json?.project_layer_id === externalId);
+            let layer = state.layers.find(row => row.client_uid === externalId
+                || row.metadata_json?.project_layer_id === externalId
+                || String(row.id || '') === externalId
+                || String(row.integration_key || '') === externalId);
             const normalizedType = String(payload.takeoff_type || payload.type || 'count').toLowerCase();
             const normalizedLayerType = normalizeEditorLayerType(normalizedType);
             const type = normalizedLayerType.type;
             const seedQuantity = num(payload.baseQuantity ?? payload.base_quantity ?? payload.seedQuantity
                 ?? payload.seed_quantity ?? layer?.seed_quantity ?? layer?.metadata_json?.base_quantity ?? 0);
             const data = {
-                client_uid: externalId,
+                client_uid: layer?.client_uid || externalId,
                 page_number: pageNum || 1,
                 name: payload.name || 'Takeoff Layer',
                 type,
@@ -3190,14 +3193,39 @@
                 locked: payload.locked ? 1 : 0,
                 seed_quantity: seedQuantity,
                 metadata_json: window.CatalogMetadata.mergeMetadata(layer?.metadata_json,
-                    payload.catalogMetadata || payload.metadata_json?.catalog_item, { project_layer_id: externalId,
+                    payload.catalogMetadata || payload.metadata_json?.catalog_item, { project_layer_id: layer?.client_uid || externalId,
                     base_quantity: seedQuantity,
                     estimate_id: payload.estimate_id || payload.estimateId || null,
                     estimating_item_id: payload.estimating_item_id || payload.estimatingItemId || null,
                     estimating_group_id: payload.estimating_group_id || payload.estimatingGroupId || null }),
             };
-            if (layer) Object.assign(layer, data);
-            else state.layers.push(data);
+            if (layer) {
+                const colorChanged = layer.color !== data.color;
+                const symbolChanged = layer.symbol !== data.symbol;
+                const sizeChanged = layer.symbol_size !== data.symbol_size;
+                Object.assign(layer, data);
+                if (colorChanged || symbolChanged || sizeChanged) {
+                    const layerKeys = new Set([externalId, String(layer.client_uid || ''), String(layer.id || ''), String(layer.metadata_json?.project_layer_id || '')].filter(Boolean));
+                    state.markers.filter(m => layerKeys.has(String(m.layer_client_uid || '')) || layerKeys.has(String(m.layer_id || ''))).forEach(ref => {
+                        if (colorChanged) ref.color = data.color;
+                        if (symbolChanged) ref.symbol = data.symbol;
+                        if (sizeChanged) {
+                            ref.symbol_size = data.symbol_size;
+                            ref.size = data.symbol_size;
+                        }
+                        destroyMarkerNodes(ref);
+                        createMarkerNode(ref);
+                    });
+                    state.segments.filter(s => layerKeys.has(String(s.layer_client_uid || '')) || layerKeys.has(String(s.layer_id || ''))).forEach(ref => {
+                        if (colorChanged) {
+                            ref.color = data.color;
+                            ref.node?.stroke(String(ref.color || layer.color));
+                        }
+                    });
+                }
+            } else {
+                state.layers.push(data);
+            }
         });
         setTakeoffPage(pageNum);
         renderLayers();
@@ -3212,7 +3240,11 @@
     };
 
     window.projectTakeoffSetLayerVisibility = function (layerId, visible) {
-        const layer = state.layers.find(row => row.client_uid === String(layerId) || row.metadata_json?.project_layer_id === String(layerId));
+        const layerKey = String(layerId);
+        const layer = state.layers.find(row => row.client_uid === layerKey
+            || row.metadata_json?.project_layer_id === layerKey
+            || String(row.id || '') === layerKey
+            || String(row.integration_key || '') === layerKey);
         if (!layer) return false;
         layer.visible = visible ? 1 : 0;
         setTakeoffPage(pageNum);
@@ -3223,7 +3255,11 @@
     };
 
     window.projectTakeoffDeleteLayer = function (layerId) {
-        const layer = state.layers.find(row => row.client_uid === String(layerId) || row.metadata_json?.project_layer_id === String(layerId));
+        const layerKey = String(layerId);
+        const layer = state.layers.find(row => row.client_uid === layerKey
+            || row.metadata_json?.project_layer_id === layerKey
+            || String(row.id || '') === layerKey
+            || String(row.integration_key || '') === layerKey);
         if (!layer) return false;
         deleteLayerWithoutConfirm(layer);
         markDirty();
@@ -3438,10 +3474,19 @@
         if (!layerId || !patch || typeof patch !== 'object') return false;
         const layerKey = String(layerId);
         const layer = state.layers.find(row => String(row.client_uid) === layerKey
-            || String(row.metadata_json?.project_layer_id || '') === layerKey);
+            || String(row.metadata_json?.project_layer_id || '') === layerKey
+            || String(row.id || '') === layerKey
+            || String(row.integration_key || '') === layerKey);
+        const layerKeys = new Set([
+            layerKey,
+            String(layer?.client_uid || ''),
+            String(layer?.id || ''),
+            String(layer?.metadata_json?.project_layer_id || ''),
+            String(layer?.integration_key || '')
+        ].filter(Boolean));
         const targets = [
-            ...state.markers.filter(marker => String(marker.layer_client_uid) === layerKey),
-            ...state.segments.filter(segment => String(segment.layer_client_uid) === layerKey)
+            ...state.markers.filter(marker => layerKeys.has(String(marker.layer_client_uid || '')) || layerKeys.has(String(marker.layer_id || ''))),
+            ...state.segments.filter(segment => layerKeys.has(String(segment.layer_client_uid || '')) || layerKeys.has(String(segment.layer_id || '')))
         ];
         if (!layer) return false;
         snapshot();
