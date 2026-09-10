@@ -1,4 +1,4 @@
-﻿<?php
+<?php
 // editor.php - Takeoff editor. Runs independently from auth/roles.
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
@@ -3574,6 +3574,125 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             } else { showToast("Error saving report: " + d.msg, "error"); btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Generate Report'; }
         } catch (e) { console.error(e); showToast("Critical Error generating report", "error"); btn.disabled = false; btn.innerHTML = '<i class="fas fa-check"></i> Generate Report'; }
     }
+
+    window.projectTakeoffDownloadAnnotatedDrawing = async function(customOptions = {}) {
+        showToast('Preparing drawing with marks for download...', 'info');
+        try {
+            const rawFilename = <?= json_encode($file['filename'] ?? 'drawing.pdf') ?>;
+            const extMatch = rawFilename.match(/\.([0-9a-z]+)$/i);
+            const baseName = rawFilename.replace(/\.[^/.]+$/, "");
+            const isPdf = !!pdfDoc || (extMatch && extMatch[1].toLowerCase() === 'pdf');
+
+            let exportCanvas = document.createElement('canvas');
+            let ctx = exportCanvas.getContext('2d');
+            let worldW = 0;
+            let worldH = 0;
+            let exportScale = 1.5;
+
+            if (pdfDoc) {
+                const page = await pdfDoc.getPage(pageNum);
+                const viewport = page.getViewport({ scale: exportScale });
+                exportCanvas.width = Math.floor(viewport.width);
+                exportCanvas.height = Math.floor(viewport.height);
+                worldW = viewport.width / exportScale;
+                worldH = viewport.height / exportScale;
+                ctx.fillStyle = '#ffffff';
+                ctx.fillRect(0, 0, exportCanvas.width, exportCanvas.height);
+                await page.render({ canvasContext: ctx, viewport }).promise;
+            } else if (canvas && canvas.backgroundImage) {
+                const bgImg = canvas.backgroundImage.getElement ? canvas.backgroundImage.getElement() : canvas.backgroundImage._element;
+                if (bgImg && (bgImg.naturalWidth || bgImg.width)) {
+                    worldW = bgImg.naturalWidth || bgImg.width;
+                    worldH = bgImg.naturalHeight || bgImg.height;
+                    exportCanvas.width = worldW;
+                    exportCanvas.height = worldH;
+                    exportScale = 1;
+                    ctx.drawImage(bgImg, 0, 0, worldW, worldH);
+                } else {
+                    worldW = canvas.getWidth();
+                    worldH = canvas.getHeight();
+                    exportCanvas.width = worldW;
+                    exportCanvas.height = worldH;
+                    exportScale = 1;
+                    ctx.drawImage(canvas.lowerCanvasEl, 0, 0);
+                }
+            } else {
+                showToast('No drawing loaded to export.', 'warning');
+                return false;
+            }
+
+            // Render Fabric annotations if any exist (excluding background)
+            if (canvas && typeof canvas.getObjects === 'function') {
+                const fabricObjs = canvas.getObjects().filter(o => !o.excludeFromExport && o !== canvas.backgroundImage);
+                if (fabricObjs.length > 0) {
+                    const tempCanvas = document.createElement('canvas');
+                    tempCanvas.width = exportCanvas.width;
+                    tempCanvas.height = exportCanvas.height;
+                    const tempCtx = tempCanvas.getContext('2d');
+                    tempCtx.scale(exportScale, exportScale);
+                    fabricObjs.forEach(obj => obj.render(tempCtx));
+                    ctx.drawImage(tempCanvas, 0, 0);
+                }
+            }
+
+            // Render Konva overlay (markers, counts, lines, areas, text notes, clouds)
+            if (konvaLayer) {
+                const transformers = konvaLayer.find('Transformer');
+                transformers.forEach(t => t.visible(false));
+
+                const origPos = konvaLayer.position();
+                const origScale = konvaLayer.scale();
+
+                konvaLayer.position({ x: 0, y: 0 });
+                konvaLayer.scale({ x: exportScale, y: exportScale });
+                konvaLayer.batchDraw();
+
+                const konvaCanvas = konvaLayer.toCanvas({
+                    x: 0,
+                    y: 0,
+                    width: exportCanvas.width,
+                    height: exportCanvas.height,
+                    pixelRatio: 1
+                });
+
+                konvaLayer.position(origPos);
+                konvaLayer.scale(origScale);
+                transformers.forEach(t => t.visible(true));
+                konvaLayer.batchDraw();
+
+                ctx.drawImage(konvaCanvas, 0, 0);
+            }
+
+            const downloadFilename = isPdf
+                ? `${baseName}_Sheet_${pageNum}_with_takeoff.pdf`
+                : `${baseName}_with_takeoff.png`;
+
+            if (isPdf && window.jspdf) {
+                const { jsPDF } = window.jspdf;
+                const pdf = new jsPDF({
+                    orientation: worldW > worldH ? 'landscape' : 'portrait',
+                    unit: 'pt',
+                    format: [worldW, worldH]
+                });
+                const imgData = exportCanvas.toDataURL('image/jpeg', 0.94);
+                pdf.addImage(imgData, 'JPEG', 0, 0, worldW, worldH);
+                pdf.save(downloadFilename);
+            } else {
+                const link = document.createElement('a');
+                link.download = downloadFilename;
+                link.href = exportCanvas.toDataURL('image/png');
+                document.body.appendChild(link);
+                link.click();
+                link.remove();
+            }
+            showToast(`Downloaded: ${downloadFilename}`, 'success');
+            return true;
+        } catch (err) {
+            console.error('Download annotated drawing error:', err);
+            showToast('Failed to export drawing with marks, falling back to original.', 'warning');
+            return false;
+        }
+    };
 
     function showToast(msg, type) {
         const box = document.getElementById('toast-container');

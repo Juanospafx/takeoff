@@ -94,9 +94,48 @@
             .then(data => {
                 if (data.status !== 'success') throw new Error(data.msg || 'Project list could not load');
                 state = data.data;
+                applyUrlInitialFilter();
                 render();
+                highlightTargetProject();
             })
             .catch(err => showError(err.message));
+    }
+
+    function applyUrlInitialFilter() {
+        const params = new URLSearchParams(window.location.search);
+        const targetProjectId = params.get('project_id');
+        const urlStatus = params.get('status');
+
+        if (targetProjectId) {
+            const found = (state.projects || []).find(p => String(p.id) === String(targetProjectId));
+            if (found) {
+                activeStatus = canonicalStatus(found);
+                return;
+            }
+        }
+        if (urlStatus) {
+            const clean = urlStatus.trim().toLowerCase().replace(/\s+/g, '_');
+            if (statusAliases[clean]) {
+                activeStatus = statusAliases[clean];
+            } else if (statuses.includes(urlStatus)) {
+                activeStatus = urlStatus;
+            }
+        }
+    }
+
+    function highlightTargetProject() {
+        const params = new URLSearchParams(window.location.search);
+        const targetProjectId = params.get('project_id');
+        if (!targetProjectId) return;
+        setTimeout(() => {
+            const row = document.querySelector(`[data-project-id="${targetProjectId}"]`) ||
+                        document.querySelector(`a[href*="id=${targetProjectId}"]`)?.closest('tr');
+            if (row) {
+                row.scrollIntoView({ behavior: 'smooth', block: 'center' });
+                row.classList.add('bb-row-highlight');
+                setTimeout(() => row.classList.remove('bb-row-highlight'), 3500);
+            }
+        }, 150);
     }
 
     function postProjectAction(action, payload) {
@@ -135,6 +174,7 @@
             const estimatorName = String(metadata.estimator || metadata.estimator_name || '').trim();
             const sqft = Number(metadata.square_footage || metadata.sqft || metadata.area_sqft || 0);
             const totalValue = Number(metadata.estimate_total || metadata.total_sales || metadata.totalValue || 0);
+            const primaryQuoteValue = Number(metadata.primary_quote_value ?? metadata.primary_estimate_total ?? metadata.primaryEstimateTotal ?? totalValue ?? 0);
             const salesPerSqFt = sqft > 0 ? `${money(totalValue / sqft, 2)} /sq ft` : '$0 /sq ft';
 
             return {
@@ -149,6 +189,7 @@
                 dueDate: project.bid_due_at || '',
                 createdAt: project.created_at || '',
                 totalValue,
+                primaryQuoteValue,
                 sqft,
                 salesPerSqFt,
                 taskCount: metadata.task_count ?? metadata.tasks_count ?? metadata.tasks ?? '',
@@ -242,9 +283,12 @@
         const body = document.getElementById('bbTableBody');
         const projects = visibleProjects();
         body.innerHTML = projects.map(project => `
-            <tr>
+            <tr data-project-id="${esc(project.id)}">
                 <td class="bb-name-cell">
-                    <a class="bb-record-name" href="project_dashboard.php?id=${encodeURIComponent(project.id)}&tab=overview">${esc(project.recordName)}</a>
+                    <div style="display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap;">
+                        <a class="bb-record-name" href="project_dashboard.php?id=${encodeURIComponent(project.id)}&tab=overview">${esc(project.recordName)}</a>
+                        ${project.primaryQuoteValue > 0 ? `<span class="bb-primary-badge" title="Primary Quote: ${money(project.primaryQuoteValue)}">${money(project.primaryQuoteValue)}</span>` : ''}
+                    </div>
                     <span class="bb-subtext">${esc(project.category)}</span>
                 </td>
                 <td class="bb-metrics-cell">

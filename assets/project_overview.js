@@ -300,6 +300,103 @@
         $(id)?.classList.toggle('open');
     }
 
+    let savedCustomers = [];
+
+    async function loadCustomersDirectory() {
+        const selector = $('poCustomerSelector');
+        if (!selector) return;
+        try {
+            const res = await fetch('../api/customers.php?action=list');
+            const data = await res.json();
+            if (data?.status === 'success' && Array.isArray(data.data)) {
+                savedCustomers = data.data;
+                populateCustomerSelector();
+            }
+        } catch (e) {
+            console.warn('Could not load customers directory:', e);
+        }
+    }
+
+    function populateCustomerSelector(selectedCompany = null) {
+        const selector = $('poCustomerSelector');
+        if (!selector) return;
+        const currentCompany = (selectedCompany || $('poCustomerCompany')?.value || '').trim().toLowerCase();
+        selector.innerHTML = '<option value="">-- Choose a saved customer --</option>' +
+            savedCustomers.map((c, i) => {
+                const label = c.company + (c.contact_name ? ` (${c.contact_name})` : '');
+                const isMatch = currentCompany && c.company.toLowerCase() === currentCompany;
+                return `<option value="${i}" ${isMatch ? 'selected' : ''}>${escapeHtml(label)}</option>`;
+            }).join('');
+    }
+
+    function selectCustomerByIndex(index) {
+        const c = savedCustomers[index];
+        if (!c) return;
+        showCustomerFields();
+        if ($('poCustomerCompany')) $('poCustomerCompany').value = c.company || '';
+        if ($('poPrimaryContact')) $('poPrimaryContact').value = c.contact_name || '';
+        if ($('poCustomerPhone')) $('poCustomerPhone').value = c.phone || '';
+        if ($('poCustomerEmail')) $('poCustomerEmail').value = c.email || '';
+        if ($('poCustomerAddress')) $('poCustomerAddress').value = c.address || '';
+        markDirty();
+        renderProjectHeaderMeta();
+        showToast(`Customer "${c.company}" selected.`);
+    }
+
+    function clearCustomerFields() {
+        if ($('poCustomerCompany')) $('poCustomerCompany').value = '';
+        if ($('poPrimaryContact')) $('poPrimaryContact').value = '';
+        if ($('poCustomerPhone')) $('poCustomerPhone').value = '';
+        if ($('poCustomerEmail')) $('poCustomerEmail').value = '';
+        if ($('poCustomerAddress')) $('poCustomerAddress').value = '';
+        if ($('poCustomerSelector')) $('poCustomerSelector').value = '';
+        markDirty();
+        renderProjectHeaderMeta();
+    }
+
+    async function saveCurrentCustomerToDirectory() {
+        const company = $('poCustomerCompany')?.value?.trim();
+        if (!company) {
+            showToast('Please enter a Customer Company name first.');
+            $('poCustomerCompany')?.focus();
+            return;
+        }
+        const payload = {
+            company,
+            contact_name: $('poPrimaryContact')?.value?.trim() || '',
+            phone: $('poCustomerPhone')?.value?.trim() || '',
+            email: $('poCustomerEmail')?.value?.trim() || '',
+            address: $('poCustomerAddress')?.value?.trim() || ''
+        };
+        const saveBtn = $('saveCustomerBtn');
+        if (saveBtn) saveBtn.disabled = true;
+        try {
+            const res = await fetch('../api/customers.php?action=save', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload)
+            });
+            const data = await res.json();
+            if (data?.status === 'success') {
+                if (Array.isArray(data.customers)) {
+                    savedCustomers = data.customers;
+                } else if (data.data) {
+                    const existingIdx = savedCustomers.findIndex(c => c.company.toLowerCase() === company.toLowerCase());
+                    if (existingIdx >= 0) savedCustomers[existingIdx] = data.data;
+                    else savedCustomers.push(data.data);
+                }
+                populateCustomerSelector(company);
+                showToast(`Customer "${company}" saved to directory!`);
+            } else {
+                showToast(data?.msg || 'Failed to save customer.');
+            }
+        } catch (e) {
+            showToast('Error saving customer to directory.');
+        } finally {
+            if (saveBtn) saveBtn.disabled = false;
+        }
+    }
+
     function showCustomerFields() {
         $('customerEmpty')?.setAttribute('hidden', 'hidden');
         $('customerFields')?.removeAttribute('hidden');
@@ -1171,6 +1268,13 @@
         $('saveProjectBtn')?.addEventListener('click', saveProject);
         $('addCustomerBtn')?.addEventListener('click', showCustomerFields);
         $('addProjectAddressBtn')?.addEventListener('click', showCustomerFields);
+        $('poCustomerSelector')?.addEventListener('change', event => {
+            const idx = event.target.value;
+            if (idx !== '') selectCustomerByIndex(Number(idx));
+        });
+        $('saveCustomerBtn')?.addEventListener('click', saveCurrentCustomerToDirectory);
+        $('clearCustomerBtn')?.addEventListener('click', clearCustomerFields);
+        loadCustomersDirectory();
         $('addNoteBtn')?.addEventListener('click', openNoteComposer);
         $('addNoteBtnHead')?.addEventListener('click', openNoteComposer);
         $('cancelNoteBtn')?.addEventListener('click', closeNoteComposer);

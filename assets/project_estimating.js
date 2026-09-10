@@ -29,7 +29,7 @@
     const apiUrl = '../api/project_estimating.php';
     const ui = { search: '', selected: new Set(), saving: false, saveRequested: false, saveTimer: null, pendingDeleteId: null, lastErrorCode: null, loadState: projectId ? 'loading' : 'local',
         message: projectId ? 'Loading estimate' : 'Local draft', collapsed: {}, expandedAssemblies: new Set(), modal: null,
-        catalogTargetGroupId: null, catalogData: null, catalogLoading: false, catalogError: '' };
+        catalogTargetGroupId: null, catalogData: null, catalogLoading: false, catalogError: '', showingExclusionPresets: false };
     let state = readLocal();
     const dirtyEstimateIds = new Set(state.dirtyEstimateIds || []);
     const takeoffSyncDirtyIds = new Set(state.takeoffSyncDirtyIds || []);
@@ -567,11 +567,22 @@
     }
 
     const columns = [
-        ['name', 'Item'], ['description', 'Description'], ['costCategory', 'Category'], ['uom', 'UoM'],
-        ['quantity', 'Qty'], ['unitMaterialCost', 'Material/unit'], ['waste', 'Waste %'],
-        ['unitLabor', 'Labor/unit'], ['laborRate', 'Labor rate'], ['difficulty', 'Difficulty'],
-        ['materialMargin', 'Material margin %'], ['laborMargin', 'Labor margin %'],
-        ['unitEquipmentCost', 'Equipment/unit'], ['equipmentQuantity', 'Equipment qty'], ['equipmentMargin', 'Equipment margin %']
+        ['name', 'Item'],
+        ['description', 'Description'],
+        ['costCode', 'Cost Code'],
+        ['costCategory', 'Category'],
+        ['quantity', 'Qty'],
+        ['uom', 'UoM'],
+        ['unitMaterialCost', 'Material/unit'],
+        ['waste', 'Waste %'],
+        ['materialMargin', 'Material margin %'],
+        ['unitLabor', 'Labor/unit'],
+        ['laborRate', 'Labor rate'],
+        ['difficulty', 'Difficulty'],
+        ['laborMargin', 'Labor margin %'],
+        ['unitEquipmentCost', 'Equipment/unit'],
+        ['equipmentQuantity', 'Equipment qty'],
+        ['equipmentMargin', 'Equipment margin %']
     ];
 
     function renderTable() {
@@ -677,8 +688,90 @@
             <label class="est-field-block"><span class="est-label">Project Notes</span><textarea data-note-field="projectNotes" placeholder="Write a project note…">${esc(notes.projectNotes)}</textarea></label>`;
     }
 
+    const EXCLUSION_PRESETS_KEY = 'takeoff.exclusions.presets';
+    const DEFAULT_EXCLUSIONS = [
+        'Permits, testing, inspections and municipal fees',
+        'Hazardous material abatement or remediation',
+        'Overtime or weekend work unless specified',
+        'Demolition of existing structures not shown on plans',
+        'Bonds (performance / payment bond) unless requested',
+        'Architectural / engineering design fees and stamped drawings',
+        'Trash disposal dumpster fees by others',
+        'Temporary power, water, and sanitary facilities'
+    ];
+
+    function getExclusionPresets() {
+        try {
+            const raw = localStorage.getItem(EXCLUSION_PRESETS_KEY);
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (Array.isArray(parsed) && parsed.length) return parsed;
+            }
+        } catch (_) {}
+        return [...DEFAULT_EXCLUSIONS];
+    }
+
+    function saveExclusionPresets(list) {
+        try {
+            localStorage.setItem(EXCLUSION_PRESETS_KEY, JSON.stringify(list));
+        } catch (_) {}
+    }
+
+    function addExclusionPreset(text) {
+        const trimmed = String(text || '').trim();
+        if (!trimmed) return;
+        const currentPresets = getExclusionPresets();
+        if (!currentPresets.includes(trimmed)) {
+            currentPresets.push(trimmed);
+            saveExclusionPresets(currentPresets);
+        }
+    }
+
+    function deleteExclusionPreset(index) {
+        const currentPresets = getExclusionPresets();
+        if (index >= 0 && index < currentPresets.length) {
+            currentPresets.splice(index, 1);
+            saveExclusionPresets(currentPresets);
+        }
+    }
+
     function listEditor(key, label, values) {
-        return `<div class="est-field-block"><div class="est-list-head"><span class="est-label">${label}</span><button type="button" class="est-small-btn" data-add-note-row="${key}" title="Add note"><i class="fas fa-plus"></i></button></div><div class="est-free-list">${values.map((value, index) => `<div class="est-free-row"><input data-note-list="${key}" data-index="${index}" value="${esc(value)}" placeholder="Write a note…"><button type="button" data-remove-note-row="${key}" data-index="${index}" title="Remove note"><i class="fas fa-times"></i></button></div>`).join('') || `<button type="button" class="est-empty-note" data-add-note-row="${key}">+ Add ${label.toLowerCase()} note</button>`}</div></div>`;
+        const isExcluded = key === 'excluded';
+        const presets = isExcluded ? getExclusionPresets() : [];
+        const presetsPanel = (isExcluded && ui.showingExclusionPresets) ? `
+            <div class="est-presets-panel">
+                <div class="est-presets-head">
+                    <span><i class="fas fa-bookmark"></i> Pre-saved Exclusions (${presets.length})</span>
+                    <button type="button" class="est-icon-action-btn" data-toggle-exclusion-presets title="Close presets">&times;</button>
+                </div>
+                <div class="est-presets-list">
+                    ${presets.map((preset, index) => `
+                        <span class="est-preset-chip" data-apply-exclusion-preset="${esc(preset)}" title="Click to insert into excluded list">
+                            <span>${esc(preset)}</span>
+                            <button type="button" class="est-icon-action-btn" data-delete-exclusion-preset="${index}" title="Delete preset">&times;</button>
+                        </span>
+                    `).join('') || '<div class="est-empty">No saved presets.</div>'}
+                </div>
+            </div>
+        ` : '';
+
+        return `<div class="est-field-block">
+            <div class="est-list-head">
+                <span class="est-label">${label}</span>
+                <div style="display:flex;gap:6px;align-items:center;">
+                    ${isExcluded ? `<button type="button" class="est-small-btn ${ui.showingExclusionPresets ? 'active' : ''}" data-toggle-exclusion-presets title="Browse pre-saved exclusion presets"><i class="fas fa-bookmark"></i> Presets</button>` : ''}
+                    <button type="button" class="est-small-btn" data-add-note-row="${key}" title="Add note"><i class="fas fa-plus"></i></button>
+                </div>
+            </div>
+            ${presetsPanel}
+            <div class="est-free-list">${values.map((value, index) => `
+                <div class="est-free-row">
+                    <input data-note-list="${key}" data-index="${index}" value="${esc(value)}" placeholder="Write a note…">
+                    ${isExcluded ? `<button type="button" class="est-icon-action-btn" data-save-as-exclusion-preset="${index}" title="Save as exclusion preset"><i class="fas fa-bookmark"></i></button>` : ''}
+                    <button type="button" data-remove-note-row="${key}" data-index="${index}" title="Remove note"><i class="fas fa-times"></i></button>
+                </div>`).join('') || `<button type="button" class="est-empty-note" data-add-note-row="${key}">+ Add ${label.toLowerCase()} note</button>`}
+            </div>
+        </div>`;
     }
 
     function summaryHtml(total) {
@@ -1088,6 +1181,31 @@
         }
         if (actionName === 'copy') { selectEstimate(estimateId); ui.modal = 'new'; renderModal(); }
         if (actionName === 'delete') deleteEstimateAuthoritative(estimateId);
+        if (actionName === 'set-primary') {
+            state.estimates.forEach(row => {
+                row.is_primary = String(row.id) === String(estimateId);
+                row.isPrimary = row.is_primary;
+            });
+            const targetEst = state.estimates.find(row => String(row.id) === String(estimateId)) || current();
+            const estSummary = Calc.calculateSummary(targetEst.groups, targetEst.settings);
+            const totalSales = estSummary.estimateTotal;
+            if (window.ProjectState) {
+                if (!window.ProjectState.projectMeta) window.ProjectState.projectMeta = {};
+                window.ProjectState.projectMeta.primary_estimate_id = estimateId;
+                window.ProjectState.projectMeta.primary_estimate_total = totalSales;
+                window.ProjectState.projectMeta.primary_quote_value = totalSales;
+            }
+            saveLocal();
+            markEstimateDirty(estimateId);
+            ui.saveRequested = true;
+            clearTimeout(ui.saveTimer);
+            ui.saveTimer = setTimeout(saveServer, 0);
+            render();
+            window.dispatchEvent(new CustomEvent('takeoff:primary-estimate-changed', {
+                detail: { estimateId, total: totalSales, projectId }
+            }));
+            if (typeof showToast === 'function') showToast(`Estimate "${targetEst.name}" set as Primary.`);
+        }
     }
 
     root.addEventListener('click', event => {
@@ -1204,6 +1322,47 @@
         }
         const deleteGroup = target.closest('[data-delete-group]')?.dataset.deleteGroup;
         if (deleteGroup && confirm('Delete this group and its items?')) { current().groups = current().groups.filter(row => row.id !== deleteGroup); changed('Deleted group'); }
+        const toggleExclusions = target.closest('[data-toggle-exclusion-presets]');
+        if (toggleExclusions) {
+            ui.showingExclusionPresets = !ui.showingExclusionPresets;
+            renderDetails();
+            return;
+        }
+        const deletePresetBtn = target.closest('[data-delete-exclusion-preset]');
+        if (deletePresetBtn) {
+            event.stopPropagation();
+            const idx = Number(deletePresetBtn.dataset.deleteExclusionPreset);
+            deleteExclusionPreset(idx);
+            renderDetails();
+            return;
+        }
+        const applyPresetBtn = target.closest('[data-apply-exclusion-preset]');
+        if (applyPresetBtn) {
+            const presetVal = applyPresetBtn.dataset.applyExclusionPreset;
+            if (presetVal) {
+                if (!current().notes.excluded) current().notes.excluded = [];
+                if (!current().notes.excluded.includes(presetVal)) {
+                    if (current().notes.excluded.length === 1 && !current().notes.excluded[0].trim()) {
+                        current().notes.excluded[0] = presetVal;
+                    } else {
+                        current().notes.excluded.push(presetVal);
+                    }
+                    changed('Added exclusion from preset');
+                }
+            }
+            return;
+        }
+        const saveAsPresetBtn = target.closest('[data-save-as-exclusion-preset]');
+        if (saveAsPresetBtn) {
+            const idx = Number(saveAsPresetBtn.dataset.saveAsExclusionPreset);
+            const val = current().notes.excluded?.[idx];
+            if (val && val.trim()) {
+                addExclusionPreset(val.trim());
+                ui.showingExclusionPresets = true;
+                renderDetails();
+            }
+            return;
+        }
         const addRow = target.closest('[data-add-note-row]')?.dataset.addNoteRow;
         if (addRow) { current().notes[addRow].push(''); changed(`Added ${addRow} note`); }
         const removeRow = target.closest('[data-remove-note-row]');

@@ -2288,3 +2288,59 @@
 .est-compare-grid { display: grid; grid-template-columns: repeat(auto-fit, minmax(190px, 1fr)); gap: 12px; }
 .est-compare-grid article { display: grid; gap: 6px; padding: 14px; border: 1px solid var(--est-line); border-radius: 8px; }
 .est-fatal { margin: 24px; padding: 16px; border: 1px solid #fecaca; border-radius: 8px; background: #fef2f2; color: #991b1b; }
+
+.est-presets-panel {
+    background: var(--est-surface-2, #1e293b);
+    border: 1px solid var(--est-line, #334155);
+    border-radius: 8px;
+    padding: 10px;
+    margin: 8px 0;
+    display: grid;
+    gap: 8px;
+}
+.est-presets-head {
+    display: flex;
+    justify-content: space-between;
+    align-items: center;
+    font-size: 0.8rem;
+    font-weight: 700;
+    color: var(--est-text, #f8fafc);
+}
+.est-presets-list {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 6px;
+    max-height: 180px;
+    overflow-y: auto;
+}
+.est-preset-chip {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    background: var(--est-surface-3, #334155);
+    color: var(--est-text, #e2e8f0);
+    padding: 4px 8px;
+    border-radius: 4px;
+    font-size: 0.78rem;
+    cursor: pointer;
+    border: 1px solid rgba(255,255,255,0.06);
+    transition: background 0.15s ease, border-color 0.15s ease;
+}
+.est-preset-chip:hover {
+    background: var(--est-primary, #3b82f6);
+    color: #fff;
+}
+.est-icon-action-btn {
+    background: transparent;
+    border: none;
+    color: var(--est-muted, #94a3b8);
+    cursor: pointer;
+    padding: 2px 5px;
+    font-size: 0.82rem;
+    border-radius: 4px;
+}
+.est-icon-action-btn:hover {
+    color: var(--est-primary, #3b82f6);
+    background: rgba(255,255,255,0.06);
+}
+

@@ -2908,6 +2908,8 @@
             return;
         }
         if (command === 'download') {
+            const downloaded = callEditor('projectTakeoffDownloadAnnotatedDrawing');
+            if (downloaded) return;
             const link = document.getElementById('downloadDocBtn');
             if (link?.href && link.href !== '#') link.click();
             return;

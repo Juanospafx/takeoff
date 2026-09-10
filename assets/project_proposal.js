@@ -22,6 +22,7 @@
         schemaVersion: 2,
         groupsOnly: false,
         lumpSum: false,
+        quantityOnly: false,
         material: { quantity: true, assemblyItems: true, itemTotalCost: true, combinedUnitCost: false, groupSubtotals: false, manufacturer: false, catalogNumber: false, description: false },
         groupBy: 'Groups',
         summary: { laborMaterials: true, taxes: true, overhead: true, profit: true, acceptedBy: true, date: true, showDecimals: true, roundTotal: false, priceSqft: false },
@@ -357,7 +358,7 @@
             ['Description', 'material.description']
         ].map(([label, path]) => renderToggle(label, path)).join('');
         settingsPanel.innerHTML = [
-            section('Quick Simplification', renderToggle('Groups Only', 'groupsOnly') + renderToggle('Lump Sum', 'lumpSum')),
+            section('Quick Simplification', renderToggle('Groups Only', 'groupsOnly') + renderToggle('Lump Sum', 'lumpSum') + renderToggle('Quantity Only', 'quantityOnly')),
             section('Material Details', materialRows),
             section('Group By', renderSelect('Group By', 'groupBy', ['Groups', 'Budget Code', 'Item Type', 'Catalog Category'])),
             section('Summary Details', [
@@ -373,14 +374,17 @@
 
     function renderItemTable(groups, allItems) {
         if (!allItems.length) return '<div class="proposal-empty-state">No cost items in estimate yet.</div>';
-        if (proposalSettings.lumpSum) return `<table class="proposal-item-table"><tbody><tr class="proposal-group-row"><td>Lump Sum Proposal</td><td class="amount">${money(totals(allItems).total)}</td></tr></tbody></table>`;
+        if (proposalSettings.lumpSum && !proposalSettings.quantityOnly) return `<table class="proposal-item-table"><tbody><tr class="proposal-group-row"><td>Lump Sum Proposal</td><td class="amount">${money(totals(allItems).total)}</td></tr></tbody></table>`;
         const headers = ['Description'];
-        if (proposalSettings.material.quantity) headers.push('Qty');
-        if (proposalSettings.material.combinedUnitCost) headers.push('Unit Cost');
-        if (proposalSettings.material.itemTotalCost) headers.push('Total');
+        const isQtyOnly = Boolean(proposalSettings.quantityOnly);
+        const hasCostColumns = !isQtyOnly && Boolean(proposalSettings.material.itemTotalCost || proposalSettings.material.combinedUnitCost);
+        const showGroupCost = hasCostColumns && Boolean(proposalSettings.costItems.groupSubtotals || proposalSettings.material.groupSubtotals);
+        if (proposalSettings.material.quantity || isQtyOnly) headers.push('Qty');
+        if (hasCostColumns && proposalSettings.material.combinedUnitCost) headers.push('Unit Cost');
+        if (hasCostColumns && proposalSettings.material.itemTotalCost) headers.push('Total');
         const rows = [];
         groups.forEach((group) => {
-            rows.push(`<tr class="proposal-group-row"><td colspan="${headers.length}">${esc(group.name)}${proposalSettings.costItems.groupSubtotals || proposalSettings.material.groupSubtotals ? `<span class="amount" style="float:right;">${money(group.total)}</span>` : ''}</td></tr>`);
+            rows.push(`<tr class="proposal-group-row"><td colspan="${headers.length}">${esc(group.name)}${showGroupCost ? `<span class="amount" style="float:right;">${money(group.total)}</span>` : ''}</td></tr>`);
             if (!proposalSettings.groupsOnly) {
                 group.children.forEach((item) => {
                     const details = [];
@@ -389,9 +393,9 @@
                     if (proposalSettings.material.catalogNumber && item.catalogNumber) details.push(`Catalog #: ${esc(item.catalogNumber)}`);
                     if (proposalSettings.material.assemblyItems) details.push(esc(item.group || 'Assembly item'));
                     const cells = [`<td><strong>${esc(item.name)}</strong>${details.length ? `<div class="proposal-muted">${details.join('<br>')}</div>` : ''}</td>`];
-                    if (proposalSettings.material.quantity) cells.push(`<td>${esc(window.QuantityFormatService.proposal(item.quantity))} ${esc(item.uom || '')}</td>`);
-                    if (proposalSettings.material.combinedUnitCost) cells.push(`<td class="amount">${money(item.unitCost)}</td>`);
-                    if (proposalSettings.material.itemTotalCost) cells.push(`<td class="amount">${money(item.total)}</td>`);
+                    if (proposalSettings.material.quantity || isQtyOnly) cells.push(`<td>${esc(window.QuantityFormatService.proposal(item.quantity))} ${esc(item.uom || '')}</td>`);
+                    if (hasCostColumns && proposalSettings.material.combinedUnitCost) cells.push(`<td class="amount">${money(item.unitCost)}</td>`);
+                    if (hasCostColumns && proposalSettings.material.itemTotalCost) cells.push(`<td class="amount">${money(item.total)}</td>`);
                     rows.push(`<tr>${cells.join('')}</tr>`);
                 });
             }
@@ -432,8 +436,9 @@
         const scope = notes.scope || cleanHtml(project.description || '') || 'No scope of work defined.';
         const overviewNotes = Array.isArray(meta.notes) ? meta.notes.map((note) => String(note.text || note.title || note || '').trim()).filter(Boolean).join('<br>') : '';
         const customerLocation = [customer.address, [customer.city, customer.region, customer.postal].filter(Boolean).join(', '), customer.country].filter(Boolean).join('<br>');
+        const isQtyOnly = Boolean(proposalSettings.quantityOnly);
         builderNote.hidden = !proposalSettings.proposalBuilder;
-        documentNode.innerHTML = `<div class="proposal-doc-header"><div class="proposal-brand"><div class="proposal-logo">B</div><div><div class="proposal-company-name">${esc(company.name)}</div><div class="proposal-muted">${esc(company.address)}</div><div class="proposal-muted">${esc(company.phone)}</div><div class="proposal-muted">Prepared by: ${esc(company.preparedBy)}</div><div class="proposal-muted">${esc(company.email)}</div></div></div><div class="proposal-quote-meta"><div><strong>Quote:</strong> ${esc(firstValue([draft.proposal_number, draft.quote_number, 'Draft']))}</div><div><strong>Date:</strong> ${esc(new Date().toLocaleDateString('en-US'))}</div></div></div><div class="proposal-doc-title">${esc(firstValue([draft.estimate_name, project.name, project.project_number, 'Draft Proposal']))}</div><div class="proposal-customer-block"><h4>Customer</h4><div><strong>${esc(customer.company || 'No customer assigned')}</strong></div>${customerLocation ? `<div>${customerLocation}</div>` : ''}${customer.contact ? `<div>${esc(customer.contact)}</div>` : ''}${customer.phone ? `<div>${esc(customer.phone)}</div>` : ''}${customer.email ? `<div>${esc(customer.email)}</div>` : ''}</div><section class="proposal-doc-section"><h4>Scope of Work</h4><p>${scope}</p></section>${notes.included && notes.included.length ? `<section class="proposal-doc-section"><h4>Included</h4><ol>${notes.included.map((item) => `<li>${esc(item)}</li>`).join('')}</ol></section>` : ''}${notes.excluded && notes.excluded.length ? `<section class="proposal-doc-section"><h4>Excluded</h4><ol>${notes.excluded.map((item) => `<li>${esc(item)}</li>`).join('')}</ol></section>` : ''}${notes.projectNotes || overviewNotes ? `<section class="proposal-doc-section"><h4>Notes</h4><p>${notes.projectNotes || cleanHtml(overviewNotes)}</p></section>` : ''}<section class="proposal-doc-section"><h4>Cost Items</h4>${renderItemTable(groupedItems(items), items)}</section>${renderSummary(totalData)}${proposalSettings.costItems.estimateTotal ? `<div class="proposal-total-box"><div><div class="label">Estimate Total</div><div>Generated from current estimate data</div></div><div class="value">${money(totalData.total)}</div></div>` : ''}${renderAcceptance()}`;
+        documentNode.innerHTML = `<div class="proposal-doc-header"><div class="proposal-brand"><div class="proposal-logo">B</div><div><div class="proposal-company-name">${esc(company.name)}</div><div class="proposal-muted">${esc(company.address)}</div><div class="proposal-muted">${esc(company.phone)}</div><div class="proposal-muted">Prepared by: ${esc(company.preparedBy)}</div><div class="proposal-muted">${esc(company.email)}</div></div></div><div class="proposal-quote-meta"><div><strong>Quote:</strong> ${esc(firstValue([draft.proposal_number, draft.quote_number, 'Draft']))}</div><div><strong>Date:</strong> ${esc(new Date().toLocaleDateString('en-US'))}</div></div></div><div class="proposal-doc-title">${esc(firstValue([draft.estimate_name, project.name, project.project_number, 'Draft Proposal']))}</div><div class="proposal-customer-block"><h4>Customer</h4><div><strong>${esc(customer.company || 'No customer assigned')}</strong></div>${customerLocation ? `<div>${customerLocation}</div>` : ''}${customer.contact ? `<div>${esc(customer.contact)}</div>` : ''}${customer.phone ? `<div>${esc(customer.phone)}</div>` : ''}${customer.email ? `<div>${esc(customer.email)}</div>` : ''}</div><section class="proposal-doc-section"><h4>Scope of Work</h4><p>${scope}</p></section>${notes.included && notes.included.length ? `<section class="proposal-doc-section"><h4>Included</h4><ol>${notes.included.map((item) => `<li>${esc(item)}</li>`).join('')}</ol></section>` : ''}${notes.excluded && notes.excluded.length ? `<section class="proposal-doc-section"><h4>Excluded</h4><ol>${notes.excluded.map((item) => `<li>${esc(item)}</li>`).join('')}</ol></section>` : ''}${notes.projectNotes || overviewNotes ? `<section class="proposal-doc-section"><h4>Notes</h4><p>${notes.projectNotes || cleanHtml(overviewNotes)}</p></section>` : ''}<section class="proposal-doc-section"><h4>Cost Items</h4>${renderItemTable(groupedItems(items), items)}</section>${isQtyOnly ? '' : renderSummary(totalData)}${!isQtyOnly && proposalSettings.costItems.estimateTotal ? `<div class="proposal-total-box"><div><div class="label">Estimate Total</div><div>Generated from current estimate data</div></div><div class="value">${money(totalData.total)}</div></div>` : ''}${renderAcceptance()}`;
     }
 
     function renderAll() {

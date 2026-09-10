@@ -708,8 +708,12 @@ $state = [
                     <button type="button"><i class="fas fa-file-lines"></i> Support Documentation</button>
                     <button type="button"><i class="fas fa-book-open"></i> User Guide</button>
                 </div>
-            </div>
-            <a class="btn-ghost" href="bid_board.php"><i class="fas fa-arrow-left"></i> Bid Board</a>
+            <?php
+            $bbStatus = $project['status'] ?? 'to_do';
+            $bbPid = (int)($project['id'] ?? 0);
+            $bbHref = 'bid_board.php' . ($bbPid > 0 ? '?status=' . urlencode($bbStatus) . '&project_id=' . $bbPid : '');
+            ?>
+            <a class="btn-ghost" href="<?= htmlspecialchars($bbHref) ?>"><i class="fas fa-arrow-left"></i> Bid Board</a>
         </div>
     </header>
 
@@ -772,12 +776,21 @@ $state = [
                     <section class="overview-card">
                         <div class="overview-card-head">
                             <h2>Customer Information</h2>
+                            <button class="btn-outline-dark btn-sm" type="button" id="saveCustomerBtn" title="Save current customer to directory"><i class="fas fa-bookmark"></i> Save Customer</button>
                         </div>
                         <div id="customerEmpty" class="overview-empty" <?= $customerCompany || $primaryContact || $customerPhone || $customerEmail || $project['job_address'] ? 'hidden' : '' ?>>
                             <button class="btn-outline-dark" type="button" id="addCustomerBtn"><i class="fas fa-plus"></i> Add Customer</button>
                             <button class="btn-outline-dark" type="button" id="addProjectAddressBtn"><i class="fas fa-location-dot"></i> Add Project Address</button>
                         </div>
                         <div class="overview-form-grid" id="customerFields" <?= $customerCompany || $primaryContact || $customerPhone || $customerEmail || $project['job_address'] ? '' : 'hidden' ?>>
+                            <label class="overview-field full">Select Saved Customer
+                                <div style="display: flex; gap: 8px; align-items: center; margin-top: 4px;">
+                                    <select id="poCustomerSelector" style="flex: 1; height: 38px; background: rgba(15,23,42,0.6); color: #f8fafc; border: 1px solid #334155; border-radius: 6px; padding: 0 10px;">
+                                        <option value="">-- Choose a saved customer --</option>
+                                    </select>
+                                    <button class="btn-outline-dark btn-sm" type="button" id="clearCustomerBtn" title="Clear customer fields" style="height: 38px; padding: 0 12px;"><i class="fas fa-eraser"></i></button>
+                                </div>
+                            </label>
                             <label class="overview-field">Customer Company
                                 <input id="poCustomerCompany" value="<?= htmlspecialchars($customerCompany) ?>">
                             </label>

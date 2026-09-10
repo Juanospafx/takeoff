@@ -33,7 +33,7 @@ function runtime(state = assemblyState()) {
 }
 
 const values = dom => [...dom.window.document.querySelectorAll('[data-assembly-component-row]')]
-    .map(row => ({ name: row.children[1].textContent.trim(), quantity: row.children[5].textContent.trim(), uom: row.children[4].textContent.trim() }));
+    .map(row => ({ name: row.children[1].textContent.trim(), quantity: row.children[5].textContent.trim(), uom: row.children[6].textContent.trim() }));
 
 test('assembly chevron expands inline component rows and supports multiple open assemblies', () => {
     const state = assemblyState();
