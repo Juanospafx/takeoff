@@ -2,7 +2,14 @@
 if (!function_exists('company_tools_bid_board_path')) {
     function company_tools_bid_board_path(): string
     {
-        return '/pages/bid_board.php';
+        $script = $_SERVER['SCRIPT_NAME'] ?? '';
+        if (strpos($script, '/pages/') !== false) {
+            return 'bid_board.php';
+        }
+        if (preg_match('#^(.*?)/(pages|admin|views)/#', $script, $m)) {
+            return $m[1] . '/pages/bid_board.php';
+        }
+        return 'bid_board.php';
     }
 }
 

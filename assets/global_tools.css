@@ -392,12 +392,29 @@
 }
 
 .bt-tools-mega.bt-tools-limited {
-    width: min(360px, calc(100vw - 24px));
-    padding: 22px 24px 26px;
+    top: calc(100% + 6px);
+    width: 240px;
+    min-width: 220px;
+    padding: 6px;
+    background: var(--global-menu-bg);
+    border: 1px solid var(--global-menu-border);
+    border-radius: 12px;
+    box-shadow: var(--global-menu-shadow);
+    transform-origin: top left;
+}
+
+.bt-tools-mega.bt-tools-limited.open {
+    display: block;
+    animation: btMenuIn .15s ease-out both;
 }
 
 .bt-tools-limited .bt-tools-eyebrow {
-    margin-bottom: 16px;
+    margin: 6px 10px 6px;
+    color: var(--global-menu-muted);
+    font-size: .72rem;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .06em;
 }
 
 .bt-tools-limited .bt-tools-grid {
@@ -405,27 +422,51 @@
     gap: 0;
 }
 
-.bt-tools-limited .bt-tools-col a {
-    min-height: 40px;
-    padding: 8px 10px;
+.bt-tools-limited .bt-tools-col h2 {
+    display: none;
 }
 
-.bt-tools-col h2 {
-    margin: 0;
-    color: #f8fafc;
-    font-size: .98rem;
-    font-weight: 900;
+.bt-tools-limited .bt-tools-rule {
+    display: none;
 }
 
-.bt-tools-rule {
-    height: 1px;
-    margin: 10px 0 9px;
-    background: rgba(255,255,255,.22);
-}
-
-.bt-tools-col nav {
+.bt-tools-limited .bt-tools-col nav {
     display: grid;
     gap: 2px;
+}
+
+.bt-tools-limited .bt-tools-col a {
+    min-height: 36px;
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    border-radius: 7px;
+    padding: 8px 10px;
+    color: var(--global-menu-text);
+    text-decoration: none;
+    font-size: .875rem;
+    font-weight: 600;
+    white-space: nowrap;
+    transition: background-color .14s ease, color .14s ease;
+}
+
+.bt-tools-limited .bt-tools-col a i {
+    width: 16px;
+    color: var(--global-menu-icon);
+    font-size: .82rem;
+    text-align: center;
+    transition: color .14s ease;
+}
+
+.bt-tools-limited .bt-tools-col a:hover,
+.bt-tools-limited .bt-tools-col a.active {
+    color: var(--global-menu-hover-text);
+    background: var(--global-menu-hover-bg);
+}
+
+.bt-tools-limited .bt-tools-col a:hover i,
+.bt-tools-limited .bt-tools-col a.active i {
+    color: var(--global-menu-hover-icon);
 }
 
 .bt-tools-col a {
@@ -546,3 +587,188 @@
         overflow: auto;
     }
 }
+
+/* ==========================================================
+   PROCORE HEADER REPLICATION
+   ========================================================== */
+.bt-global-header {
+    background: #17191c !important;
+    min-height: 50px !important;
+    height: 50px !important;
+    padding: 0 16px !important;
+    border-bottom: 1px solid rgba(255, 255, 255, 0.08) !important;
+}
+
+.bt-brand {
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
+    padding: 0 4px !important;
+    font-size: 0.95rem !important;
+    font-weight: 800 !important;
+    letter-spacing: -0.02em !important;
+    text-decoration: none !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    height: 34px !important;
+    max-width: 160px !important;
+}
+
+.bt-brand-logo {
+    height: 26px !important;
+    max-width: 145px !important;
+    object-fit: contain !important;
+    display: block !important;
+    filter: brightness(0) invert(1) !important;
+    transition: opacity 0.15s ease;
+}
+
+.bt-brand-text {
+    color: #ffffff !important;
+    font-weight: 800 !important;
+    font-size: 1rem !important;
+}
+
+.bt-brand:hover .bt-brand-logo {
+    opacity: 0.85;
+}
+
+.bt-menu-wrap {
+    min-height: 50px !important;
+}
+
+.bt-selector {
+    min-height: 50px !important;
+    border: none !important;
+    border-left: 1px solid rgba(255, 255, 255, 0.12) !important;
+    padding: 0 14px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+}
+
+.bt-selector:hover {
+    background: rgba(255, 255, 255, 0.05) !important;
+}
+
+.bt-picker-lines {
+    display: flex;
+    flex-direction: column;
+    text-align: left;
+}
+
+.bt-picker-top {
+    font-size: 11px !important;
+    color: #9aa1a6 !important;
+    font-weight: 400 !important;
+    line-height: 1.2 !important;
+}
+
+.bt-picker-bottom {
+    font-size: 12.5px !important;
+    color: #ffffff !important;
+    font-weight: 600 !important;
+    line-height: 1.3 !important;
+}
+
+.bt-picker-caret {
+    color: #9aa1a6 !important;
+    font-size: 9px !important;
+    margin-left: 4px;
+}
+
+.bt-favorites-procore {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+    padding-left: 14px;
+    border-left: 1px solid rgba(255, 255, 255, 0.12);
+}
+
+.bt-fav-star {
+    color: #ffffff;
+    font-size: 13px;
+    display: flex;
+    align-items: center;
+}
+
+.bt-fav-container {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.bt-fav-label {
+    font-size: 11px;
+    color: #9aa1a6;
+    font-weight: 500;
+    line-height: 1;
+    letter-spacing: 0.02em;
+}
+
+.bt-fav-tabs {
+    display: flex;
+    align-items: center;
+    gap: 22px;
+}
+
+.bt-fav-tab {
+    color: #cbd5e1;
+    font-size: 14px;
+    font-weight: 500;
+    letter-spacing: 0.02em;
+    text-decoration: none;
+    white-space: nowrap;
+    transition: color 0.15s ease;
+}
+
+.bt-fav-tab:hover {
+    color: #ffffff;
+}
+
+.bt-fav-tab.active {
+    color: #ffffff;
+    font-weight: 600;
+}
+
+.bt-icon-procore {
+    background: transparent;
+    border: none;
+    color: #cbd5e1;
+    font-size: 15px;
+    width: 32px;
+    height: 32px;
+    border-radius: 50%;
+    display: inline-grid;
+    place-items: center;
+    cursor: pointer;
+    text-decoration: none;
+    transition: background 0.15s ease, color 0.15s ease;
+}
+
+.bt-icon-procore:hover {
+    background: rgba(255, 255, 255, 0.1);
+    color: #ffffff;
+}
+
+.bt-avatar-procore {
+    width: 30px;
+    height: 30px;
+    border-radius: 50%;
+    background: #2b3035;
+    color: #ffffff;
+    border: 1px solid rgba(255, 255, 255, 0.25);
+    font-size: 11px;
+    font-weight: 700;
+    display: inline-grid;
+    place-items: center;
+    cursor: pointer;
+    padding: 0;
+    transition: border-color 0.15s ease;
+}
+
+.bt-avatar-procore:hover {
+    border-color: #ffffff;
+}
+

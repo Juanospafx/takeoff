@@ -7,36 +7,42 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
 ?>
 <header class="bt-global-header" data-global-tools-header>
     <div class="bt-global-left">
-        <a class="bt-brand" href="<?= htmlspecialchars($bidBoardPath) ?>" aria-label="Open Bid Board">
-            <span class="bt-brand-mark">B</span>
-            <span>Brightronix</span>
+        <a class="bt-brand" href="bid_board.php" aria-label="Brightronix Home">
+            <img src="../assets/logo-text.png" alt="Brightronix" class="bt-brand-logo" onerror="if(!this.dataset.retried){this.dataset.retried='1';this.src='../assets/images/logo-text.png';}else{this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='inline';}">
+            <span class="bt-brand-text" style="display:none;">Brightronix</span>
         </a>
+        <div class="bt-nav-divider"></div>
         <div class="bt-menu-wrap">
             <button class="bt-selector" type="button" data-global-menu-toggle="company" aria-expanded="false" aria-label="Select company or project">
-                <span>Brightronix Electric</span>
-                <strong>Select a Project</strong>
-                <i class="fas fa-chevron-down"></i>
+                <div class="bt-picker-lines">
+                    <span class="bt-picker-top">Brightronix LLC</span>
+                    <strong class="bt-picker-bottom">Select a Project</strong>
+                </div>
+                <i class="fas fa-caret-down bt-picker-caret"></i>
             </button>
             <div class="bt-small-menu" data-global-menu="company">
-                <a href="/pages/index.php">
+                <a href="index.php">
                     <i class="fas fa-building"></i>
-                    <span>Brightronix Electric</span>
+                    <span>Brightronix LLC</span>
                 </a>
-                <a href="/pages/project_module.php">
+                <a href="projects.php">
                     <i class="fas fa-folder-open"></i>
                     <span>Select a Project</span>
                 </a>
-                <a href="/pages/company_settings.php">
+                <a href="company_settings.php">
                     <i class="fas fa-gear"></i>
                     <span>Company Settings</span>
                 </a>
             </div>
         </div>
+        <div class="bt-nav-divider"></div>
         <div class="bt-menu-wrap bt-tools-wrap">
             <button class="bt-selector bt-company-tools-trigger" type="button" data-global-menu-toggle="tools" aria-expanded="false">
-                <span>Company Tools</span>
-                <strong>Preconstruction</strong>
-                <i class="fas fa-chevron-down"></i>
+                <div class="bt-picker-lines">
+                    <span class="bt-picker-top">Company Tools</span>
+                    <strong class="bt-picker-bottom">Bid Board</strong>
+                </div>
+                <i class="fas fa-caret-down bt-picker-caret"></i>
             </button>
             <div class="bt-tools-mega bt-tools-limited" data-global-menu="tools">
                 <div class="bt-tools-eyebrow">Select a tool</div>
@@ -47,8 +53,12 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
                             <div class="bt-tools-rule"></div>
                             <nav>
                                 <?php foreach ($category['links'] as $link): ?>
-                                    <?php $isActive = $currentPath === ($link['path'] ?? ''); ?>
-                                    <a class="<?= $isActive ? 'active' : '' ?>" href="<?= htmlspecialchars($link['path']) ?>">
+                                    <?php 
+                                        $linkPath = $link['path'] ?? '';
+                                        $resolvedPath = (strpos($linkPath, '/pages/') === 0) ? basename($linkPath) : $linkPath;
+                                        $isActive = $currentPath === $linkPath || basename($currentPath) === $resolvedPath; 
+                                    ?>
+                                    <a class="<?= $isActive ? 'active' : '' ?>" href="<?= htmlspecialchars($resolvedPath) ?>">
                                         <i class="<?= htmlspecialchars($link['icon'] ?? 'fas fa-circle') ?>"></i>
                                         <span><?= htmlspecialchars($link['label']) ?></span>
                                     </a>
@@ -59,86 +69,72 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
                 </div>
             </div>
         </div>
-        <div class="bt-menu-wrap">
-            <button class="bt-nav-trigger" type="button" data-global-menu-toggle="favorites" aria-expanded="false">
-                <i class="fas fa-star"></i>
-                <span>Favorites</span>
-            </button>
-            <div class="bt-small-menu" data-global-menu="favorites">
-                <?php if (count($favoriteTools) > 0): ?>
-                    <?php foreach ($favoriteTools as $link): ?>
-                        <a class="<?= $currentPath === ($link['path'] ?? '') ? 'active' : '' ?>" href="<?= htmlspecialchars($link['path']) ?>">
-                            <i class="<?= htmlspecialchars($link['icon'] ?? 'fas fa-star') ?>"></i>
-                            <span><?= htmlspecialchars($link['label']) ?></span>
-                        </a>
-                    <?php endforeach; ?>
-                <?php else: ?>
-                    <div class="bt-empty-menu">No favorites yet</div>
-                <?php endif; ?>
-            </div>
-        </div>
-        <div class="bt-menu-wrap">
-            <button class="bt-nav-trigger" type="button" data-global-menu-toggle="recent" aria-expanded="false">Recent</button>
-            <div class="bt-small-menu" data-global-menu="recent">
-                <div class="bt-empty-menu">No recent tools yet</div>
-            </div>
-        </div>
-        <div class="bt-menu-wrap">
-            <button class="bt-nav-trigger" type="button" data-global-menu-toggle="pinned" aria-expanded="false">Pinned</button>
-            <div class="bt-small-menu" data-global-menu="pinned">
-                <div class="bt-empty-menu">No pinned tools yet</div>
+        <div class="bt-nav-divider"></div>
+        <!-- Favorites horizontal tab bar (Procore style) -->
+        <div class="bt-favorites-procore">
+            <div class="bt-fav-star"><i class="fas fa-star"></i></div>
+            <div class="bt-fav-container">
+                <div class="bt-fav-label">Favorites</div>
+                <nav class="bt-fav-tabs" aria-label="Favorites navigation">
+                    <a href="bid_board.php" class="bt-fav-tab <?= (strpos($currentPath, 'bid_board') !== false || $currentPath === '/' || $currentPath === '') ? 'active' : '' ?>">Bid Board</a>
+                    <a href="cost_catalog.php" class="bt-fav-tab <?= strpos($currentPath, 'cost_catalog') !== false ? 'active' : '' ?>">Cost Catalog</a>
+                    <a href="project_dashboard.php?id=1" class="bt-fav-tab <?= strpos($currentPath, 'project_dashboard') !== false ? 'active' : '' ?>">Equipment</a>
+                    <a href="projects.php" class="bt-fav-tab <?= strpos($currentPath, 'projects.php') !== false ? 'active' : '' ?>">360 Reporting</a>
+                    <a href="archivos.php" class="bt-fav-tab <?= strpos($currentPath, 'archivos') !== false ? 'active' : '' ?>">Documents</a>
+                </nav>
             </div>
         </div>
     </div>
     <div class="bt-global-right">
         <div class="bt-menu-wrap">
-            <button class="bt-selector" type="button" data-global-menu-toggle="apps" aria-expanded="false" aria-label="Select app">
-                <span>Apps</span>
-                <strong>Select an App</strong>
-                <i class="fas fa-chevron-down"></i>
+            <button class="bt-selector" type="button" data-global-menu-toggle="apps" aria-expanded="false" aria-label="Select tool">
+                <div class="bt-picker-lines">
+                    <span class="bt-picker-top">Tools</span>
+                    <strong class="bt-picker-bottom">Select a Tool</strong>
+                </div>
+                <i class="fas fa-caret-down bt-picker-caret"></i>
             </button>
             <div class="bt-small-menu bt-align-right" data-global-menu="apps">
-                <a href="/pages/company_tools.php">
+                <a href="cost_catalog.php">
+                    <i class="fas fa-box-archive"></i>
+                    <span>Catalog update</span>
+                </a>
+                <a href="project_dashboard.php?tab=takeoff">
+                    <i class="fas fa-cubes"></i>
+                    <span>Material Extraction</span>
+                </a>
+                <a href="editor.php">
+                    <i class="fas fa-draw-polygon"></i>
+                    <span>Room Designer</span>
+                </a>
+                <div style="height: 1px; background: rgba(0,0,0,0.08); margin: 4px 0;"></div>
+                <a href="company_tools.php">
                     <i class="fas fa-grip"></i>
                     <span>Company Tools</span>
                 </a>
-                <a href="/pages/project_module.php">
+                <a href="projects.php">
                     <i class="fas fa-briefcase"></i>
                     <span>Portfolio</span>
                 </a>
             </div>
         </div>
+        <button class="bt-icon-procore" type="button" title="Support & Feedback" aria-label="Support & Feedback"><i class="far fa-circle-question"></i></button>
+        <a href="directorio.php" class="bt-icon-procore" title="My Open Items" aria-label="My Open Items"><i class="fas fa-list-check"></i></a>
+        <button class="bt-icon-procore" type="button" title="Announcements" aria-label="Announcements"><i class="far fa-bell"></i></button>
         <div class="bt-menu-wrap">
-            <button class="bt-icon" type="button" data-global-menu-toggle="help" aria-expanded="false" aria-label="Help"><i class="far fa-circle-question"></i></button>
-            <div class="bt-small-menu bt-align-right" data-global-menu="help">
-                <button class="bt-menu-action" type="button">
-                    <i class="fas fa-book-open"></i>
-                    <span>Support Documentation</span>
-                </button>
-                <button class="bt-menu-action" type="button">
-                    <i class="fas fa-circle-info"></i>
-                    <span>User Guide</span>
-                </button>
-            </div>
-        </div>
-        <div class="bt-menu-wrap">
-            <button class="bt-icon" type="button" data-global-menu-toggle="notifications" aria-expanded="false" aria-label="Notifications"><i class="far fa-bell"></i></button>
-            <div class="bt-small-menu bt-align-right" data-global-menu="notifications">
-                <div class="bt-empty-menu">No notifications</div>
-            </div>
-        </div>
-        <div class="bt-menu-wrap">
-            <button class="bt-avatar" type="button" data-global-menu-toggle="user" aria-expanded="false" aria-label="User menu">JE</button>
+            <button class="bt-avatar-procore" type="button" data-global-menu-toggle="user" aria-expanded="false" aria-label="Account & Profile">
+                <span>ID</span>
+            </button>
             <div class="bt-small-menu bt-align-right" data-global-menu="user">
                 <button class="bt-menu-action" type="button">
                     <i class="fas fa-user"></i>
-                    <span>Profile</span>
+                    <span>Profile (Admin)</span>
                 </button>
                 <button class="bt-menu-action" type="button" data-theme-toggle>
                     <i class="fas fa-moon"></i>
                     <span>Dark Mode</span>
                 </button>
-                <a href="/pages/company_settings.php">
+                <a href="company_settings.php">
                     <i class="fas fa-sliders"></i>
                     <span>Settings</span>
                 </a>
