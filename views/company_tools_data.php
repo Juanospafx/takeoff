@@ -21,8 +21,24 @@ if (!function_exists('company_tools_categories')) {
             [
                 'title' => 'Preconstruction',
                 'links' => [
-                    ['label' => 'Cost Catalog', 'path' => '/pages/cost_catalog.php', 'icon' => 'fas fa-book'],
-                    ['label' => 'Bid Board', 'path' => $bidBoardPath, 'icon' => 'fas fa-table-columns'],
+                    ['id' => 'bid_board', 'label' => 'Bid Board', 'path' => $bidBoardPath, 'icon' => 'fas fa-table-columns'],
+                    ['id' => 'cost_catalog', 'label' => 'Cost Catalog', 'path' => 'cost_catalog.php', 'icon' => 'fas fa-book-bookmark'],
+                    ['id' => 'editor', 'label' => 'Plan Editor & Takeoff', 'path' => 'editor.php', 'icon' => 'fas fa-draw-polygon'],
+                ],
+            ],
+            [
+                'title' => 'Project Management',
+                'links' => [
+                    ['id' => 'projects', 'label' => 'Projects Portfolio', 'path' => 'projects.php', 'icon' => 'fas fa-briefcase'],
+                    ['id' => 'archivos', 'label' => 'Documents', 'path' => 'archivos.php', 'icon' => 'fas fa-folder-tree'],
+                    ['id' => 'timeline', 'label' => 'Schedule & Timeline', 'path' => 'timeline.php', 'icon' => 'fas fa-timeline'],
+                    ['id' => 'directorio', 'label' => 'Directory', 'path' => 'directorio.php', 'icon' => 'fas fa-address-book'],
+                ],
+            ],
+            [
+                'title' => 'Administration',
+                'links' => [
+                    ['id' => 'company_settings', 'label' => 'Company Settings', 'path' => 'company_settings.php', 'icon' => 'fas fa-sliders'],
                 ],
             ],
         ];
@@ -37,11 +53,8 @@ if (!function_exists('company_tools_existing_categories')) {
             $category['links'] = array_values(array_filter($category['links'], static function ($link) {
                 $path = $link['path'] ?? '';
                 if ($path === '' || strpos($path, 'http') === 0) return true;
-                $relative = ltrim(preg_replace('~^/pages/~', 'pages/', $path), '/');
-                if (strpos($path, '/admin/') === 0) {
-                    $relative = ltrim($path, '/');
-                }
-                return file_exists(__DIR__ . '/../' . $relative);
+                $filename = basename($path);
+                return file_exists(__DIR__ . '/../pages/' . $filename);
             }));
         }
         return $categories;
@@ -49,11 +62,11 @@ if (!function_exists('company_tools_existing_categories')) {
 }
 
 if (!function_exists('company_tool_find')) {
-    function company_tool_find(string $label): ?array
+    function company_tool_find(string $idOrLabel): ?array
     {
         foreach (company_tools_existing_categories() as $category) {
             foreach ($category['links'] as $link) {
-                if (strcasecmp($link['label'] ?? '', $label) === 0) {
+                if (($link['id'] ?? '') === $idOrLabel || strcasecmp($link['label'] ?? '', $idOrLabel) === 0) {
                     return $link;
                 }
             }
@@ -65,9 +78,10 @@ if (!function_exists('company_tool_find')) {
 if (!function_exists('company_tools_favorites')) {
     function company_tools_favorites(): array
     {
+        $defaultFavs = ['bid_board', 'cost_catalog', 'archivos'];
         $favorites = [];
-        foreach (['Bid Board', 'Cost Catalog'] as $label) {
-            $link = company_tool_find($label);
+        foreach ($defaultFavs as $favId) {
+            $link = company_tool_find($favId);
             if ($link) {
                 $favorites[] = $link;
             }

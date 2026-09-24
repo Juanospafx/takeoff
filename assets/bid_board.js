@@ -535,6 +535,7 @@
         openMenuId = null;
         renderPipelineTabs();
         renderTemplateOptions();
+        renderStageOptions();
         renderSortIcon();
         syncFieldSelectors();
         const exportLabel = document.getElementById('bbExportStageLabel');
@@ -547,6 +548,60 @@
         document.getElementById('bbTableControls').hidden = isEmpty;
         document.querySelector('.bb-table-shell').hidden = isEmpty;
         if (!isEmpty) renderTable();
+    }
+
+    let tabsDragInitialized = false;
+    function initTabsDragScroll(root) {
+        if (!root || tabsDragInitialized) return;
+        tabsDragInitialized = true;
+
+        let isDown = false;
+        let startX = 0;
+        let scrollStart = 0;
+        let hasMoved = false;
+
+        root.addEventListener('mousedown', (e) => {
+            if (e.button !== 0) return;
+            isDown = true;
+            hasMoved = false;
+            root.classList.add('is-dragging');
+            startX = e.pageX - root.offsetLeft;
+            scrollStart = root.scrollLeft;
+        });
+
+        window.addEventListener('mousemove', (e) => {
+            if (!isDown) return;
+            const x = e.pageX - root.offsetLeft;
+            const walk = (x - startX) * 1.5;
+            if (Math.abs(walk) > 3) {
+                hasMoved = true;
+            }
+            root.scrollLeft = scrollStart - walk;
+        });
+
+        window.addEventListener('mouseup', () => {
+            if (isDown) {
+                isDown = false;
+                root.classList.remove('is-dragging');
+            }
+        });
+
+        root.addEventListener('click', (e) => {
+            if (hasMoved) {
+                e.stopPropagation();
+                e.preventDefault();
+                hasMoved = false;
+            }
+        }, true);
+
+        root.addEventListener('wheel', (e) => {
+            if (root.scrollWidth > root.clientWidth) {
+                if (Math.abs(e.deltaY) > Math.abs(e.deltaX)) {
+                    e.preventDefault();
+                    root.scrollLeft += e.deltaY;
+                }
+            }
+        }, { passive: false });
     }
 
     function renderPipelineTabs() {
@@ -568,6 +623,13 @@
                 render();
             });
         });
+        initTabsDragScroll(root);
+        const activeTab = root.querySelector('.bb-pipeline-tab.active');
+        if (activeTab && root.scrollWidth > root.clientWidth) {
+            setTimeout(() => {
+                activeTab.scrollIntoView({ behavior: 'smooth', block: 'nearest', inline: 'center' });
+            }, 60);
+        }
     }
 
     function renderTable() {
@@ -585,7 +647,7 @@
                     ${project.category && project.category !== '--' ? `<div class="bb-subtext">${esc(project.category)}</div>` : ''}
                 </td>
                 <td class="bb-col-info-cell">
-                    <button class="bb-info-btn" type="button" aria-label="Project information" data-bb-tooltip="${esc(infoTooltip(project))}">
+                    <button class="bb-info-btn" type="button" aria-label="Project information" data-bb-tooltip-html="${esc(renderInfoPopoverHtml(project))}">
                         <i class="fas fa-chart-column"></i>
                     </button>
                 </td>
@@ -646,15 +708,18 @@
 
     function statusSelect(project) {
         const currentPhase = getPhase(project.statusLabel);
-        const bgPale = hexToRgba(currentPhase.color, 0.12);
-        const borderPale = hexToRgba(currentPhase.color, 0.35);
-        const textPale = getDarkerShade(currentPhase.color);
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark' || document.body?.classList.contains('theme-dark');
+        const bgAlpha = isDark ? 0.26 : 0.12;
+        const borderAlpha = isDark ? 0.52 : 0.35;
+        const bgPale = hexToRgba(currentPhase.color, bgAlpha);
+        const borderPale = hexToRgba(currentPhase.color, borderAlpha);
+        const textPale = isDark ? '#ffffff' : getDarkerShade(currentPhase.color);
         const isOpen = openStatusMenuId === String(project.id);
         return `
             <div class="bb-status-pill-container ${isOpen ? 'open' : ''}">
                 <button type="button" class="bb-status-pill-wrap ${isOpen ? 'active' : ''}" data-status-trigger="${esc(project.id)}" title="Click to Change Status" style="background-color: ${bgPale}; color: ${textPale}; border: 1px solid ${borderPale};">
                     <span class="bb-status-dot" style="background-color: ${currentPhase.color};"></span>
-                    <span class="bb-status-pill-label">${esc(currentPhase.label.toUpperCase())}</span>
+                    <span class="bb-status-pill-label" style="color: ${textPale};">${esc(currentPhase.label.toUpperCase())}</span>
                     <i class="fas fa-caret-down bb-status-pill-caret" style="color: ${textPale};"></i>
                 </button>
                 <div class="bb-status-menu-panel ${isOpen ? 'open' : ''}" data-status-panel="${esc(project.id)}">
@@ -663,14 +728,14 @@
                         ${pipelineStatuses.map(status => {
                             const phase = getPhase(status);
                             const isCurrent = status === project.statusLabel;
-                            const itemBg = hexToRgba(phase.color, 0.12);
-                            const itemBorder = hexToRgba(phase.color, 0.32);
-                            const itemText = getDarkerShade(phase.color);
+                            const itemBg = hexToRgba(phase.color, bgAlpha);
+                            const itemBorder = hexToRgba(phase.color, borderAlpha);
+                            const itemText = isDark ? '#ffffff' : getDarkerShade(phase.color);
                             return `
                                 <button type="button" class="bb-status-menu-option ${isCurrent ? 'selected' : ''}" data-set-status="${esc(status)}" data-project-id="${esc(project.id)}">
                                     <span class="bb-status-option-pill" style="background-color: ${itemBg}; border: 1px solid ${itemBorder}; color: ${itemText};">
                                         <span class="bb-status-dot-sm" style="background-color: ${phase.color};"></span>
-                                        <span class="bb-status-option-name">${esc(phase.label.toUpperCase())}</span>
+                                        <span class="bb-status-option-name" style="color: ${itemText};">${esc(phase.label.toUpperCase())}</span>
                                     </span>
                                     ${isCurrent ? `<i class="fas fa-check bb-status-option-check" style="color: ${phase.color};"></i>` : ''}
                                 </button>
@@ -879,6 +944,46 @@
         return `${years} year${years === 1 ? '' : 's'} ago`;
     }
 
+    function renderInfoPopoverHtml(project) {
+        const createdText = relativeTime(project.createdAt);
+        const projNum = safeText(project.projectId) || '--';
+        const tasks = project.taskCount != null && project.taskCount !== '' ? safeText(project.taskCount) : '--';
+        const notes = project.noteCount != null && project.noteCount !== '' ? safeText(project.noteCount) : '--';
+        const sales = project.salesPerSqFt || '$0 /sq ft';
+        return `
+            <div class="bb-info-popover">
+                <div class="bb-info-sec">
+                    <div class="bb-info-label">Project created</div>
+                    <div class="bb-info-val">${esc(createdText)}</div>
+                </div>
+                <div class="bb-info-sec">
+                    <div class="bb-info-label">Project number</div>
+                    <div class="bb-info-val">${esc(projNum)}</div>
+                </div>
+                <div class="bb-info-stats-row">
+                    <div class="bb-info-stat-col">
+                        <div class="bb-info-label">Tasks</div>
+                        <div class="bb-info-stat-val">
+                            <i class="fas fa-clipboard bb-stat-icon"></i>
+                            <span class="bb-stat-num">${esc(tasks)}</span>
+                        </div>
+                    </div>
+                    <div class="bb-info-stat-col">
+                        <div class="bb-info-label">Notes</div>
+                        <div class="bb-info-stat-val">
+                            <i class="fas fa-file-lines bb-stat-icon"></i>
+                            <span class="bb-stat-num">${esc(notes)}</span>
+                        </div>
+                    </div>
+                </div>
+                <div class="bb-info-sec">
+                    <div class="bb-info-label">Total sales per sq ft</div>
+                    <div class="bb-info-val">${esc(sales)}</div>
+                </div>
+            </div>
+        `;
+    }
+
     function infoTooltip(project) {
         return [
             'Project created',
@@ -921,7 +1026,6 @@
         if (!rawProject) return;
         const previousState = JSON.parse(JSON.stringify(state));
         rawProject.status = statusCodes[statusLabel] || 'to_do';
-        activeStatus = statusLabel;
         render();
         postProjectAction('save', savePayload(rawProject, statusLabel)).catch(err => {
             state = previousState;
@@ -1014,14 +1118,92 @@
             .join('');
     }
 
+    function updateModalLivePreview() {
+        const previewName = document.getElementById('bbModalPreviewName');
+        const previewStage = document.getElementById('bbModalPreviewStage');
+        const nameVal = document.getElementById('bbProjectName')?.value.trim() || 'New Project';
+        const stageVal = document.getElementById('bbProjectStage')?.value || activeStatus || 'To Do';
+        const phase = getPhase(stageVal);
+        if (previewName) previewName.textContent = nameVal;
+        if (previewStage && phase) {
+            const isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+            const bgAlpha = isDark ? 0.26 : 0.14;
+            const borderAlpha = isDark ? 0.52 : 0.35;
+            previewStage.style.backgroundColor = hexToRgba(phase.color, bgAlpha);
+            previewStage.style.borderColor = hexToRgba(phase.color, borderAlpha);
+            previewStage.style.color = isDark ? '#ffffff' : getDarkerShade(phase.color);
+            previewStage.innerHTML = `
+                <span class="bb-status-dot" style="background-color: ${phase.color};"></span>
+                <span class="bb-status-pill-label" style="color: ${isDark ? '#ffffff' : getDarkerShade(phase.color)};">${esc(phase.label.toUpperCase())}</span>
+            `;
+        }
+    }
+
+    function renderStageOptions() {
+        const stageSelect = document.getElementById('bbProjectStage');
+        if (!stageSelect) return;
+        const currentVal = stageSelect.value || activeStatus || 'To Do';
+        stageSelect.innerHTML = pipelineStatuses.map(status => {
+            const phase = getPhase(status);
+            return `<option value="${esc(status)}">${esc(phase.label)}</option>`;
+        }).join('');
+        stageSelect.value = currentVal;
+
+        // Populate visual interactive stage pills
+        const pillGrid = document.getElementById('bbStagePillGrid');
+        if (pillGrid) {
+            pillGrid.innerHTML = pipelineStatuses.map(status => {
+                const phase = getPhase(status);
+                const isSelected = status === currentVal;
+                return `
+                    <button type="button" class="bb-modal-stage-pill ${isSelected ? 'active' : ''}" data-stage-val="${esc(status)}">
+                        <span class="bb-stage-dot" style="background-color: ${phase.color};"></span>
+                        <span class="bb-stage-text">${esc(phase.label)}</span>
+                    </button>
+                `;
+            }).join('');
+
+            pillGrid.querySelectorAll('[data-stage-val]').forEach(btn => {
+                btn.onclick = () => {
+                    const chosen = btn.dataset.stageVal;
+                    stageSelect.value = chosen;
+                    pillGrid.querySelectorAll('.bb-modal-stage-pill').forEach(b => b.classList.remove('active'));
+                    btn.classList.add('active');
+                    updateModalLivePreview();
+                };
+            });
+        }
+        updateModalLivePreview();
+    }
+
     function openCreateProject() {
         document.getElementById('bbProjectForm').reset();
         const nameInput = document.getElementById('bbProjectName');
-        if (nameInput) nameInput.value = 'New Project';
+        if (nameInput) {
+            nameInput.value = 'New Project';
+            nameInput.oninput = updateModalLivePreview;
+        }
+        renderStageOptions();
+        const stageSelect = document.getElementById('bbProjectStage');
+        if (stageSelect) {
+            stageSelect.value = activeStatus || 'To Do';
+            const pillGrid = document.getElementById('bbStagePillGrid');
+            if (pillGrid) {
+                pillGrid.querySelectorAll('.bb-modal-stage-pill').forEach(b => {
+                    b.classList.toggle('active', b.dataset.stageVal === stageSelect.value);
+                });
+            }
+        }
         document.querySelector('input[name="bbProjectMode"][value="template"]').checked = true;
         toggleProjectTemplate();
+        updateModalLivePreview();
         document.getElementById('bbProjectModal').classList.add('open');
-        setTimeout(() => nameInput?.focus?.(), 40);
+        setTimeout(() => {
+            if (nameInput) {
+                nameInput.focus();
+                nameInput.select();
+            }
+        }, 50);
     }
 
     function toggleProjectTemplate() {
@@ -1032,6 +1214,7 @@
         });
         const wrap = document.getElementById('bbProjectTemplateWrap');
         if (wrap) wrap.style.display = mode === 'template' ? 'block' : 'none';
+        updateModalLivePreview();
     }
 
     async function createProjectDraft(event) {
@@ -1040,6 +1223,9 @@
         const templateId = mode === 'template' ? document.getElementById('bbProjectTemplate').value : '';
         const template = (state.templates || []).find(row => String(row.id) === String(templateId));
         const projectName = document.getElementById('bbProjectName')?.value.trim() || 'New Project';
+        const selectedStage = document.getElementById('bbProjectStage')?.value || activeStatus || 'To Do';
+        const statusCode = statusCodes[selectedStage] || 'to_do';
+
         const submitBtn = event.target.querySelector('button[type="submit"]');
         if (submitBtn) {
             submitBtn.disabled = true;
@@ -1050,7 +1236,7 @@
             project_template_id: templateId,
             template_name: template?.name || '',
             name: projectName,
-            status: 'to_do',
+            status: statusCode,
             measurement_system: 'US',
             estimate_pricing: 'Unlocked',
             created_at: new Date().toISOString()
@@ -1060,7 +1246,7 @@
             const res = await postProjectAction('save', {
                 name: projectName,
                 project_template_id: templateId || null,
-                status: 'to_do',
+                status: statusCode,
                 metadata_json: JSON.stringify({
                     estimator: 'Juan Estevez',
                     measurement_system: 'US',
@@ -1077,7 +1263,7 @@
         } catch (e) {
             console.warn('Direct project creation fallback to draft', e);
         }
-        window.location.href = `project_dashboard.php?draft=1${templateId ? `&template_id=${encodeURIComponent(templateId)}` : ''}&name=${encodeURIComponent(projectName)}`;
+        window.location.href = `project_dashboard.php?draft=1${templateId ? `&template_id=${encodeURIComponent(templateId)}` : ''}&name=${encodeURIComponent(projectName)}&status=${encodeURIComponent(statusCode)}`;
     }
 
     function closeModals() {
@@ -1099,10 +1285,17 @@
     }
 
     function showTooltip(target) {
+        const html = target.getAttribute('data-bb-tooltip-html');
         const text = target.getAttribute('data-bb-tooltip');
-        if (!text) return;
+        if (!html && !text) return;
         const tooltip = ensureTooltip();
-        tooltip.textContent = text;
+        if (html) {
+            tooltip.innerHTML = html;
+            tooltip.classList.add('bb-tooltip-rich');
+        } else {
+            tooltip.textContent = text;
+            tooltip.classList.remove('bb-tooltip-rich');
+        }
         tooltip.classList.add('show');
         positionTooltip(target);
     }
@@ -1112,11 +1305,9 @@
     }
 
     function positionTooltip(target) {
-        if (!tooltipEl) return;
+        if (!tooltipEl || !target) return;
         const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
         const rect = target.getBoundingClientRect();
-        tooltipEl.style.left = '0px';
-        tooltipEl.style.top = '0px';
         const tipRect = tooltipEl.getBoundingClientRect();
 
         const tLeft = rect.left / zoom;
@@ -1125,16 +1316,28 @@
         const tWidth = rect.width / zoom;
         const tipWidth = tipRect.width / zoom;
         const tipHeight = tipRect.height / zoom;
-        const vpWidth = window.innerWidth / zoom;
+        const vpWidth = (window.innerWidth || document.documentElement.clientWidth || 1200) / zoom;
+        const vpHeight = (window.innerHeight || document.documentElement.clientHeight || 800) / zoom;
 
-        const left = Math.min(Math.max(10, tLeft + tWidth / 2 - tipWidth / 2), vpWidth - tipWidth - 10);
-        const top = tTop > tipHeight + 14 ? tTop - tipHeight - 8 : tBottom + 8;
+        let left = tLeft + (tWidth / 2) - (tipWidth / 2);
+        if (left < 10) left = 10;
+        if (left + tipWidth > vpWidth - 10) left = vpWidth - tipWidth - 10;
+
+        let top = tBottom + 8;
+        if (top + tipHeight > vpHeight - 8) {
+            if (tTop - tipHeight - 8 >= 8) {
+                top = tTop - tipHeight - 8;
+            } else {
+                top = Math.max(8, vpHeight - tipHeight - 8);
+            }
+        }
+
         tooltipEl.style.left = `${Math.round(left)}px`;
         tooltipEl.style.top = `${Math.round(top)}px`;
     }
 
     function bindTooltips(root = document) {
-        root.querySelectorAll('[data-bb-tooltip]').forEach(el => {
+        root.querySelectorAll('[data-bb-tooltip], [data-bb-tooltip-html]').forEach(el => {
             el.addEventListener('mouseenter', () => showTooltip(el));
             el.addEventListener('mouseleave', hideTooltip);
             el.addEventListener('focus', () => showTooltip(el));
@@ -1267,6 +1470,20 @@
         };
         window.addEventListener('scroll', closeFloatingUi, true);
         window.addEventListener('resize', closeFloatingUi);
+
+        // Re-render when theme changes (light/dark)
+        try {
+            const themeObserver = new MutationObserver((mutations) => {
+                for (const mutation of mutations) {
+                    if (mutation.type === 'attributes' && mutation.attributeName === 'data-theme') {
+                        if (state.projects && state.projects.length) render();
+                        break;
+                    }
+                }
+            });
+            themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+        } catch (err) {}
+
         load();
     });
 })();
