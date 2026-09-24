@@ -11,18 +11,23 @@
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="../assets/global_tools.css?v=procore-20260923">
+    <link rel="stylesheet" href="../assets/global_tools.css?v=brightronix-nohalo-v1">
     <script>
         (function () {
             try {
                 var saved = localStorage.getItem('takeoff.theme');
-                document.documentElement.setAttribute('data-theme', saved === 'dark' ? 'dark' : 'light');
+                var theme = (saved === 'dark' || saved === 'light') ? saved : 'light';
+                document.documentElement.setAttribute('data-theme', theme);
+                document.addEventListener('DOMContentLoaded', function () {
+                    document.body.classList.toggle('theme-light', theme === 'light');
+                    document.body.classList.toggle('theme-dark', theme === 'dark');
+                });
             } catch (error) {
                 document.documentElement.setAttribute('data-theme', 'light');
             }
         })();
     </script>
-    <link rel="stylesheet" href="../assets/bid_board.css?v=procore-20260923-v7">
+    <link rel="stylesheet" href="../assets/bid_board.css?v=brightronix-nohalo-v1">
 </head>
 <body>
 <?php include __DIR__ . '/../views/global_tools_header.php'; ?>
@@ -333,6 +338,6 @@
 </div>
 
 <script src="../assets/global_tools.js"></script>
-<script src="../assets/bid_board.js?v=procore-20260923-v7"></script>
+<script src="../assets/bid_board.js?v=procore-20260923-v8"></script>
 </body>
 </html>

@@ -155,10 +155,18 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
     } catch (error) {}
     var theme = saved === 'dark' || saved === 'light' ? saved : 'light';
     document.documentElement.setAttribute('data-theme', theme);
+    if (document.body) {
+        document.body.classList.toggle('theme-light', theme === 'light');
+        document.body.classList.toggle('theme-dark', theme === 'dark');
+    }
 
     function syncThemeButton() {
+        var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
+        if (document.body) {
+            document.body.classList.toggle('theme-light', !isDark);
+            document.body.classList.toggle('theme-dark', isDark);
+        }
         document.querySelectorAll('[data-theme-toggle]').forEach(function (button) {
-            var isDark = document.documentElement.getAttribute('data-theme') === 'dark';
             var label = button.querySelector('span');
             if (label) label.textContent = isDark ? 'Light Mode' : 'Dark Mode';
             var icon = button.querySelector('i');
@@ -171,6 +179,10 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
         if (!button) return;
         var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
         document.documentElement.setAttribute('data-theme', next);
+        if (document.body) {
+            document.body.classList.toggle('theme-light', next === 'light');
+            document.body.classList.toggle('theme-dark', next === 'dark');
+        }
         try {
             localStorage.setItem(key, next);
         } catch (error) {}
