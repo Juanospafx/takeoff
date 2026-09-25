@@ -364,6 +364,44 @@ if (!empty($project['estimator_id']) && dash_table_exists($pdo, 'estimators')) {
     $estimatorName = $stmt->fetchColumn() ?: 'Unassigned';
 }
 
+$availableEstimators = [];
+if (dash_table_exists($pdo, 'estimators')) {
+    try {
+        $stmt = $pdo->query("SELECT id, display_name AS name, trade AS role FROM estimators WHERE deleted_at IS NULL ORDER BY display_name ASC");
+        $availableEstimators = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+    } catch (Throwable $e) {}
+}
+if (dash_table_exists($pdo, 'users')) {
+    try {
+        $stmt = $pdo->query("SELECT id, username AS name, role FROM users ORDER BY username ASC");
+        $uRows = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
+        $existing = array_map(fn($e) => strtolower(trim($e['name'])), $availableEstimators);
+        foreach ($uRows as $ur) {
+            if (!in_array(strtolower(trim($ur['name'])), $existing, true)) {
+                $availableEstimators[] = [
+                    'id' => (int) $ur['id'],
+                    'name' => $ur['name'],
+                    'role' => ucfirst($ur['role'] ?? 'Member')
+                ];
+            }
+        }
+    } catch (Throwable $e) {}
+}
+if (empty($availableEstimators)) {
+    $availableEstimators = [
+        ['id' => 1, 'name' => 'Isaac Diaz', 'role' => 'Lead Estimator'],
+        ['id' => 2, 'name' => 'Juan Estevez', 'role' => 'Chief Estimator'],
+        ['id' => 3, 'name' => 'Carlos Rodriguez', 'role' => 'Project Manager'],
+        ['id' => 4, 'name' => 'Sarah Jenkins', 'role' => 'Senior Estimator'],
+        ['id' => 5, 'name' => 'Michael Chang', 'role' => 'Civil Estimator'],
+        ['id' => 6, 'name' => 'Elena Rostova', 'role' => 'Electrical Estimator'],
+        ['id' => 7, 'name' => 'David Miller', 'role' => 'Mechanical Estimator'],
+        ['id' => 8, 'name' => 'Amanda Brooks', 'role' => 'Commercial Estimator'],
+        ['id' => 9, 'name' => 'Marcus Vance', 'role' => 'Structural Estimator'],
+        ['id' => 10, 'name' => 'Ana Lopez', 'role' => 'Estimating Coordinator']
+    ];
+}
+
 $projectMeta = [];
 if (!empty($project['metadata_json'])) {
     $decodedMeta = json_decode((string) $project['metadata_json'], true);
@@ -464,6 +502,7 @@ $state = [
         'total' => $estimateTotal,
     ],
     'proposalDraft' => $proposals[0] ?? null,
+    'availableEstimators' => $availableEstimators,
 ];
 ?>
 <!doctype html>
@@ -798,7 +837,7 @@ $state = [
             }
         }
     </style>
-    <link rel="stylesheet" href="../assets/project_overview.css?v=project-document-menus-20260811-1">
+    <link rel="stylesheet" href="../assets/project_overview.css?v=doc-modal-confirm-20260925-4">
     <link rel="stylesheet" href="../assets/project_takeoff.css?v=takeoff-group-modal-20260831-1">
     <link rel="stylesheet" href="../assets/project_estimating.css?v=estimating-assembly-hierarchy-20260902-1">
     <link rel="stylesheet" href="../assets/project_proposal.css?v=proposal-workspace-20260810-1">
@@ -868,16 +907,6 @@ $state = [
                             </div>
                         </div>
                     </div>
-                    <div class="dropdown-wrap">
-                        <button class="btn-main orange" type="button" data-menu-toggle="uploadMenu"><i
-                                class="fas fa-upload"></i> Upload</button>
-                        <div class="project-menu align-right" id="uploadMenu">
-                            <button type="button" data-upload-category="Drawings"><i class="fas fa-file-pdf"></i> Upload
-                                Drawings</button>
-                            <button type="button" data-upload-category="Attachments"><i class="fas fa-paperclip"></i>
-                                Upload Attachments</button>
-                        </div>
-                    </div>
                     <button class="btn-main" type="button" id="saveProjectBtn"><i class="fas fa-floppy-disk"></i> Save
                         Project</button>
                     <div class="dropdown-wrap">
@@ -937,7 +966,17 @@ $state = [
                                 <label class="overview-field">
                                     <span>Estimator</span>
                                     <div class="pd-input-with-actions">
-                                        <input id="poEstimator" value="<?= htmlspecialchars($estimatorName) ?>">
+                                        <select id="poEstimator" class="pd-composer-input" data-initial-value="<?= htmlspecialchars($estimatorName) ?>">
+                                            <option value="">-- Select an Estimator --</option>
+                                            <?php foreach ($availableEstimators as $est): ?>
+                                                <option value="<?= htmlspecialchars($est['name']) ?>" <?= strtolower(trim($estimatorName)) === strtolower(trim($est['name'])) ? 'selected' : '' ?>>
+                                                    <?= htmlspecialchars($est['name']) ?> (<?= htmlspecialchars($est['role'] ?? 'Estimator') ?>)
+                                                </option>
+                                            <?php endforeach; ?>
+                                            <?php if (!empty($estimatorName) && $estimatorName !== 'Unassigned' && !in_array(strtolower(trim($estimatorName)), array_map(fn($u) => strtolower(trim($u['name'])), $availableEstimators))): ?>
+                                                <option value="<?= htmlspecialchars($estimatorName) ?>" selected><?= htmlspecialchars($estimatorName) ?> (Custom)</option>
+                                            <?php endif; ?>
+                                        </select>
                                         <span class="pd-field-caret"><i class="fas fa-chevron-down"></i></span>
                                     </div>
                                 </label>
@@ -1181,12 +1220,58 @@ $state = [
             </section>
 
             <section id="tab-documents" class="tab-panel documents-page">
-                <div class="documents-layout pro-documents" id="documentsPage">
-                    <aside class="documents-sidebar" aria-label="Document folders">
+                <!-- State 1: Empty View (Image 1) -->
+                <div class="documents-empty-view" id="documentsEmptyView">
+                    <div class="doc-empty-card" id="docEmptyDropzone">
+                        <svg class="doc-empty-icon" width="130" height="120" viewBox="0 0 130 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                            <!-- Radiating spark rays -->
+                            <path d="M52 14L48 8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                            <path d="M65 11V4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                            <path d="M78 14L82 8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+
+                            <!-- Blue folders inside box -->
+                            <path d="M36 29C36 27.5 37.2 26.5 38.8 26.5H58L62 30H92C93.5 30 94.5 31.2 94.5 32.5V45H36V29Z" fill="#004b9e"/>
+                            <path d="M38 34C38 32.5 39.2 31.5 40.8 31.5H62L66 35H95C96.5 35 97.5 36.2 97.5 37.5V48H38V34Z" fill="#0055b8"/>
+
+                            <!-- Shadow under box -->
+                            <ellipse cx="65" cy="114" rx="46" ry="5" class="doc-svg-shadow"/>
+
+                            <!-- Box body -->
+                            <rect x="33" y="44" width="64" height="64" rx="2" class="doc-svg-box" stroke-width="2.4"/>
+
+                            <!-- Top lip line -->
+                            <line x1="33" y1="46" x2="97" y2="46" stroke="currentColor" stroke-width="2"/>
+
+                            <!-- Handle cutout -->
+                            <rect x="57" y="52" width="16" height="7" rx="3.5" fill="currentColor"/>
+
+                            <!-- Left corner bracket -->
+                            <path d="M34 50V108H46" stroke="currentColor" stroke-width="3" stroke-linecap="square"/>
+
+                            <!-- Front label paper with orange border -->
+                            <rect x="49" y="66" width="36" height="28" rx="1.5" class="doc-svg-label" stroke="#fb5a3a" stroke-width="2"/>
+                            <!-- Text lines on label -->
+                            <line x1="54" y1="73" x2="78" y2="73" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" class="doc-svg-line"/>
+                            <line x1="54" y1="78" x2="74" y2="78" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" class="doc-svg-line"/>
+                            <line x1="54" y1="83" x2="68" y2="83" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" class="doc-svg-line"/>
+                        </svg>
+
+                        <h2 class="doc-empty-title">Upload Documents to Get Started</h2>
+                        <p class="doc-empty-desc">Once you upload, you and your team can manage documents here.</p>
+                        <button type="button" class="btn-main orange doc-empty-upload-btn" id="docEmptyUploadBtn">
+                            <i class="fas fa-upload"></i>
+                            <span>Upload</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- State 2: Populated View (Image 2) -->
+                <div class="documents-layout pro-documents" id="documentsPageView" style="display: none;">
+                    <aside class="documents-sidebar" id="documentsSidebar" aria-label="Document folders">
                         <div class="documents-sidebar-head">
                             <h2>Folders</h2>
                             <div class="documents-menu-wrap">
-                                <button class="documents-icon-btn" type="button" data-doc-folder-menu-toggle
+                                <button class="btn-ghost icon-only" type="button" data-doc-folder-menu-toggle
                                     title="Folder options"><i class="fas fa-ellipsis-vertical"></i></button>
                                 <div class="documents-menu" id="documentsFolderMenu">
                                     <button type="button" data-doc-folder-action="create"><i
@@ -1203,74 +1288,72 @@ $state = [
                         <div class="documents-folder-tree" id="documentsFolderTree"></div>
                     </aside>
 
+                    <div class="documents-sidebar-resizer" id="docSidebarResizer" title="Drag to resize sidebar">
+                        <div class="doc-resizer-handle"></div>
+                    </div>
+
                     <section class="documents-content-panel" aria-label="Documents content">
-                        <div class="documents-content-head">
-                            <div>
-                                <h2 id="documentsContentTitle">Custom Drawings</h2>
-                                <span id="documentsContentSubtitle">Manage drawings and project attachments.</span>
-                            </div>
-                            <div class="documents-head-actions">
-                                <button class="btn-ghost" type="button" id="documentsAutoRenameBtn"><i
-                                        class="fas fa-grip"></i><span>Auto-rename</span></button>
-                                <button class="btn-main" type="button" id="documentsStartTakeoffBtn"><i
-                                        class="fas fa-ruler-combined"></i><span>Start Takeoff</span></button>
-                                <button class="btn-main orange" type="button" id="documentsUploadBtn"><i
-                                        class="fas fa-upload"></i><span>Upload</span></button>
-                            </div>
-                        </div>
-
-                        <div class="documents-dropzone" id="documentsDropzone">
-                            <div>
-                                <strong>Drag and drop files here</strong>
-                                <span>Upload drawings, attachments, specifications, or addenda for this project.</span>
-                            </div>
-                            <div class="documents-drop-actions">
-                                <button class="btn-outline-dark" type="button" id="browseDrawingsBtn"><i
-                                        class="fas fa-file-pdf"></i> Upload Drawings</button>
-                                <button class="btn-outline-dark" type="button" id="browseAttachmentsBtn"><i
-                                        class="fas fa-paperclip"></i> Upload Attachments</button>
-                                <button class="btn-outline-dark" type="button" id="browseDocumentsBtn"><i
-                                        class="fas fa-folder-open"></i> Browse files</button>
+                        <!-- Top title bar with density slider & Move to Takeoff -->
+                        <div class="doc-main-topbar">
+                            <h2 id="documentsContentTitle">Custom Drawings</h2>
+                            <div class="doc-topbar-actions">
+                                <button type="button" class="btn-main orange doc-move-takeoff-btn" id="docMoveToTakeoffBtn" title="Move current document to Takeoff workspace">
+                                    <i class="fas fa-ruler-combined"></i>
+                                    <span>Move to Takeoff</span>
+                                </button>
+                                <div class="doc-slider-wrap" title="Adjust row density">
+                                    <input id="documentsZoom" class="doc-density-slider" type="range" min="0" max="2" step="1" value="1"
+                                        aria-label="Document row density">
+                                </div>
                             </div>
                         </div>
 
+                        <!-- Toolbar: Custom ▾, Upload, Search, ⋮ -->
                         <div class="documents-toolbar">
-                            <label class="documents-sort">
-                                <span>Sort</span>
-                                <select id="documentsSortBy">
-                                    <option value="custom">Custom</option>
-                                    <option value="name">Name</option>
-                                    <option value="uploadedAt">Upload Date</option>
-                                    <option value="pageCount">Page Count</option>
-                                    <option value="type">Type</option>
-                                </select>
-                            </label>
-                            <button class="documents-icon-btn bordered" type="button" id="documentsSortDir"
-                                title="Toggle direction"><i class="fas fa-arrow-down-a-z"></i></button>
-                            <div class="documents-search">
-                                <input id="documentsSearch" type="search" placeholder="Search drawing">
-                                <i class="fas fa-magnifying-glass"></i>
+                            <div class="doc-toolbar-left">
+                                <div class="doc-sort-dropdown-wrap">
+                                    <button class="btn-outline-dark doc-custom-btn" type="button" id="docSortMenuBtn">
+                                        <i class="fas fa-bars"></i>
+                                        <span id="docSortLabel">Custom</span>
+                                        <i class="fas fa-caret-down"></i>
+                                    </button>
+                                    <div class="documents-menu" id="docSortMenu">
+                                        <button type="button" data-doc-sort="custom">Custom</button>
+                                        <button type="button" data-doc-sort="name">Name</button>
+                                        <button type="button" data-doc-sort="uploadedAt">Upload Date</button>
+                                        <button type="button" data-doc-sort="pageCount">Page Count</button>
+                                        <button type="button" data-doc-sort="type">Type</button>
+                                    </div>
+                                </div>
+                                <button class="btn-main orange doc-upload-btn-full" type="button" id="docUploadArrowBtn"
+                                    title="Upload file">
+                                    <i class="fas fa-upload"></i>
+                                    <span>Upload</span>
+                                </button>
                             </div>
-                            <label class="documents-zoom">
-                                <i class="fas fa-magnifying-glass-minus"></i>
-                                <input id="documentsZoom" type="range" min="0" max="2" step="1" value="1"
-                                    aria-label="Document row density">
-                                <i class="fas fa-magnifying-glass-plus"></i>
-                            </label>
-                            <div class="documents-menu-wrap">
-                                <button class="documents-icon-btn bordered" type="button" data-doc-view-menu-toggle
-                                    title="View options"><i class="fas fa-ellipsis-vertical"></i></button>
-                                <div class="documents-menu align-right" id="documentsViewMenu">
-                                    <button type="button" data-doc-view-action="compact"><i class="fas fa-list"></i>
-                                        Compact rows</button>
-                                    <button type="button" data-doc-view-action="comfortable"><i
-                                            class="fas fa-table-cells-large"></i> Comfortable rows</button>
+
+                            <div class="doc-toolbar-right">
+                                <div class="documents-search">
+                                    <input id="documentsSearch" type="search" placeholder="Search drawing">
+                                    <i class="fas fa-magnifying-glass"></i>
+                                </div>
+                                <div class="documents-menu-wrap">
+                                    <button class="btn-ghost icon-only" type="button" data-doc-view-menu-toggle
+                                        title="View options"><i class="fas fa-ellipsis-vertical"></i></button>
+                                    <div class="documents-menu align-right" id="documentsViewMenu">
+                                        <button type="button" data-doc-view-action="compact"><i class="fas fa-list"></i>
+                                            Compact rows</button>
+                                        <button type="button" data-doc-view-action="comfortable"><i
+                                                class="fas fa-table-cells-large"></i> Comfortable rows</button>
+                                    </div>
                                 </div>
                             </div>
                         </div>
 
                         <div class="documents-list" id="documentsList"></div>
                     </section>
+                    <!-- Universal Sidebar Context Menu -->
+                    <div class="documents-menu" id="docSidebarMenu" style="display: none;"></div>
                 </div>
             </section>
 
@@ -1988,6 +2071,27 @@ $state = [
         </div>
     </div>
 
+    <!-- Document / Folder Rename Modal (Same styling as Note Modal) -->
+    <div class="pd-modal-backdrop" id="pdDocRenameModal" role="dialog" aria-modal="true" aria-labelledby="docRenameModalTitle">
+        <div class="pd-modal" style="width: min(460px, 100%);">
+            <div class="pd-modal-head">
+                <h3 id="docRenameModalTitle"><i class="fas fa-pen" style="color: var(--primary);"></i> Rename</h3>
+                <button class="pd-modal-head-close" type="button" data-close-modal="pdDocRenameModal"
+                    aria-label="Close">&times;</button>
+            </div>
+            <div class="pd-modal-body" style="grid-template-columns: 1fr;">
+                <label class="overview-field full">
+                    <span id="docRenameInputLabel">Name</span>
+                    <input id="modalDocRenameInput" class="pd-composer-input" placeholder="Enter name..." autocomplete="off">
+                </label>
+            </div>
+            <div class="pd-modal-foot">
+                <button type="button" class="btn-ghost" data-close-modal="pdDocRenameModal">Cancel</button>
+                <button type="button" class="btn-main orange" id="modalSaveDocRenameBtn"><i class="fas fa-check"></i> Save</button>
+            </div>
+        </div>
+    </div>
+
     <!-- Item Options Floating Menu for Notes & Tasks -->
     <div class="pd-floating-options-menu" id="pdItemContextMenu" style="display:none;">
         <button type="button" id="pdItemActionEdit"><i class="fas fa-pen"></i> Edit</button>
@@ -2030,6 +2134,17 @@ $state = [
 
     <script>
         window.ProjectState = <?= json_encode($state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+        <?php if (!empty($_GET['stage'])): ?>
+        try {
+            localStorage.setItem('takeoff.bidBoardStage', <?= json_encode($_GET['stage']) ?>);
+            sessionStorage.setItem('takeoff.bidBoardStage', <?= json_encode($_GET['stage']) ?>);
+        } catch (e) {}
+        <?php elseif (!empty($project['status'])): ?>
+        try {
+            localStorage.setItem('takeoff.bidBoardStage', <?= json_encode(dash_status_label($project['status'])) ?>);
+            sessionStorage.setItem('takeoff.bidBoardStage', <?= json_encode(dash_status_label($project['status'])) ?>);
+        } catch (e) {}
+        <?php endif; ?>
 
         const tabs = document.querySelectorAll('[data-tab]');
         const panels = document.querySelectorAll('.tab-panel');
@@ -2256,7 +2371,9 @@ $state = [
 
         setActiveTab(ProjectState.activeTab || 'overview', false);
     </script>
-    <script src="../assets/project_overview.js?v=project-documents-persistence-20260811-6"></script>
+    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+    <script>if (window.pdfjsLib) window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';</script>
+    <script src="../assets/project_overview.js?v=doc-modal-confirm-20260925-4"></script>
     <script src="../assets/estimating_catalog_snapshot_service.js?v=estimating-catalog-snapshot-20260827-1"></script>
     <script src="../assets/catalog_change_detection_service.js?v=catalog-change-detection-20260827-1"></script>
     <script src="../assets/takeoff_estimating_sync_service.js?v=estimating-linked-part-20260831-1"></script>

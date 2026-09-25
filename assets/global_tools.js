@@ -40,7 +40,24 @@
         }
     }
 
+    function syncHeaderZoomFavorites() {
+        const header = document.querySelector('.bt-global-header');
+        if (!header) return;
+
+        const dpr = window.devicePixelRatio || 1;
+        const outerRatio = (window.outerWidth && window.innerWidth) ? (window.outerWidth / window.innerWidth) : 1;
+        // Activate starting at 125% zoom (>= 1.24) or viewport width <= 1360px
+        const isZoom125 = (dpr >= 1.24) || (outerRatio >= 1.24) || (window.innerWidth <= 1360);
+
+        header.classList.toggle('zoom-favs-collapsed', isZoom125);
+        const compFavs = document.getElementById('btCompanyFavorites');
+        const appFavs = document.getElementById('btAppFavorites');
+        if (compFavs) compFavs.classList.toggle('collapsed', isZoom125);
+        if (appFavs) appFavs.classList.toggle('collapsed', isZoom125);
+    }
+
     function syncUI() {
+        syncHeaderZoomFavorites();
         const currentPath = window.location.pathname.split('/').pop() || 'bid_board.php';
 
         // 1. Company Favorites (Left side - max 5)
@@ -256,7 +273,10 @@
                 // If it is a favorite star button and the header is extended (favorites container is visible), do nothing
                 if (button.classList.contains('bt-fav-star-btn')) {
                     const favContainer = button.closest('.bt-favorites')?.querySelector('.bt-fav-container');
-                    if (favContainer && window.getComputedStyle(favContainer).display !== 'none') {
+                    const isCollapsed = button.closest('.bt-favorites')?.classList.contains('collapsed') ||
+                                        document.querySelector('.bt-global-header')?.classList.contains('zoom-favs-collapsed') ||
+                                        (favContainer && window.getComputedStyle(favContainer).display === 'none');
+                    if (!isCollapsed) {
                         return;
                     }
                 }
@@ -297,10 +317,15 @@
             if (event.key === 'Escape') closeMenus(null);
         });
         let resizeTimer;
-        window.addEventListener('resize', () => {
+        const handleResize = () => {
             closeMenus(null);
+            syncHeaderZoomFavorites();
             clearTimeout(resizeTimer);
-            resizeTimer = setTimeout(syncUI, 120);
-        });
+            resizeTimer = setTimeout(syncUI, 100);
+        };
+        window.addEventListener('resize', handleResize);
+        if (window.visualViewport) {
+            window.visualViewport.addEventListener('resize', handleResize);
+        }
     });
 })();

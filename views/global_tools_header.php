@@ -116,7 +116,11 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
 
     <!-- Center: Brand Logo & Subtitle Centered Vertically & Horizontally -->
     <div class="bt-global-center">
-        <a class="bt-brand" href="bid_board.php" aria-label="Brightronix Estimating Hub">
+        <?php
+        $navReturnStage = $_GET['stage'] ?? $_GET['status'] ?? '';
+        $navBidBoardHref = 'bid_board.php' . (!empty($navReturnStage) ? '?status=' . urlencode($navReturnStage) : '');
+        ?>
+        <a class="bt-brand" href="<?= htmlspecialchars($navBidBoardHref) ?>" id="btHeaderBrandLink" aria-label="Brightronix Estimating Hub">
             <div class="bt-brand-block">
                 <img src="../assets/logo-text.png" alt="Brightronix" class="bt-brand-logo"
                     onerror="if(!this.dataset.retried){this.dataset.retried='1';this.src='../assets/images/logo-text.png';}else{this.style.display='none';if(this.nextElementSibling)this.nextElementSibling.style.display='inline';}">
@@ -500,6 +504,13 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
 
             if (primBtn) {
                 primBtn.textContent = options.primaryText || (type === 'error' ? 'Close' : 'Got It');
+                if (options.primaryDanger || (type === 'error' && options.cancelText)) {
+                    primBtn.style.background = '#ef4444';
+                    primBtn.style.boxShadow = '0 2px 6px rgba(239, 68, 68, 0.35)';
+                } else {
+                    primBtn.style.background = '';
+                    primBtn.style.boxShadow = '';
+                }
             }
             primaryCallback = typeof options.onPrimary === 'function' ? options.onPrimary : null;
 
@@ -550,22 +561,43 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
             }
         }
 
-        if (closeBtn) closeBtn.addEventListener('click', closeAnnouncement);
+        function handleCancelDismiss() {
+            var cb = cancelCallback;
+            primaryCallback = null;
+            secondaryCallback = null;
+            cancelCallback = null;
+            if (cb) cb();
+            closeAnnouncement();
+        }
+
+        if (closeBtn) closeBtn.addEventListener('click', handleCancelDismiss);
         if (primBtn) {
             primBtn.addEventListener('click', function () {
-                if (primaryCallback) primaryCallback();
+                var cb = primaryCallback;
+                primaryCallback = null;
+                secondaryCallback = null;
+                cancelCallback = null;
+                if (cb) cb();
                 closeAnnouncement();
             });
         }
         if (secBtn) {
             secBtn.addEventListener('click', function () {
-                if (secondaryCallback) secondaryCallback();
+                var cb = secondaryCallback;
+                primaryCallback = null;
+                secondaryCallback = null;
+                cancelCallback = null;
+                if (cb) cb();
                 closeAnnouncement();
             });
         }
         if (cancelBtn) {
             cancelBtn.addEventListener('click', function () {
-                if (cancelCallback) cancelCallback();
+                var cb = cancelCallback;
+                primaryCallback = null;
+                secondaryCallback = null;
+                cancelCallback = null;
+                if (cb) cb();
                 closeAnnouncement();
             });
         }
@@ -573,14 +605,14 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
         if (modalBackdrop) {
             modalBackdrop.addEventListener('click', function (e) {
                 if (e.target === modalBackdrop) {
-                    closeAnnouncement();
+                    handleCancelDismiss();
                 }
             });
         }
 
         document.addEventListener('keydown', function (e) {
             if (e.key === 'Escape' && modalBackdrop && modalBackdrop.classList.contains('open')) {
-                closeAnnouncement();
+                handleCancelDismiss();
             }
         });
 

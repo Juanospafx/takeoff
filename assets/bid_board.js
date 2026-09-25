@@ -39,6 +39,13 @@
         awarded: 'Accepted',
         accepted: 'Accepted',
         in_progress: 'In Progress',
+        'in progress': 'In Progress',
+        working_on: 'In Progress',
+        'working on': 'In Progress',
+        work_on: 'In Progress',
+        'work on': 'In Progress',
+        working: 'In Progress',
+        progress: 'In Progress',
         complete: 'Complete',
         completed: 'Complete',
         estimators: 'Estimadores',
@@ -145,33 +152,68 @@
             .catch(err => showError(err.message));
     }
 
+    function saveActiveStage(status) {
+        if (!status) return;
+        try {
+            localStorage.setItem('takeoff.bidBoardStage', status);
+            sessionStorage.setItem('takeoff.bidBoardStage', status);
+        } catch (e) {}
+    }
+
+    function resolveStatusFromInput(val) {
+        if (!val || typeof val !== 'string') return null;
+        const trimmed = val.trim();
+        const clean = trimmed.toLowerCase().replace(/[\s-]+/g, '_');
+        if (statusAliases[clean]) return statusAliases[clean];
+        if (pipelineStatuses.includes(trimmed)) return trimmed;
+        for (const p of pipelineStatuses) {
+            if (p.toLowerCase() === trimmed.toLowerCase()) return p;
+        }
+        const cfg = getPhaseConfig();
+        for (const [key, conf] of Object.entries(cfg)) {
+            if (conf.label && (conf.label.toLowerCase() === trimmed.toLowerCase() || conf.label.toLowerCase().replace(/[\s-]+/g, '_') === clean)) {
+                return key;
+            }
+        }
+        return null;
+    }
+
     function applyUrlInitialFilter() {
         const params = new URLSearchParams(window.location.search);
         const targetProjectId = params.get('project_id');
-        const urlStatus = params.get('status');
+        const urlStatus = params.get('status') || params.get('stage');
 
         if (targetProjectId) {
             const found = (state.projects || []).find(p => String(p.id) === String(targetProjectId));
             if (found) {
                 activeStatus = canonicalStatus(found);
+                saveActiveStage(activeStatus);
                 return;
             }
         }
-        if (urlStatus) {
-            const clean = urlStatus.trim().toLowerCase().replace(/\s+/g, '_');
-            if (statusAliases[clean]) {
-                activeStatus = statusAliases[clean];
-            } else if (pipelineStatuses.includes(urlStatus)) {
-                activeStatus = urlStatus;
-            }
-        } else if (!targetProjectId) {
-            const allProjects = normalizedProjects();
-            const hasEstimadores = allProjects.some(p => p.statusLabel === 'Estimadores');
-            const hasToDo = allProjects.some(p => p.statusLabel === 'To Do');
-            if (hasEstimadores && !hasToDo) {
-                activeStatus = 'Estimadores';
-            }
+
+        const fromUrl = resolveStatusFromInput(urlStatus);
+        if (fromUrl) {
+            activeStatus = fromUrl;
+            saveActiveStage(activeStatus);
+            return;
         }
+
+        // Restore persisted stage when returning to Bid Board
+        const savedStage = localStorage.getItem('takeoff.bidBoardStage') || sessionStorage.getItem('takeoff.bidBoardStage');
+        const fromSaved = resolveStatusFromInput(savedStage);
+        if (fromSaved) {
+            activeStatus = fromSaved;
+            return;
+        }
+
+        const allProjects = normalizedProjects();
+        const hasEstimadores = allProjects.some(p => p.statusLabel === 'Estimadores');
+        const hasToDo = allProjects.some(p => p.statusLabel === 'To Do');
+        if (hasEstimadores && !hasToDo) {
+            activeStatus = 'Estimadores';
+        }
+        saveActiveStage(activeStatus);
     }
 
     function highlightTargetProject() {
@@ -620,6 +662,7 @@
         root.querySelectorAll('[data-status]').forEach(tab => {
             tab.addEventListener('click', () => {
                 activeStatus = tab.dataset.status;
+                saveActiveStage(activeStatus);
                 render();
             });
         });
@@ -641,7 +684,7 @@
             <tr data-project-id="${esc(project.id)}">
                 <td class="bb-name-cell">
                     <div style="display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; max-width: 100%;">
-                        <a class="bb-record-name" href="project_dashboard.php?id=${encodeURIComponent(project.id)}&tab=overview">${esc(project.recordName)}</a>
+                        <a class="bb-record-name" href="project_dashboard.php?id=${encodeURIComponent(project.id)}&tab=overview&stage=${encodeURIComponent(activeStatus)}">${esc(project.recordName)}</a>
                         ${project.primaryQuoteValue > 0 ? `<span class="bb-primary-badge" title="Primary Quote: ${money(project.primaryQuoteValue)}">${money(project.primaryQuoteValue)}</span>` : ''}
                     </div>
                     ${project.category && project.category !== '--' ? `<div class="bb-subtext">${esc(project.category)}</div>` : ''}
@@ -665,7 +708,7 @@
                 <td>
                     <div class="bb-sales-value" data-bb-tooltip="${esc(`Total Sales per sq ft:\n${project.salesPerSqFt}`)}">${formatSales(project.totalValue)}</div>
                 </td>
-                <td>
+                <td class="bb-col-estimator-cell">
                     <div class="bb-estimator-wrap" data-bb-tooltip="${esc(`Estimator: ${project.responsibleName || 'Unassigned'}`)}">
                         <div class="bb-estimator-avatar">${esc(project.responsibleInitials)}</div>
                         <span class="bb-estimator-name">${esc(project.responsibleName)}</span>
@@ -823,7 +866,7 @@
 
                 const openLink = document.getElementById('bbActionOpen');
                 if (openLink) {
-                    openLink.href = `project_dashboard.php?id=${encodeURIComponent(projectId)}&tab=overview`;
+                    openLink.href = `project_dashboard.php?id=${encodeURIComponent(projectId)}&tab=overview&stage=${encodeURIComponent(activeStatus)}`;
                 }
 
                 menu.hidden = false;
@@ -1483,6 +1526,22 @@
             });
             themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
         } catch (err) { }
+
+        // Persist active stage whenever navigating to project dashboard
+        document.addEventListener('click', event => {
+            const link = event.target.closest('a[href*="project_dashboard.php"], #bbActionOpen');
+            if (link) {
+                saveActiveStage(activeStatus);
+            }
+        });
+
+        // Ensure browser Back button (bfcache) preserves the active stage
+        window.addEventListener('pageshow', (event) => {
+            applyUrlInitialFilter();
+            if (state.projects && state.projects.length) {
+                render();
+            }
+        });
 
         load();
     });

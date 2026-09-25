@@ -122,7 +122,7 @@ try {
 
     foreach ($phases as $statusCode => $phaseLabel) {
         $phaseIndex++;
-        for ($i = 0; $i < 12; $i++) {
+        for ($i = 0; $i < 8; $i++) {
             // Alternate between short and long names for testing flexibility
             $isLong = ($i % 2 === 1);
             $namePool = $isLong ? $longNames : $shortNames;
