@@ -67,14 +67,14 @@
                 const parsed = JSON.parse(raw);
                 return { ...defaultPhaseConfig, ...parsed };
             }
-        } catch (e) {}
+        } catch (e) { }
         return { ...defaultPhaseConfig };
     }
 
     function savePhaseConfig(cfg) {
         try {
             localStorage.setItem('takeoff.pipelineConfig', JSON.stringify(cfg));
-        } catch (e) {}
+        } catch (e) { }
     }
 
     function getPhase(key) {
@@ -180,7 +180,7 @@
         if (!targetProjectId) return;
         setTimeout(() => {
             const row = document.querySelector(`[data-project-id="${targetProjectId}"]`) ||
-                        document.querySelector(`a[href*="id=${targetProjectId}"]`)?.closest('tr');
+                document.querySelector(`a[href*="id=${targetProjectId}"]`)?.closest('tr');
             if (row) {
                 const scrollParent = row.closest('.bb-table-scroll');
                 if (scrollParent) {
@@ -302,7 +302,7 @@
         const badge = document.getElementById('bbFilterActiveBadge');
         const filterBtn = document.getElementById('bbFiltersBtn');
         const matchLabel = document.getElementById('bbFiltersMatchCount');
-        
+
         if (badge) {
             badge.textContent = count;
             badge.hidden = count === 0;
@@ -476,7 +476,7 @@
                 if (filterState.requester) {
                     const reqQ = filterState.requester.toLowerCase();
                     const match = (project.requestingEntity || '').toLowerCase().includes(reqQ) ||
-                                  (project.requestingContact || '').toLowerCase().includes(reqQ);
+                        (project.requestingContact || '').toLowerCase().includes(reqQ);
                     if (!match) return false;
                 }
                 if (filterState.dueDate) {
@@ -717,21 +717,21 @@
         const isOpen = openStatusMenuId === String(project.id);
         return `
             <div class="bb-status-pill-container ${isOpen ? 'open' : ''}">
-                <button type="button" class="bb-status-pill-wrap ${isOpen ? 'active' : ''}" data-status-trigger="${esc(project.id)}" title="Click to Change Status" style="background-color: ${bgPale}; color: ${textPale}; border: 1px solid ${borderPale};">
+                <button type="button" class="bb-status-pill-wrap ${isOpen ? 'active' : ''}" data-status-trigger="${esc(project.id)}" title="Click to Change Stage" style="background-color: ${bgPale}; color: ${textPale}; border: 1px solid ${borderPale};">
                     <span class="bb-status-dot" style="background-color: ${currentPhase.color};"></span>
                     <span class="bb-status-pill-label" style="color: ${textPale};">${esc(currentPhase.label.toUpperCase())}</span>
                     <i class="fas fa-caret-down bb-status-pill-caret" style="color: ${textPale};"></i>
                 </button>
                 <div class="bb-status-menu-panel ${isOpen ? 'open' : ''}" data-status-panel="${esc(project.id)}">
-                    <div class="bb-status-menu-eyebrow">Change Status</div>
+                    <div class="bb-status-menu-eyebrow">Change Stage</div>
                     <div class="bb-status-menu-list">
                         ${pipelineStatuses.map(status => {
-                            const phase = getPhase(status);
-                            const isCurrent = status === project.statusLabel;
-                            const itemBg = hexToRgba(phase.color, bgAlpha);
-                            const itemBorder = hexToRgba(phase.color, borderAlpha);
-                            const itemText = isDark ? '#ffffff' : getDarkerShade(phase.color);
-                            return `
+            const phase = getPhase(status);
+            const isCurrent = status === project.statusLabel;
+            const itemBg = hexToRgba(phase.color, bgAlpha);
+            const itemBorder = hexToRgba(phase.color, borderAlpha);
+            const itemText = isDark ? '#ffffff' : getDarkerShade(phase.color);
+            return `
                                 <button type="button" class="bb-status-menu-option ${isCurrent ? 'selected' : ''}" data-set-status="${esc(status)}" data-project-id="${esc(project.id)}">
                                     <span class="bb-status-option-pill" style="background-color: ${itemBg}; border: 1px solid ${itemBorder}; color: ${itemText};">
                                         <span class="bb-status-dot-sm" style="background-color: ${phase.color};"></span>
@@ -740,7 +740,7 @@
                                     ${isCurrent ? `<i class="fas fa-check bb-status-option-check" style="color: ${phase.color};"></i>` : ''}
                                 </button>
                             `;
-                        }).join('')}
+        }).join('')}
                     </div>
                 </div>
             </div>
@@ -1482,7 +1482,7 @@
                 }
             });
             themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
-        } catch (err) {}
+        } catch (err) { }
 
         load();
     });

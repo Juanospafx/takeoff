@@ -107,10 +107,10 @@ body {
 }
 
 .bid-board-shell {
-    flex: 1 1 auto;
-    min-height: 0;
-    height: calc(100% - 92px);
-    max-height: calc(100% - 92px);
+    flex: 1 1 0px !important;
+    min-height: 0 !important;
+    height: auto !important;
+    max-height: none !important;
     width: 100%;
     display: flex;
     flex-direction: column;
@@ -118,6 +118,11 @@ body {
     margin: 0;
     padding: 0;
     background: var(--bb-bg);
+}
+
+body.header-is-collapsed .bb-pipeline-tabs-wrapper,
+.bid-board-shell.header-is-collapsed .bb-pipeline-tabs-wrapper {
+    margin-top: 12px !important;
 }
 
 .bid-board-main {
@@ -507,7 +512,7 @@ button:focus-visible,
 .bb-pipeline-tabs-wrapper {
     flex: 0 0 auto;
     width: calc(100% - 36px) !important;
-    margin: 0 18px 10px 18px !important;
+    margin: 0 18px 12px 18px !important;
     background: var(--bb-surface, #ffffff);
     border: 1px solid var(--border, #d5d8dc) !important;
     border-radius: 14px !important;
@@ -3100,16 +3105,20 @@ body.theme-dark .bb-row-menu-toggle.active {
    ========================================================== */
 .bb-brightronix-footer,
 .bb-procore-footer {
-    flex: 0 0 30px;
-    height: 30px;
+    flex: 0 0 21px;
+    height: 21px;
+    min-height: 21px;
+    max-height: 21px;
     background: #17191c;
     color: #94a3b8;
     display: flex;
     align-items: center;
     justify-content: center;
     text-align: center;
-    padding: 0 20px;
-    font-size: 11.5px;
+    padding: 0 16px;
+    font-family: 'Outfit', system-ui, -apple-system, sans-serif !important;
+    font-size: 10.5px;
+    line-height: 1;
     letter-spacing: 0.02em;
     border-top: 1px solid #2d3748;
     user-select: none;
@@ -3119,6 +3128,7 @@ body.theme-dark .bb-row-menu-toggle.active {
 .bb-brightronix-footer span {
     color: #94a3b8;
     font-weight: 400;
+    font-size: 10.5px;
 }
 
 /* ==========================================================

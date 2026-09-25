@@ -253,6 +253,13 @@
         document.querySelectorAll('[data-global-menu-toggle]').forEach(button => {
             button.addEventListener('click', event => {
                 event.stopPropagation();
+                // If it is a favorite star button and the header is extended (favorites container is visible), do nothing
+                if (button.classList.contains('bt-fav-star-btn')) {
+                    const favContainer = button.closest('.bt-favorites')?.querySelector('.bt-fav-container');
+                    if (favContainer && window.getComputedStyle(favContainer).display !== 'none') {
+                        return;
+                    }
+                }
                 const menu = menuFor(button);
                 if (!menu) return;
 

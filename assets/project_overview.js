@@ -37,7 +37,15 @@
     const slug = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
     function markDirty() {
-        isDirty = true;
+        if (!isDirty) {
+            isDirty = true;
+            try {
+                if (!window._historyDirtyGuarded) {
+                    window._historyDirtyGuarded = true;
+                    window.history.pushState({ takeoffDirtyGuard: true }, '', window.location.href);
+                }
+            } catch (e) { }
+        }
     }
 
     async function request(action, payload = {}) {
@@ -81,6 +89,7 @@
             primary_contact: $('poPrimaryContact')?.value || '',
             customer_phone: $('poCustomerPhone')?.value || '',
             customer_email: $('poCustomerEmail')?.value || '',
+            customer_address: $('poCustomerAddress')?.value || '',
             notes,
             tasks
         };
@@ -93,7 +102,7 @@
             status: currentStatus,
             project_number: $('poProjectNumber')?.value || '',
             client_name: $('poCustomerCompany')?.value || '',
-            job_address: $('poProjectAddress')?.value || $('poCustomerAddress')?.value || '',
+            job_address: $('poProjectAddress')?.value || '',
             bid_due_at: bidDueAt,
             metadata_json: JSON.stringify(metadata)
         };
@@ -102,7 +111,16 @@
     async function saveProject() {
         const payload = collectProjectPayload();
         if (!payload.name.trim()) {
-            showToast('Estimate Name is required.');
+            if (window.TakeoffAnnouncement) {
+                window.TakeoffAnnouncement.warning({
+                    title: 'Estimate Name Required',
+                    badge: 'REQUIRED FIELD',
+                    content: '<p>Please enter an <strong>Estimate Name</strong> before saving the project.</p>',
+                    primaryText: 'Understood'
+                });
+            } else {
+                showToast('Estimate Name is required.');
+            }
             return;
         }
 
@@ -145,10 +163,24 @@
             const uploadResult = await persistPendingDocuments(projectId);
 
             isDirty = false;
+            window._historyDirtyGuarded = false;
             localStorage.removeItem('takeoff.projectDraft');
-            showToast(uploadResult.failed
-                ? `Project saved. ${uploadResult.failed} document${uploadResult.failed === 1 ? '' : 's'} still need to be re-selected.`
-                : 'Project and documents saved.');
+
+            if (window.TakeoffAnnouncement) {
+                window.TakeoffAnnouncement.success({
+                    title: 'Project Saved Successfully',
+                    badge: 'PROJECT SAVED',
+                    content: `<p>All changes to <strong>${escapeHtml(payload.name)}</strong> have been persisted.</p>` +
+                        (uploadResult.failed ? `<div class="g-announcement-highlight-box" style="border-left-color: #f59e0b;"><strong>Note:</strong> ${uploadResult.failed} document(s) still need to be re-selected.</div>` : '') +
+                        `<div class="g-announcement-highlight-box">
+                                <strong>Stage:</strong> ${escapeHtml(statusLabel())}<br>
+                                <strong>Due Date:</strong> ${escapeHtml(dueLabel())}<br>
+                                <strong>Estimator:</strong> ${escapeHtml($('poEstimator')?.value || 'Isaac Diaz')}
+                             </div>`,
+                    primaryText: 'Continue'
+                });
+            }
+
             if (wasDraft) {
                 migrateDraftWorkspace(projectId);
                 window.location.href = `project_dashboard.php?id=${encodeURIComponent(projectId)}&tab=overview`;
@@ -160,7 +192,15 @@
             if ($('projectHeaderName')) $('projectHeaderName').textContent = payload.name;
             renderProjectHeaderMeta();
         } catch (error) {
-            showToast(error instanceof Error ? error.message : 'Project save failed.');
+            const errText = error instanceof Error ? error.message : 'Project save failed.';
+            if (window.TakeoffAnnouncement) {
+                window.TakeoffAnnouncement.error({
+                    title: 'Project Save Error',
+                    badge: 'SYSTEM ERROR',
+                    content: `<p>An unexpected error occurred while saving the project:</p><div class="g-announcement-highlight-box" style="border-left-color: #ef4444; color: #ef4444;"><strong>${escapeHtml(errText)}</strong></div><p>Please verify all required fields or check your database connection and try again.</p>`,
+                    primaryText: 'Dismiss'
+                });
+            }
         } finally {
             if (saveButton) {
                 saveButton.disabled = false;
@@ -233,6 +273,54 @@
         return `${month}/${day}/${year}`;
     }
 
+    const defaultPhaseConfig = {
+        'Invitations': { label: 'Invitations', color: '#b45309' },
+        'To Do': { label: 'To Do', color: '#1d5cc9' },
+        'Estimating': { label: 'Estimating', color: '#d97706' },
+        'Bid Submitted': { label: 'Bid Submitted', color: '#ea580c' },
+        'Accepted': { label: 'Accepted', color: '#059669' },
+        'In Progress': { label: 'In Progress', color: '#2563eb' },
+        'Complete': { label: 'Complete', color: '#10b981' },
+        'Estimadores': { label: 'Estimadores', color: '#7c3aed' },
+        'Lost': { label: 'Lost', color: '#dc2626' },
+        'Archived': { label: 'Archived', color: '#64748b' }
+    };
+
+    function getPhase(key) {
+        try {
+            const raw = localStorage.getItem('takeoff.pipelineConfig');
+            if (raw) {
+                const parsed = JSON.parse(raw);
+                if (parsed[key]) return parsed[key];
+            }
+        } catch (e) { }
+        return defaultPhaseConfig[key] || { label: key, color: '#1d5cc9' };
+    }
+
+    function hexToRgba(hex, alpha = 0.14) {
+        if (!hex || typeof hex !== 'string') return `rgba(29, 92, 201, ${alpha})`;
+        let c = hex.replace('#', '');
+        if (c.length === 3) c = c.split('').map(x => x + x).join('');
+        const num = parseInt(c, 16);
+        if (isNaN(num)) return `rgba(29, 92, 201, ${alpha})`;
+        const r = (num >> 16) & 255;
+        const g = (num >> 8) & 255;
+        const b = num & 255;
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    function getDarkerShade(hex) {
+        if (!hex || typeof hex !== 'string') return '#1d5cc9';
+        let c = hex.replace('#', '');
+        if (c.length === 3) c = c.split('').map(x => x + x).join('');
+        const num = parseInt(c, 16);
+        if (isNaN(num)) return '#1e293b';
+        const r = Math.max(0, Math.min(255, Math.round(((num >> 16) & 255) * 0.72)));
+        const g = Math.max(0, Math.min(255, Math.round(((num >> 8) & 255) * 0.72)));
+        const b = Math.max(0, Math.min(255, Math.round((num & 255) * 0.72)));
+        return `rgb(${r}, ${g}, ${b})`;
+    }
+
     function renderStatusDropdown() {
         const button = $('projectStatusButton');
         const label = $('projectStatusLabel');
@@ -240,15 +328,50 @@
         if (!button || !label || !menu) return;
 
         const activeLabel = statusLabel();
-        button.className = `project-status-badge status-${slug(activeLabel)}`;
+        const currentPhase = getPhase(activeLabel);
+        const isDark = document.documentElement.getAttribute('data-theme') === 'dark' || document.body?.classList.contains('theme-dark');
+        const bgAlpha = isDark ? 0.26 : 0.12;
+        const borderAlpha = isDark ? 0.52 : 0.35;
+        const bgPale = hexToRgba(currentPhase.color, bgAlpha);
+        const borderPale = hexToRgba(currentPhase.color, borderAlpha);
+        const textPale = isDark ? '#ffffff' : getDarkerShade(currentPhase.color);
+
+        button.className = 'bb-status-pill-wrap';
+        button.style.backgroundColor = bgPale;
+        button.style.borderColor = borderPale;
+        button.style.color = textPale;
         button.dataset.status = currentStatus;
-        label.textContent = activeLabel;
+
+        const dot = button.querySelector('.bb-status-dot');
+        if (dot) dot.style.backgroundColor = currentPhase.color;
+        label.textContent = currentPhase.label.toUpperCase();
+        label.style.color = textPale;
+        const caret = button.querySelector('.bb-status-pill-caret');
+        if (caret) caret.style.color = textPale;
+
         renderProjectHeaderMeta();
-        menu.innerHTML = PROJECT_STATUSES.map(status => `
-            <button class="project-status-option" type="button" data-project-status="${STATUS_VALUES[status]}">
-                <span class="status-pill status-${slug(status)}">${status}</span>
-            </button>
-        `).join('');
+
+        menu.innerHTML = `
+            <div class="bb-status-menu-eyebrow">Change Stage</div>
+            <div class="bb-status-menu-list">
+                ${PROJECT_STATUSES.map(status => {
+            const phase = getPhase(status);
+            const isCurrent = status === activeLabel;
+            const itemBg = hexToRgba(phase.color, bgAlpha);
+            const itemBorder = hexToRgba(phase.color, borderAlpha);
+            const itemText = isDark ? '#ffffff' : getDarkerShade(phase.color);
+            return `
+                        <button class="bb-status-menu-option ${isCurrent ? 'selected' : ''}" type="button" data-project-status="${STATUS_VALUES[status]}">
+                            <span class="bb-status-option-pill" style="background-color: ${itemBg}; border: 1px solid ${itemBorder}; color: ${itemText};">
+                                <span class="bb-status-dot-sm" style="background-color: ${phase.color};"></span>
+                                <span class="bb-status-option-name" style="color: ${itemText};">${phase.label.toUpperCase()}</span>
+                            </span>
+                            ${isCurrent ? `<i class="fas fa-check bb-status-option-check" style="color: ${phase.color};"></i>` : ''}
+                        </button>
+                    `;
+        }).join('')}
+            </div>
+        `;
 
         menu.querySelectorAll('[data-project-status]').forEach(option => {
             option.addEventListener('click', event => {
@@ -297,7 +420,15 @@
         document.querySelectorAll('.project-menu').forEach(menu => {
             if (menu.id !== id) menu.classList.remove('open');
         });
-        $(id)?.classList.toggle('open');
+        const target = $(id);
+        if (target) {
+            target.classList.toggle('open');
+            const subhead = document.querySelector('.project-subhead-wrapper');
+            if (subhead) {
+                const anyOpen = !!document.querySelector('.project-menu.open, .bb-status-menu-panel.open');
+                subhead.classList.toggle('has-open-menu', anyOpen);
+            }
+        }
     }
 
     let savedCustomers = [];
@@ -332,12 +463,12 @@
     function selectCustomerByIndex(index) {
         const c = savedCustomers[index];
         if (!c) return;
-        showCustomerFields();
         if ($('poCustomerCompany')) $('poCustomerCompany').value = c.company || '';
         if ($('poPrimaryContact')) $('poPrimaryContact').value = c.contact_name || '';
         if ($('poCustomerPhone')) $('poCustomerPhone').value = c.phone || '';
         if ($('poCustomerEmail')) $('poCustomerEmail').value = c.email || '';
         if ($('poCustomerAddress')) $('poCustomerAddress').value = c.address || '';
+        syncCustomerDisplayCard();
         markDirty();
         renderProjectHeaderMeta();
         showToast(`Customer "${c.company}" selected.`);
@@ -350,6 +481,7 @@
         if ($('poCustomerEmail')) $('poCustomerEmail').value = '';
         if ($('poCustomerAddress')) $('poCustomerAddress').value = '';
         if ($('poCustomerSelector')) $('poCustomerSelector').value = '';
+        syncCustomerDisplayCard();
         markDirty();
         renderProjectHeaderMeta();
     }
@@ -397,187 +529,369 @@
         }
     }
 
+    function syncCustomerDisplayCard() {
+        const company = $('poCustomerCompany')?.value?.trim() || 'GP Construction';
+        const contact = $('poPrimaryContact')?.value?.trim() || company;
+        const phone = $('poCustomerPhone')?.value?.trim() || '3212002278';
+        const email = $('poCustomerEmail')?.value?.trim() || 'Paul@gpconstructioncompany.com';
+        const projectAddress = $('poProjectAddress')?.value?.trim() || '';
+
+        const avatar = $('customerAvatarLetter');
+        if (avatar) avatar.textContent = (company[0] || 'G').toUpperCase();
+        const displayComp = $('displayCustomerCompany');
+        if (displayComp) displayComp.textContent = company;
+        const displayContactSummary = $('displayContactSummary');
+        if (displayContactSummary) {
+            const parts = [contact, phone, email].filter(Boolean);
+            displayContactSummary.textContent = parts.join(', ');
+        }
+
+        const displayProjectAddressText = $('displayProjectAddressText');
+        const editProjectAddressRow = $('editProjectAddressRow');
+        const addProjectAddressBtn = $('addProjectAddressBtn');
+        if (displayProjectAddressText) {
+            displayProjectAddressText.textContent = projectAddress;
+        }
+        if (editProjectAddressRow && addProjectAddressBtn) {
+            if (projectAddress) {
+                editProjectAddressRow.style.display = 'flex';
+                addProjectAddressBtn.style.display = 'none';
+            } else {
+                editProjectAddressRow.style.display = 'none';
+                addProjectAddressBtn.style.display = 'flex';
+            }
+        }
+    }
+
     function showCustomerFields() {
-        $('customerEmpty')?.setAttribute('hidden', 'hidden');
-        $('customerFields')?.removeAttribute('hidden');
+        const fields = $('customerFields');
+        if (fields) {
+            fields.style.display = 'grid';
+            fields.removeAttribute('hidden');
+        }
         markDirty();
     }
+
+    let contextMenuTarget = null; // { type: 'note' | 'task', index: number }
 
     function renderNotes() {
         const list = $('overviewNotesList');
+        const cardTitle = $('overviewNotesCardTitle');
+        if (cardTitle) cardTitle.textContent = `Notes (${notes.length})`;
         if (!list) return;
         if (!notes.length) {
             list.innerHTML = `
-                <div class="overview-empty" id="overviewNotesEmpty">
-                    <p>No notes yet</p>
-                    <button class="btn-outline-dark" type="button" id="addNoteBtn"><i class="fas fa-plus"></i> Add note</button>
+                <div class="pd-empty-card-state" id="overviewNotesEmpty" role="button" tabindex="0">
+                    <div class="pd-empty-graphic">
+                        <svg width="72" height="52" viewBox="0 0 72 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="18" y="10" width="46" height="36" rx="4" fill="rgba(0,0,0,0.08)" />
+                            <rect x="14" y="6" width="46" height="36" rx="4" fill="var(--bg-panel)" stroke="var(--border)" stroke-width="1.5" />
+                            <path d="M14 10C14 7.79 15.79 6 18 6H56C58.21 6 60 7.79 60 10V15H14V10Z" fill="#0055b8" />
+                            <circle cx="20" cy="10.5" r="1.5" fill="#ffffff" opacity="0.8" />
+                            <circle cx="25" cy="10.5" r="1.5" fill="#ffffff" opacity="0.8" />
+                            <rect x="20" y="21" width="18" height="2" rx="1" fill="var(--border)" />
+                            <rect x="20" y="26" width="26" height="2" rx="1" fill="var(--border)" />
+                            <rect x="20" y="31" width="14" height="2" rx="1" fill="var(--border)" />
+                            <path d="M10 28H18M14 24V32" stroke="#fb5a3a" stroke-width="2.5" stroke-linecap="round" />
+                            <path d="M14 20L15 22L17 22L15.5 23.5L16 25.5L14 24.5L12 25.5L12.5 23.5L11 22L13 22L14 20Z" fill="#fb5a3a" />
+                        </svg>
+                    </div>
+                    <div class="pd-empty-title">Create a Note</div>
+                    <div class="pd-empty-subtitle">Take notes to help organize thoughts and information with your team.</div>
                 </div>`;
-            $('addNoteBtn')?.addEventListener('click', openNoteComposer);
+            $('overviewNotesEmpty')?.addEventListener('click', () => openNoteModal());
             return;
         }
-        list.innerHTML = notes.map((note, idx) => `
-            <div class="overview-list-item" data-note-index="${idx}">
-                <div class="d-flex justify-content-between align-items-center">
-                    <strong>${escapeHtml(note.user || 'User')}</strong>
-                    <div class="d-flex align-items-center gap-2">
-                        <span>${escapeHtml(note.timestamp || '')}</span>
-                        <button type="button" class="btn-ghost btn-sm text-danger p-0" data-delete-note="${idx}" title="Delete note"><i class="fas fa-trash"></i></button>
+
+        list.innerHTML = `
+            <div class="pd-list-month-header">September</div>
+            ${notes.map((note, idx) => {
+            const author = note.user || 'Isaac De Jesús';
+            const initial = (author[0] || 'I').toUpperCase();
+            return `
+                    <div class="pd-note-item" data-note-index="${idx}">
+                        <div class="pd-note-avatar">${escapeHtml(initial)}</div>
+                        <div class="pd-note-content-wrap">
+                            <div class="pd-note-author">${escapeHtml(author)}</div>
+                            <div class="pd-note-time">${escapeHtml(note.timestamp || 'in less than a minute')}</div>
+                            <div class="pd-note-bubble">${escapeHtml(note.content || '').replace(/\n/g, '<br>')}</div>
+                        </div>
+                        <div class="pd-item-menu-wrap">
+                            <button type="button" class="pd-row-dots-btn" data-note-menu="${idx}" title="Note options"><i class="fas fa-ellipsis-vertical"></i></button>
+                        </div>
                     </div>
-                </div>
-                <p>${escapeHtml(note.content || '')}</p>
-            </div>`).join('');
-        list.querySelectorAll('[data-delete-note]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const idx = Number(btn.dataset.deleteNote);
-                if (Number.isInteger(idx) && idx >= 0 && idx < notes.length) {
-                    notes.splice(idx, 1);
-                    markDirty();
-                    renderNotes();
-                }
+                `;
+        }).join('')}
+        `;
+
+        list.querySelectorAll('[data-note-menu]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = Number(btn.dataset.noteMenu);
+                openItemContextMenu(btn, 'note', idx);
             });
         });
     }
 
-    function openNoteComposer() {
-        const composer = $('overviewNotesComposer');
-        if (composer) {
-            composer.style.display = 'block';
-            const textarea = $('overviewNoteContent');
-            if (textarea) {
-                textarea.value = '';
-                textarea.focus();
-            }
+    function openNoteModal(index = -1) {
+        const modal = $('pdNoteModal');
+        const titleEl = $('noteModalTitle');
+        const indexInput = $('modalNoteIndex');
+        const contentInput = $('modalNoteContent');
+        if (!modal) return;
+
+        if (index >= 0 && index < notes.length) {
+            if (titleEl) titleEl.innerHTML = '<i class="fas fa-sticky-note" style="color: var(--primary);"></i> Edit Note';
+            if (indexInput) indexInput.value = String(index);
+            if (contentInput) contentInput.value = notes[index].content || '';
         } else {
-            const content = prompt('Add note');
-            if (!content) return;
+            if (titleEl) titleEl.innerHTML = '<i class="fas fa-sticky-note" style="color: var(--primary);"></i> Add Note';
+            if (indexInput) indexInput.value = '-1';
+            if (contentInput) contentInput.value = '';
+        }
+
+        modal.classList.add('open');
+        setTimeout(() => contentInput?.focus(), 50);
+    }
+
+    function saveNoteFromModal() {
+        const indexInput = $('modalNoteIndex');
+        const contentInput = $('modalNoteContent');
+        const content = contentInput?.value.trim();
+        if (!content) return;
+
+        const idx = Number(indexInput?.value ?? -1);
+        if (idx >= 0 && idx < notes.length) {
+            notes[idx].content = content;
+            notes[idx].timestamp = 'just now';
+        } else {
             notes.push({
-                user: $('poEstimator')?.value || 'Juan Estevez',
-                timestamp: new Date().toLocaleString(),
+                user: $('poEstimator')?.value || 'Isaac De Jesús',
+                timestamp: 'in less than a minute',
                 content
             });
-            markDirty();
-            renderNotes();
-            showToast('Note added locally. Press Save Project to persist it.');
         }
-    }
 
-    function closeNoteComposer() {
-        const composer = $('overviewNotesComposer');
-        if (composer) composer.style.display = 'none';
-        const textarea = $('overviewNoteContent');
-        if (textarea) textarea.value = '';
-    }
-
-    function saveNoteFromComposer() {
-        const textarea = $('overviewNoteContent');
-        const content = textarea?.value.trim();
-        if (!content) return;
-        notes.push({
-            user: $('poEstimator')?.value || 'Juan Estevez',
-            timestamp: new Date().toLocaleString(),
-            content
-        });
-        closeNoteComposer();
+        $('pdNoteModal')?.classList.remove('open');
         markDirty();
         renderNotes();
-        showToast('Note added locally. Press Save Project to persist it.');
-    }
-
-    function addNote() {
-        openNoteComposer();
+        showToast('Note saved locally. Press Save Project to persist it.');
     }
 
     function renderTasks() {
         const list = $('overviewTasksList');
+        const cardTitle = $('overviewTasksCardTitle');
+        if (cardTitle) cardTitle.textContent = `Tasks (${tasks.length})`;
         const countBadge = $('overviewTaskCount');
         if (countBadge) countBadge.textContent = String(tasks.length);
         if (!list) return;
         if (!tasks.length) {
             list.innerHTML = `
-                <div class="overview-empty" id="overviewTasksEmpty">
-                    <p>No tasks yet</p>
-                    <button class="btn-outline-dark" type="button" id="createTaskBtn"><i class="fas fa-plus"></i> Create first task</button>
+                <div class="pd-empty-card-state" id="overviewTasksEmpty" role="button" tabindex="0">
+                    <div class="pd-empty-graphic">
+                        <svg width="72" height="52" viewBox="0 0 72 52" fill="none" xmlns="http://www.w3.org/2000/svg">
+                            <rect x="18" y="10" width="46" height="36" rx="4" fill="rgba(0,0,0,0.08)" />
+                            <rect x="14" y="6" width="46" height="36" rx="4" fill="var(--bg-panel)" stroke="var(--border)" stroke-width="1.5" />
+                            <path d="M14 10C14 7.79 15.79 6 18 6H56C58.21 6 60 7.79 60 10V15H14V10Z" fill="#0055b8" />
+                            <circle cx="20" cy="10.5" r="1.5" fill="#ffffff" opacity="0.8" />
+                            <circle cx="25" cy="10.5" r="1.5" fill="#ffffff" opacity="0.8" />
+                            <rect x="20" y="21" width="18" height="2" rx="1" fill="var(--border)" />
+                            <rect x="20" y="26" width="26" height="2" rx="1" fill="var(--border)" />
+                            <rect x="20" y="31" width="14" height="2" rx="1" fill="var(--border)" />
+                            <path d="M10 28H18M14 24V32" stroke="#fb5a3a" stroke-width="2.5" stroke-linecap="round" />
+                            <path d="M14 20L15 22L17 22L15.5 23.5L16 25.5L14 24.5L12 25.5L12.5 23.5L11 22L13 22L14 20Z" fill="#fb5a3a" />
+                        </svg>
+                    </div>
+                    <div class="pd-empty-title">Create a Task</div>
+                    <div class="pd-empty-subtitle">Assign a task with a due date to yourself or someone else on your team.</div>
                 </div>`;
-            $('createTaskBtn')?.addEventListener('click', openTaskComposer);
+            $('overviewTasksEmpty')?.addEventListener('click', () => openTaskModal());
             return;
         }
-        list.innerHTML = tasks.map((task, idx) => `
-            <div class="overview-list-item" data-task-index="${idx}">
-                <div class="d-flex justify-content-between align-items-center">
-                    <strong>${escapeHtml(task.title || '')}</strong>
-                    <div class="d-flex align-items-center gap-2">
-                        <span>${escapeHtml(task.responsible || '')} ${escapeHtml(task.due_date || '')}</span>
-                        <button type="button" class="btn-ghost btn-sm text-danger p-0" data-delete-task="${idx}" title="Delete task"><i class="fas fa-trash"></i></button>
+
+        list.innerHTML = tasks.map((task, idx) => {
+            const dueText = task.due_date ? formatTaskDue(task.due_date) : '';
+            return `
+                <div class="pd-task-item" data-task-index="${idx}">
+                    <div class="pd-task-icon-box"><i class="fas fa-clipboard"></i></div>
+                    <div class="pd-task-content-wrap">
+                        <div class="pd-task-title">${escapeHtml(task.title || '')}</div>
+                        <div class="pd-task-assignee">For ${escapeHtml(task.responsible || 'Isaac De Jesús')}</div>
+                    </div>
+                    ${dueText ? `<div class="pd-task-due-badge">${escapeHtml(dueText)}</div>` : ''}
+                    <div class="pd-item-menu-wrap">
+                        <button type="button" class="pd-row-dots-btn" data-task-menu="${idx}" title="Task options"><i class="fas fa-ellipsis-vertical"></i></button>
                     </div>
                 </div>
-            </div>`).join('');
-        list.querySelectorAll('[data-delete-task]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const idx = Number(btn.dataset.deleteTask);
-                if (Number.isInteger(idx) && idx >= 0 && idx < tasks.length) {
-                    tasks.splice(idx, 1);
-                    markDirty();
-                    renderTasks();
-                }
+            `;
+        }).join('');
+
+        list.querySelectorAll('[data-task-menu]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const idx = Number(btn.dataset.taskMenu);
+                openItemContextMenu(btn, 'task', idx);
             });
         });
     }
 
-    function openTaskComposer() {
-        const composer = $('overviewTaskComposer');
-        if (composer) {
-            composer.style.display = 'block';
-            const titleInput = $('overviewTaskTitle');
-            if (titleInput) {
-                titleInput.value = '';
-                titleInput.focus();
+    function formatTaskDue(dateVal) {
+        if (!dateVal) return '';
+        try {
+            const d = new Date(dateVal);
+            if (isNaN(d.getTime())) return `Due ${dateVal}`;
+            const diffHours = Math.round((d.getTime() - Date.now()) / (1000 * 60 * 60));
+            if (diffHours > 0 && diffHours < 48) {
+                return `Due in about ${diffHours} hour${diffHours === 1 ? '' : 's'}`;
             }
-            const assignee = $('overviewTaskAssignee');
-            if (assignee && !assignee.value) assignee.value = $('poEstimator')?.value || 'Juan Estevez';
-        } else {
-            const title = prompt('Task title');
-            if (!title) return;
-            tasks.push({
-                title,
-                responsible: $('poEstimator')?.value || 'Juan Estevez',
-                due_date: '',
-                status: 'open'
-            });
-            markDirty();
-            renderTasks();
-            showToast('Task added locally. Press Save Project to persist it.');
+            return `Due ${d.toLocaleDateString()}`;
+        } catch (e) {
+            return `Due ${dateVal}`;
         }
     }
 
-    function closeTaskComposer() {
-        const composer = $('overviewTaskComposer');
-        if (composer) composer.style.display = 'none';
-        const titleInput = $('overviewTaskTitle');
-        if (titleInput) titleInput.value = '';
+    let systemUsers = [
+        { id: 1, name: 'Isaac Diaz', role: 'Lead Estimator', initials: 'ID', avatarColor: '#5b4364' },
+        { id: 2, name: 'Juan Estevez', role: 'Chief Estimator', initials: 'JE', avatarColor: '#1d5cc9' },
+        { id: 3, name: 'Carlos Rodriguez', role: 'Project Manager', initials: 'CR', avatarColor: '#059669' },
+        { id: 4, name: 'Ana Lopez', role: 'Estimating Coordinator', initials: 'AL', avatarColor: '#d97706' },
+        { id: 5, name: 'Paul Construction', role: 'Client Representative', initials: 'PC', avatarColor: '#7c3aed' }
+    ];
+
+    async function loadSystemUsers() {
+        try {
+            const res = await fetch('../api/users.php?action=list');
+            if (res.ok) {
+                const data = await res.json();
+                if (data?.status === 'success' && Array.isArray(data.data) && data.data.length) {
+                    systemUsers = data.data;
+                }
+            }
+        } catch (e) {
+            // Keep default system users
+        }
+        populateAssigneeSelector();
     }
 
-    function saveTaskFromComposer() {
-        const title = $('overviewTaskTitle')?.value.trim();
+    function populateAssigneeSelector(selectedAssignee = null) {
+        const select = $('modalTaskAssignee');
+        if (!select) return;
+        const current = (selectedAssignee || select.value || '').trim();
+
+        select.innerHTML = '<option value="">-- Choose an Assignee --</option>' +
+            systemUsers.map(u => {
+                const isSel = (current && (current === u.name || current.toLowerCase() === u.name.toLowerCase())) ? 'selected' : '';
+                return `<option value="${escapeHtml(u.name)}" ${isSel}>${escapeHtml(u.name)} (${escapeHtml(u.role || 'Member')})</option>`;
+            }).join('');
+
+        if (current && !systemUsers.some(u => u.name.toLowerCase() === current.toLowerCase())) {
+            const opt = document.createElement('option');
+            opt.value = current;
+            opt.textContent = `${current} (Custom)`;
+            opt.selected = true;
+            select.appendChild(opt);
+        }
+    }
+
+    function openTaskModal(index = -1) {
+        const modal = $('pdTaskModal');
+        const titleEl = $('taskModalTitle');
+        const indexInput = $('modalTaskIndex');
+        const taskTitleInput = $('modalTaskTitle');
+        const assigneeInput = $('modalTaskAssignee');
+        const dueInput = $('modalTaskDue');
+        if (!modal) return;
+
+        if (index >= 0 && index < tasks.length) {
+            if (titleEl) titleEl.innerHTML = '<i class="fas fa-tasks" style="color: var(--primary);"></i> Edit Task';
+            if (indexInput) indexInput.value = String(index);
+            if (taskTitleInput) taskTitleInput.value = tasks[index].title || '';
+            const assignee = tasks[index].responsible || 'Isaac Diaz';
+            populateAssigneeSelector(assignee);
+            if (dueInput) dueInput.value = tasks[index].due_date || '';
+        } else {
+            if (titleEl) titleEl.innerHTML = '<i class="fas fa-tasks" style="color: var(--primary);"></i> Create Task';
+            if (indexInput) indexInput.value = '-1';
+            if (taskTitleInput) taskTitleInput.value = '';
+            const defaultAssignee = $('poEstimator')?.value || 'Isaac Diaz';
+            populateAssigneeSelector(defaultAssignee);
+            if (dueInput) dueInput.value = '';
+        }
+
+        modal.classList.add('open');
+        setTimeout(() => taskTitleInput?.focus(), 50);
+    }
+
+    function saveTaskFromModal() {
+        const indexInput = $('modalTaskIndex');
+        const taskTitleInput = $('modalTaskTitle');
+        const assigneeInput = $('modalTaskAssignee');
+        const dueInput = $('modalTaskDue');
+
+        const title = taskTitleInput?.value.trim();
         if (!title) return;
-        const responsible = $('overviewTaskAssignee')?.value.trim() || $('poEstimator')?.value || 'Juan Estevez';
-        const due = $('overviewTaskDue')?.value || '';
-        tasks.push({
-            title,
-            responsible,
-            due_date: due,
-            status: 'open'
-        });
-        closeTaskComposer();
+        const responsible = assigneeInput?.value.trim() || $('poEstimator')?.value || 'Isaac Diaz';
+        const due = dueInput?.value || '';
+
+        const idx = Number(indexInput?.value ?? -1);
+        if (idx >= 0 && idx < tasks.length) {
+            tasks[idx].title = title;
+            tasks[idx].responsible = responsible;
+            tasks[idx].due_date = due;
+        } else {
+            tasks.push({
+                title,
+                responsible,
+                due_date: due,
+                status: 'open'
+            });
+        }
+
+        $('pdTaskModal')?.classList.remove('open');
         markDirty();
         renderTasks();
-        showToast('Task added locally. Press Save Project to persist it.');
+        showToast('Task saved locally. Press Save Project to persist it.');
     }
 
-    function createTask() {
-        openTaskComposer();
+    function openItemContextMenu(button, type, index) {
+        const menu = $('pdItemContextMenu');
+        if (!menu) return;
+
+        contextMenuTarget = { type, index };
+        const rect = button.getBoundingClientRect();
+        const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+
+        menu.style.display = 'flex';
+        menu.style.position = 'fixed';
+        menu.style.zIndex = '99999';
+
+        const menuWidth = 130;
+        const leftPos = (rect.right / zoom) - menuWidth;
+        const topPos = (rect.bottom / zoom) + 4;
+
+        menu.style.left = `${Math.max(10, leftPos)}px`;
+        menu.style.top = `${topPos}px`;
     }
 
-    function showToast(message) {
+    function closeItemContextMenu() {
+        const menu = $('pdItemContextMenu');
+        if (menu) menu.style.display = 'none';
+        contextMenuTarget = null;
+    }
+
+    function showToast(message, type = 'success') {
+        if (window.TakeoffAnnouncement && typeof window.TakeoffAnnouncement.show === 'function') {
+            window.TakeoffAnnouncement.show({
+                type: type === 'error' ? 'error' : (type === 'warning' ? 'warning' : 'success'),
+                title: type === 'error' ? 'System Alert' : (type === 'warning' ? 'Notice' : 'Project Update'),
+                badge: type === 'error' ? 'ERROR' : (type === 'warning' ? 'NOTICE' : 'ALERT'),
+                message: message,
+                primaryText: 'Continue',
+                force: true,
+                showDontShow: false
+            });
+            return;
+        }
         const old = document.querySelector('.toast-lite');
         if (old) old.remove();
         const toast = document.createElement('div');
@@ -1138,90 +1452,90 @@
         const startButton = $('documentsStartTakeoffBtn');
         if (startButton) startButton.disabled = true;
         try {
-        const drawings = drawingDocuments();
-        if (!drawings.length) {
-            showToast('Upload drawings before starting takeoff.');
-            return;
-        }
-        const doc = findDocumentById(selectedDocumentsId) || drawings[0];
-        selectedDocumentsId = doc.id;
-        let takeoffFileId = doc.backendId || doc.id;
-        if (doc.source === 'local') {
-            const file = sessionFiles.get(String(doc.id));
-            if (!file) {
-                showToast('Select this PDF again so it can be uploaded for Takeoff.');
+            const drawings = drawingDocuments();
+            if (!drawings.length) {
+                showToast('Upload drawings before starting takeoff.');
                 return;
             }
-            try {
-                const form = new FormData();
-                form.append('project_id', window.ProjectState?.projectId || '');
-                form.append('file', file, file.name);
-                const response = await fetch('../api/project_document_takeoff.php', { method: 'POST', body: form, headers: { Accept: 'application/json' } });
-                const result = await response.json().catch(() => null);
-                if (!response.ok || !result?.success || !result.file?.id) throw new Error(result?.message || `HTTP ${response.status}`);
-                takeoffFileId = Number(result.file.id);
-                const alias = { id: takeoffFileId, source: 'legacy_file', filename: result.file.filename, title: result.file.filename, path: `../${result.file.filepath}`, extension: doc.extension, mime_type: doc.type };
-                window.ProjectState.documents = (window.ProjectState.documents || []).filter(row =>
-                    !(row.source === 'local_metadata' && String(row.id) === String(doc.id)) &&
-                    !(row.source === 'legacy_file' && Number(row.id) === takeoffFileId)
-                );
-                window.ProjectState.documents.push(alias);
-                localDocuments = localDocuments.filter(row => String(row.id) !== String(doc.id));
-                sessionFiles.delete(String(doc.id));
-                const objectUrl = sessionFileUrls.get(String(doc.id));
-                if (objectUrl) URL.revokeObjectURL(objectUrl);
-                sessionFileUrls.delete(String(doc.id));
-                persistLocalDocuments();
-            } catch (error) {
-                showToast(error.message || 'Unable to upload this PDF for Takeoff.');
-                return;
-            }
-        }
-        if (doc.source === 'existing') {
-            try {
-                if (doc.originalSource === 'project_document') {
-                    // project_document_takeoff.php creates or reuses the files-table identity required by editor.php.
+            const doc = findDocumentById(selectedDocumentsId) || drawings[0];
+            selectedDocumentsId = doc.id;
+            let takeoffFileId = doc.backendId || doc.id;
+            if (doc.source === 'local') {
+                const file = sessionFiles.get(String(doc.id));
+                if (!file) {
+                    showToast('Select this PDF again so it can be uploaded for Takeoff.');
+                    return;
                 }
-                const response = await fetch('../api/project_document_takeoff.php', {
-                    method: 'POST',
-                    headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-                    body: JSON.stringify({
-                        document_id: doc.backendId,
-                        project_id: window.ProjectState?.projectId,
-                        source: doc.originalSource || 'legacy_file'
-                    })
-                });
-                const result = await response.json().catch(() => null);
-                if (!response.ok || !result?.success || !result.file?.id) throw new Error(result?.message || `HTTP ${response.status}`);
-                takeoffFileId = Number(result.file.id);
-                const sourceRow = window.ProjectState.documents.find(row => row.source === doc.originalSource && Number(row.id) === Number(doc.backendId));
-                const alias = {
-                    ...sourceRow,
-                    id: takeoffFileId,
-                    source: 'legacy_file',
-                    filename: result.file.filename || sourceRow?.filename || doc.filename,
-                    title: result.file.filename || sourceRow?.title || doc.name,
-                    path: `../${result.file.filepath}`,
-                    extension: doc.extension,
-                    mime_type: doc.type
-                };
-                if (!window.ProjectState.documents.some(row => row.source === 'legacy_file' && Number(row.id) === takeoffFileId)) window.ProjectState.documents.push(alias);
-            } catch (error) {
-                showToast(error.message || 'Unable to prepare this PDF for Takeoff.');
-                return;
+                try {
+                    const form = new FormData();
+                    form.append('project_id', window.ProjectState?.projectId || '');
+                    form.append('file', file, file.name);
+                    const response = await fetch('../api/project_document_takeoff.php', { method: 'POST', body: form, headers: { Accept: 'application/json' } });
+                    const result = await response.json().catch(() => null);
+                    if (!response.ok || !result?.success || !result.file?.id) throw new Error(result?.message || `HTTP ${response.status}`);
+                    takeoffFileId = Number(result.file.id);
+                    const alias = { id: takeoffFileId, source: 'legacy_file', filename: result.file.filename, title: result.file.filename, path: `../${result.file.filepath}`, extension: doc.extension, mime_type: doc.type };
+                    window.ProjectState.documents = (window.ProjectState.documents || []).filter(row =>
+                        !(row.source === 'local_metadata' && String(row.id) === String(doc.id)) &&
+                        !(row.source === 'legacy_file' && Number(row.id) === takeoffFileId)
+                    );
+                    window.ProjectState.documents.push(alias);
+                    localDocuments = localDocuments.filter(row => String(row.id) !== String(doc.id));
+                    sessionFiles.delete(String(doc.id));
+                    const objectUrl = sessionFileUrls.get(String(doc.id));
+                    if (objectUrl) URL.revokeObjectURL(objectUrl);
+                    sessionFileUrls.delete(String(doc.id));
+                    persistLocalDocuments();
+                } catch (error) {
+                    showToast(error.message || 'Unable to upload this PDF for Takeoff.');
+                    return;
+                }
             }
-        }
-        window.ProjectState.selectedDocumentId = takeoffFileId;
-        window.ProjectState.selectedDrawingId = takeoffFileId;
-        if (typeof window.setActiveTab === 'function') window.setActiveTab('takeoff');
-        if (typeof window.projectTakeoffRefreshDrawings === 'function') window.projectTakeoffRefreshDrawings();
-        const frame = $('takeoffFrame');
-        const empty = $('takeoffEmpty');
-        if (frame) {
-            frame.src = `editor.php?id=${encodeURIComponent(takeoffFileId)}&embedded=1`;
-            frame.style.display = 'block';
-        }
-        if (empty) empty.style.display = 'none';
+            if (doc.source === 'existing') {
+                try {
+                    if (doc.originalSource === 'project_document') {
+                        // project_document_takeoff.php creates or reuses the files-table identity required by editor.php.
+                    }
+                    const response = await fetch('../api/project_document_takeoff.php', {
+                        method: 'POST',
+                        headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
+                        body: JSON.stringify({
+                            document_id: doc.backendId,
+                            project_id: window.ProjectState?.projectId,
+                            source: doc.originalSource || 'legacy_file'
+                        })
+                    });
+                    const result = await response.json().catch(() => null);
+                    if (!response.ok || !result?.success || !result.file?.id) throw new Error(result?.message || `HTTP ${response.status}`);
+                    takeoffFileId = Number(result.file.id);
+                    const sourceRow = window.ProjectState.documents.find(row => row.source === doc.originalSource && Number(row.id) === Number(doc.backendId));
+                    const alias = {
+                        ...sourceRow,
+                        id: takeoffFileId,
+                        source: 'legacy_file',
+                        filename: result.file.filename || sourceRow?.filename || doc.filename,
+                        title: result.file.filename || sourceRow?.title || doc.name,
+                        path: `../${result.file.filepath}`,
+                        extension: doc.extension,
+                        mime_type: doc.type
+                    };
+                    if (!window.ProjectState.documents.some(row => row.source === 'legacy_file' && Number(row.id) === takeoffFileId)) window.ProjectState.documents.push(alias);
+                } catch (error) {
+                    showToast(error.message || 'Unable to prepare this PDF for Takeoff.');
+                    return;
+                }
+            }
+            window.ProjectState.selectedDocumentId = takeoffFileId;
+            window.ProjectState.selectedDrawingId = takeoffFileId;
+            if (typeof window.setActiveTab === 'function') window.setActiveTab('takeoff');
+            if (typeof window.projectTakeoffRefreshDrawings === 'function') window.projectTakeoffRefreshDrawings();
+            const frame = $('takeoffFrame');
+            const empty = $('takeoffEmpty');
+            if (frame) {
+                frame.src = `editor.php?id=${encodeURIComponent(takeoffFileId)}&embedded=1`;
+                frame.style.display = 'block';
+            }
+            if (empty) empty.style.display = 'none';
         } finally {
             startTakeoffInFlight = false;
             if (startButton) startButton.disabled = false;
@@ -1248,6 +1562,18 @@
         syncDocumentsToProjectState();
         renderDocumentsPage();
 
+        // Immediately update status pill when theme changes (Light / Dark)
+        const themeObserver = new MutationObserver(() => {
+            renderStatusDropdown();
+        });
+        themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme', 'class'] });
+
+        document.addEventListener('click', (e) => {
+            if (e.target.closest('[data-theme-toggle]')) {
+                setTimeout(renderStatusDropdown, 50);
+            }
+        });
+
         document.querySelectorAll('[data-menu-toggle]').forEach(button => {
             button.addEventListener('click', event => {
                 event.stopPropagation();
@@ -1258,6 +1584,84 @@
             document.querySelectorAll('.project-menu').forEach(menu => menu.classList.remove('open'));
             document.querySelectorAll('.documents-menu').forEach(menu => menu.classList.remove('open'));
             $('projectStatusMenu')?.classList.remove('open');
+            $('pdPresenceMenu')?.classList.remove('open');
+            document.querySelector('.project-subhead-wrapper')?.classList.remove('has-open-menu');
+        });
+
+        // Multi-User Presence System (supports up to 4 simultaneous avatars)
+        const initialCollaborators = [
+            { id: 1, name: 'Isaac Diaz (You)', initials: 'ID', color: '#5b4364', role: 'Lead Estimator', isSelf: true }
+        ];
+
+        window.ProjectPresence = {
+            users: [...initialCollaborators],
+            getUsers() { return this.users; },
+            setUsers(newUsers) {
+                this.users = Array.isArray(newUsers) ? newUsers : [];
+                this.render();
+            },
+            addUser(user) {
+                if (!this.users.some(u => u.id === user.id)) {
+                    this.users.push(user);
+                    this.render();
+                }
+            },
+            removeUser(userId) {
+                this.users = this.users.filter(u => u.id !== userId);
+                this.render();
+            },
+            render() {
+                const stack = $('pdPresenceStack');
+                const list = $('pdPresenceList');
+                const count = $('pdPresenceCount');
+                if (!stack) return;
+
+                const visible = this.users.slice(0, 4);
+                const overflow = this.users.length - 4;
+
+                let html = '';
+                visible.forEach((u, i) => {
+                    const z = 10 - i;
+                    const tooltip = `${escapeHtml(u.name)} (${escapeHtml(u.role || 'Collaborator')})`;
+                    html += `
+                        <div class="pd-presence-avatar ${u.isSelf ? 'self' : ''}" style="background: ${u.color || '#5b4364'}; z-index: ${z};" title="${tooltip}">
+                            <span>${escapeHtml(u.initials || u.name.slice(0, 2).toUpperCase())}</span>
+                            <span class="pd-presence-dot" title="Active in project"></span>
+                        </div>
+                    `;
+                });
+
+                if (overflow > 0) {
+                    html += `<div class="pd-presence-overflow" title="${overflow} more users active">+${overflow}</div>`;
+                }
+
+                stack.innerHTML = html;
+
+                if (count) {
+                    count.textContent = `${this.users.length} active`;
+                }
+
+                if (list) {
+                    list.innerHTML = this.users.map(u => `
+                        <div class="pd-presence-user-row">
+                            <div class="pd-presence-avatar" style="background: ${u.color || '#5b4364'}; width: 24px; height: 24px; font-size: 9.5px; margin: 0;">
+                                <span>${escapeHtml(u.initials || u.name.slice(0, 2).toUpperCase())}</span>
+                            </div>
+                            <div class="pd-presence-user-info">
+                                <span class="pd-presence-user-name">${escapeHtml(u.name)}</span>
+                                <span class="pd-presence-user-role">${escapeHtml(u.role || 'Collaborator')} • Active now</span>
+                            </div>
+                        </div>
+                    `).join('');
+                }
+            }
+        };
+
+        window.ProjectPresence.render();
+
+        $('pdPresenceStack')?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            $('pdPresenceMenu')?.classList.toggle('open');
         });
 
         $('projectStatusButton')?.addEventListener('click', event => {
@@ -1265,9 +1669,139 @@
             $('projectStatusMenu')?.classList.toggle('open');
         });
 
+        function syncCustomerDisplayCard() {
+            const company = $('poCustomerCompany')?.value?.trim() || 'GP Construction';
+            const contact = $('poPrimaryContact')?.value?.trim() || 'GP Construction';
+            const phone = $('poCustomerPhone')?.value?.trim() || '3212002278';
+            const email = $('poCustomerEmail')?.value?.trim() || 'Paul@gpconstructioncompany.com';
+            const address = $('poCustomerAddress')?.value?.trim() || '';
+            const projAddress = $('poProjectAddress')?.value?.trim() || '';
+
+            const avatar = $('customerAvatarLetter');
+            if (avatar) avatar.textContent = company.charAt(0).toUpperCase() || 'G';
+
+            const compEl = $('displayCustomerCompany');
+            if (compEl) compEl.textContent = company;
+
+            const summaryEl = $('displayContactSummary');
+            if (summaryEl) summaryEl.textContent = `${contact}, ${phone}, ${email}`;
+
+            const addrEl = $('displayContactAddress');
+            if (addrEl) addrEl.textContent = address || 'No address set';
+
+            const projText = $('displayProjectAddressText');
+            const projRow = $('editProjectAddressRow');
+            const addBtn = $('addProjectAddressBtn');
+            if (projAddress) {
+                if (projText) projText.textContent = projAddress;
+                if (projRow) projRow.style.display = 'flex';
+                if (addBtn) addBtn.style.display = 'none';
+            } else {
+                if (projRow) projRow.style.display = 'none';
+                if (addBtn) addBtn.style.display = 'flex';
+            }
+        }
+
+        function openCustomerModal() {
+            $('pdCustomerModal')?.classList.add('open');
+        }
+        function closeCustomerModal() {
+            $('pdCustomerModal')?.classList.remove('open');
+            syncCustomerDisplayCard();
+        }
+
+        function openAddressModal() {
+            $('pdAddressModal')?.classList.add('open');
+            setTimeout(() => $('poProjectAddress')?.focus(), 50);
+        }
+        function closeAddressModal() {
+            $('pdAddressModal')?.classList.remove('open');
+            syncCustomerDisplayCard();
+        }
+
+        function updatePricingLockIcon() {
+            const select = $('poEstimatePricing');
+            const wrap = select?.closest('.pd-pricing-wrap');
+            const icon = wrap?.querySelector('.pd-pricing-status-icon i');
+            if (!select || !icon) return;
+            const isLocked = select.value === 'Locked';
+            icon.className = isLocked ? 'fas fa-lock' : 'fas fa-lock-open';
+            icon.style.color = isLocked ? '#ef4444' : '#10b981';
+        }
+
         $('saveProjectBtn')?.addEventListener('click', saveProject);
-        $('addCustomerBtn')?.addEventListener('click', showCustomerFields);
-        $('addProjectAddressBtn')?.addEventListener('click', showCustomerFields);
+        $('addCustomerBtn')?.addEventListener('click', openCustomerModal);
+        $('toggleCustomerDrawerBtn')?.addEventListener('click', openCustomerModal);
+        $('editCustomerInfoBtn')?.addEventListener('click', openCustomerModal);
+        $('addProjectAddressBtn')?.addEventListener('click', openAddressModal);
+        $('editProjectAddressBtn')?.addEventListener('click', openAddressModal);
+        $('editProjectAddressRow')?.addEventListener('click', openAddressModal);
+        $('applyCustomerModalBtn')?.addEventListener('click', closeCustomerModal);
+        $('applyAddressModalBtn')?.addEventListener('click', closeAddressModal);
+
+        document.querySelectorAll('[data-close-modal]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const modalId = btn.dataset.closeModal;
+                $(modalId)?.classList.remove('open');
+                syncCustomerDisplayCard();
+            });
+        });
+
+        document.querySelectorAll('.pd-modal-backdrop').forEach(backdrop => {
+            backdrop.addEventListener('click', e => {
+                if (e.target === backdrop) {
+                    backdrop.classList.remove('open');
+                    syncCustomerDisplayCard();
+                }
+            });
+        });
+
+        $('poEstimatePricing')?.addEventListener('change', () => {
+            updatePricingLockIcon();
+            markDirty();
+        });
+        updatePricingLockIcon();
+
+        function snapToTenMinutes(input) {
+            if (!input || !input.value) return;
+            const val = input.value;
+            // Handle HH:MM (e.g. 14:23 -> 14:20)
+            const parts = val.split(':');
+            if (parts.length >= 2) {
+                const h = parts[0];
+                let m = parseInt(parts[1], 10);
+                if (!isNaN(m)) {
+                    m = Math.round(m / 10) * 10;
+                    if (m >= 60) m = 50;
+                    input.value = `${h.padStart(2, '0')}:${String(m).padStart(2, '0')}`;
+                }
+            }
+        }
+
+        $('poDueTime')?.addEventListener('change', function () {
+            snapToTenMinutes(this);
+            markDirty();
+        });
+        $('poDueTime')?.addEventListener('blur', function () {
+            snapToTenMinutes(this);
+        });
+
+        // Date and Time inputs are automatically handled globally by TakeoffDateTimePicker
+
+        $('poClearEstimatorBtn')?.addEventListener('click', () => {
+            const est = $('poEstimator');
+            if (est) {
+                est.value = '';
+                markDirty();
+                renderProjectHeaderMeta();
+            }
+        });
+        ['poCustomerCompany', 'poPrimaryContact', 'poCustomerPhone', 'poCustomerEmail', 'poCustomerAddress', 'poProjectAddress'].forEach(id => {
+            $(id)?.addEventListener('input', () => {
+                syncCustomerDisplayCard();
+                markDirty();
+            });
+        });
         $('poCustomerSelector')?.addEventListener('change', event => {
             const idx = event.target.value;
             if (idx !== '') selectCustomerByIndex(Number(idx));
@@ -1275,14 +1809,43 @@
         $('saveCustomerBtn')?.addEventListener('click', saveCurrentCustomerToDirectory);
         $('clearCustomerBtn')?.addEventListener('click', clearCustomerFields);
         loadCustomersDirectory();
-        $('addNoteBtn')?.addEventListener('click', openNoteComposer);
-        $('addNoteBtnHead')?.addEventListener('click', openNoteComposer);
-        $('cancelNoteBtn')?.addEventListener('click', closeNoteComposer);
-        $('saveNoteBtn')?.addEventListener('click', saveNoteFromComposer);
-        $('createTaskBtn')?.addEventListener('click', openTaskComposer);
-        $('createTaskBtnHead')?.addEventListener('click', openTaskComposer);
-        $('cancelTaskBtn')?.addEventListener('click', closeTaskComposer);
-        $('saveTaskBtn')?.addEventListener('click', saveTaskFromComposer);
+        $('addNoteBtn')?.addEventListener('click', () => openNoteModal(-1));
+        $('addNoteBtnHead')?.addEventListener('click', () => openNoteModal(-1));
+        $('modalSaveNoteBtn')?.addEventListener('click', saveNoteFromModal);
+        $('createTaskBtn')?.addEventListener('click', () => openTaskModal(-1));
+        $('createTaskBtnHead')?.addEventListener('click', () => openTaskModal(-1));
+        $('modalSaveTaskBtn')?.addEventListener('click', saveTaskFromModal);
+
+        $('pdItemActionEdit')?.addEventListener('click', () => {
+            if (!contextMenuTarget) return;
+            const { type, index } = contextMenuTarget;
+            closeItemContextMenu();
+            if (type === 'note') openNoteModal(index);
+            else if (type === 'task') openTaskModal(index);
+        });
+
+        $('pdItemActionDelete')?.addEventListener('click', () => {
+            if (!contextMenuTarget) return;
+            const { type, index } = contextMenuTarget;
+            closeItemContextMenu();
+            if (type === 'note' && index >= 0 && index < notes.length) {
+                notes.splice(index, 1);
+                markDirty();
+                renderNotes();
+                showToast('Note deleted.');
+            } else if (type === 'task' && index >= 0 && index < tasks.length) {
+                tasks.splice(index, 1);
+                markDirty();
+                renderTasks();
+                showToast('Task deleted.');
+            }
+        });
+
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('#pdItemContextMenu') && !e.target.closest('.pd-item-menu-wrap')) {
+                closeItemContextMenu();
+            }
+        });
 
         document.querySelectorAll('[data-upload-category]').forEach(button => {
             button.addEventListener('click', event => {
@@ -1378,6 +1941,118 @@
 
         renderNotes();
         renderTasks();
+        loadSystemUsers();
+
+        window.TakeoffUsers = {
+            getUsers: () => systemUsers,
+            setUsers: (list) => {
+                systemUsers = Array.isArray(list) ? list : systemUsers;
+                populateAssigneeSelector();
+            },
+            load: loadSystemUsers
+        };
+
+        // In-app navigation interceptor for unsaved changes
+        document.addEventListener('click', event => {
+            if (!isDirty) return;
+
+            const link = event.target.closest('a[href]');
+            if (!link) return;
+
+            const href = link.getAttribute('href');
+            if (!href || href === '#' || href.startsWith('javascript:') || link.target === '_blank') return;
+            if (href.startsWith('#')) return;
+
+            event.preventDefault();
+            event.stopPropagation();
+
+            if (window.TakeoffAnnouncement) {
+                window.TakeoffAnnouncement.show({
+                    type: 'warning',
+                    force: true,
+                    title: 'Unsaved Changes in Project',
+                    badge: 'UNSAVED CHANGES',
+                    content: `<p>You have made changes to this project that have not been saved yet.</p>
+                              <div class="g-announcement-highlight-box" style="border-left-color: #f59e0b;">
+                                  Would you like to save your project before leaving, or discard changes?
+                              </div>`,
+                    primaryText: 'Save & Exit',
+                    secondaryText: 'Discard & Exit',
+                    cancelText: 'Stay on Page',
+                    onPrimary: async () => {
+                        try {
+                            await saveProject();
+                            isDirty = false;
+                            window.location.href = href;
+                        } catch (err) {
+                            console.error('Failed to save project before navigating:', err);
+                        }
+                    },
+                    onSecondary: () => {
+                        isDirty = false;
+                        window.location.href = href;
+                    },
+                    onCancel: () => {
+                        // User chooses to stay
+                    }
+                });
+            } else {
+                if (confirm('You have unsaved changes. Discard and leave anyway?')) {
+                    isDirty = false;
+                    window.location.href = href;
+                }
+            }
+        }, true);
+
+        // Browser back button interceptor for unsaved changes
+        window.addEventListener('popstate', event => {
+            if (!isDirty) return;
+
+            // Re-push state immediately so user is not navigated away while modal is active
+            try {
+                window.history.pushState({ takeoffDirtyGuard: true }, '', window.location.href);
+            } catch (e) { }
+
+            if (window.TakeoffAnnouncement) {
+                window.TakeoffAnnouncement.show({
+                    type: 'warning',
+                    force: true,
+                    title: 'Unsaved Changes in Project',
+                    badge: 'UNSAVED CHANGES',
+                    content: `<p>You have made changes to this project that have not been saved yet.</p>
+                              <div class="g-announcement-highlight-box" style="border-left-color: #f59e0b;">
+                                  Would you like to save your project before leaving, or discard changes?
+                              </div>`,
+                    primaryText: 'Save & Exit',
+                    secondaryText: 'Discard & Exit',
+                    cancelText: 'Stay on Page',
+                    onPrimary: async () => {
+                        try {
+                            await saveProject();
+                            isDirty = false;
+                            window._historyDirtyGuarded = false;
+                            window.history.go(-2);
+                        } catch (err) {
+                            console.error('Failed to save project before navigating back:', err);
+                        }
+                    },
+                    onSecondary: () => {
+                        isDirty = false;
+                        window._historyDirtyGuarded = false;
+                        window.history.go(-2);
+                    },
+                    onCancel: () => {
+                        // User chooses to stay
+                    }
+                });
+            } else {
+                if (confirm('You have unsaved changes. Discard and leave anyway?')) {
+                    isDirty = false;
+                    window._historyDirtyGuarded = false;
+                    window.history.go(-2);
+                }
+            }
+        });
 
         window.addEventListener('beforeunload', event => {
             if (!isDirty) return;
