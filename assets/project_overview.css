@@ -1733,7 +1733,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     padding: 20px;
     background: rgba(15, 23, 42, 0.55);
     backdrop-filter: blur(2px);
-    z-index: 5000;
+    z-index: 999999;
 }
 
 .pd-modal-backdrop.open {

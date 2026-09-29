@@ -1631,8 +1631,8 @@
         typeSelect.value = types.includes(state.layerTypeFilter) ? state.layerTypeFilter : '';
     }
 
-    function deleteLayer(layer) {
-        if (!layer || !confirm('Delete this takeoff layer and its measurements?')) return;
+    function executeDeleteLayer(layer) {
+        if (!layer) return;
         snapshot();
         state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).forEach(destroyMarkerNodes);
         state.segments.filter(segment => segment.layer_client_uid === layer.client_uid).forEach(destroySegmentNodes);
@@ -1644,6 +1644,23 @@
         state.selectedElement = null;
         markDirty({ pageFallback: true });
         renderAll();
+    }
+
+    async function deleteLayer(layer) {
+        if (!layer) return;
+        const confirmFn = window.parent?.showConfirmDialog || window.showConfirmDialog;
+        if (typeof confirmFn === 'function') {
+            const ok = await confirmFn({
+                title: 'Delete Takeoff Layer',
+                message: `Delete takeoff layer "${layer.name || 'Unnamed'}" and its measurements?`,
+                confirmText: 'Delete Layer',
+                primaryDanger: true
+            });
+            if (!ok) return;
+        } else if (!confirm('Delete this takeoff layer and its measurements?')) {
+            return;
+        }
+        executeDeleteLayer(layer);
     }
 
     function duplicateLayer(layer) {
@@ -2726,6 +2743,23 @@
     }
 
     function renameLayer(layer) {
+        if (!layer) return;
+        const renameFn = window.parent?.openRenameModal || window.openRenameModal;
+        if (typeof renameFn === 'function') {
+            renameFn({
+                title: 'Rename Takeoff Layer',
+                label: 'Layer Name',
+                currentName: layer.name || '',
+                onSave: (newName) => {
+                    if (!newName || !newName.trim()) return;
+                    snapshot();
+                    layer.name = newName.trim();
+                    markDirty();
+                    renderAll();
+                }
+            });
+            return;
+        }
         const name = prompt('Layer name', layer.name || '');
         if (!name) return;
         snapshot();
@@ -2735,6 +2769,23 @@
     }
 
     function renameGroup(group) {
+        if (!group) return;
+        const renameFn = window.parent?.openRenameModal || window.openRenameModal;
+        if (typeof renameFn === 'function') {
+            renameFn({
+                title: 'Rename Group',
+                label: 'Group Name',
+                currentName: group,
+                onSave: (newName) => {
+                    if (!newName || !newName.trim()) return;
+                    snapshot();
+                    state.layers.filter(layer => layerGroup(layer) === group).forEach(layer => { layer.group_name = newName.trim(); });
+                    markDirty();
+                    renderAll();
+                }
+            });
+            return;
+        }
         const next = prompt('Rename group', group);
         if (!next) return;
         snapshot();
@@ -2754,9 +2805,21 @@
         renderAll();
     }
 
-    function deleteGroup(group) {
+    async function deleteGroup(group) {
         const layers = state.layers.filter(layer => layerGroup(layer) === group);
-        if (!layers.length || !confirm('Delete this takeoff group and all layers?')) return;
+        if (!layers.length) return;
+        const confirmFn = window.parent?.showConfirmDialog || window.showConfirmDialog;
+        if (typeof confirmFn === 'function') {
+            const ok = await confirmFn({
+                title: 'Delete Takeoff Group',
+                message: `Delete takeoff group "${group}" and all its ${layers.length} layer(s)?`,
+                confirmText: 'Delete Group',
+                primaryDanger: true
+            });
+            if (!ok) return;
+        } else if (!confirm(`Delete this takeoff group and all ${layers.length} layers?`)) {
+            return;
+        }
         snapshot();
         layers.forEach(deleteLayerWithoutConfirm);
         markDirty();

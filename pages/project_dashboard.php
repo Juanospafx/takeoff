@@ -720,7 +720,7 @@ $state = [
 
         .takeoff-workspace {
             height: 100%;
-            background: #0f172a;
+            background: var(--bg-body, #eaedf2);
         }
 
         .estimating-toolbar {
@@ -837,8 +837,8 @@ $state = [
             }
         }
     </style>
-    <link rel="stylesheet" href="../assets/project_overview.css?v=doc-modal-confirm-20260925-4">
-    <link rel="stylesheet" href="../assets/project_takeoff.css?v=takeoff-group-modal-20260831-1">
+    <link rel="stylesheet" href="../assets/project_overview.css?v=doc-modal-confirm-20260925-5">
+    <link rel="stylesheet" href="../assets/project_takeoff.css?v=takeoff-layout-v3-20260929-1">
     <link rel="stylesheet" href="../assets/project_estimating.css?v=estimating-assembly-hierarchy-20260902-1">
     <link rel="stylesheet" href="../assets/project_proposal.css?v=proposal-workspace-20260810-1">
 </head>
@@ -846,7 +846,7 @@ $state = [
 <body>
     <?php include __DIR__ . '/../views/global_tools_header.php'; ?>
     <div class="workspace-shell">
-        <div class="project-subhead-wrapper">
+        <div class="project-subhead-wrapper <?= $activeTab === 'takeoff' ? 'is-takeoff-tab' : '' ?>">
             <header class="project-header">
                 <div class="pd-header-left">
                     <?php
@@ -865,6 +865,26 @@ $state = [
                                 <i class="fas fa-caret-down bb-status-pill-caret"></i>
                             </button>
                             <div class="bb-status-menu-panel project-status-menu" id="projectStatusMenu"></div>
+                        </div>
+                        <!-- Active Takeoff Item info with quick actions -->
+                        <div class="takeoff-subhead-item-info" id="takeoffSubheadItemInfo" style="display:none;" title="Active Takeoff Item">
+                            <div class="takeoff-subhead-item-main">
+                                <span class="pro-active-layer-dot" id="takeoffSubheadItemDot"></span>
+                                <strong class="takeoff-subhead-item-name" id="takeoffSubheadItemName"></strong>
+                                <span class="takeoff-subhead-item-meta" id="takeoffSubheadItemMeta"></span>
+                            </div>
+                            <div class="takeoff-subhead-item-divider"></div>
+                            <div class="takeoff-subhead-item-actions">
+                                <button type="button" class="subhead-item-act-btn" data-subhead-item-action="copy" title="Copy item or selection">
+                                    <i class="fas fa-copy"></i><span>Copy</span>
+                                </button>
+                                <button type="button" class="subhead-item-act-btn" data-subhead-item-action="move" title="Move item to group">
+                                    <i class="fas fa-folder-tree"></i><span>Move to</span>
+                                </button>
+                                <button type="button" class="subhead-item-act-btn danger" data-subhead-item-action="delete" title="Delete item or selection">
+                                    <i class="fas fa-trash"></i><span>Delete</span>
+                                </button>
+                            </div>
                         </div>
                     </div>
                     <!-- Keep hidden for script hooks -->
@@ -927,11 +947,160 @@ $state = [
             </header>
 
             <nav class="top-tabs" aria-label="Project workspace tabs" role="tablist">
-                <button type="button" data-tab="overview" class="active">Overview</button>
-                <button type="button" data-tab="documents">Documents</button>
-                <button type="button" data-tab="takeoff">Takeoff</button>
-                <button type="button" data-tab="estimating">Estimating</button>
-                <button type="button" data-tab="proposal">Proposal</button>
+                <div class="top-tabs-nav">
+                    <button type="button" data-tab="overview" class="active">Overview</button>
+                    <button type="button" data-tab="documents">Documents</button>
+                    <button type="button" data-tab="takeoff">Takeoff</button>
+                    <button type="button" data-tab="estimating">Estimating</button>
+                    <button type="button" data-tab="proposal">Proposal</button>
+                </div>
+                <!-- Drawings & Sheets + Page Count (Point 7: right next to proposal tab) -->
+                <div class="takeoff-subhead-sheet-group" id="takeoffSubheadSheetGroup">
+                    <div class="takeoff-subhead-drawing-wrap">
+                        <div class="pro-drawing-selector">
+                            <button class="pro-sheet-select pro-sheet-trigger" id="takeoffSheetSelect"
+                                type="button" aria-expanded="false">
+                                <span
+                                    id="takeoffSheetLabel"><?= htmlspecialchars($selectedDoc['filename'] ?? 'No drawing selected') ?></span>
+                                <i class="fas fa-chevron-down"></i>
+                            </button>
+                            <div class="pro-drawing-dropdown" id="takeoffDrawingDropdown"
+                                aria-label="Drawing selector">
+                                <div class="pro-drawing-dropdown-head">
+                                    <div>
+                                        <div class="pro-drawing-crumbs">Drawing Sources <i
+                                                class="fas fa-chevron-right"></i> Estimating Tool</div>
+                                        <strong>Drawings &amp; Sheets</strong>
+                                    </div>
+                                    <button class="pro-icon-btn" type="button" data-drawing-close
+                                        aria-label="Close drawing selector"><i
+                                            class="fas fa-times"></i></button>
+                                </div>
+                                <div class="pro-drawing-active-bar" id="takeoffDrawingActiveBar">
+                                    <div class="pro-drawing-active-info" id="takeoffDrawingActiveInfo">
+                                        <span class="pro-drawing-active-label">Item Activo:</span>
+                                        <span class="pro-drawing-active-pill" id="takeoffDrawingActivePill"
+                                            title="Item actualmente seleccionado para cotización">
+                                            <span class="pro-drawing-active-dot"
+                                                id="takeoffDrawingActiveDot"></span>
+                                            <span id="takeoffDrawingActiveText">Ningún item seleccionado</span>
+                                        </span>
+                                    </div>
+                                    <div class="pro-drawing-filters">
+                                        <button class="pro-drawing-filter-btn active"
+                                            id="takeoffFilterAllSheets" type="button"
+                                            data-drawing-filter="all">Todas las Hojas</button>
+                                        <button class="pro-drawing-filter-btn" id="takeoffFilterItemSheets"
+                                            type="button" data-drawing-filter="item">Solo con este Item <span
+                                                class="pro-filter-count"
+                                                id="takeoffFilterItemCount">0</span></button>
+                                    </div>
+                                </div>
+                                <div class="pro-drawing-search">
+                                    <input id="takeoffDrawingSearch" type="search"
+                                        placeholder="Search drawing or sheet...">
+                                    <i class="fas fa-magnifying-glass"></i>
+                                </div>
+                                <div class="pro-drawing-grid">
+                                    <div class="pro-drawing-col">
+                                        <div class="pro-drawing-col-title">Directory <span class="pro-col-badge"
+                                                id="takeoffDocTotalCount">0</span></div>
+                                        <div id="takeoffDocumentList" class="pro-drawing-list"></div>
+                                    </div>
+                                    <div class="pro-drawing-col">
+                                        <div class="pro-drawing-col-title">Sheets <span class="pro-col-badge"
+                                                id="takeoffSheetTotalCount">0</span></div>
+                                        <div id="takeoffSheetList" class="pro-drawing-list"></div>
+                                    </div>
+                                    <div class="pro-drawing-preview">
+                                        <div class="pro-drawing-col-title">Preview &amp; Takeoff</div>
+                                        <div class="pro-preview-container">
+                                            <div id="takeoffSheetPreview" class="pro-preview-box">
+                                                <span>Select a sheet</span>
+                                            </div>
+                                            <div class="pro-preview-details" id="takeoffPreviewDetails">
+                                                <div class="pro-preview-sheet-header">
+                                                    <h4 id="takeoffPreviewTitle">Sheet Preview</h4>
+                                                    <span class="pro-preview-sheet-sub"
+                                                        id="takeoffPreviewSub">Selecciona una hoja para ver sus
+                                                        marcas</span>
+                                                </div>
+                                                <div class="pro-preview-takeoff-section">
+                                                    <div class="pro-preview-section-title">
+                                                        <span><i class="fas fa-layer-group"></i> Items en esta
+                                                            hoja</span>
+                                                        <span class="pro-preview-item-count"
+                                                            id="takeoffPreviewItemCount">0 items</span>
+                                                    </div>
+                                                    <div class="pro-preview-items-list"
+                                                        id="takeoffPreviewItemsList">
+                                                        <div class="pro-preview-empty-takeoff">Sin marcas en
+                                                            esta hoja</div>
+                                                    </div>
+                                                </div>
+                                                <button class="pro-open-sheet-btn" id="takeoffOpenSheetBtn"
+                                                    type="button" disabled>
+                                                    <i class="fas fa-arrow-right-to-bracket"></i> Abrir Hoja
+                                                </button>
+                                            </div>
+                                        </div>
+                                    </div>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    <button class="pro-actions-btn takeoff-subhead-compare-btn" id="takeoffCompareBtn" type="button" title="Compare estimates">
+                        <i class="fas fa-code-compare"></i><span>Compare</span>
+                    </button>
+                </div>
+                <!-- Right tools: Download icon first, then Drawing Scale directly underneath Save Project -->
+                <div class="takeoff-subhead-tabs-tools" id="takeoffSubheadTabsTools">
+                    <button class="pro-actions-btn takeoff-subhead-download-btn icon-only" id="takeoffDownloadDrawingBtn" type="button"
+                        title="Download current drawing" aria-label="Download current drawing">
+                        <i class="fas fa-download"></i>
+                    </button>
+                    <div class="takeoff-subhead-scale-slot" id="takeoffSubheadScaleSlot">
+                        <div class="pro-scale-wrap">
+                            <button class="pro-scale-status" id="takeoffScaleStatus" type="button" data-scale-toggle
+                                aria-expanded="false">
+                                <i class="fas fa-triangle-exclamation" style="display:none;"></i>
+                                <span>Not Drawing Scale</span>
+                            </button>
+                            <div class="pro-scale-panel" id="takeoffScalePanel"
+                                aria-label="Takeoff scale calibration">
+                                <div class="pro-scale-panel-head">
+                                    <strong>Drawing Scale</strong>
+                                    <button class="pro-icon-btn" type="button" data-scale-close
+                                        aria-label="Close scale panel"><i class="fas fa-times"></i></button>
+                                </div>
+                                <label for="takeoffScaleMode">Calibration mode</label>
+                                <select id="takeoffScaleMode">
+                                    <option value="preset">Preset scale</option>
+                                    <option value="manual">Manual rule</option>
+                                </select>
+                                <div id="takeoffPresetWrap">
+                                    <label for="takeoffScalePreset">Scale preset</label>
+                                    <select id="takeoffScalePreset">
+                                        <option value="">Loading scales...</option>
+                                    </select>
+                                </div>
+                                <div id="takeoffManualWrap" class="pro-scale-manual" hidden>
+                                    <p>Draw a known line on the plan, enter its real length in feet, then apply.</p>
+                                    <div class="pro-scale-manual-row">
+                                        <input id="takeoffManualFeet" type="number" min="0.1" step="0.1"
+                                            placeholder="ft">
+                                        <button type="button" class="pro-toolbar-btn"
+                                            data-scale-apply-manual>Apply</button>
+                                    </div>
+                                    <button type="button" class="pro-chip-btn" data-scale-clear-line><i
+                                            class="fas fa-trash"></i> Clear line</button>
+                                </div>
+                                <div class="pro-scale-hint" id="takeoffScaleHint">Choose a preset scale or calibrate
+                                    manually.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
             </nav>
         </div>
 
@@ -1364,16 +1533,9 @@ $state = [
                             <div>
                                 <h2 id="takeoffPanelTitle">Takeoffs (0)</h2>
                             </div>
-                            <button class="pro-icon-btn" type="button" data-takeoff-action="toggle-global-visibility"
-                                title="Show/hide all takeoffs" aria-label="Show/hide all takeoffs"><i
-                                    class="fas fa-eye"></i></button>
                             <button class="pro-add-btn" type="button" data-takeoff-action="create-layer"
                                 title="Create New Takeoff Layer" aria-label="Create New Takeoff Layer"><i
                                     class="fas fa-plus"></i></button>
-                            <button class="pro-icon-btn" type="button" id="toggleTakeoffItemsPanel"
-                                title="Collapse panel" aria-label="Collapse items panel">
-                                <i class="fas fa-angles-left"></i>
-                            </button>
                         </div>
                         <div class="pro-takeoff-searchbar">
                             <div class="pro-search-input">
@@ -1382,245 +1544,42 @@ $state = [
                             </div>
                         </div>
                         <div class="pro-takeoff-actions-row">
+                            <button class="pro-visibility-btn pro-global-eye-btn" type="button" data-takeoff-action="toggle-global-visibility"
+                                title="Show/hide all takeoffs" aria-label="Show/hide all takeoffs"><i
+                                    class="fas fa-eye"></i></button>
                             <div class="pro-menu-wrap">
                                 <button class="pro-actions-btn" type="button"
                                     data-takeoff-menu-toggle="takeoffItemsActions" aria-label="Takeoff actions">
-                                    Actions <i class="fas fa-chevron-down"></i>
+                                    Actions <i class="fas fa-caret-down"></i>
                                 </button>
                                 <div class="pro-menu" id="takeoffItemsActions">
                                     <button type="button" data-takeoff-action="create-layer"><i class="fas fa-plus"></i>
                                         Create New Layer</button>
+                                    <button type="button" data-takeoff-action="create-group"><i class="fas fa-folder-plus"></i>
+                                        Create New Group</button>
                                     <button type="button" data-takeoff-action="collapse-all"><i
                                             class="fas fa-down-left-and-up-right-to-center"></i> Collapse All</button>
                                     <button type="button" class="excel" data-takeoff-action="export-excel"><i
                                             class="fas fa-file-excel"></i> Takeoff Quantities to Excel</button>
                                 </div>
                             </div>
-                            <button class="pro-create-group-btn" type="button" data-takeoff-action="create-group"><i
-                                    class="fas fa-folder-plus"></i><span>Create new group</span></button>
                         </div>
                         <div class="pro-takeoff-tree" id="takeoffItemsTree"></div>
-                        <div class="pro-takeoff-footer">
-                            <div>
-                                <span>Active Layer</span>
-                                <strong id="takeoffActiveLayerLabel">None</strong>
-                                <small><i class="fas fa-circle-check"></i> Ready for estimating</small>
-                            </div>
-                        </div>
                     </aside>
 
+                    <!-- Draggable Resizer & Collapse Flap Tab -->
+                    <div class="pro-sidebar-resizer" id="takeoffSidebarResizer" title="Drag to resize sidebar">
+                        <button class="pro-sidebar-collapse-tab" id="takeoffSidebarCollapseTab" type="button" title="Hide Sidebar" aria-label="Hide Sidebar">
+                            <i class="fas fa-chevron-left"></i>
+                        </button>
+                    </div>
+
                     <section class="pro-takeoff-viewer">
-                        <div class="pro-viewer-toolbar">
-                            <div class="pro-toolbar-group">
-                                <div class="pro-drawing-selector">
-                                    <button class="pro-sheet-select pro-sheet-trigger" id="takeoffSheetSelect"
-                                        type="button" aria-expanded="false">
-                                        <span
-                                            id="takeoffSheetLabel"><?= htmlspecialchars($selectedDoc['filename'] ?? 'No drawing selected') ?></span>
-                                        <i class="fas fa-chevron-down"></i>
-                                    </button>
-                                    <div class="pro-drawing-dropdown" id="takeoffDrawingDropdown"
-                                        aria-label="Drawing selector">
-                                        <div class="pro-drawing-dropdown-head">
-                                            <div>
-                                                <div class="pro-drawing-crumbs">Drawing Sources <i
-                                                        class="fas fa-chevron-right"></i> Estimating Tool</div>
-                                                <strong>Drawings &amp; Sheets</strong>
-                                            </div>
-                                            <button class="pro-icon-btn" type="button" data-drawing-close
-                                                aria-label="Close drawing selector"><i
-                                                    class="fas fa-times"></i></button>
-                                        </div>
-                                        <div class="pro-drawing-active-bar" id="takeoffDrawingActiveBar">
-                                            <div class="pro-drawing-active-info" id="takeoffDrawingActiveInfo">
-                                                <span class="pro-drawing-active-label">Item Activo:</span>
-                                                <span class="pro-drawing-active-pill" id="takeoffDrawingActivePill"
-                                                    title="Item actualmente seleccionado para cotización">
-                                                    <span class="pro-drawing-active-dot"
-                                                        id="takeoffDrawingActiveDot"></span>
-                                                    <span id="takeoffDrawingActiveText">Ningún item seleccionado</span>
-                                                </span>
-                                            </div>
-                                            <div class="pro-drawing-filters">
-                                                <button class="pro-drawing-filter-btn active"
-                                                    id="takeoffFilterAllSheets" type="button"
-                                                    data-drawing-filter="all">Todas las Hojas</button>
-                                                <button class="pro-drawing-filter-btn" id="takeoffFilterItemSheets"
-                                                    type="button" data-drawing-filter="item">Solo con este Item <span
-                                                        class="pro-filter-count"
-                                                        id="takeoffFilterItemCount">0</span></button>
-                                            </div>
-                                        </div>
-                                        <div class="pro-drawing-search">
-                                            <input id="takeoffDrawingSearch" type="search"
-                                                placeholder="Search drawing or sheet...">
-                                            <i class="fas fa-magnifying-glass"></i>
-                                        </div>
-                                        <div class="pro-drawing-grid">
-                                            <div class="pro-drawing-col">
-                                                <div class="pro-drawing-col-title">Directory <span class="pro-col-badge"
-                                                        id="takeoffDocTotalCount">0</span></div>
-                                                <div id="takeoffDocumentList" class="pro-drawing-list"></div>
-                                            </div>
-                                            <div class="pro-drawing-col">
-                                                <div class="pro-drawing-col-title">Sheets <span class="pro-col-badge"
-                                                        id="takeoffSheetTotalCount">0</span></div>
-                                                <div id="takeoffSheetList" class="pro-drawing-list"></div>
-                                            </div>
-                                            <div class="pro-drawing-preview">
-                                                <div class="pro-drawing-col-title">Preview &amp; Takeoff</div>
-                                                <div class="pro-preview-container">
-                                                    <div id="takeoffSheetPreview" class="pro-preview-box">
-                                                        <span>Select a sheet</span>
-                                                    </div>
-                                                    <div class="pro-preview-details" id="takeoffPreviewDetails">
-                                                        <div class="pro-preview-sheet-header">
-                                                            <h4 id="takeoffPreviewTitle">Sheet Preview</h4>
-                                                            <span class="pro-preview-sheet-sub"
-                                                                id="takeoffPreviewSub">Selecciona una hoja para ver sus
-                                                                marcas</span>
-                                                        </div>
-                                                        <div class="pro-preview-takeoff-section">
-                                                            <div class="pro-preview-section-title">
-                                                                <span><i class="fas fa-layer-group"></i> Items en esta
-                                                                    hoja</span>
-                                                                <span class="pro-preview-item-count"
-                                                                    id="takeoffPreviewItemCount">0 items</span>
-                                                            </div>
-                                                            <div class="pro-preview-items-list"
-                                                                id="takeoffPreviewItemsList">
-                                                                <div class="pro-preview-empty-takeoff">Sin marcas en
-                                                                    esta hoja</div>
-                                                            </div>
-                                                        </div>
-                                                        <button class="pro-open-sheet-btn" id="takeoffOpenSheetBtn"
-                                                            type="button" disabled>
-                                                            <i class="fas fa-arrow-right-to-bracket"></i> Abrir Hoja
-                                                        </button>
-                                                    </div>
-                                                </div>
-                                            </div>
-                                        </div>
-                                    </div>
-                                </div>
-                            </div>
-                            <div class="pro-toolbar-group center">
-                                <div class="pro-top-stat"><span>Page</span><strong id="takeoffTopPage">1 / 1</strong>
-                                </div>
-                                <div class="pro-top-stat"><span>Estimate</span><strong id="takeoffTopProgress">0%
-                                        ready</strong></div>
-                            </div>
-                            <div class="pro-scale-wrap">
-                                <button class="pro-scale-status" id="takeoffScaleStatus" type="button" data-scale-toggle
-                                    aria-expanded="false">
-                                    <i class="fas fa-triangle-exclamation"></i>
-                                    <span>Drawing Scale: not defined yet</span>
-                                </button>
-                                <div class="pro-scale-panel" id="takeoffScalePanel"
-                                    aria-label="Takeoff scale calibration">
-                                    <div class="pro-scale-panel-head">
-                                        <strong>Drawing Scale</strong>
-                                        <button class="pro-icon-btn" type="button" data-scale-close
-                                            aria-label="Close scale panel"><i class="fas fa-times"></i></button>
-                                    </div>
-                                    <label for="takeoffScaleMode">Calibration mode</label>
-                                    <select id="takeoffScaleMode">
-                                        <option value="preset">Preset scale</option>
-                                        <option value="manual">Manual rule</option>
-                                    </select>
-                                    <div id="takeoffPresetWrap">
-                                        <label for="takeoffScalePreset">Scale preset</label>
-                                        <select id="takeoffScalePreset">
-                                            <option value="">Loading scales...</option>
-                                        </select>
-                                    </div>
-                                    <div id="takeoffManualWrap" class="pro-scale-manual" hidden>
-                                        <p>Draw a known line on the plan, enter its real length in feet, then apply.</p>
-                                        <div class="pro-scale-manual-row">
-                                            <input id="takeoffManualFeet" type="number" min="0.1" step="0.1"
-                                                placeholder="ft">
-                                            <button type="button" class="pro-toolbar-btn"
-                                                data-scale-apply-manual>Apply</button>
-                                        </div>
-                                        <button type="button" class="pro-chip-btn" data-scale-clear-line><i
-                                                class="fas fa-trash"></i> Clear line</button>
-                                    </div>
-                                    <div class="pro-scale-hint" id="takeoffScaleHint">Choose a preset scale or calibrate
-                                        manually.</div>
-                                </div>
-                            </div>
-                            <div class="pro-menu-wrap">
-                                <button class="pro-actions-btn" type="button"
-                                    data-takeoff-menu-toggle="takeoffWorkspaceActions">
-                                    <i class="fas fa-ellipsis-vertical"></i><span>Project actions</span><i
-                                        class="fas fa-chevron-down"></i>
-                                </button>
-                                <div class="pro-menu" id="takeoffWorkspaceActions">
-                                    <button type="button" data-takeoff-action="upload-drawing"><i
-                                            class="fas fa-cloud-arrow-up"></i> Upload drawing</button>
-                                    <button type="button" data-takeoff-action="save-workspace"><i
-                                            class="fas fa-floppy-disk"></i> Save workspace</button>
-                                    <button type="button" data-takeoff-action="export-excel"><i
-                                            class="fas fa-file-export"></i> Export quantities</button>
-                                    <button type="button" data-viewer-command="download"><i class="fas fa-download"></i>
-                                        Download drawing</button>
-                                </div>
-                            </div>
-                        </div>
+                        <div class="pro-viewer-toolbar" style="display:none;"></div>
 
                         <div class="pro-canvas-shell">
-                            <?php if ($selectedDoc && $selectedDoc['source'] === 'legacy_file'): ?>
-                                <iframe id="takeoffFrame" class="takeoff-frame pro-takeoff-frame"
-                                    src="editor.php?id=<?= (int) $selectedDoc['id'] ?>&embedded=1&estimate_key=est_primary&inherit_legacy=1"></iframe>
-                            <?php else: ?>
-                                <div id="takeoffEmpty" class="takeoff-empty pro-takeoff-empty">
-                                    <div>
-                                        <i class="fas fa-file-pdf fa-3x mb-3"></i>
-                                        <h3>No drawing selected</h3>
-                                        <p>Upload drawings in Documents to start takeoff.</p>
-                                    </div>
-                                </div>
-                                <iframe id="takeoffFrame" class="takeoff-frame pro-takeoff-frame"
-                                    style="display:none;"></iframe>
-                            <?php endif; ?>
-
-                            <div class="pro-floating-controls">
-                                <button class="pro-icon-btn" type="button" data-viewer-command="previous"
-                                    title="Previous sheet"><i class="fas fa-chevron-left"></i></button>
-                                <button class="pro-icon-btn" type="button" data-viewer-command="next"
-                                    title="Next sheet"><i class="fas fa-chevron-right"></i></button>
-                                <button class="pro-icon-btn" type="button" data-viewer-command="zoom-out"
-                                    title="Zoom out"><i class="fas fa-minus"></i></button>
-                                <input id="takeoffZoomSlider" type="range" min="25" max="400" value="100"
-                                    aria-label="Zoom">
-                                <span id="takeoffZoomPercent">100%</span>
-                                <button class="pro-icon-btn" type="button" data-viewer-command="zoom-in"
-                                    title="Zoom in"><i class="fas fa-plus"></i></button>
-                                <button class="pro-chip-btn" type="button" data-viewer-command="fit">Fit</button>
-                                <button class="pro-icon-btn" type="button" data-viewer-command="fullscreen"
-                                    title="Fullscreen"><i class="fas fa-expand"></i></button>
-                            </div>
-                        </div>
-
-                        <div class="pro-row-menu" id="takeoffRowMenu">
-                            <button type="button"><i class="fas fa-pen"></i> Rename</button>
-                            <button type="button"><i class="fas fa-copy"></i> Duplicate</button>
-                            <button type="button"><i class="fas fa-sliders"></i> Edit Properties</button>
-                            <button type="button"><i class="fas fa-palette"></i> Change Color</button>
-                            <button type="button" class="danger"><i class="fas fa-trash"></i> Delete</button>
-                        </div>
-                    </section>
-
-                    <aside class="pro-takeoff-inspector" aria-label="Takeoff tools and properties">
-                        <div class="pro-inspector-head">
-                            <div><strong>Takeoff inspector</strong><small>Tools & properties</small></div>
-                            <button class="pro-icon-btn" type="button" id="toggleTakeoffInspector"
-                                title="Collapse inspector" aria-label="Collapse inspector">
-                                <i class="fas fa-angles-right"></i>
-                            </button>
-                        </div>
-                        <div class="pro-inspector-tools">
-                            <div class="pro-tools-bar" aria-label="Takeoff tools">
+                            <!-- Floating tool buttons inside canvas (Point 5) -->
+                            <div class="pro-floating-tools" id="takeoffFloatingTools" aria-label="Takeoff tools">
                                 <button class="pro-tool-btn active" type="button" data-tool-command="smart"
                                     title="Select"><i class="fas fa-mouse-pointer"></i></button>
                                 <button class="pro-tool-btn" type="button" data-tool-command="pan" title="Pan"><i
@@ -1651,10 +1610,59 @@ $state = [
                                         class="fas fa-rotate-right"></i></button>
                                 <button class="pro-tool-btn danger" type="button" data-tool-command="delete"
                                     title="Delete"><i class="fas fa-trash"></i></button>
+                                <div class="pro-tool-separator"></div>
+                                <button class="pro-tool-btn" type="button" id="takeoffToolsDockToggle"
+                                    title="Dock left / right" aria-label="Dock left or right"><i
+                                        class="fas fa-right-left"></i></button>
                             </div>
-                            <div class="pro-inspector-content" id="takeoffInspectorContent"></div>
+
+                            <?php if ($selectedDoc && $selectedDoc['source'] === 'legacy_file'): ?>
+                                <iframe id="takeoffFrame" class="takeoff-frame pro-takeoff-frame"
+                                    src="editor.php?id=<?= (int) $selectedDoc['id'] ?>&embedded=1&estimate_key=est_primary&inherit_legacy=1"></iframe>
+                            <?php else: ?>
+                                <div id="takeoffEmpty" class="takeoff-empty pro-takeoff-empty">
+                                    <div>
+                                        <i class="fas fa-file-pdf fa-3x mb-3"></i>
+                                        <h3>No drawing selected</h3>
+                                        <p>Upload drawings in Documents to start takeoff.</p>
+                                    </div>
+                                </div>
+                                <iframe id="takeoffFrame" class="takeoff-frame pro-takeoff-frame"
+                                    style="display:none;"></iframe>
+                            <?php endif; ?>
+
+                            <div class="pro-floating-controls">
+                                <button class="pro-icon-btn" type="button" data-viewer-command="previous"
+                                    title="Previous sheet"><i class="fas fa-chevron-left"></i></button>
+                                <button class="pro-icon-btn" type="button" data-viewer-command="next"
+                                    title="Next sheet"><i class="fas fa-chevron-right"></i></button>
+                                <button class="pro-icon-btn" type="button" data-viewer-command="zoom-out"
+                                    title="Zoom out"><i class="fas fa-minus"></i></button>
+                                <input id="takeoffZoomSlider" type="range" min="25" max="400" value="100"
+                                    aria-label="Zoom">
+                                <span id="takeoffZoomPercent">100%</span>
+                                <button class="pro-icon-btn" type="button" data-viewer-command="zoom-in"
+                                    title="Zoom in"><i class="fas fa-plus"></i></button>
+                                <button class="pro-chip-btn" type="button" data-viewer-command="fit">Fit</button>
+                                <div class="takeoff-subhead-page-wrap" id="takeoffFloatingPageWrap">
+                                    <span class="takeoff-subhead-page-badge" title="Sheet Page Count">
+                                        <span id="takeoffTopPage">1 / 1</span>
+                                    </span>
+                                    <span id="takeoffTopProgress" style="display:none;"></span>
+                                </div>
+                                <button class="pro-icon-btn" type="button" data-viewer-command="fullscreen"
+                                    title="Fullscreen"><i class="fas fa-expand"></i></button>
+                            </div>
                         </div>
-                    </aside>
+
+                        <div class="pro-row-menu" id="takeoffRowMenu">
+                            <button type="button"><i class="fas fa-pen"></i> Rename</button>
+                            <button type="button"><i class="fas fa-copy"></i> Duplicate</button>
+                            <button type="button"><i class="fas fa-sliders"></i> Edit Properties</button>
+                            <button type="button"><i class="fas fa-palette"></i> Change Color</button>
+                            <button type="button" class="danger"><i class="fas fa-trash"></i> Delete</button>
+                        </div>
+                    </section>
                     <footer class="est-version-bar" id="takeoffEstimateTypesFooter" aria-label="Available estimates">
                         <span class="est-pill">Loading estimates&hellip;</span>
                     </footer>
@@ -1925,7 +1933,7 @@ $state = [
                     </footer>
                 </div>
         </main>
-        <footer class="bb-brightronix-footer">
+        <footer class="bb-brightronix-footer" <?= $activeTab === 'takeoff' ? 'style="display:none;"' : '' ?>>
             <span>All Rights Reserved by Brightronix &copy; 2026</span>
         </footer>
     </div>
@@ -2167,6 +2175,23 @@ $state = [
             ProjectState.activeTab = tab;
             const scrollTabs = ['overview'];
             document.querySelector('.workspace-shell')?.classList.toggle('workspace-scroll-mode', scrollTabs.includes(tab));
+            const isTakeoff = (tab === 'takeoff');
+            document.querySelector('.project-subhead-wrapper')?.classList.toggle('is-takeoff-tab', isTakeoff);
+            document.querySelector('.workspace-shell')?.classList.toggle('is-takeoff-tab', isTakeoff);
+            document.body.classList.toggle('is-takeoff-tab', isTakeoff);
+            const footer = document.querySelector('.bb-brightronix-footer');
+            if (footer) footer.style.display = isTakeoff ? 'none' : '';
+            if (!isTakeoff) {
+                const info = document.getElementById('takeoffSubheadItemInfo');
+                if (info) {
+                    info.style.display = 'none';
+                    info.classList.remove('is-visible');
+                }
+            } else {
+                setTimeout(() => {
+                    window.syncTakeoffLayout?.();
+                }, 0);
+            }
             tabs.forEach(btn => {
                 const active = btn.dataset.tab === tab;
                 btn.classList.toggle('active', active);
@@ -2373,28 +2398,28 @@ $state = [
     </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script>if (window.pdfjsLib) window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';</script>
-    <script src="../assets/project_overview.js?v=doc-modal-confirm-20260925-4"></script>
+    <script src="../assets/project_overview.js?v=modal-guard-20260929-1"></script>
     <script src="../assets/estimating_catalog_snapshot_service.js?v=estimating-catalog-snapshot-20260827-1"></script>
     <script src="../assets/catalog_change_detection_service.js?v=catalog-change-detection-20260827-1"></script>
     <script src="../assets/takeoff_estimating_sync_service.js?v=estimating-linked-part-20260831-1"></script>
-    <script src="../assets/project_estimate_footer.js?v=estimate-menu-all-tabs-20260820-5"></script>
+    <script src="../assets/project_estimate_footer.js?v=estimate-star-orange-20260929-1"></script>
     <script src="../assets/catalog_item_contract.js?v=catalog-item-contract-20260826-1"></script>
     <script src="../assets/catalog_metadata.js?v=catalog-metadata-20260826-1"></script>
     <script src="../assets/catalog_service.js?v=catalog-service-20260826-1"></script>
     <script src="../assets/boq_catalog_adapter.js?v=boq-catalog-boundary-20260826-1"></script>
     <script src="../assets/takeoff_catalog_adapter.js?v=takeoff-catalog-boundary-20260826-1"></script>
     <script src="../assets/takeoff_color_palette.js?v=takeoff-duplicate-color-20260831-1"></script>
-    <script src="../assets/project_takeoff.js?v=takeoff-duplicate-edit-persistence-20260831-1"></script>
+    <script src="../assets/project_takeoff.js?v=takeoff-persist-20260929-1"></script>
     <script src="../assets/assembly_expansion_service.js?v=assembly-expansion-20260828-1"></script>
     <script src="../assets/estimating_assembly_expansion_adapter.js?v=estimating-assembly-adapter-20260828-1"></script>
     <script src="../assets/quantity_format_service.js?v=quantity-context-format-20260831-1"></script>
     <script src="../assets/estimate_calculation_service.js?v=estimating-normal-item-quantity-20260831-1"></script>
     <script src="../assets/catalog_update_preview_service.js?v=catalog-update-preview-20260827-1"></script>
     <script src="../assets/estimating_export_service.js?v=estimating-boq-export-20260820-1"></script>
-    <script src="../assets/estimating_workspace_service.js?v=estimating-catalog-snapshot-20260827-1"></script>
+    <script src="../assets/estimating_workspace_service.js?v=workspace-primary-20260929-1"></script>
     <script src="../assets/catalog_update_application_service.js?v=catalog-update-application-20260827-2"></script>
     <script src="../assets/estimating_catalog_adapter.js?v=estimating-catalog-snapshot-20260827-1"></script>
-    <script src="../assets/project_estimating.js?v=estimating-assembly-hierarchy-20260902-1"></script>
+    <script src="../assets/project_estimating.js?v=estimating-all-modals-20260929-1"></script>
     <script src="../assets/catalog_update_ui.js?v=catalog-update-ui-20260827-1"></script>
     <script src="../assets/project_proposal.js?v=quantity-context-format-20260831-1"></script>
     <script src="../assets/global_tools.js"></script>

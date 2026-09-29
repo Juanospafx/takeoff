@@ -58,6 +58,29 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
     
     <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
+    <script>
+        (function() {
+            var theme = localStorage.getItem('bt_theme') || localStorage.getItem('theme') || 'light';
+            document.documentElement.setAttribute('data-theme', theme);
+            window.addEventListener('message', function(e) {
+                if (e.data && e.data.type === 'theme-change') {
+                    var newTheme = e.data.theme || 'light';
+                    document.documentElement.setAttribute('data-theme', newTheme);
+                    if (document.body) {
+                        document.body.classList.toggle('theme-dark', newTheme === 'dark');
+                        document.body.classList.toggle('theme-light', newTheme === 'light');
+                    }
+                }
+            });
+            document.addEventListener('DOMContentLoaded', function() {
+                var currentTheme = document.documentElement.getAttribute('data-theme') || 'light';
+                if (document.body) {
+                    document.body.classList.toggle('theme-dark', currentTheme === 'dark');
+                    document.body.classList.toggle('theme-light', currentTheme === 'light');
+                }
+            });
+        })();
+    </script>
 
     <link rel="stylesheet" href="../assets/editor/editor.css?v=takeoff-editor-20260611-4">
     <link rel="stylesheet" href="../assets/editor/takeoff.css?v=takeoff-locking-20260804-1">
@@ -88,7 +111,11 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
         body.embedded-editor .canvas-area {
             grid-area: canvas;
-            background: #dfe4ea;
+            background: #eaedf2;
+        }
+        [data-theme="dark"] body.embedded-editor .canvas-area,
+        body.theme-dark.embedded-editor .canvas-area {
+            background: #141822 !important;
         }
 
         /* --- LAYOUT GRID (Desktop Default) --- */

@@ -128,7 +128,15 @@
         const total = summary();
         window.dispatchEvent(new CustomEvent('takeoff:estimating-state-updated', { detail: {
             projectId: String(projectId), activeEstimateId: state.activeEstimateId,
-            estimates: state.estimates.map(row => ({ id: row.id, name: row.name, status: row.status })),
+            estimates: state.estimates.map(row => ({
+                id: row.id,
+                name: row.name,
+                status: row.status,
+                is_primary: Boolean(row.is_primary || row.isPrimary),
+                isPrimary: Boolean(row.is_primary || row.isPrimary),
+                groups: row.groups,
+                settings: row.settings
+            })),
             summary: { material: total.direct.materialSales, labor: total.direct.laborSales,
                 equipment: total.direct.equipmentSales, preTaxMarkup: total.preTaxTotal,
                 taxes: total.totalTax, total: total.estimateTotal, profit: total.profit }
@@ -821,11 +829,133 @@
         if (!ui.modal) return;
         const portal = document.createElement('div');
         portal.dataset.estimatingModalPortal = '';
-        portal.className = 'est-modal-backdrop';
-        if (ui.modal === 'new') portal.innerHTML = `<div class="est-dialog est-copy-modal" role="dialog" aria-modal="true" aria-labelledby="copyEstimateTitle"><header><div><h2 id="copyEstimateTitle">New Estimate</h2><span>Create an independent estimate for this project</span></div><button type="button" aria-label="Close" data-close-modal>&times;</button></header><div class="est-copy-body"><label class="est-copy-name"><span>Name</span><input id="copyEstimateName" type="text" value="${esc(current().name)} Copy" autocomplete="off"></label><fieldset><legend>Starting point</legend><label class="est-copy-option"><input type="radio" name="copyEstimateMode" value="all" checked><span><strong>Copy everything</strong><small>Start with an independent copy of groups, items, quantities, notes and markups.</small></span></label><label class="est-copy-option"><input type="radio" name="copyEstimateMode" value="structure"><span><strong>Groups only</strong><small>Keep only the group structure; Takeoff items are not imported automatically.</small></span></label><label class="est-copy-option"><input type="radio" name="copyEstimateMode" value="blank"><span><strong>Blank</strong><small>Start completely empty; Takeoff items are added only when explicitly linked.</small></span></label></fieldset></div><footer><button type="button" data-close-modal>Cancel</button><button type="button" class="est-btn-primary" data-create-estimate data-est-action="create-estimate-copy">Create estimate</button></footer></div>`;
-        if (ui.modal === 'compare') portal.innerHTML = `<div class="est-dialog est-compare" role="dialog" aria-modal="true"><header><h2>Compare Estimates</h2><button type="button" data-close-modal data-modal-close="compareOpen">&times;</button></header><div class="est-compare-grid">${state.estimates.map(row => { const total = Calc.calculateSummary(row.groups, row.settings); return `<article><h3>${esc(row.name)}</h3><p>${row.groups.reduce((sum, group) => sum + group.items.length, 0)} items</p><strong>${money(total.estimateTotal)}</strong><span>${money(total.profit)} profit</span></article>`; }).join('')}</div></div>`;
-        if (ui.modal === 'export') portal.innerHTML = `<div class="est-dialog est-copy-modal" role="dialog" aria-modal="true" aria-labelledby="exportEstimateTitle"><header><div><h2 id="exportEstimateTitle">Export Estimate</h2><span>Download a supplier-ready bill of materials or bill of quantities</span></div><button type="button" aria-label="Close" data-close-modal>&times;</button></header><div class="est-copy-body"><fieldset><legend>Export format</legend><label class="est-copy-option"><input type="radio" name="estimateExportMode" value="bom-excel" checked><span><strong>Bill of Materials (BOM - Excel)</strong><small>Summary of all items separated by groups, with hierarchical assemblies and components formatted for Excel (.xls).</small></span></label><label class="est-copy-option"><input type="radio" name="estimateExportMode" value="bom-csv"><span><strong>Bill of Materials (BOM - CSV)</strong><small>Hierarchical BOM with group headers and assembly components as CSV.</small></span></label><label class="est-copy-option"><input type="radio" name="estimateExportMode" value="normal"><span><strong>BOQ normal (CSV)</strong><small>Export the estimate as organized, keeping assemblies as assembly rows.</small></span></label><label class="est-copy-option"><input type="radio" name="estimateExportMode" value="flat"><span><strong>BOQ Flat (CSV)</strong><small>Break assemblies into parts and consolidate the total quantity of each catalog item.</small></span></label></fieldset></div><footer><button type="button" data-close-modal>Cancel</button><button type="button" class="est-btn-primary" data-download-estimate>Export</button></footer></div>`;
-        if (ui.modal === 'catalog') portal.innerHTML = `<div class="est-dialog est-copy-modal" role="dialog" aria-modal="true" aria-labelledby="estimateCatalogTitle"><header><div><h2 id="estimateCatalogTitle">Add Cost Catalog Item</h2><span>Select an existing catalog item for this estimate group</span></div><button type="button" aria-label="Close" data-close-modal>&times;</button></header><div class="est-copy-body"><input type="search" data-est-catalog-search placeholder="Search Cost Catalog" autocomplete="off"><div data-est-catalog-results>${ui.catalogLoading ? '<div class="est-empty">Loading Cost Catalog…</div>' : (ui.catalogError ? `<div class="est-empty">${esc(ui.catalogError)}</div>` : renderCatalogChoices(''))}</div></div><footer><button type="button" data-close-modal>Cancel</button></footer></div>`;
+        portal.className = 'pd-modal-backdrop open';
+        portal.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(4px); z-index: 999999;';
+        if (ui.modal === 'new') {
+            portal.innerHTML = `<div class="pd-modal" style="width: min(520px, 100%); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="copyEstimateTitle">
+                <div class="pd-modal-head" style="padding: 14px 18px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
+                    <div>
+                        <h3 id="copyEstimateTitle" style="margin: 0; font-size: 1.05rem; display: flex; align-items: center; gap: 8px;">
+                            <i class="fas fa-calculator" style="color: var(--primary, #fb5a3a);"></i> New Estimate
+                        </h3>
+                        <span style="font-size: .78rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Create an independent estimate for this project</span>
+                    </div>
+                    <button class="pd-modal-head-close" type="button" data-close-modal aria-label="Close" style="border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--text-muted, #64748b);">&times;</button>
+                </div>
+                <div class="pd-modal-body" style="display: flex; flex-direction: column; gap: 14px; padding: 18px 20px; background: var(--bg-panel, #ffffff);">
+                    <label class="overview-field full" style="display: flex; flex-direction: column; gap: 6px;">
+                        <span style="font-size: .8rem; font-weight: 600; color: var(--text-main, #0f172a);">Estimate Name</span>
+                        <input id="copyEstimateName" class="pd-composer-input" type="text" value="${esc(current().name)} Copy" autocomplete="off" placeholder="Estimate name..." style="width: 100%; box-sizing: border-box; height: 36px; padding: 6px 12px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: var(--bg-card, #f8fafc); color: inherit;">
+                    </label>
+                    <fieldset style="border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px; padding: 12px 14px; margin: 0; display: flex; flex-direction: column; gap: 8px; background: var(--bg-card, #f8fafc);">
+                        <legend style="font-size: .75rem; font-weight: 700; color: var(--text-muted, #64748b); padding: 0 4px; text-transform: uppercase; letter-spacing: 0.05em;">Starting point</legend>
+                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
+                            <input type="radio" name="copyEstimateMode" value="all" checked style="margin-top: 3px;">
+                            <span><strong style="display: block; font-size: .83rem;">Copy everything</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Start with an independent copy of groups, items, quantities, notes and markups.</small></span>
+                        </label>
+                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
+                            <input type="radio" name="copyEstimateMode" value="structure" style="margin-top: 3px;">
+                            <span><strong style="display: block; font-size: .83rem;">Groups only</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Keep only the group structure; Takeoff items are not imported automatically.</small></span>
+                        </label>
+                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
+                            <input type="radio" name="copyEstimateMode" value="blank" style="margin-top: 3px;">
+                            <span><strong style="display: block; font-size: .83rem;">Blank</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Start completely empty; Takeoff items are added only when explicitly linked.</small></span>
+                        </label>
+                    </fieldset>
+                </div>
+                <div class="pd-modal-foot" style="display: flex; justify-content: flex-end; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--border, #e2e8f0); background: var(--bg-card, #f8fafc);">
+                    <button type="button" class="btn-ghost" data-close-modal style="padding: 7px 14px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; cursor: pointer;">Cancel</button>
+                    <button type="button" class="btn-main orange" data-create-estimate data-est-action="create-estimate-copy" style="padding: 7px 16px; border: none; border-radius: 6px; background: var(--primary, #fb5a3a); color: #fff; font-weight: 600; cursor: pointer;"><i class="fas fa-plus"></i> Create Estimate</button>
+                </div>
+            </div>`;
+        }
+        if (ui.modal === 'compare') {
+            portal.innerHTML = `<div class="pd-modal" style="width: min(720px, 100%); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true">
+                <div class="pd-modal-head" style="padding: 14px 18px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <i class="fas fa-code-compare" style="color: var(--primary, #fb5a3a);"></i>
+                        <h3 style="margin: 0; font-size: 1.05rem; font-weight: 600;">Compare Estimates</h3>
+                    </div>
+                    <button class="pd-modal-head-close" type="button" data-close-modal data-modal-close="compareOpen" aria-label="Close" style="border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--text-muted, #64748b);">&times;</button>
+                </div>
+                <div class="pd-modal-body" style="padding: 18px 20px; background: var(--bg-panel, #ffffff);">
+                    <div class="est-compare-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px;">
+                        ${state.estimates.map(row => {
+                            const total = Calc.calculateSummary(row.groups, row.settings);
+                            return `<article style="border: 1px solid var(--border, #cbd5e1); border-radius: 8px; padding: 12px; background: var(--bg-card, #f8fafc);">
+                                <h4 style="margin: 0 0 6px; font-size: .92rem;">${esc(row.name)}</h4>
+                                <p style="margin: 0 0 8px; font-size: .78rem; color: var(--text-muted, #64748b);">${row.groups.reduce((sum, group) => sum + group.items.length, 0)} items</p>
+                                <strong style="display: block; font-size: 1.1rem; color: var(--text-main, #0f172a);">${money(total.estimateTotal)}</strong>
+                                <span style="display: block; font-size: .78rem; color: #16a34a; margin-top: 2px;">${money(total.profit)} profit</span>
+                            </article>`;
+                        }).join('')}
+                    </div>
+                </div>
+                <div class="pd-modal-foot" style="display: flex; justify-content: flex-end; padding: 12px 20px; border-top: 1px solid var(--border, #e2e8f0); background: var(--bg-card, #f8fafc);">
+                    <button type="button" class="btn-ghost" data-close-modal data-modal-close="compareOpen" style="padding: 7px 16px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; cursor: pointer;">Close</button>
+                </div>
+            </div>`;
+        }
+        if (ui.modal === 'export') {
+            portal.innerHTML = `<div class="pd-modal" style="width: min(520px, 100%); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="exportEstimateTitle">
+                <div class="pd-modal-head" style="padding: 14px 18px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
+                    <div>
+                        <h3 id="exportEstimateTitle" style="margin: 0; font-size: 1.05rem; display: flex; align-items: center; gap: 8px;">
+                            <i class="fas fa-file-export" style="color: var(--primary, #fb5a3a);"></i> Export Estimate
+                        </h3>
+                        <span style="font-size: .78rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Download a supplier-ready bill of materials or bill of quantities</span>
+                    </div>
+                    <button class="pd-modal-head-close" type="button" aria-label="Close" data-close-modal style="border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--text-muted, #64748b);">&times;</button>
+                </div>
+                <div class="pd-modal-body" style="padding: 18px 20px; background: var(--bg-panel, #ffffff);">
+                    <fieldset style="border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px; padding: 12px 14px; margin: 0; display: flex; flex-direction: column; gap: 8px; background: var(--bg-card, #f8fafc);">
+                        <legend style="font-size: .75rem; font-weight: 700; color: var(--text-muted, #64748b); padding: 0 4px; text-transform: uppercase; letter-spacing: 0.05em;">Export format</legend>
+                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
+                            <input type="radio" name="estimateExportMode" value="bom-excel" checked style="margin-top: 3px;">
+                            <span><strong style="display: block; font-size: .83rem;">Bill of Materials (BOM - Excel)</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Summary of all items separated by groups, with hierarchical assemblies and components formatted for Excel (.xls).</small></span>
+                        </label>
+                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
+                            <input type="radio" name="estimateExportMode" value="bom-csv" style="margin-top: 3px;">
+                            <span><strong style="display: block; font-size: .83rem;">Bill of Materials (BOM - CSV)</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Hierarchical BOM with group headers and assembly components as CSV.</small></span>
+                        </label>
+                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
+                            <input type="radio" name="estimateExportMode" value="normal" style="margin-top: 3px;">
+                            <span><strong style="display: block; font-size: .83rem;">BOQ normal (CSV)</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Export the estimate as organized, keeping assemblies as assembly rows.</small></span>
+                        </label>
+                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
+                            <input type="radio" name="estimateExportMode" value="flat" style="margin-top: 3px;">
+                            <span><strong style="display: block; font-size: .83rem;">BOQ Flat (CSV)</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Break assemblies into parts and consolidate the total quantity of each catalog item.</small></span>
+                        </label>
+                    </fieldset>
+                </div>
+                <div class="pd-modal-foot" style="display: flex; justify-content: flex-end; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--border, #e2e8f0); background: var(--bg-card, #f8fafc);">
+                    <button type="button" class="btn-ghost" data-close-modal style="padding: 7px 14px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; cursor: pointer;">Cancel</button>
+                    <button type="button" class="btn-main orange" data-download-estimate style="padding: 7px 16px; border: none; border-radius: 6px; background: var(--primary, #fb5a3a); color: #fff; font-weight: 600; cursor: pointer;"><i class="fas fa-download"></i> Export</button>
+                </div>
+            </div>`;
+        }
+        if (ui.modal === 'catalog') {
+            portal.innerHTML = `<div class="pd-modal" style="width: min(580px, 100%); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="estimateCatalogTitle">
+                <div class="pd-modal-head" style="padding: 14px 18px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
+                    <div>
+                        <h3 id="estimateCatalogTitle" style="margin: 0; font-size: 1.05rem; display: flex; align-items: center; gap: 8px;">
+                            <i class="fas fa-book-open" style="color: var(--primary, #fb5a3a);"></i> Add Cost Catalog Item
+                        </h3>
+                        <span style="font-size: .78rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Select an existing catalog item for this estimate group</span>
+                    </div>
+                    <button class="pd-modal-head-close" type="button" aria-label="Close" data-close-modal style="border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--text-muted, #64748b);">&times;</button>
+                </div>
+                <div class="pd-modal-body" style="padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; background: var(--bg-panel, #ffffff);">
+                    <input type="search" data-est-catalog-search placeholder="Search Cost Catalog..." autocomplete="off" style="width: 100%; box-sizing: border-box; height: 36px; padding: 6px 12px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: var(--bg-card, #f8fafc); color: inherit;">
+                    <div data-est-catalog-results style="max-height: 320px; overflow-y: auto;">
+                        ${ui.catalogLoading ? '<div class="est-empty" style="padding: 24px; text-align: center; color: var(--text-muted, #64748b);">Loading Cost Catalog…</div>' : (ui.catalogError ? `<div class="est-empty" style="padding: 24px; text-align: center; color: #ef4444;">${esc(ui.catalogError)}</div>` : renderCatalogChoices(''))}
+                    </div>
+                </div>
+                <div class="pd-modal-foot" style="display: flex; justify-content: flex-end; padding: 12px 20px; border-top: 1px solid var(--border, #e2e8f0); background: var(--bg-card, #f8fafc);">
+                    <button type="button" class="btn-ghost" data-close-modal style="padding: 7px 16px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; cursor: pointer;">Cancel</button>
+                </div>
+            </div>`;
+        }
         document.body.appendChild(portal);
         portal.querySelector('input, button')?.focus();
     }
@@ -1037,12 +1167,42 @@
     }
 
     function confirmEstimateDeletion(message) {
+        if (typeof window.showConfirmDialog === 'function') {
+            return window.showConfirmDialog({
+                title: 'Delete Estimate',
+                message: message,
+                confirmText: 'Delete Estimate',
+                cancelText: 'Cancel',
+                primaryDanger: true,
+                badge: 'CONFIRM DELETION',
+                icon: 'fas fa-trash'
+            });
+        }
         return new Promise(resolve => {
             document.querySelector('[data-estimate-delete-confirm]')?.remove();
             const portal = document.createElement('div');
-            portal.className = 'est-modal-backdrop';
+            portal.className = 'pd-modal-backdrop open';
             portal.dataset.estimateDeleteConfirm = 'true';
-            portal.innerHTML = `<div class="est-dialog est-copy-modal" role="dialog" aria-modal="true" aria-labelledby="deleteEstimateTitle"><header><div><h2 id="deleteEstimateTitle">Delete estimate</h2><span>This action cannot be undone</span></div></header><div class="est-copy-body"><p>${esc(message)}</p></div><footer><button type="button" data-delete-cancel>Cancel</button><button type="button" class="est-btn-primary" data-delete-confirm>Delete</button></footer></div>`;
+            portal.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(4px); z-index: 999999;';
+            portal.innerHTML = `<div class="pd-modal" style="width: min(460px, 100%); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="deleteEstimateTitle">
+                <div class="pd-modal-head" style="padding: 14px 18px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
+                    <div style="display: flex; align-items: center; gap: 8px;">
+                        <i class="fas fa-trash-can" style="color: #ef4444; font-size: 1.1rem;"></i>
+                        <h3 id="deleteEstimateTitle" style="margin: 0; font-size: 1.05rem; font-weight: 600;">Delete Estimate</h3>
+                    </div>
+                    <button class="pd-modal-head-close" type="button" data-delete-cancel aria-label="Close" style="border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--text-muted, #64748b);">&times;</button>
+                </div>
+                <div class="pd-modal-body" style="padding: 18px 20px; font-size: .88rem; color: var(--text-main, #334155); line-height: 1.5; background: var(--bg-panel, #ffffff);">
+                    <p style="margin: 0 0 10px;">${esc(message)}</p>
+                    <div style="background: rgba(239, 68, 68, 0.08); border-left: 3px solid #ef4444; padding: 8px 12px; border-radius: 4px; font-size: .8rem; color: #b91c1c;">
+                        <strong>Warning:</strong> This action is permanent and cannot be undone.
+                    </div>
+                </div>
+                <div class="pd-modal-foot" style="display: flex; justify-content: flex-end; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--border, #e2e8f0); background: var(--bg-card, #f8fafc);">
+                    <button type="button" class="btn-ghost" data-delete-cancel style="padding: 7px 14px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; cursor: pointer;">Cancel</button>
+                    <button type="button" class="btn-main" data-delete-confirm style="padding: 7px 16px; border: none; border-radius: 6px; background: #ef4444; color: #fff; font-weight: 600; cursor: pointer;"><i class="fas fa-trash"></i> Delete Estimate</button>
+                </div>
+            </div>`;
             const finish = value => { portal.remove(); resolve(value); };
             portal.addEventListener('click', event => {
                 if (event.target === portal || event.target.closest('[data-delete-cancel]')) finish(false);
@@ -1171,12 +1331,42 @@
     function handleEstimateCardAction(actionName, estimateId) {
         if (actionName === 'rename') {
             const estimate = state.estimates.find(row => String(row.id) === String(estimateId));
-            const name = estimate && prompt('Estimate name', estimate.name);
-            if (estimate && name?.trim()) {
-                estimate.name = name.trim(); estimate.updatedAt = Workspace.now();
-                estimate.auditLog.push({ id: Workspace.uid('audit'), at: estimate.updatedAt, action: 'Renamed estimate' });
-                markEstimateDirty(estimate.id); saveLocal(); ui.saveRequested = true;
-                clearTimeout(ui.saveTimer); ui.saveTimer = setTimeout(saveServer, 0); render();
+            if (!estimate) return;
+            if (typeof window.openRenameModal === 'function') {
+                window.openRenameModal({
+                    title: 'Rename Estimate',
+                    label: 'Estimate Name',
+                    currentName: estimate.name,
+                    onSave: (newName) => {
+                        const name = newName?.trim();
+                        if (name && name !== estimate.name) {
+                            estimate.name = name;
+                            estimate.updatedAt = Workspace.now();
+                            estimate.auditLog.push({ id: Workspace.uid('audit'), at: estimate.updatedAt, action: 'Renamed estimate' });
+                            markEstimateDirty(estimate.id);
+                            saveLocal();
+                            ui.saveRequested = true;
+                            clearTimeout(ui.saveTimer);
+                            ui.saveTimer = setTimeout(saveServer, 0);
+                            render();
+                            publish();
+                        }
+                    }
+                });
+            } else {
+                const name = prompt('Estimate name', estimate.name);
+                if (name?.trim()) {
+                    estimate.name = name.trim();
+                    estimate.updatedAt = Workspace.now();
+                    estimate.auditLog.push({ id: Workspace.uid('audit'), at: estimate.updatedAt, action: 'Renamed estimate' });
+                    markEstimateDirty(estimate.id);
+                    saveLocal();
+                    ui.saveRequested = true;
+                    clearTimeout(ui.saveTimer);
+                    ui.saveTimer = setTimeout(saveServer, 0);
+                    render();
+                    publish();
+                }
             }
         }
         if (actionName === 'copy') { selectEstimate(estimateId); ui.modal = 'new'; renderModal(); }
@@ -1201,6 +1391,7 @@
             clearTimeout(ui.saveTimer);
             ui.saveTimer = setTimeout(saveServer, 0);
             render();
+            publish();
             window.dispatchEvent(new CustomEvent('takeoff:primary-estimate-changed', {
                 detail: { estimateId, total: totalSales, projectId }
             }));
@@ -1465,7 +1656,7 @@
         // Selecting a tab is local UI state, not an estimate content edit. It
         // must not increment the estimate revision or conflict with another
         // estimator editing that same estimate.
-        ui.selected.clear(); saveLocal(); render();
+        ui.selected.clear(); saveLocal(); render(); publish();
     }
 
     window.addEventListener('takeoff:estimating-lines-updated', event => {
@@ -1665,6 +1856,8 @@
             persisted: true
         };
     };
+
+    window.isEstimatingDirty = () => Boolean(ui.saving || ui.saveRequested || dirtyEstimateIds.size);
 
     window.addEventListener('beforeunload', event => {
         if (!ui.saving && !ui.saveRequested && !dirtyEstimateIds.size) return;

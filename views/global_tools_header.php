@@ -337,6 +337,14 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
                 if (icon) icon.className = isDark ? 'fas fa-sun' : 'fas fa-moon';
                 button.setAttribute('title', isDark ? 'Switch to Light Mode' : 'Switch to Dark Mode');
             });
+            try {
+                var currentTheme = isDark ? 'dark' : 'light';
+                document.querySelectorAll('iframe').forEach(function(frame) {
+                    try {
+                        frame.contentWindow.postMessage({ type: 'theme-change', theme: currentTheme }, '*');
+                    } catch(e) {}
+                });
+            } catch(e) {}
         }
 
         document.addEventListener('click', function (event) {

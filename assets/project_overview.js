@@ -99,7 +99,7 @@
         return {
             id: Number(window.ProjectState?.projectId || 0) || 0,
             project_template_id: window.ProjectState?.projectInfo?.project_template_id || '',
-            name: $('poEstimateName')?.value.trim() || 'New Project',
+            name: $('poEstimateName')?.value.trim() || window.ProjectState?.projectInfo?.name || $('projectHeaderName')?.textContent?.trim() || 'New Project',
             description: $('poProjectDescription')?.value || '',
             status: currentStatus,
             project_number: $('poProjectNumber')?.value || '',
@@ -145,7 +145,7 @@
             }
             if (typeof window.projectTakeoffSaveState === 'function') {
                 try {
-                    window.projectTakeoffSaveState();
+                    await window.projectTakeoffSaveState();
                 } catch (stateErr) {
                     console.warn('Takeoff state save warning:', stateErr);
                 }
@@ -2044,6 +2044,7 @@
             input.select();
         }, 50);
     }
+    window.openRenameModal = openRenameModal;
 
     function renameDocumentWithModal(doc, trigger = null) {
         if (!doc) return;
@@ -2178,6 +2179,7 @@
             resolve(window.confirm(message));
         });
     }
+    window.showConfirmDialog = showConfirmDialog;
 
     function showAlertDialog({
         title = 'Notice',
@@ -3219,9 +3221,18 @@
             load: loadSystemUsers
         };
 
+        function checkIsDirty() {
+            if (isDirty) return true;
+            if (typeof window.isTakeoffDirty === 'function' && window.isTakeoffDirty()) return true;
+            if (typeof window.isEstimatingDirty === 'function' && window.isEstimatingDirty()) return true;
+            if (window.ProjectState?.isDirty) return true;
+            return false;
+        }
+        window.isProjectDirty = checkIsDirty;
+
         // In-app navigation interceptor for unsaved changes
         document.addEventListener('click', event => {
-            if (!isDirty) return;
+            if (!checkIsDirty()) return;
 
             const link = event.target.closest('a[href]');
             if (!link) return;
@@ -3273,7 +3284,7 @@
 
         // Browser back button interceptor for unsaved changes
         window.addEventListener('popstate', event => {
-            if (!isDirty) return;
+            if (!checkIsDirty()) return;
 
             // Re-push state immediately so user is not navigated away while modal is active
             try {
@@ -3322,7 +3333,7 @@
         });
 
         window.addEventListener('beforeunload', event => {
-            if (!isDirty) return;
+            if (!checkIsDirty()) return;
             event.preventDefault();
             event.returnValue = '';
         });
