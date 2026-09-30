@@ -159,14 +159,191 @@ try {
             $createdAt = date('Y-m-d H:i:s', strtotime('-' . rand(2, 90) . ' days'));
             $projectNum = sprintf('DEMO-P%02d-%02d', $phaseIndex, $i + 1);
 
+            // Scale realistic material & equipment quantities based on square footage
+            $scaleFactor = max(0.5, round($sqft / 10000, 2));
+            $trofferQty = max(12, (int)round($sqft / 90));
+            $conduitLF = max(180, (int)round($sqft * 0.85));
+            $wireLF = max(600, (int)round($conduitLF * 3.5));
+            $recQty = max(10, (int)round($sqft / 250));
+            $dimmerQty = max(4, (int)round($trofferQty / 8));
+            $exitQty = max(2, (int)round($sqft / 4000));
+
+            $groups1 = [
+                [
+                    'id' => 'grp_dist_' . $i,
+                    'name' => 'Power & Distribution',
+                    'expanded' => true,
+                    'items' => [
+                        [
+                            'id' => 'itm_mdp_' . $i,
+                            'name' => '400A Main Distribution Panel (MDP-1, 120/208V 3PH 4W)',
+                            'quantity' => 1,
+                            'unit' => 'EA',
+                            'unit_cost' => 8500.00,
+                            'cost' => 8500.00,
+                            'material_cost' => 8500.00,
+                            'labor_hours' => 18.0
+                        ],
+                        [
+                            'id' => 'itm_p1a_' . $i,
+                            'name' => '200A 42-Circuit Lighting & Appliance Branch Panel',
+                            'quantity' => max(1, (int)round($scaleFactor)),
+                            'unit' => 'EA',
+                            'unit_cost' => 2850.00,
+                            'cost' => 2850.00,
+                            'material_cost' => 2850.00,
+                            'labor_hours' => 12.0
+                        ],
+                        [
+                            'id' => 'itm_xfmr_' . $i,
+                            'name' => '75kVA Dry-Type Transformer 480V-208Y/120V NEMA 3R',
+                            'quantity' => 1,
+                            'unit' => 'EA',
+                            'unit_cost' => 4200.00,
+                            'cost' => 4200.00,
+                            'material_cost' => 4200.00,
+                            'labor_hours' => 14.0
+                        ]
+                    ]
+                ],
+                [
+                    'id' => 'grp_light_' . $i,
+                    'name' => 'Lighting & Lighting Controls',
+                    'expanded' => true,
+                    'items' => [
+                        [
+                            'id' => 'itm_troff_' . $i,
+                            'name' => '2x4 Architectural Back-Lit LED Troffer 40W 4000K',
+                            'quantity' => $trofferQty,
+                            'unit' => 'EA',
+                            'unit_cost' => 125.00,
+                            'cost' => 125.00,
+                            'material_cost' => 125.00,
+                            'labor_hours' => 0.75
+                        ],
+                        [
+                            'id' => 'itm_dimm_' . $i,
+                            'name' => '0-10V Commercial Dimming Wall Station / Occupancy Sensor',
+                            'quantity' => $dimmerQty,
+                            'unit' => 'EA',
+                            'unit_cost' => 85.00,
+                            'cost' => 85.00,
+                            'material_cost' => 85.00,
+                            'labor_hours' => 0.5
+                        ],
+                        [
+                            'id' => 'itm_exit_' . $i,
+                            'name' => 'LED Exit Sign / Emergency Light Combo w/ Battery Backup',
+                            'quantity' => $exitQty,
+                            'unit' => 'EA',
+                            'unit_cost' => 110.00,
+                            'cost' => 110.00,
+                            'material_cost' => 110.00,
+                            'labor_hours' => 0.8
+                        ]
+                    ]
+                ],
+                [
+                    'id' => 'grp_branch_' . $i,
+                    'name' => 'Conduit, Wire & Branch Devices',
+                    'expanded' => true,
+                    'items' => [
+                        [
+                            'id' => 'itm_emt_' . $i,
+                            'name' => '3/4" EMT Thinwall Steel Conduit w/ Set Screw Fittings',
+                            'quantity' => $conduitLF,
+                            'unit' => 'LF',
+                            'unit_cost' => 7.80,
+                            'cost' => 7.80,
+                            'material_cost' => 7.80,
+                            'labor_hours' => 0.12
+                        ],
+                        [
+                            'id' => 'itm_wire_' . $i,
+                            'name' => '#12 AWG THHN Stranded Copper Building Wire (600V)',
+                            'quantity' => $wireLF,
+                            'unit' => 'LF',
+                            'unit_cost' => 0.65,
+                            'cost' => 0.65,
+                            'material_cost' => 0.65,
+                            'labor_hours' => 0.04
+                        ],
+                        [
+                            'id' => 'itm_rec_' . $i,
+                            'name' => '20A Commercial Spec-Grade Duplex Receptacle w/ Cover',
+                            'quantity' => $recQty,
+                            'unit' => 'EA',
+                            'unit_cost' => 45.00,
+                            'cost' => 45.00,
+                            'material_cost' => 45.00,
+                            'labor_hours' => 0.45
+                        ]
+                    ]
+                ]
+            ];
+
+            // Calculate Primary Estimate Subtotal
+            $directSales1 = 0;
+            foreach ($groups1 as $g) {
+                foreach ($g['items'] as $it) {
+                    $directSales1 += $it['quantity'] * $it['unit_cost'];
+                }
+            }
+            // 10% overhead / markup
+            $primaryEstTotal = round($directSales1 * 1.10, 2);
+
+            // Alternate estimate: Premium Architectural Fixtures
+            $altFixturesQty = max(6, (int)round($trofferQty * 0.35));
+            $groups2 = [
+                [
+                    'id' => 'grp_alt_' . $i,
+                    'name' => 'Architectural Suspended Linear Lighting',
+                    'expanded' => true,
+                    'items' => [
+                        [
+                            'id' => 'itm_pendant_' . $i,
+                            'name' => '4FT Direct/Indirect Architectural LED Continuous Pendant',
+                            'quantity' => $altFixturesQty,
+                            'unit' => 'EA',
+                            'unit_cost' => 310.00,
+                            'cost' => 310.00,
+                            'material_cost' => 310.00,
+                            'labor_hours' => 1.2
+                        ],
+                        [
+                            'id' => 'itm_daylight_' . $i,
+                            'name' => 'Continuous Daylight Harvesting & Wireless Mesh Sensors',
+                            'quantity' => max(2, (int)round($altFixturesQty / 4)),
+                            'unit' => 'EA',
+                            'unit_cost' => 165.00,
+                            'cost' => 165.00,
+                            'material_cost' => 165.00,
+                            'labor_hours' => 0.7
+                        ]
+                    ]
+                ]
+            ];
+            $directSales2 = 0;
+            foreach ($groups2 as $g) {
+                foreach ($g['items'] as $it) {
+                    $directSales2 += $it['quantity'] * $it['unit_cost'];
+                }
+            }
+            $altEstTotal = round($directSales2 * 1.10, 2);
+
+            $primaryId = "est_{$phaseIndex}_{$i}_primary";
+            $altId = "est_{$phaseIndex}_{$i}_alt";
+
             $metadata = [
                 'estimator' => $estimator,
                 'estimator_name' => $estimator,
                 'customer_email' => $client[1],
                 'primary_contact' => $client[1],
-                'estimate_total' => $totalValue,
-                'total_sales' => $totalValue,
-                'primary_quote_value' => $primaryQuote,
+                'primary_estimate_id' => $primaryId,
+                'primary_estimate_total' => $primaryEstTotal,
+                'primary_quote_value' => $primaryEstTotal,
+                'estimate_total' => $primaryEstTotal,
+                'total_sales' => $primaryEstTotal,
                 'square_footage' => $sqft,
                 'sqft' => $sqft,
                 'task_count' => rand(0, 14),
@@ -189,11 +366,86 @@ try {
                 ':metadata_json' => json_encode($metadata, JSON_UNESCAPED_SLASHES)
             ]);
 
+            $insertedProjectId = (int)$pdo->lastInsertId();
+
+            // Insert Primary Estimate
+            $estStmt = $pdo->prepare("
+                INSERT INTO `estimates` (
+                    `project_id`, `estimate_number`, `name`, `status`, `currency_code`, `created_at`, `updated_at`
+                ) VALUES (?, ?, ?, ?, 'USD', ?, ?)
+            ");
+            $estStmt->execute([
+                $insertedProjectId,
+                $projectNum . '-EST1',
+                'Primary Estimate',
+                'ready',
+                $createdAt,
+                $createdAt
+            ]);
+            $est1DbId = (int)$pdo->lastInsertId();
+
+            $state1 = [
+                'id' => $primaryId,
+                'dbEstimateId' => $est1DbId,
+                'projectId' => $insertedProjectId,
+                'name' => 'Primary Estimate',
+                'status' => 'ready',
+                'is_primary' => true,
+                'isPrimary' => true,
+                'isActive' => true,
+                'groups' => $groups1,
+                'settings' => [
+                    'preTaxMarkups' => [
+                        ['id' => 'm_oh_' . $i, 'name' => 'Overhead', 'type' => 'percentage', 'percent' => 10, 'base' => 'subtotal_sales', 'active' => true]
+                    ],
+                    'postTaxMarkups' => [],
+                    'taxes' => []
+                ]
+            ];
+
+            // Insert Alternate Estimate
+            $estStmt->execute([
+                $insertedProjectId,
+                $projectNum . '-EST2',
+                'Alternate Lighting Package',
+                'draft',
+                $createdAt,
+                $createdAt
+            ]);
+            $est2DbId = (int)$pdo->lastInsertId();
+
+            $state2 = [
+                'id' => $altId,
+                'dbEstimateId' => $est2DbId,
+                'projectId' => $insertedProjectId,
+                'name' => 'Alternate Lighting Package',
+                'status' => 'draft',
+                'is_primary' => false,
+                'isPrimary' => false,
+                'isActive' => false,
+                'groups' => $groups2,
+                'settings' => [
+                    'preTaxMarkups' => [
+                        ['id' => 'm_oh2_' . $i, 'name' => 'Overhead', 'type' => 'percentage', 'percent' => 10, 'base' => 'subtotal_sales', 'active' => true]
+                    ],
+                    'postTaxMarkups' => [],
+                    'taxes' => []
+                ]
+            ];
+
+            $wsStmt = $pdo->prepare("
+                INSERT INTO `estimate_workspace_states` (
+                    `estimate_id`, `project_id`, `client_estimate_id`, `state_json`, `revision`
+                ) VALUES (?, ?, ?, ?, 1)
+            ");
+            $wsStmt->execute([$est1DbId, $insertedProjectId, $primaryId, json_encode($state1, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)]);
+            $wsStmt->execute([$est2DbId, $insertedProjectId, $altId, json_encode($state2, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)]);
+
             $totalInserted++;
         }
     }
 
-    echo "SUCCESS: Inserted {$totalInserted} test projects across all 10 pipeline phases.\n";
+    echo "SUCCESS: Inserted {$totalInserted} test projects with rich multi-estimates and workspace items across all 10 pipeline phases.\n";
 } catch (\Throwable $e) {
     echo "ERROR: " . $e->getMessage() . "\n";
     exit(1);

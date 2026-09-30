@@ -347,10 +347,7 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
             } catch(e) {}
         }
 
-        document.addEventListener('click', function (event) {
-            var button = event.target.closest('[data-theme-toggle]');
-            if (!button) return;
-            var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+        function applyTheme(next) {
             document.documentElement.setAttribute('data-theme', next);
             if (document.body) {
                 document.body.classList.toggle('theme-light', next === 'light');
@@ -359,7 +356,37 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
             try {
                 localStorage.setItem(key, next);
             } catch (error) { }
+
+            try {
+                document.querySelectorAll('iframe').forEach(function(frame) {
+                    try {
+                        if (frame.contentDocument) {
+                            frame.contentDocument.documentElement.setAttribute('data-theme', next);
+                            if (frame.contentDocument.body) {
+                                frame.contentDocument.body.classList.toggle('theme-dark', next === 'dark');
+                                frame.contentDocument.body.classList.toggle('theme-light', next === 'light');
+                            }
+                        }
+                        frame.contentWindow.postMessage({ type: 'theme-change', theme: next }, '*');
+                    } catch(e) {}
+                });
+            } catch(e) {}
+
             syncThemeButton();
+        }
+
+        document.addEventListener('click', function (event) {
+            var button = event.target.closest('[data-theme-toggle]');
+            if (!button) return;
+            var next = document.documentElement.getAttribute('data-theme') === 'dark' ? 'light' : 'dark';
+
+            if (typeof document.startViewTransition === 'function') {
+                document.startViewTransition(function() {
+                    applyTheme(next);
+                });
+            } else {
+                applyTheme(next);
+            }
         });
 
         document.addEventListener('DOMContentLoaded', syncThemeButton);
@@ -370,35 +397,48 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
         var slideToggle = document.getElementById('btHeaderSlideToggle');
         var globalHeader = document.querySelector('.bt-global-header');
 
-        if (collapseBtn && globalHeader) {
-            collapseBtn.addEventListener('click', function (e) {
-                e.stopPropagation();
+        function setHeaderCollapsed(collapsed) {
+            if (!globalHeader) return;
+            if (collapsed) {
                 globalHeader.classList.add('header-collapsed');
                 document.body.classList.add('header-is-collapsed');
                 var shell = document.querySelector('.workspace-shell') || document.querySelector('.bid-board-shell');
                 if (shell) shell.classList.add('header-is-collapsed');
                 if (slideToggle) slideToggle.style.display = 'flex';
+            } else {
+                globalHeader.classList.remove('header-collapsed');
+                document.body.classList.remove('header-is-collapsed');
+                var shell = document.querySelector('.workspace-shell') || document.querySelector('.bid-board-shell');
+                if (shell) shell.classList.remove('header-is-collapsed');
+                if (slideToggle) slideToggle.style.display = 'none';
+            }
+            try {
+                localStorage.setItem('takeoff_global_header_collapsed', collapsed ? '1' : '0');
+            } catch (e) { }
+        }
+
+        if (collapseBtn && globalHeader) {
+            collapseBtn.addEventListener('click', function (e) {
+                e.stopPropagation();
+                setHeaderCollapsed(true);
             });
         }
 
         if (slideToggle && globalHeader) {
             slideToggle.addEventListener('click', function (e) {
                 e.stopPropagation();
-                globalHeader.classList.remove('header-collapsed');
-                document.body.classList.remove('header-is-collapsed');
-                var shell = document.querySelector('.workspace-shell') || document.querySelector('.bid-board-shell');
-                if (shell) shell.classList.remove('header-is-collapsed');
-                slideToggle.style.display = 'none';
+                setHeaderCollapsed(false);
             });
         }
 
         try {
-            if (new URLSearchParams(window.location.search).get('collapsed') === '1' && globalHeader) {
-                globalHeader.classList.add('header-collapsed');
-                document.body.classList.add('header-is-collapsed');
-                var shell = document.querySelector('.workspace-shell') || document.querySelector('.bid-board-shell');
-                if (shell) shell.classList.add('header-is-collapsed');
-                if (slideToggle) slideToggle.style.display = 'flex';
+            var urlParam = new URLSearchParams(window.location.search).get('collapsed');
+            if (urlParam === '1') {
+                setHeaderCollapsed(true);
+            } else if (urlParam === '0') {
+                setHeaderCollapsed(false);
+            } else if (localStorage.getItem('takeoff_global_header_collapsed') === '1') {
+                setHeaderCollapsed(true);
             }
         } catch (e) { }
 

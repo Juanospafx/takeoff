@@ -81,17 +81,19 @@
         const dueDate = dateInputValue($('poDueDate')?.value || '');
         const dueTime = $('poDueTime')?.value || '';
         const bidDueAt = dueDate ? `${dueDate} ${dueTime || '00:00'}:00` : '';
+        const existingMeta = window.ProjectState?.projectMeta || {};
         const metadata = {
-            estimator: $('poEstimator')?.value || 'Juan Estevez',
-            measurement_system: $('poMeasurementSystem')?.value || 'US',
-            estimate_pricing: $('poEstimatePricing')?.value || 'Unlocked',
-            office: $('poOffice')?.value || '',
-            square_footage: $('poSquareFootage')?.value || '',
-            customer_company: $('poCustomerCompany')?.value || '',
-            primary_contact: $('poPrimaryContact')?.value || '',
-            customer_phone: $('poCustomerPhone')?.value || '',
-            customer_email: $('poCustomerEmail')?.value || '',
-            customer_address: $('poCustomerAddress')?.value || '',
+            ...existingMeta,
+            estimator: $('poEstimator')?.value || existingMeta.estimator || 'Juan Estevez',
+            measurement_system: $('poMeasurementSystem')?.value || existingMeta.measurement_system || 'US',
+            estimate_pricing: $('poEstimatePricing')?.value || existingMeta.estimate_pricing || 'Unlocked',
+            office: $('poOffice')?.value || existingMeta.office || '',
+            square_footage: $('poSquareFootage')?.value || existingMeta.square_footage || '',
+            customer_company: $('poCustomerCompany')?.value || existingMeta.customer_company || '',
+            primary_contact: $('poPrimaryContact')?.value || existingMeta.primary_contact || '',
+            customer_phone: $('poCustomerPhone')?.value || existingMeta.customer_phone || '',
+            customer_email: $('poCustomerEmail')?.value || existingMeta.customer_email || '',
+            customer_address: $('poCustomerAddress')?.value || existingMeta.customer_address || '',
             notes,
             tasks
         };
@@ -158,7 +160,8 @@
                 }
             }
             const wasDraft = Number(window.ProjectState?.projectId || 0) === 0;
-            const result = await request('save', payload);
+            const savePayload = collectProjectPayload();
+            const result = await request('save', savePayload);
             const projectId = savedProjectId(result);
             if (!projectId) throw new Error('The project was saved without a valid project ID.');
 
@@ -392,7 +395,7 @@
         try {
             localStorage.setItem('takeoff.bidBoardStage', statusLabel());
             sessionStorage.setItem('takeoff.bidBoardStage', statusLabel());
-        } catch (e) {}
+        } catch (e) { }
         renderStatusDropdown();
         $('projectStatusMenu')?.classList.remove('open');
 
@@ -890,12 +893,31 @@
         menu.style.position = 'fixed';
         menu.style.zIndex = '99999';
 
-        const menuWidth = 130;
-        const leftPos = (rect.right / zoom) - menuWidth;
-        const topPos = (rect.bottom / zoom) + 4;
+        const boundaryEl = button.closest('#overviewTab, .workspace-shell, body') || document.body;
+        const margin = 10;
+        const bRect = (boundaryEl && boundaryEl !== document.body) ? boundaryEl.getBoundingClientRect() : {
+            left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight
+        };
+        const minLeft = Math.max(margin, (bRect.left / zoom) + margin);
+        const maxRight = Math.min((window.innerWidth / zoom) - margin, (bRect.right / zoom) - margin);
+        const maxBottom = Math.min((window.innerHeight / zoom) - margin, (bRect.bottom / zoom) - margin);
 
-        menu.style.left = `${Math.max(10, leftPos)}px`;
-        menu.style.top = `${topPos}px`;
+        const menuWidth = menu.offsetWidth || 130;
+        const menuHeight = menu.offsetHeight || 140;
+
+        let leftPos = (rect.right / zoom) - menuWidth;
+        if (leftPos < minLeft) {
+            leftPos = (rect.left / zoom);
+        }
+        leftPos = Math.max(minLeft, Math.min(leftPos, maxRight - menuWidth));
+
+        let topPos = (rect.bottom / zoom) + 4;
+        if (topPos + menuHeight > maxBottom) {
+            topPos = Math.max(margin, (rect.top / zoom) - menuHeight - 4);
+        }
+
+        menu.style.left = `${Math.round(leftPos)}px`;
+        menu.style.top = `${Math.round(topPos)}px`;
     }
 
     function closeItemContextMenu() {
@@ -1189,7 +1211,7 @@
             if (window.createImageBitmap) {
                 createImageBitmap(canvas).then(bitmap => {
                     pdfThumbnailDataCache.set(cacheKey, bitmap);
-                }).catch(() => {});
+                }).catch(() => { });
             }
         } catch (err) {
             console.warn('Could not render thumbnail for page', sheet.pageNumber, err);
@@ -1234,7 +1256,7 @@
                 if (window.createImageBitmap) {
                     createImageBitmap(canvas).then(bitmap => {
                         pdfThumbnailDataCache.set(cacheKey, bitmap);
-                    }).catch(() => {});
+                    }).catch(() => { });
                 }
             } catch (err) {
                 console.warn('Could not render attachment preview:', err);
@@ -1513,7 +1535,7 @@
     function setFolderReorderList(ids) {
         try {
             localStorage.setItem('takeoff.docFolderOrder', JSON.stringify(ids));
-        } catch (e) {}
+        } catch (e) { }
     }
 
     function reorderPdfDocuments(sourceId, targetId, insertBefore) {
@@ -1699,9 +1721,9 @@
             </div>
             <div class="documents-folder-children">
                 ${drawings.map(doc => {
-                    const pageVal = doc.pageCount || (doc.pages && doc.pages.length) || '';
-                    const isDocActive = selectedDocumentsFolder === `document:${doc.id}`;
-                    return `
+            const pageVal = doc.pageCount || (doc.pages && doc.pages.length) || '';
+            const isDocActive = selectedDocumentsFolder === `document:${doc.id}`;
+            return `
                     <div class="doc-tree-item child ${isDocActive ? 'active' : ''}" data-doc-folder="document:${escapeHtml(doc.id)}" data-drag-doc-id="${escapeHtml(doc.id)}" draggable="true">
                         <i class="fas fa-grip-vertical doc-drag-handle" title="Drag to reorder"></i>
                         <i class="fas fa-folder doc-tree-item-icon"></i>
@@ -1709,7 +1731,7 @@
                         ${pageVal ? `<span class="doc-tree-item-badge">${escapeHtml(pageVal)}</span>` : ''}
                         <button class="btn-ghost icon-only doc-tree-item-more" type="button" data-doc-sidebar-more="doc:${escapeHtml(doc.id)}" title="Document options"><i class="fas fa-ellipsis-vertical"></i></button>
                     </div>`;
-                }).join('')}
+        }).join('')}
             </div>
             <div class="doc-tree-item ${isAttachmentsActive ? 'active' : ''}" data-doc-folder="attachments">
                 <i class="fas fa-paperclip doc-tree-item-icon"></i>
@@ -2774,9 +2796,12 @@
             document.querySelector('.project-subhead-wrapper')?.classList.remove('has-open-menu');
         });
 
-        // Multi-User Presence System (supports up to 4 simultaneous avatars)
+        // Multi-User Presence System (4 active users allowed per project)
         const initialCollaborators = [
-            { id: 1, name: 'Isaac Diaz (You)', initials: 'ID', color: '#5b4364', role: 'Lead Estimator', isSelf: true }
+            { id: 1, name: 'Isaac Diaz (You)', initials: 'ID', color: '#5b4364', role: 'Lead Estimator', isSelf: true },
+            { id: 2, name: 'Sarah Connor', initials: 'SC', color: '#2563eb', role: 'Senior Architect', isSelf: false },
+            { id: 3, name: 'Marcus Vance', initials: 'MV', color: '#059669', role: 'Project Manager', isSelf: false },
+            { id: 4, name: 'Elena Gomez', initials: 'EG', color: '#d97706', role: 'Electrical Estimator', isSelf: false }
         ];
 
         window.ProjectPresence = {

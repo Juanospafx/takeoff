@@ -270,8 +270,26 @@
             const metadata = parseMetadata(project);
             const estimatorName = String(metadata.estimator || metadata.estimator_name || '').trim();
             const sqft = Number(metadata.square_footage || metadata.sqft || metadata.area_sqft || 0);
-            const totalValue = Number(metadata.estimate_total || metadata.total_sales || metadata.totalValue || 0);
-            const primaryQuoteValue = Number(metadata.primary_quote_value ?? metadata.primary_estimate_total ?? metadata.primaryEstimateTotal ?? totalValue ?? 0);
+            const metadataPrimary = Number(metadata.primary_estimate_total ?? metadata.primary_quote_value ?? metadata.primaryEstimateTotal ?? 0);
+            let storagePrimary = 0;
+            if (!metadataPrimary && project?.id) {
+                try {
+                    const raw = localStorage.getItem(`takeoff.estimating.module.${project.id}`);
+                    if (raw) {
+                        const parsed = JSON.parse(raw);
+                        const list = Array.isArray(parsed.estimates) ? parsed.estimates : [];
+                        const explicitId = String(parsed.activeEstimateId || '');
+                        const pEst = list.find(e => Boolean(e.is_primary || e.isPrimary)) || list.find(e => String(e.id) === explicitId) || list[0];
+                        if (pEst) {
+                            const val = Number(pEst.estimateTotal || pEst.totalSales || pEst.grand_total || pEst.total_amount || pEst.total || 0);
+                            if (val > 0) storagePrimary = val;
+                        }
+                    }
+                } catch (e) {}
+            }
+            const fallbackValue = Number(metadata.estimate_total || metadata.total_sales || metadata.totalValue || 0);
+            const totalValue = metadataPrimary > 0 ? metadataPrimary : (storagePrimary > 0 ? storagePrimary : fallbackValue);
+            const primaryQuoteValue = totalValue;
             const salesPerSqFt = sqft > 0 ? `${money(totalValue / sqft, 2)} /sq ft` : '$0 /sq ft';
 
             return {
@@ -872,24 +890,23 @@
                 menu.hidden = false;
                 const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
                 const rect = button.getBoundingClientRect();
+                const bounds = getBidBoardBoundary(button);
 
                 const btnLeft = rect.left / zoom;
                 const btnRight = rect.right / zoom;
                 const btnTop = rect.top / zoom;
                 const btnBottom = rect.bottom / zoom;
-                const vpWidth = window.innerWidth / zoom;
-                const vpHeight = window.innerHeight / zoom;
 
                 const menuWidth = menu.offsetWidth || 155;
                 const menuHeight = menu.offsetHeight || 140;
 
-                // Snug alignment to button's right edge
+                // Snug alignment to button's right edge (opens towards the left)
                 let left = btnRight - menuWidth;
-                if (left + menuWidth > vpWidth - 6) {
-                    left = vpWidth - menuWidth - 6;
+                if (left + menuWidth > bounds.right) {
+                    left = bounds.right - menuWidth;
                 }
-                if (left < 6) {
-                    left = 6;
+                if (left < bounds.left) {
+                    left = bounds.left;
                 }
 
                 menu.style.position = 'fixed';
@@ -897,13 +914,13 @@
                 menu.style.left = `${Math.round(left)}px`;
                 menu.style.right = 'auto';
 
-                // Snug 2px gap right under or above the button
+                // Snug 2px gap right under or above the button, respecting boundary limits
                 const gap = 2;
-                if (btnBottom + menuHeight + gap + 8 <= vpHeight) {
+                if (btnBottom + menuHeight + gap <= bounds.bottom) {
                     menu.style.top = `${Math.round(btnBottom + gap)}px`;
                     menu.style.bottom = 'auto';
                 } else {
-                    menu.style.top = `${Math.round(Math.max(6, btnTop - menuHeight - gap))}px`;
+                    menu.style.top = `${Math.round(Math.max(bounds.top, btnTop - menuHeight - gap))}px`;
                     menu.style.bottom = 'auto';
                 }
             });
@@ -911,32 +928,67 @@
         bindTooltips(root);
     }
 
+    function getBidBoardBoundary(el) {
+        const margin = 8;
+        const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+        const boundaryEl = el?.closest?.('.bid-board-shell, .bb-card-container, .bb-page-body, .bid-board-main') || document.body;
+        if (!boundaryEl || boundaryEl === document.body || boundaryEl === document.documentElement) {
+            return {
+                left: margin,
+                top: margin,
+                right: (window.innerWidth / zoom) - margin,
+                bottom: (window.innerHeight / zoom) - margin,
+                width: (window.innerWidth / zoom) - (margin * 2),
+                height: (window.innerHeight / zoom) - (margin * 2)
+            };
+        }
+        const bRect = boundaryEl.getBoundingClientRect();
+        return {
+            left: Math.max(margin, (bRect.left / zoom) + margin),
+            top: Math.max(margin, (bRect.top / zoom) + margin),
+            right: Math.min((window.innerWidth / zoom) - margin, (bRect.right / zoom) - margin),
+            bottom: Math.min((window.innerHeight / zoom) - margin, (bRect.bottom / zoom) - margin),
+            width: Math.max(0, Math.min((window.innerWidth / zoom) - margin, (bRect.right / zoom) - margin) - Math.max(margin, (bRect.left / zoom) + margin)),
+            height: Math.max(0, Math.min((window.innerHeight / zoom) - margin, (bRect.bottom / zoom) - margin) - Math.max(margin, (bRect.top / zoom) + margin))
+        };
+    }
+
     function positionStatusMenu(panel, trigger) {
         const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
         const rect = trigger.getBoundingClientRect();
+        const bounds = getBidBoardBoundary(trigger);
 
         const triggerLeft = rect.left / zoom;
+        const triggerRight = rect.right / zoom;
         const triggerTop = rect.top / zoom;
         const triggerBottom = rect.bottom / zoom;
-        const vpWidth = window.innerWidth / zoom;
-        const vpHeight = window.innerHeight / zoom;
 
         const width = 220;
         const height = Math.min(380, panel.scrollHeight || 340);
-        const margin = 8;
         const gap = 3;
+
+        let left = triggerLeft;
+        if (left + width > bounds.right) {
+            left = triggerRight - width;
+        }
+        if (left + width > bounds.right) {
+            left = bounds.right - width;
+        }
+        if (left < bounds.left) {
+            left = bounds.left;
+        }
 
         panel.style.position = 'fixed';
         panel.style.zIndex = '5200';
         panel.style.width = `${width}px`;
-        panel.style.left = `${Math.round(Math.max(margin, Math.min(vpWidth - width - margin, triggerLeft)))}px`;
+        panel.style.left = `${Math.round(left)}px`;
         panel.style.right = 'auto';
 
-        if (triggerBottom + height + margin <= vpHeight) {
+        if (triggerBottom + height + gap <= bounds.bottom) {
             panel.style.top = `${Math.round(triggerBottom + gap)}px`;
             panel.style.bottom = 'auto';
         } else {
-            panel.style.top = `${Math.round(Math.max(margin, triggerTop - height - gap))}px`;
+            panel.style.top = `${Math.round(Math.max(bounds.top, triggerTop - height - gap))}px`;
             panel.style.bottom = 'auto';
         }
     }

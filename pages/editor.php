@@ -911,29 +911,46 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         return result.data || null;
     }
 
+    window.sheetScales = window.sheetScales || {};
+
     async function loadCalibrationForPage(showNotice) {
         const requestedPage = Number(pageNum || 1);
         try {
             const scale = await takeoffScaleRequest('scale', { drawing_id: fileId, estimate_key: takeoffEstimateKey, page_number: requestedPage });
             if (requestedPage !== Number(pageNum || 1)) return;
             pixelsPerFoot = Number(scale?.pixels_per_unit || 0);
+            window.sheetScales[requestedPage] = pixelsPerFoot;
             setScaleDisplay(scale?.scale_name || '');
             if (pixelsPerFoot > 0 && showNotice) setTimeout(() => showToast("Saved calibration loaded", "success"), 800);
         } catch (error) {
             pixelsPerFoot = 0;
+            window.sheetScales[requestedPage] = 0;
             setScaleDisplay('');
             console.error('Scale load failed:', error);
             if (showNotice) showToast(error.message, 'error');
         }
         refreshMeasureLabels();
+        try {
+            window.parent?.syncScaleStatus?.();
+        } catch (e) {}
     }
 
-    function saveCalibrationForPage(scaleName, calibration = {}) {
+    function saveCalibrationForPage(scaleName, calibration = {}, applyAll = false) {
+        const pageCount = pdfDoc ? pdfDoc.numPages : 1;
+        if (applyAll) {
+            for (let p = 1; p <= pageCount; p++) {
+                window.sheetScales[p] = pixelsPerFoot;
+            }
+        } else {
+            window.sheetScales[pageNum] = pixelsPerFoot;
+        }
         return takeoffScaleRequest('save_scale', {
             drawing_id: fileId,
             project_id: typeof projectId !== 'undefined' ? projectId : 0,
             estimate_key: takeoffEstimateKey,
             page_number: pageNum,
+            apply_to_all: applyAll ? 1 : 0,
+            page_count: pageCount,
             scale_name: scaleName || 'Custom',
             pixels_per_unit: pixelsPerFoot,
             unit: 'ft',
@@ -944,6 +961,14 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
     function setScaleDisplay(text) {
         const el = document.getElementById('scale-display');
         if (el) el.textContent = text || '';
+        try {
+            window.parent?.syncScaleStatus?.();
+            window.parent?.postMessage({
+                type: 'project-takeoff-scale-changed',
+                scaleName: text || '',
+                pageNum: typeof pageNum !== 'undefined' ? pageNum : 1
+            }, '*');
+        } catch (e) {}
     }
 
     function keepScaleDisplayVisible() {
@@ -1134,7 +1159,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         return 72;
     }
 
-    async function applyScalePreset(value) {
+    async function applyScalePreset(value, applyAll = false) {
         if (!value) return;
         const index = parseInt(value, 10);
         const preset = SCALE_PRESETS[index];
@@ -1144,10 +1169,11 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         const nextPixelsPerFoot = pixelsPerInch / preset.feetPerInch;
         if (!isFinite(nextPixelsPerFoot) || nextPixelsPerFoot <= 0) { showToast("Invalid preset calculation", "error"); return; }
         pixelsPerFoot = nextPixelsPerFoot;
-        await saveCalibrationForPage(preset.label, { mode: 'preset', preset_index: index, feet_per_inch: preset.feetPerInch });
+        await saveCalibrationForPage(preset.label, { mode: 'preset', preset_index: index, feet_per_inch: preset.feetPerInch }, applyAll);
         setScaleDisplay(preset.label);
-        showToast(`Calibrated! 1 ft = ${pixelsPerFoot.toFixed(2)} px`, "success");
+        showToast(applyAll ? `Calibrated all sheets! 1 ft = ${pixelsPerFoot.toFixed(2)} px` : `Calibrated sheet! 1 ft = ${pixelsPerFoot.toFixed(2)} px`, "success");
         refreshMeasureLabels();
+        try { window.projectTakeoffUpdateScale?.(pageNum, pixelsPerFoot, applyAll); } catch (e) {}
     }
 
     function resetScalePresetSelection() {
@@ -3298,12 +3324,12 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         lineState = 0; activeLine = null; canvas.requestRenderAll();
     }
     
-    function finishCal(save) {
+    function finishCal(save, applyAll = false) {
         if(save) {
             const val = parseFloat(document.getElementById('cal-val').value);
             if(val > 0) {
                 pixelsPerFoot = canvas.tempDist / val;
-                saveCalibrationForPage('Custom', { mode: 'manual', measured_pixels: canvas.tempDist, real_feet: val })
+                saveCalibrationForPage('Custom', { mode: 'manual', measured_pixels: canvas.tempDist, real_feet: val }, applyAll)
                     .catch(error => showToast(error.message, 'error'));
                 setScaleDisplay('Custom');
                 showToast(`Calibrated! 1 ft = ${pixelsPerFoot.toFixed(2)} px`, "success");

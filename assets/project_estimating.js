@@ -188,6 +188,25 @@
         const sqft = Number(window.ProjectState?.projectMeta?.square_footage || 0);
         const sqftElement = $('estimateSqft');
         if (sqftElement) sqftElement.textContent = sqft ? `${money(total.estimateTotal / sqft)}/sq ft` : '--/sq ft';
+        const cur = current();
+        if (cur) {
+            cur.estimateTotal = total.estimateTotal;
+            cur.totalSales = total.estimateTotal;
+            cur.grand_total = total.estimateTotal;
+            cur.total_amount = total.estimateTotal;
+        }
+        if (cur && window.ProjectState) {
+            if (!window.ProjectState.projectMeta) window.ProjectState.projectMeta = {};
+            const metaPrimaryId = String(window.ProjectState.projectMeta.primary_estimate_id || '');
+            const isCurPrimary = metaPrimaryId ? String(cur.id) === metaPrimaryId : Boolean(cur.is_primary || cur.isPrimary);
+            if (isCurPrimary) {
+                window.ProjectState.projectMeta.primary_estimate_id = cur.id;
+                window.ProjectState.projectMeta.primary_estimate_total = total.estimateTotal;
+                window.ProjectState.projectMeta.primary_quote_value = total.estimateTotal;
+                window.ProjectState.projectMeta.total_sales = total.estimateTotal;
+                window.ProjectState.projectMeta.estimate_total = total.estimateTotal;
+            }
+        }
         renderFooter();
         renderStatus();
     }
@@ -832,67 +851,78 @@
         portal.className = 'pd-modal-backdrop open';
         portal.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(4px); z-index: 999999;';
         if (ui.modal === 'new') {
-            portal.innerHTML = `<div class="pd-modal" style="width: min(520px, 100%); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="copyEstimateTitle">
-                <div class="pd-modal-head" style="padding: 14px 18px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
-                    <div>
-                        <h3 id="copyEstimateTitle" style="margin: 0; font-size: 1.05rem; display: flex; align-items: center; gap: 8px;">
-                            <i class="fas fa-calculator" style="color: var(--primary, #fb5a3a);"></i> New Estimate
-                        </h3>
-                        <span style="font-size: .78rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Create an independent estimate for this project</span>
+            portal.innerHTML = `<div class="bb-create-project-modal bb-studio-modal pd-modal" style="width: min(480px, 92vw); border-radius: 12px; overflow: hidden; background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); box-shadow: 0 20px 60px rgba(15, 23, 42, 0.28); display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="copyEstimateTitle">
+                <div class="bb-modal-head" style="padding: 12px 18px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <div class="bb-modal-icon-badge" style="width: 34px; height: 34px; border-radius: 8px; background: #fff7ed; border: 1px solid #fed7aa; color: #fb5a3a; display: grid; place-items: center; font-size: 15px; flex: 0 0 34px;">
+                            <i class="fas fa-calculator"></i>
+                        </div>
+                        <div>
+                            <strong id="copyEstimateTitle" class="bb-modal-heading" style="display: block; font-size: 14.5px; font-weight: 700; color: var(--text-main, #0f172a); line-height: 1.25;">New Estimate Version</strong>
+                            <span class="bb-modal-subheading" style="display: block; font-size: 11.5px; color: var(--text-muted, #64748b); margin-top: 1px;">Create an independent bid estimate version for this project</span>
+                        </div>
                     </div>
-                    <button class="pd-modal-head-close" type="button" data-close-modal aria-label="Close" style="border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--text-muted, #64748b);">&times;</button>
+                    <button class="bb-icon-btn bordered" type="button" data-close-modal aria-label="Close" style="width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border, #e2e8f0); background: transparent; cursor: pointer; color: var(--text-muted, #64748b); display: grid; place-items: center; font-size: 13px; transition: all .15s ease;">
+                        <i class="fas fa-times"></i>
+                    </button>
                 </div>
-                <div class="pd-modal-body" style="display: flex; flex-direction: column; gap: 14px; padding: 18px 20px; background: var(--bg-panel, #ffffff);">
-                    <label class="overview-field full" style="display: flex; flex-direction: column; gap: 6px;">
-                        <span style="font-size: .8rem; font-weight: 600; color: var(--text-main, #0f172a);">Estimate Name</span>
-                        <input id="copyEstimateName" class="pd-composer-input" type="text" value="${esc(current().name)} Copy" autocomplete="off" placeholder="Estimate name..." style="width: 100%; box-sizing: border-box; height: 36px; padding: 6px 12px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: var(--bg-card, #f8fafc); color: inherit;">
-                    </label>
-                    <fieldset style="border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px; padding: 12px 14px; margin: 0; display: flex; flex-direction: column; gap: 8px; background: var(--bg-card, #f8fafc);">
-                        <legend style="font-size: .75rem; font-weight: 700; color: var(--text-muted, #64748b); padding: 0 4px; text-transform: uppercase; letter-spacing: 0.05em;">Starting point</legend>
-                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
-                            <input type="radio" name="copyEstimateMode" value="all" checked style="margin-top: 3px;">
-                            <span><strong style="display: block; font-size: .83rem;">Copy everything</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Start with an independent copy of groups, items, quantities, notes and markups.</small></span>
+                <div class="bb-modal-body" style="padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; background: var(--bg-panel, #ffffff);">
+                    <div class="bb-form-group" style="display: flex; flex-direction: column; gap: 4px;">
+                        <label class="bb-form-label" for="copyEstimateName" style="font-size: 11.5px; font-weight: 600; color: var(--text-main, #0f172a); display: flex; align-items: center; gap: 4px;">
+                            <span>Estimate Name</span>
+                            <span style="color: #fb5a3a; font-weight: 700;">*</span>
                         </label>
-                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
-                            <input type="radio" name="copyEstimateMode" value="structure" style="margin-top: 3px;">
-                            <span><strong style="display: block; font-size: .83rem;">Groups only</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Keep only the group structure; Takeoff items are not imported automatically.</small></span>
-                        </label>
-                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
-                            <input type="radio" name="copyEstimateMode" value="blank" style="margin-top: 3px;">
-                            <span><strong style="display: block; font-size: .83rem;">Blank</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Start completely empty; Takeoff items are added only when explicitly linked.</small></span>
-                        </label>
-                    </fieldset>
-                </div>
-                <div class="pd-modal-foot" style="display: flex; justify-content: flex-end; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--border, #e2e8f0); background: var(--bg-card, #f8fafc);">
-                    <button type="button" class="btn-ghost" data-close-modal style="padding: 7px 14px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; cursor: pointer;">Cancel</button>
-                    <button type="button" class="btn-main orange" data-create-estimate data-est-action="create-estimate-copy" style="padding: 7px 16px; border: none; border-radius: 6px; background: var(--primary, #fb5a3a); color: #fff; font-weight: 600; cursor: pointer;"><i class="fas fa-plus"></i> Create Estimate</button>
-                </div>
-            </div>`;
-        }
-        if (ui.modal === 'compare') {
-            portal.innerHTML = `<div class="pd-modal" style="width: min(720px, 100%); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true">
-                <div class="pd-modal-head" style="padding: 14px 18px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
-                    <div style="display: flex; align-items: center; gap: 8px;">
-                        <i class="fas fa-code-compare" style="color: var(--primary, #fb5a3a);"></i>
-                        <h3 style="margin: 0; font-size: 1.05rem; font-weight: 600;">Compare Estimates</h3>
+                        <div class="bb-input-icon-wrap" style="position: relative; display: flex; align-items: center;">
+                            <i class="fas fa-file-invoice-dollar" style="position: absolute; left: 11px; color: var(--text-muted, #94a3b8); font-size: 13px; pointer-events: none;"></i>
+                            <input id="copyEstimateName" class="bb-input-control" type="text" value="${esc(current().name)} Copy" autocomplete="off" placeholder="e.g. Base Bid Copy" style="width: 100%; box-sizing: border-box; height: 35px; padding: 6px 10px 6px 33px; border: 1px solid var(--border, #cbd5e1); border-radius: 7px; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a); font-size: 12.5px; outline: none; transition: border-color .15s ease, box-shadow .15s ease;">
+                        </div>
+                        <div class="bb-input-hint" style="font-size: 10.5px; color: var(--text-muted, #64748b);">Unique name displayed across tabs, client summaries, and proposals.</div>
                     </div>
-                    <button class="pd-modal-head-close" type="button" data-close-modal data-modal-close="compareOpen" aria-label="Close" style="border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--text-muted, #64748b);">&times;</button>
-                </div>
-                <div class="pd-modal-body" style="padding: 18px 20px; background: var(--bg-panel, #ffffff);">
-                    <div class="est-compare-grid" style="display: grid; grid-template-columns: repeat(auto-fill, minmax(200px, 1fr)); gap: 14px;">
-                        ${state.estimates.map(row => {
-                            const total = Calc.calculateSummary(row.groups, row.settings);
-                            return `<article style="border: 1px solid var(--border, #cbd5e1); border-radius: 8px; padding: 12px; background: var(--bg-card, #f8fafc);">
-                                <h4 style="margin: 0 0 6px; font-size: .92rem;">${esc(row.name)}</h4>
-                                <p style="margin: 0 0 8px; font-size: .78rem; color: var(--text-muted, #64748b);">${row.groups.reduce((sum, group) => sum + group.items.length, 0)} items</p>
-                                <strong style="display: block; font-size: 1.1rem; color: var(--text-main, #0f172a);">${money(total.estimateTotal)}</strong>
-                                <span style="display: block; font-size: .78rem; color: #16a34a; margin-top: 2px;">${money(total.profit)} profit</span>
-                            </article>`;
-                        }).join('')}
+
+                    <div class="bb-form-group" style="display: flex; flex-direction: column; gap: 6px;">
+                        <label class="bb-form-label" style="font-size: 11.5px; font-weight: 600; color: var(--text-main, #0f172a); display: flex; align-items: center; gap: 5px;">
+                            <i class="fas fa-shapes" style="color: #fb5a3a; font-size: 12px;"></i>
+                            <span>Starting Configuration</span>
+                        </label>
+                        <div class="bb-studio-mode-stack" style="display: flex; flex-direction: column; gap: 7px;">
+                            <label class="est-copy-option bb-studio-card" style="position: relative; border: 1.5px solid var(--border, #cbd5e1); border-radius: 8px; padding: 8px 12px; background: var(--bg-panel, #ffffff); cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all .15s ease;">
+                                <input type="radio" name="copyEstimateMode" value="all" checked style="margin-top: 2px; accent-color: #fb5a3a; width: 14px; height: 14px;">
+                                <div style="flex: 1;">
+                                    <div style="display: flex; align-items: center; gap: 7px;">
+                                        <strong style="font-size: 12.5px; color: var(--text-main, #0f172a);">Copy everything</strong>
+                                        <span style="display: inline-block; font-size: 9.5px; font-weight: 700; color: #fb5a3a; background: #fff7ed; border: 1px solid #fed7aa; padding: 1px 6px; border-radius: 999px;">Recommended</span>
+                                    </div>
+                                    <small style="display: block; font-size: 11px; color: var(--text-muted, #64748b); margin-top: 1px; line-height: 1.3;">Start with a complete clone of groups, items, quantities, notes, materials and markups.</small>
+                                </div>
+                            </label>
+                            <label class="est-copy-option bb-studio-card" style="position: relative; border: 1.5px solid var(--border, #cbd5e1); border-radius: 8px; padding: 8px 12px; background: var(--bg-panel, #ffffff); cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all .15s ease;">
+                                <input type="radio" name="copyEstimateMode" value="structure" style="margin-top: 2px; accent-color: #fb5a3a; width: 14px; height: 14px;">
+                                <div style="flex: 1;">
+                                    <strong style="display: block; font-size: 12.5px; color: var(--text-main, #0f172a);">Groups only</strong>
+                                    <small style="display: block; font-size: 11px; color: var(--text-muted, #64748b); margin-top: 1px; line-height: 1.3;">Keep the exact group hierarchy; items from Takeoff are not automatically pre-populated.</small>
+                                </div>
+                            </label>
+                            <label class="est-copy-option bb-studio-card" style="position: relative; border: 1.5px solid var(--border, #cbd5e1); border-radius: 8px; padding: 8px 12px; background: var(--bg-panel, #ffffff); cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all .15s ease;">
+                                <input type="radio" name="copyEstimateMode" value="blank" style="margin-top: 2px; accent-color: #fb5a3a; width: 14px; height: 14px;">
+                                <div style="flex: 1;">
+                                    <strong style="display: block; font-size: 12.5px; color: var(--text-main, #0f172a);">Blank estimate</strong>
+                                    <small style="display: block; font-size: 11px; color: var(--text-muted, #64748b); margin-top: 1px; line-height: 1.3;">Start with a fresh empty estimate. Ideal for value engineering alternates or custom bids.</small>
+                                </div>
+                            </label>
+                        </div>
                     </div>
                 </div>
-                <div class="pd-modal-foot" style="display: flex; justify-content: flex-end; padding: 12px 20px; border-top: 1px solid var(--border, #e2e8f0); background: var(--bg-card, #f8fafc);">
-                    <button type="button" class="btn-ghost" data-close-modal data-modal-close="compareOpen" style="padding: 7px 16px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; cursor: pointer;">Close</button>
+                <div class="bb-modal-foot" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 18px; border-top: 1px solid var(--border, #e2e8f0); background: var(--bg-subtle, #f8fafc);">
+                    <div class="bb-modal-foot-info" style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted, #64748b);">
+                        <i class="fas fa-circle-check" style="color: #16a34a; font-size: 13px;"></i>
+                        <span>Independent version with separate totals</span>
+                    </div>
+                    <div class="bb-modal-foot-actions" style="display: flex; align-items: center; gap: 8px;">
+                        <button class="bb-btn-procore-secondary" type="button" data-close-modal style="height: 32px; padding: 0 14px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: var(--bg-panel, #ffffff); color: var(--text-main, #334155); font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s ease;">Cancel</button>
+                        <button class="bb-btn-procore-primary" type="button" data-create-estimate data-est-action="create-estimate-copy" style="height: 32px; padding: 0 16px; border: none; border-radius: 6px; background: var(--tk-primary, #fb5a3a); color: #ffffff; font-size: 12px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(251, 90, 58, 0.3); transition: all .15s ease;">
+                            <i class="fas fa-plus"></i> Create Estimate
+                        </button>
+                    </div>
                 </div>
             </div>`;
         }
@@ -1397,6 +1427,24 @@
             }));
             if (typeof showToast === 'function') showToast(`Estimate "${targetEst.name}" set as Primary.`);
         }
+        if (actionName === 'toggle-pin') {
+            const targetEst = state.estimates.find(row => String(row.id) === String(estimateId));
+            if (targetEst) {
+                targetEst.isPinned = !targetEst.isPinned;
+                if (window.ProjectState) {
+                    if (!window.ProjectState.projectMeta) window.ProjectState.projectMeta = {};
+                    const pinnedSet = new Set(Array.isArray(window.ProjectState.projectMeta.pinned_estimate_ids)
+                        ? window.ProjectState.projectMeta.pinned_estimate_ids.map(String) : []);
+                    if (targetEst.isPinned) pinnedSet.add(String(estimateId));
+                    else pinnedSet.delete(String(estimateId));
+                    window.ProjectState.projectMeta.pinned_estimate_ids = Array.from(pinnedSet);
+                }
+                saveLocal();
+                render();
+                publish();
+                if (typeof showToast === 'function') showToast(targetEst.isPinned ? `Estimate "${targetEst.name}" pinned.` : `Estimate "${targetEst.name}" unpinned.`);
+            }
+        }
     }
 
     root.addEventListener('click', event => {
@@ -1409,10 +1457,65 @@
             root.querySelectorAll('[data-estimate-actions-menu]').forEach(row => { row.hidden = true; });
             root.querySelectorAll('[data-estimate-menu]').forEach(row => row.setAttribute('aria-expanded', 'false'));
             if (menu && opening) {
+                const margin = 10;
+                const boundaryEl = estimateMenu.closest('.estimating-page, .workspace-shell, body') || document.body;
+                let bounds = {
+                    left: margin,
+                    top: margin,
+                    right: window.innerWidth - margin,
+                    bottom: window.innerHeight - margin,
+                    width: window.innerWidth - (margin * 2),
+                    height: window.innerHeight - (margin * 2)
+                };
+                if (boundaryEl && boundaryEl !== document.body && boundaryEl !== document.documentElement) {
+                    const bRect = boundaryEl.getBoundingClientRect();
+                    bounds = {
+                        left: Math.max(margin, bRect.left + margin),
+                        top: Math.max(margin, bRect.top + margin),
+                        right: Math.min(window.innerWidth - margin, bRect.right - margin),
+                        bottom: Math.min(window.innerHeight - margin, bRect.bottom - margin),
+                        width: Math.max(0, Math.min(window.innerWidth - margin, bRect.right - margin) - Math.max(margin, bRect.left + margin)),
+                        height: Math.max(0, Math.min(window.innerHeight - margin, bRect.bottom - margin) - Math.max(margin, bRect.top + margin))
+                    };
+                }
+
                 const rect = estimateMenu.getBoundingClientRect();
                 menu.hidden = false;
-                menu.style.left = `${Math.max(8, Math.min(window.innerWidth - 178, rect.right - 170))}px`;
-                menu.style.top = `${Math.max(8, rect.top - menu.offsetHeight - 6)}px`;
+                menu.style.visibility = 'hidden';
+                menu.style.left = '0px';
+                menu.style.top = '0px';
+                menu.style.bottom = 'auto';
+                menu.style.right = 'auto';
+
+                const menuRect = menu.getBoundingClientRect();
+                const menuW = menuRect.width || menu.offsetWidth || 180;
+                const menuH = menuRect.height || menu.offsetHeight || 190;
+
+                const midX = bounds.left + (bounds.width / 2);
+                let left = (rect.left + menuW > bounds.right || rect.left > midX)
+                    ? (rect.right - menuW)
+                    : rect.left;
+
+                if (left + menuW > bounds.right) {
+                    left = bounds.right - menuW;
+                }
+                if (left < bounds.left) {
+                    left = bounds.left;
+                }
+
+                let top = 'auto';
+                let bottom = 'auto';
+                if (rect.top - menuH >= bounds.top) {
+                    bottom = `${Math.round(window.innerHeight - rect.top + 6)}px`;
+                } else {
+                    top = `${Math.round(Math.min(bounds.bottom - menuH, rect.bottom + 6))}px`;
+                }
+
+                menu.style.left = `${Math.round(left)}px`;
+                menu.style.right = 'auto';
+                menu.style.top = top;
+                menu.style.bottom = bottom;
+                menu.style.visibility = 'visible';
                 estimateMenu.setAttribute('aria-expanded', 'true');
             }
             return;
@@ -1571,7 +1674,6 @@
         if (version) selectEstimate(version);
         const footerAction = target.closest('[data-estimating-action]')?.dataset.estimatingAction;
         if (footerAction === 'new-estimate') { ui.modal = 'new'; renderModal(); }
-        if (footerAction === 'compare-estimates') { ui.modal = 'compare'; renderModal(); }
         if (target.closest('[data-retry-save]')) saveServer();
     });
 
@@ -1735,7 +1837,6 @@
     });
     window.addEventListener('takeoff:estimating-action-requested', event => {
         if (event.detail?.action === 'new-estimate') ui.modal = 'new';
-        if (event.detail?.action === 'compare-estimates') ui.modal = 'compare';
         renderModal();
     });
     window.addEventListener('takeoff:estimating-estimate-action-requested', event => {

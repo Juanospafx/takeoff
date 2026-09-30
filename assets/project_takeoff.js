@@ -32,7 +32,7 @@
         const frame = $('takeoffFrame');
         try {
             frame?.contentWindow?.postMessage({ type: 'takeoff-visible' }, '*');
-        } catch (e) {}
+        } catch (e) { }
     }
 
     function takeoffEditorUrl(documentId, estimateId = activeEstimateId()) {
@@ -46,7 +46,7 @@
         const documentId = activeDrawingDoc()?.id || window.ProjectState?.selectedDocumentId;
         if (!frame || !documentId) return false;
         let loadedEstimate = '';
-        try { loadedEstimate = new URL(frame.getAttribute('src') || '', window.location.href).searchParams.get('estimate_key') || ''; } catch (_) {}
+        try { loadedEstimate = new URL(frame.getAttribute('src') || '', window.location.href).searchParams.get('estimate_key') || ''; } catch (_) { }
         if (loadedEstimate === String(estimateId)) return false;
         const requestedEstimateId = String(estimateId);
         const generation = ++editorEstimateGeneration;
@@ -146,12 +146,12 @@
     let takeoffIsDirty = false;
     window.isTakeoffDirty = () => takeoffIsDirty;
     window.projectTakeoffFitToScreen = fitTakeoffToScreen;
-    window.projectTakeoffSaveState = async function() {
+    window.projectTakeoffSaveState = async function () {
         takeoffIsDirty = false;
         try {
             const pId = String(window.ProjectState?.projectId || 0);
             localStorage.setItem('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
-        } catch (_) {}
+        } catch (_) { }
         syncTakeoffToEstimating();
         syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
         try {
@@ -403,28 +403,249 @@
     }
 
     const TAKEOFF_TYPES = ['Count', 'Linear', 'Linear with drop', 'Linear avg. with drop', 'Count by distance', 'Area / Volume', 'Vertical wall area'];
-    const TAKEOFF_UOMS = ['ea', 'ft', 'lf', 'sq ft', 'ft3', 'yd', 'm'];
-    const TAKEOFF_SYMBOLS = ['Solid Circle', 'Hollow Circle', 'Square', 'Triangle', 'Diamond', 'Cross'];
-    const TAKEOFF_SIZES = ['Small', 'Medium', 'Large'];
-    const takeoffSizeRadius = size => ({ Small: 7, Medium: 9, Large: 12 }[size]
+    const TAKEOFF_UOMS = [
+        'ea', 'set', 'lot', 'pr', 'pkg', 'box',
+        'lf', 'ft', 'in', 'yd', 'm', 'mm',
+        'sq ft', 'sq yd', 'm2', 'acre',
+        'cu yd', 'ft3', 'm3', 'gal',
+        'hr', 'day', 'wk'
+    ];
+    const TAKEOFF_SYMBOLS = ['Checkmark', 'Octagon', 'Solid Circle', 'Square', 'Triangle', 'Cross', 'Pentagon', 'Target', 'Dimension', 'Hollow Circle', 'Diamond'];
+    const TAKEOFF_SIZES = ['X-Small', 'Small', 'Medium', 'Large'];
+    const takeoffSizeRadius = size => ({ 'X-Small': 5, Small: 7, Medium: 9, Large: 12 }[size]
         || Math.max(4, Math.min(96, Number(size) || 9)));
     const takeoffDisplaySize = size => {
         if (TAKEOFF_SIZES.includes(size)) return size;
         const radius = takeoffSizeRadius(size);
+        if (radius <= 5) return 'X-Small';
         if (radius <= 7) return 'Small';
         if (radius >= 12) return 'Large';
         return 'Medium';
     };
     const takeoffDisplaySymbol = symbol => {
         const raw = String(symbol || '').toLowerCase();
+        if (raw.includes('check')) return 'Checkmark';
+        if (raw.includes('octagon')) return 'Octagon';
         if (raw.includes('square')) return 'Square';
         if (raw.includes('triangle')) return 'Triangle';
+        if (raw.includes('pentagon')) return 'Pentagon';
+        if (raw.includes('target') || raw.includes('concentric')) return 'Target';
+        if (raw.includes('dimension') || raw.includes('dynamic')) return 'Dimension';
         if (raw.includes('diamond')) return 'Diamond';
-        if (raw.includes('cross')) return 'Cross';
+        if (raw.includes('cross') || raw.includes('plus')) return 'Cross';
         if (raw.includes('hollow')) return 'Hollow Circle';
         return 'Solid Circle';
     };
+
+    function getLayerBadgeSvg(layer, size = 14) {
+        const color = layer?.color || '#3b82f6';
+        const rawType = String(layer?.type || 'Count');
+        const isCount = rawType === 'Count' || rawType === 'Count by distance' || Boolean(layer?.symbol && !rawType.startsWith('Linear') && !rawType.includes('Area'));
+
+        if (!isCount) {
+            if (rawType === 'Linear' || rawType.startsWith('Linear')) {
+                return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none">
+                    <line x1="3" y1="12" x2="21" y2="12" stroke="${esc(color)}" stroke-width="3.5" stroke-linecap="round"/>
+                    <circle cx="5" cy="12" r="2.5" fill="${esc(color)}"/>
+                    <circle cx="19" cy="12" r="2.5" fill="${esc(color)}"/>
+                </svg>`;
+            }
+            return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none">
+                <polygon points="4 5, 20 5, 20 19, 4 19" stroke="${esc(color)}" stroke-width="2.2" stroke-linejoin="round" fill="${esc(color)}" fill-opacity="0.35"/>
+            </svg>`;
+        }
+
+        const sym = takeoffDisplaySymbol(layer?.symbol || 'Solid Circle');
+        switch (sym) {
+            case 'Checkmark':
+                return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="${esc(color)}" stroke-width="3.2" stroke-linecap="round" stroke-linejoin="round">
+                    <polyline points="20 6 9 17 4 12"/>
+                </svg>`;
+            case 'Square':
+                return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="${esc(color)}">
+                    <rect x="3.5" y="3.5" width="17" height="17" rx="1.5"/>
+                </svg>`;
+            case 'Triangle':
+                return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="${esc(color)}">
+                    <polygon points="12 2.5 22 21.5 2 21.5"/>
+                </svg>`;
+            case 'Octagon':
+                return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="${esc(color)}">
+                    <polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86"/>
+                </svg>`;
+            case 'Cross':
+                return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="${esc(color)}">
+                    <path d="M19 10.5h-5.5V5c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v5.5H5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5h5.5V19c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-5.5H19c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5z"/>
+                </svg>`;
+            case 'Pentagon':
+                return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="${esc(color)}">
+                    <polygon points="12 2 22 9.5 18.2 21.5 5.8 21.5 2 9.5"/>
+                </svg>`;
+            case 'Target':
+                return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="${esc(color)}" stroke-width="2.5">
+                    <circle cx="12" cy="12" r="9"/>
+                    <circle cx="12" cy="12" r="4.5" fill="${esc(color)}"/>
+                </svg>`;
+            case 'Hollow Circle':
+                return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none" stroke="${esc(color)}" stroke-width="3">
+                    <circle cx="12" cy="12" r="8"/>
+                </svg>`;
+            case 'Diamond':
+                return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="${esc(color)}">
+                    <polygon points="12 2 22 12 12 22 2 12"/>
+                </svg>`;
+            case 'Dimension':
+                return `<svg viewBox="0 0 28 20" width="${Math.round(size * 1.15)}" height="${Math.round(size * 0.85)}" fill="none" stroke="${esc(color)}" stroke-width="2">
+                    <text x="14" y="8" text-anchor="middle" font-size="9" font-family="sans-serif" font-weight="bold" fill="${esc(color)}" stroke="none">x</text>
+                    <line x1="3" y1="11" x2="3" y2="18"/>
+                    <line x1="25" y1="11" x2="25" y2="18"/>
+                    <line x1="3" y1="15" x2="25" y2="15"/>
+                </svg>`;
+            case 'Solid Circle':
+            default:
+                return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="${esc(color)}">
+                    <circle cx="12" cy="12" r="8.5"/>
+                </svg>`;
+        }
+    }
+
+    function renderLayerBadgeHtml(layer, size = 14) {
+        if (!layer) return '';
+        const symbolLabel = layer.symbol || layer.type || 'Item';
+        return `<span class="pro-layer-symbol-badge" title="${esc(symbolLabel)} (${esc(layer.color || '#3b82f6')})">${getLayerBadgeSvg(layer, size)}</span>`;
+    }
+
     const TAKEOFF_COLORS = window.TakeoffColorPalette?.COLORS || [];
+    const TAKEOFF_RICH_COLORS = [
+        '#7c3aed',
+        '#3b5998',
+        '#0ea5e9',
+        '#00d2ff',
+        '#009688',
+        '#16a34a',
+        '#84cc16',
+        '#a3e635',
+        '#fde047',
+        '#f59e0b',
+        '#f97316',
+        '#ef4444',
+        '#78350f',
+        '#000000'
+    ];
+
+    const TAKEOFF_TYPE_ITEMS = [
+        {
+            type: 'Count',
+            title: 'Count',
+            desc: 'Count Quantity items - EX: Light Fixtures, Electrical Outlets, Data Outlets',
+            svg: `<svg viewBox="0 0 44 44" width="34" height="34" fill="none"><path d="M22 6 C18.7 6 16 8.7 16 12 C16 16 22 21 22 21 C22 21 28 16 28 12 C28 8.7 25.3 6 22 6 Z" fill="var(--pcd-pin-bg, #ffffff)" stroke="#1e293b" stroke-width="2" stroke-linejoin="round"/><circle cx="22" cy="11.5" r="2.2" fill="#1e293b"/><path d="M11 18 C7.7 18 5 20.7 5 24 C5 28 11 33 11 33 C11 33 17 28 17 24 C17 20.7 14.3 18 11 18 Z" fill="var(--pcd-pin-bg, #ffffff)" stroke="#1e293b" stroke-width="2" stroke-linejoin="round"/><circle cx="11" cy="23.5" r="2.2" fill="#1e293b"/><path d="M33 21 C29.7 21 27 23.7 27 27 C27 31 33 36 33 36 C33 36 39 31 39 27 C39 23.7 36.3 21 33 21 Z" fill="var(--pcd-pin-bg, #ffffff)" stroke="#1e293b" stroke-width="2" stroke-linejoin="round"/><circle cx="33" cy="26.5" r="2.2" fill="#1e293b"/></svg>`
+        },
+        {
+            type: 'Linear',
+            title: 'Linear',
+            desc: 'Measure Distance - EX: Cable, Conduit, Pipe',
+            svg: `<svg viewBox="0 0 44 44" width="34" height="34" fill="none"><polyline points="7 34, 21 15, 37 34" stroke="#ff5722" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><circle cx="7" cy="34" r="3.5" fill="#ffffff" stroke="#1e293b" stroke-width="2"/><circle cx="21" cy="15" r="3.5" fill="#ffffff" stroke="#1e293b" stroke-width="2"/><circle cx="37" cy="34" r="3.5" fill="#ffffff" stroke="#1e293b" stroke-width="2"/></svg>`
+        },
+        {
+            type: 'Linear with drop',
+            title: 'Linear with drop',
+            desc: 'Measure conduit and include drop distance at user defined points',
+            svg: `<svg viewBox="0 0 44 44" width="34" height="34" fill="none"><polyline points="7 22, 22 9, 37 22" stroke="#ff5722" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="7" y1="22" x2="7" y2="34" stroke="#ff5722" stroke-width="1.8" stroke-dasharray="2,2"/><circle cx="7" cy="34" r="2.2" fill="#ffffff" stroke="#ff5722" stroke-width="1.5"/><line x1="22" y1="9" x2="22" y2="25" stroke="#ff5722" stroke-width="1.8" stroke-dasharray="2,2"/><circle cx="22" cy="25" r="2.2" fill="#ffffff" stroke="#ff5722" stroke-width="1.5"/><line x1="37" y1="22" x2="37" y2="34" stroke="#ff5722" stroke-width="1.8" stroke-dasharray="2,2"/><circle cx="37" cy="34" r="2.2" fill="#ffffff" stroke="#ff5722" stroke-width="1.5"/><circle cx="7" cy="22" r="3.2" fill="#ffffff" stroke="#1e293b" stroke-width="2"/><circle cx="22" cy="9" r="3.2" fill="#ffffff" stroke="#1e293b" stroke-width="2"/><circle cx="37" cy="22" r="3.2" fill="#ffffff" stroke="#1e293b" stroke-width="2"/></svg>`
+        },
+        {
+            type: 'Linear avg. with drop',
+            title: 'Linear avg. with drop',
+            desc: 'Uses sample cable runs to average length including drop',
+            svg: `<svg viewBox="0 0 44 44" width="34" height="34" fill="none"><path d="M8 29 L16 29 L16 17 L25 17 L25 29 L36 29" stroke="#ff5722" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"/><line x1="16" y1="29" x2="16" y2="35" stroke="#ff5722" stroke-width="2"/><line x1="25" y1="29" x2="25" y2="35" stroke="#ff5722" stroke-width="2"/><circle cx="8" cy="29" r="3" fill="#ffffff" stroke="#1e293b" stroke-width="2"/><circle cx="16" cy="35" r="3" fill="#ffffff" stroke="#1e293b" stroke-width="2"/><circle cx="25" cy="35" r="3" fill="#ffffff" stroke="#1e293b" stroke-width="2"/><circle cx="36" cy="29" r="3" fill="#ffffff" stroke="#1e293b" stroke-width="2"/><circle cx="25" cy="11" r="3" fill="#ffffff" stroke="#1e293b" stroke-width="2"/><line x1="25" y1="11" x2="25" y2="17" stroke="#ff5722" stroke-width="2"/></svg>`
+        },
+        {
+            type: 'Count by distance',
+            title: 'Count by distance',
+            desc: 'Divides linear distance into quantity for J-hooks, Anchors, Straps, etc.',
+            svg: `<svg viewBox="0 0 44 44" width="34" height="34" fill="none"><line x1="7" y1="33" x2="21" y2="17" stroke="#ff5722" stroke-width="2.5" stroke-dasharray="3,3" stroke-linecap="round"/><line x1="21" y1="17" x2="37" y2="33" stroke="#ff5722" stroke-width="2.5" stroke-dasharray="3,3" stroke-linecap="round"/><circle cx="7" cy="33" r="3.2" fill="#ffffff" stroke="#1e293b" stroke-width="2"/><circle cx="21" cy="17" r="3.2" fill="#ffffff" stroke="#1e293b" stroke-width="2"/><circle cx="37" cy="33" r="3.2" fill="#ffffff" stroke="#1e293b" stroke-width="2"/></svg>`
+        },
+        {
+            type: 'Area / Volume',
+            title: 'Area / Volume',
+            desc: 'Measure area in square units or space in cubic ones',
+            svg: `<svg viewBox="0 0 44 44" width="34" height="34" fill="none"><polygon points="10 16, 34 16, 37 34, 7 34" stroke="#ff5722" stroke-width="2.5" stroke-linejoin="round" fill="none"/><circle cx="10" cy="16" r="3" fill="#ffffff" stroke="#1e293b" stroke-width="2"/><circle cx="34" cy="16" r="3" fill="#ffffff" stroke="#1e293b" stroke-width="2"/><circle cx="37" cy="34" r="3" fill="#ffffff" stroke="#1e293b" stroke-width="2"/><circle cx="7" cy="34" r="3" fill="#ffffff" stroke="#1e293b" stroke-width="2"/></svg>`
+        }
+    ];
+
+    const TAKEOFF_SYMBOL_ITEMS = [
+        { section: 'Basic Symbols' },
+        {
+            id: 'Checkmark',
+            label: 'Checkmark',
+            svg: `<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
+        },
+        {
+            id: 'Octagon',
+            label: 'Octagon',
+            svg: `<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86"/></svg>`
+        },
+        {
+            id: 'Solid Circle',
+            label: 'Circle',
+            svg: `<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor"><circle cx="12" cy="12" r="8.5"/></svg>`
+        },
+        {
+            id: 'Square',
+            label: 'Square',
+            svg: `<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor"><rect x="3.5" y="3.5" width="17" height="17" rx="1"/></svg>`
+        },
+        {
+            id: 'Triangle',
+            label: 'Triangle',
+            svg: `<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor"><polygon points="12 3 22 21 2 21"/></svg>`
+        },
+        {
+            id: 'Cross',
+            label: 'Plus',
+            svg: `<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor"><path d="M19 10.5h-5.5V5c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v5.5H5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5h5.5V19c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-5.5H19c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5z"/></svg>`
+        },
+        {
+            id: 'Pentagon',
+            label: 'Pentagon',
+            svg: `<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor"><polygon points="12 2 22 9.5 18.2 21.5 5.8 21.5 2 9.5"/></svg>`
+        },
+        {
+            id: 'Target',
+            label: 'Concentric',
+            svg: `<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4" fill="currentColor"/></svg>`
+        },
+        { divider: true },
+        { section: 'Dynamic Symbols' },
+        {
+            id: 'Dimension',
+            label: 'Dimension',
+            svg: `<svg viewBox="0 0 28 20" width="22" height="17" fill="none" stroke="currentColor" stroke-width="1.8"><text x="14" y="8" text-anchor="middle" font-size="9" font-family="sans-serif" font-weight="bold" fill="currentColor" stroke="none">x</text><line x1="3" y1="11" x2="3" y2="18"/><line x1="25" y1="11" x2="25" y2="18"/><line x1="3" y1="15" x2="25" y2="15"/></svg>`
+        }
+    ];
+
+    const TAKEOFF_SIZE_ITEMS = [
+        {
+            id: 'X-Small',
+            label: 'X-Small',
+            svg: `<svg viewBox="0 0 28 28" width="20" height="20" fill="none"><circle cx="14" cy="14" r="11" stroke="var(--pcd-ring, #cbd5e1)" stroke-width="1.2"/><circle cx="14" cy="14" r="7.5" stroke="var(--pcd-ring-2, #94a3b8)" stroke-width="1.2"/><circle cx="14" cy="14" r="2.5" fill="#1e293b"/></svg>`
+        },
+        {
+            id: 'Small',
+            label: 'Small',
+            svg: `<svg viewBox="0 0 28 28" width="20" height="20" fill="none"><circle cx="14" cy="14" r="9.5" stroke="var(--pcd-ring, #cbd5e1)" stroke-width="1.4"/><circle cx="14" cy="14" r="5" stroke="#1e293b" stroke-width="2"/></svg>`
+        },
+        {
+            id: 'Medium',
+            label: 'Medium',
+            svg: `<svg viewBox="0 0 28 28" width="20" height="20" fill="none"><circle cx="14" cy="14" r="7.5" stroke="#1e293b" stroke-width="2.2"/></svg>`
+        },
+        {
+            id: 'Large',
+            label: 'Large',
+            svg: `<svg viewBox="0 0 28 28" width="20" height="20" fill="none"><circle cx="14" cy="14" r="10.5" stroke="#1e293b" stroke-width="2.2"/></svg>`
+        }
+    ];
+
     const TAKEOFF_TYPE_HELP = {
         Count: 'Use Count for fixtures, receptacles, luminaires, devices, or any item measured by quantity.',
         Linear: 'Use Linear for conduits, cables, piping, or any item measured by length.',
@@ -434,6 +655,518 @@
         'Area / Volume': 'Use Area / Volume for surfaces or volumetric quantities.',
         'Vertical wall area': 'Use Vertical wall area for wall takeoffs measured by height and length.'
     };
+
+    function closeAllProCustomDropdowns() {
+        document.querySelectorAll('.pro-custom-dropdown.is-open').forEach(dd => {
+            dd.classList.remove('is-open');
+        });
+    }
+
+    if (!window.__proCustomDropdownGlobalClickBound) {
+        window.__proCustomDropdownGlobalClickBound = true;
+        document.addEventListener('click', (e) => {
+            if (!e.target.closest('.pro-custom-dropdown')) {
+                closeAllProCustomDropdowns();
+            }
+        });
+    }
+
+    function setupTypeDropdown(prefix, selectEl) {
+        const dropdown = $(`${prefix}TypeDropdown`);
+        const trigger = $(`${prefix}TypeTrigger`);
+        const menu = $(`${prefix}TypeMenu`);
+        if (!dropdown || !trigger || !menu) return;
+
+        menu.innerHTML = TAKEOFF_TYPE_ITEMS.map(item => `
+            <div class="pcd-item" data-type="${esc(item.type)}">
+                <div class="pcd-item-icon">${item.svg}</div>
+                <div class="pcd-item-content">
+                    <div class="pcd-item-title">${esc(item.title)}</div>
+                    <div class="pcd-item-desc">${esc(item.desc)}</div>
+                </div>
+            </div>
+        `).join('');
+
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isOpen = dropdown.classList.contains('is-open');
+            closeAllProCustomDropdowns();
+            if (!isOpen) dropdown.classList.add('is-open');
+        });
+
+        menu.querySelectorAll('.pcd-item').forEach(itemEl => {
+            itemEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const type = itemEl.dataset.type;
+                if (selectEl) {
+                    selectEl.value = type;
+                    selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                updateTypeDropdownTrigger(prefix, type);
+                closeAllProCustomDropdowns();
+            });
+        });
+    }
+
+    function updateTypeDropdownTrigger(prefix, type) {
+        const item = TAKEOFF_TYPE_ITEMS.find(it => it.type === type) || TAKEOFF_TYPE_ITEMS[0];
+        const iconPreview = $(`${prefix}TypeIconPreview`);
+        const textPreview = $(`${prefix}TypeText`);
+        const menu = $(`${prefix}TypeMenu`);
+        if (iconPreview) iconPreview.innerHTML = item.svg;
+        if (textPreview) textPreview.textContent = item.title;
+        if (menu) {
+            menu.querySelectorAll('.pcd-item').forEach(el => {
+                el.classList.toggle('is-selected', el.dataset.type === type);
+            });
+        }
+    }
+
+    const TAKEOFF_UOM_ITEMS = [
+        { section: 'Count & Items' },
+        { id: 'ea', label: 'ea', desc: 'Each', hint: 'Fixtures, devices, boxes', category: 'Count' },
+        { id: 'pr', label: 'pr', desc: 'Pair', hint: 'Matched pairs', category: 'Count' },
+        { id: 'set', label: 'set', desc: 'Set', hint: 'Assemblies, sets', category: 'Count' },
+        { id: 'lot', label: 'lot', desc: 'Lot', hint: 'Lump sum packages', category: 'Count' },
+        { id: 'pkg', label: 'pkg', desc: 'Package', hint: 'Standard packs', category: 'Count' },
+        { id: 'box', label: 'box', desc: 'Box', hint: 'Box quantities', category: 'Count' },
+
+        { section: 'Length & Distance' },
+        { id: 'lf', label: 'lf', desc: 'Linear Feet', hint: 'Conduit, wire, piping', category: 'Length' },
+        { id: 'ft', label: 'ft', desc: 'Feet', hint: 'Drop & run lengths', category: 'Length' },
+        { id: 'in', label: 'in', desc: 'Inches', hint: 'Short measurements', category: 'Length' },
+        { id: 'yd', label: 'yd', desc: 'Yards', hint: 'Trenching & site work', category: 'Length' },
+        { id: 'm', label: 'm', desc: 'Meters', hint: 'Metric distance', category: 'Length' },
+        { id: 'mm', label: 'mm', desc: 'Millimeters', hint: 'Precision metric', category: 'Length' },
+
+        { section: 'Area & Surface' },
+        { id: 'sq ft', label: 'sq ft', desc: 'Square Feet', hint: 'Floor, wall, ceiling', category: 'Area' },
+        { id: 'sq yd', label: 'sq yd', desc: 'Square Yards', hint: 'Paving, turf, flooring', category: 'Area' },
+        { id: 'm2', label: 'm²', desc: 'Square Meters', hint: 'Metric floor/wall', category: 'Area' },
+        { id: 'acre', label: 'acre', desc: 'Acres', hint: 'Site acreage', category: 'Area' },
+
+        { section: 'Volume & Bulk' },
+        { id: 'cu yd', label: 'cu yd', desc: 'Cubic Yards', hint: 'Concrete, excavation', category: 'Volume' },
+        { id: 'ft3', label: 'ft³', desc: 'Cubic Feet', hint: 'Structural volume', category: 'Volume' },
+        { id: 'm3', label: 'm³', desc: 'Cubic Meters', hint: 'Metric volume', category: 'Volume' },
+        { id: 'gal', label: 'gal', desc: 'Gallons', hint: 'Liquid, paint, sealant', category: 'Volume' },
+
+        { section: 'Time & Labor' },
+        { id: 'hr', label: 'hr', desc: 'Hours', hint: 'Labor hours', category: 'Time' },
+        { id: 'day', label: 'day', desc: 'Days', hint: 'Daily crew / equipment', category: 'Time' },
+        { id: 'wk', label: 'wk', desc: 'Weeks', hint: 'Duration schedule', category: 'Time' }
+    ];
+
+    function allowedUomCategoriesForType(type) {
+        const raw = String(type || 'Count').trim();
+        if (raw === 'Count' || raw === 'Count by distance') return ['Count'];
+        if (raw === 'Linear' || raw.startsWith('Linear')) return ['Length'];
+        if (raw === 'Area / Volume' || raw.includes('Area') || raw.includes('Volume')) return ['Area', 'Volume'];
+        return ['Count', 'Length', 'Area', 'Volume', 'Time'];
+    }
+
+    function defaultUomForType(type) {
+        const raw = String(type || 'Count').trim();
+        if (raw === 'Count' || raw === 'Count by distance') return 'ea';
+        if (raw === 'Linear' || raw.startsWith('Linear')) return 'ft';
+        if (raw === 'Area / Volume' || raw.includes('Area') || raw.includes('Volume')) return 'sq ft';
+        return 'ea';
+    }
+
+    function isUomValidForType(uom, type) {
+        if (!uom) return false;
+        const normUom = String(uom).trim().toLowerCase();
+        const allowed = allowedUomCategoriesForType(type);
+        const item = TAKEOFF_UOM_ITEMS.find(it => it.id && (
+            it.id.toLowerCase() === normUom ||
+            (normUom === 'm²' && it.id === 'm2') ||
+            (normUom === 'ft³' && it.id === 'ft3') ||
+            (normUom === 'cu yd' && it.id === 'cu yd') ||
+            (normUom === 'yd3' && it.id === 'cu yd')
+        ));
+        if (!item) return true;
+        return allowed.includes(item.category);
+    }
+
+    function setupUomDropdown(prefix, selectEl) {
+        const dropdown = $(`${prefix}UomDropdown`);
+        const trigger = $(`${prefix}UomTrigger`);
+        const menu = $(`${prefix}UomMenu`);
+        if (!dropdown || !trigger || !menu) return;
+
+        let listHtml = '';
+        TAKEOFF_UOM_ITEMS.forEach(item => {
+            if (item.section) {
+                listHtml += `<div class="pcd-section-header" data-uom-section="${esc(item.section)}">${esc(item.section)}</div>`;
+            } else {
+                listHtml += `
+                    <div class="pcd-uom-item" data-uom="${esc(item.id)}" data-category="${esc(item.category || '')}" data-search="${esc((item.label + ' ' + item.desc + ' ' + item.id + ' ' + (item.hint || '')).toLowerCase())}">
+                        <div class="pcd-uom-left">
+                            <span class="pcd-uom-badge">${esc(item.label)}</span>
+                            <div class="pcd-uom-info">
+                                <span class="pcd-uom-name">${esc(item.desc)}</span>
+                                ${item.hint ? `<span class="pcd-uom-hint">${esc(item.hint)}</span>` : ''}
+                            </div>
+                        </div>
+                        <i class="fas fa-check pcd-uom-check"></i>
+                    </div>
+                `;
+            }
+        });
+
+        menu.innerHTML = `
+            <div class="pcd-search-wrap">
+                <i class="fas fa-search pcd-search-icon"></i>
+                <input type="text" class="pcd-search-input" placeholder="Search or type unit..." autocomplete="off">
+            </div>
+            <div class="pcd-uom-list">
+                ${listHtml}
+            </div>
+            <div class="pcd-uom-custom-row" style="display:none;">
+                <button type="button" class="pcd-uom-custom-btn">
+                    <i class="fas fa-plus"></i> <span class="pcd-uom-custom-text">Use custom unit</span>
+                </button>
+            </div>
+        `;
+
+        const searchInput = menu.querySelector('.pcd-search-input');
+        const customRow = menu.querySelector('.pcd-uom-custom-row');
+        const customBtn = menu.querySelector('.pcd-uom-custom-btn');
+        const customText = menu.querySelector('.pcd-uom-custom-text');
+
+        function applyUomSelection(uom) {
+            const clean = String(uom || 'ea').trim();
+            if (selectEl) {
+                setSelectValue(selectEl, clean);
+                selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+            }
+            updateUomDropdownTrigger(prefix, clean);
+            closeAllProCustomDropdowns();
+        }
+
+        function filterItems(query) {
+            const q = String(query || '').toLowerCase().trim();
+            const currentType = dropdown._takeoffType || 'Count';
+            const allowed = allowedUomCategoriesForType(currentType);
+            const items = menu.querySelectorAll('.pcd-uom-item');
+            let hasExactMatch = false;
+            let firstVisible = null;
+
+            items.forEach(el => {
+                const cat = el.dataset.category || '';
+                const isTypeAllowed = !cat || allowed.includes(cat);
+                if (!isTypeAllowed) {
+                    el.style.display = 'none';
+                    return;
+                }
+                const uomId = (el.dataset.uom || '').toLowerCase();
+                const searchData = (el.dataset.search || '').toLowerCase();
+                const matches = !q || searchData.includes(q) || uomId.includes(q);
+                el.style.display = matches ? 'flex' : 'none';
+                if (matches) {
+                    if (!firstVisible) firstVisible = el;
+                    if (uomId === q) hasExactMatch = true;
+                }
+            });
+
+            menu.querySelectorAll('.pcd-section-header').forEach(header => {
+                if (!q) {
+                    // Check if any item in this section is allowed for current type
+                    let next = header.nextElementSibling;
+                    let sectionHasVisible = false;
+                    while (next && !next.classList.contains('pcd-section-header')) {
+                        const cat = next.dataset.category || '';
+                        if (next.classList.contains('pcd-uom-item') && (!cat || allowed.includes(cat))) {
+                            sectionHasVisible = true;
+                            break;
+                        }
+                        next = next.nextElementSibling;
+                    }
+                    header.style.display = sectionHasVisible ? 'block' : 'none';
+                    return;
+                }
+                let next = header.nextElementSibling;
+                let sectionHasVisible = false;
+                while (next && !next.classList.contains('pcd-section-header')) {
+                    if (next.classList.contains('pcd-uom-item') && next.style.display !== 'none') {
+                        sectionHasVisible = true;
+                        break;
+                    }
+                    next = next.nextElementSibling;
+                }
+                header.style.display = sectionHasVisible ? 'block' : 'none';
+            });
+
+            if (q && !hasExactMatch && customRow && customText) {
+                customRow.style.display = 'block';
+                customText.textContent = `Use custom unit "${q}"`;
+            } else if (customRow) {
+                customRow.style.display = 'none';
+            }
+
+            return { firstVisible, hasExactMatch };
+        }
+
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isOpen = dropdown.classList.contains('is-open');
+            closeAllProCustomDropdowns();
+            if (!isOpen) {
+                dropdown.classList.add('is-open');
+                if (searchInput) {
+                    searchInput.value = '';
+                }
+                filterItems('');
+                if (searchInput) {
+                    setTimeout(() => searchInput.focus(), 25);
+                }
+            }
+        });
+
+        menu.addEventListener('click', (e) => {
+            e.stopPropagation();
+        });
+
+        searchInput?.addEventListener('input', (e) => {
+            filterItems(e.target.value);
+        });
+
+        searchInput?.addEventListener('keydown', (e) => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                const q = searchInput.value.trim();
+                const { firstVisible } = filterItems(q);
+                if (firstVisible && (!q || firstVisible.style.display !== 'none')) {
+                    applyUomSelection(firstVisible.dataset.uom);
+                } else if (q) {
+                    applyUomSelection(q);
+                }
+            } else if (e.key === 'Escape') {
+                closeAllProCustomDropdowns();
+            }
+        });
+
+        customBtn?.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const q = searchInput?.value.trim();
+            if (q) applyUomSelection(q);
+        });
+
+        menu.querySelectorAll('.pcd-uom-item').forEach(itemEl => {
+            itemEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                applyUomSelection(itemEl.dataset.uom);
+            });
+        });
+    }
+
+    function filterUomDropdownByType(prefix, type) {
+        const dropdown = $(`${prefix}UomDropdown`);
+        const menu = $(`${prefix}UomMenu`);
+        if (!dropdown || !menu) return;
+        dropdown._takeoffType = type || 'Count';
+        const allowed = allowedUomCategoriesForType(dropdown._takeoffType);
+
+        menu.querySelectorAll('.pcd-uom-item').forEach(el => {
+            const cat = el.dataset.category || '';
+            const isAllowed = !cat || allowed.includes(cat);
+            el.dataset.typeAllowed = isAllowed ? 'true' : 'false';
+            el.style.display = isAllowed ? 'flex' : 'none';
+        });
+
+        menu.querySelectorAll('.pcd-section-header').forEach(header => {
+            let next = header.nextElementSibling;
+            let sectionHasVisible = false;
+            while (next && !next.classList.contains('pcd-section-header')) {
+                if (next.classList.contains('pcd-uom-item') && next.dataset.typeAllowed === 'true') {
+                    sectionHasVisible = true;
+                    break;
+                }
+                next = next.nextElementSibling;
+            }
+            header.style.display = sectionHasVisible ? 'block' : 'none';
+        });
+    }
+
+    function updateUomDropdownTrigger(prefix, rawUom) {
+        const norm = String(rawUom || 'ea').trim();
+        const textPreview = $(`${prefix}UomText`);
+        const trigger = $(`${prefix}UomTrigger`);
+        const menu = $(`${prefix}UomMenu`);
+        
+        const matchedItem = TAKEOFF_UOM_ITEMS.find(it => it.id && (
+            it.id.toLowerCase() === norm.toLowerCase() ||
+            (norm.toLowerCase() === 'm²' && it.id === 'm2') ||
+            (norm.toLowerCase() === 'ft³' && it.id === 'ft3') ||
+            (norm.toLowerCase() === 'cu yd' && it.id === 'cu yd') ||
+            (norm.toLowerCase() === 'yd3' && it.id === 'cu yd')
+        ));
+        const displayLabel = matchedItem ? matchedItem.label : norm;
+        const fullDesc = matchedItem ? `${matchedItem.desc} (${matchedItem.label})` : `Unit of Measure: ${norm}`;
+
+        if (textPreview) {
+            textPreview.textContent = displayLabel;
+        }
+        if (trigger) {
+            trigger.title = fullDesc;
+        }
+        if (menu) {
+            menu.querySelectorAll('.pcd-uom-item').forEach(el => {
+                const uomId = (el.dataset.uom || '').toLowerCase();
+                const isSelected = (uomId === norm.toLowerCase()) ||
+                    (norm.toLowerCase() === 'm²' && uomId === 'm2') ||
+                    (norm.toLowerCase() === 'ft³' && uomId === 'ft3') ||
+                    (norm.toLowerCase() === 'cu yd' && uomId === 'cu yd') ||
+                    (norm.toLowerCase() === 'yd3' && uomId === 'cu yd');
+                el.classList.toggle('is-selected', Boolean(isSelected));
+            });
+        }
+    }
+
+    function setupSymbolDropdown(prefix, selectEl) {
+        const dropdown = $(`${prefix}SymbolDropdown`);
+        const trigger = $(`${prefix}SymbolTrigger`);
+        const menu = $(`${prefix}SymbolMenu`);
+        if (!dropdown || !trigger || !menu) return;
+
+        let html = '';
+        TAKEOFF_SYMBOL_ITEMS.forEach(item => {
+            if (item.section) {
+                html += `<div class="pcd-section-header">${esc(item.section)}</div>`;
+            } else if (item.divider) {
+                html += `<div class="pcd-divider"></div>`;
+            } else {
+                html += `<div class="pcd-symbol-item" data-symbol="${esc(item.id)}" title="${esc(item.label)}">
+                    <span>${item.svg}</span>
+                </div>`;
+            }
+        });
+        menu.innerHTML = html;
+
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isOpen = dropdown.classList.contains('is-open');
+            closeAllProCustomDropdowns();
+            if (!isOpen) dropdown.classList.add('is-open');
+        });
+
+        menu.querySelectorAll('.pcd-symbol-item').forEach(itemEl => {
+            itemEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const sym = itemEl.dataset.symbol;
+                if (selectEl) {
+                    selectEl.value = sym;
+                    selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                updateSymbolDropdownTrigger(prefix, sym);
+                closeAllProCustomDropdowns();
+            });
+        });
+    }
+
+    function updateSymbolDropdownTrigger(prefix, rawSymbol) {
+        const norm = takeoffDisplaySymbol(rawSymbol);
+        const item = TAKEOFF_SYMBOL_ITEMS.find(it => it.id === norm) || TAKEOFF_SYMBOL_ITEMS.find(it => it.id === 'Solid Circle');
+        const preview = $(`${prefix}SymbolPreview`);
+        const menu = $(`${prefix}SymbolMenu`);
+        if (preview && item) preview.innerHTML = item.svg;
+        if (menu) {
+            menu.querySelectorAll('.pcd-symbol-item').forEach(el => {
+                el.classList.toggle('is-selected', el.dataset.symbol === norm);
+            });
+        }
+    }
+
+    function setupSizeDropdown(prefix, selectEl) {
+        const dropdown = $(`${prefix}SizeDropdown`);
+        const trigger = $(`${prefix}SizeTrigger`);
+        const menu = $(`${prefix}SizeMenu`);
+        if (!dropdown || !trigger || !menu) return;
+
+        menu.innerHTML = TAKEOFF_SIZE_ITEMS.map(item => `
+            <div class="pcd-size-item" data-size="${esc(item.id)}" title="${esc(item.label)}">
+                <span>${item.svg}</span>
+            </div>
+        `).join('');
+
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isOpen = dropdown.classList.contains('is-open');
+            closeAllProCustomDropdowns();
+            if (!isOpen) dropdown.classList.add('is-open');
+        });
+
+        menu.querySelectorAll('.pcd-size-item').forEach(itemEl => {
+            itemEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const sz = itemEl.dataset.size;
+                if (selectEl) {
+                    selectEl.value = sz;
+                    selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+                }
+                updateSizeDropdownTrigger(prefix, sz);
+                closeAllProCustomDropdowns();
+            });
+        });
+    }
+
+    function updateSizeDropdownTrigger(prefix, rawSize) {
+        const norm = takeoffDisplaySize(rawSize);
+        const item = TAKEOFF_SIZE_ITEMS.find(it => it.id === norm) || TAKEOFF_SIZE_ITEMS.find(it => it.id === 'Medium');
+        const preview = $(`${prefix}SizePreview`);
+        const menu = $(`${prefix}SizeMenu`);
+        if (preview && item) preview.innerHTML = item.svg;
+        if (menu) {
+            menu.querySelectorAll('.pcd-size-item').forEach(el => {
+                el.classList.toggle('is-selected', el.dataset.size === norm);
+            });
+        }
+    }
+
+    function setupColorDropdown(prefix, selectEl, customPickerEl) {
+        const dropdown = $(`${prefix}ColorDropdown`);
+        const trigger = $(`${prefix}ColorTrigger`);
+        const menu = $(`${prefix}ColorMenu`);
+        if (!dropdown || !trigger || !menu) return;
+
+        menu.innerHTML = TAKEOFF_RICH_COLORS.map(color => `
+            <div class="pcd-color-item" data-color="${color}">
+                <span class="pcd-color-circle" style="background:${color};"></span>
+            </div>
+        `).join('');
+
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            const isOpen = dropdown.classList.contains('is-open');
+            closeAllProCustomDropdowns();
+            if (!isOpen) dropdown.classList.add('is-open');
+        });
+
+        menu.querySelectorAll('.pcd-color-item').forEach(itemEl => {
+            itemEl.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const color = itemEl.dataset.color;
+                if (prefix === 'createLayer') {
+                    setCreateLayerColor(color);
+                } else {
+                    setLayerColor(color);
+                }
+                closeAllProCustomDropdowns();
+            });
+        });
+    }
+
+    function updateColorDropdownTrigger(prefix, hex) {
+        const swatch = $(`${prefix}ColorSwatch`);
+        const menu = $(`${prefix}ColorMenu`);
+        if (swatch) swatch.style.background = hex;
+        if (menu) {
+            menu.querySelectorAll('.pcd-color-item').forEach(el => {
+                const match = el.dataset.color?.toLowerCase() === String(hex || '').toLowerCase();
+                el.classList.toggle('is-selected', match);
+            });
+        }
+    }
 
     const takeoffState = {
         groups: [],
@@ -543,10 +1276,12 @@
             const groupKey = `${estimateId || 'legacy'}:${metadata.estimating_group_id || groupName}`;
             let group = byName.get(groupKey);
             if (!group) {
-                group = { id: metadata.estimating_group_id ? `estgrp_${estimateId}_${metadata.estimating_group_id}` : makeId('grp'),
+                group = {
+                    id: metadata.estimating_group_id ? `estgrp_${estimateId}_${metadata.estimating_group_id}` : makeId('grp'),
                     name: groupName, estimateId,
                     estimatingGroupId: metadata.estimating_group_id || null,
-                    isExpanded: true, isDefault: false, layers: [] };
+                    isExpanded: true, isDefault: false, layers: []
+                };
                 byName.set(groupKey, group);
                 groups.push(group);
             }
@@ -651,7 +1386,7 @@
         try {
             const pId = String(window.ProjectState?.projectId || 0);
             localStorage.setItem('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
-        } catch (_) {}
+        } catch (_) { }
         syncTakeoffToEstimating();
     }
 
@@ -700,11 +1435,14 @@
     }
 
     function findGroup(groupId) {
-        return takeoffState.groups.find(group => group.id === groupId)
-            || takeoffState.groups.find(group => groupBelongsToEstimate(group)) || null;
+        if (!groupId) return null;
+        return takeoffState.groups.find(group => String(group.id) === String(groupId))
+            || takeoffState.groups.find(group => String(group.estimatingGroupId || '') === String(groupId))
+            || null;
     }
 
     function findGroupExact(groupId) {
+        if (!groupId) return null;
         return takeoffState.groups.find(group => String(group.id) === String(groupId)
             && groupBelongsToEstimate(group)) || null;
     }
@@ -728,7 +1466,7 @@
         try {
             const parsed = JSON.parse(localStorage.getItem(estimatingStoreKey()) || 'null');
             if (parsed && (Array.isArray(parsed.groups) || Array.isArray(parsed.estimates))) return parsed;
-        } catch (e) {}
+        } catch (e) { }
         return {
             search: '',
             selected: [],
@@ -807,16 +1545,18 @@
         return String(group?.estimateId || '') === String(estimateId || '');
     }
 
-    function ensureEstimateTakeoffWorkspace(estimateId = activeEstimateId(), createDefault = true) {
+    function ensureEstimateTakeoffWorkspace(estimateId = activeEstimateId(), createDefault = false) {
         let scopedGroups = takeoffState.groups.filter(group => groupBelongsToEstimate(group, estimateId));
-        let defGroup = scopedGroups.find(g => (g.name || '').trim().toLowerCase() === 'default group' || g.isDefault);
-        if (!defGroup && createDefault) {
-            defGroup = defaultGroup(estimateId);
-            takeoffState.groups.unshift(defGroup);
-            scopedGroups = takeoffState.groups.filter(group => groupBelongsToEstimate(group, estimateId));
+        if (scopedGroups.length === 0 && createDefault) {
+            const isTemplate = Boolean(window.ProjectState?.projectInfo?.project_template_id || new URLSearchParams(window.location.search).get('template_id'));
+            if (!isTemplate) {
+                const defGroup = defaultGroup(estimateId);
+                takeoffState.groups.unshift(defGroup);
+                scopedGroups = [defGroup];
+            }
         }
         if (!scopedGroups.some(group => group.id === takeoffState.activeGroupId)) {
-            takeoffState.activeGroupId = defGroup?.id || scopedGroups[0]?.id || null;
+            takeoffState.activeGroupId = scopedGroups[0]?.id || null;
         }
         if (takeoffState.activeLayerId && !layerBelongsToEstimate(findLayer(takeoffState.activeLayerId), estimateId)) {
             takeoffState.activeLayerId = null;
@@ -853,8 +1593,10 @@
                     || groupKey.endsWith('_' + String(row.id || ''))
                     || (row.name && row.name.trim().toLowerCase() === (estimateGroup.name || '').trim().toLowerCase())));
             if (!group) {
-                group = { id: `estgrp_${estimateId}_${groupKey}`, estimatingGroupId: groupKey,
-                    estimateId, name: estimateGroup.name || 'Default Group', isExpanded: true, isDefault: false, layers: [] };
+                group = {
+                    id: `estgrp_${estimateId}_${groupKey}`, estimatingGroupId: groupKey,
+                    estimateId, name: estimateGroup.name || 'Default Group', isExpanded: true, isDefault: false, layers: []
+                };
                 takeoffState.groups.push(group);
             }
             group.estimatingGroupId = groupKey;
@@ -888,7 +1630,8 @@
                 let layer = allLayers().find(row => (String(row.estimateId || '') === estimateId || !row.estimateId)
                     && layerMatchesEstimatingItem(row));
                 if (!layer) {
-                    layer = { id: layerId, groupId: group.id, estimateId, estimatingItemId: itemId,
+                    layer = {
+                        id: layerId, groupId: group.id, estimateId, estimatingItemId: itemId,
                         name: item.name || 'Cost item', type: inferTakeoffTypeFromUom(item.uom) || 'Count',
                         uom: item.uom || 'ea', symbol: 'Solid Circle', size: 'Medium', color: '#2563eb',
                         visible: true, locked: false, quantity: Number(item.quantity || 0),
@@ -896,7 +1639,8 @@
                         catalog_item_id: item.catalogItemId || null, unitCost: Number(item.unitMaterialCost || 0),
                         unit_cost: Number(item.unitMaterialCost || 0), laborHours: Number(item.unitLabor || 0),
                         labor_hours: Number(item.unitLabor || 0), description: item.description || '',
-                        catalogNumber: item.costCode || item.budgetCode || '', itemType: item.itemType || 'part' };
+                        catalogNumber: item.costCode || item.budgetCode || '', itemType: item.itemType || 'part'
+                    };
                     group.layers.push(layer);
                 } else {
                     const oldGroup = groupForLayer(layer);
@@ -904,11 +1648,13 @@
                         oldGroup.layers = oldGroup.layers.filter(row => row !== layer);
                         group.layers.push(layer); layer.groupId = group.id;
                     }
-                    Object.assign(layer, { estimateId, estimatingItemId: itemId, name: item.name || layer.name,
+                    Object.assign(layer, {
+                        estimateId, estimatingItemId: itemId, name: item.name || layer.name,
                         uom: item.uom || layer.uom, catalogItemId: item.catalogItemId || null,
                         catalog_item_id: item.catalogItemId || null, unitCost: Number(item.unitMaterialCost || 0),
                         unit_cost: Number(item.unitMaterialCost || 0), laborHours: Number(item.unitLabor || 0),
-                        labor_hours: Number(item.unitLabor || 0), description: item.description || '' });
+                        labor_hours: Number(item.unitLabor || 0), description: item.description || ''
+                    });
                 }
                 seen.add(String(layer.id));
                 if (!item.takeoffLayerId) pendingLinks.push({ itemId, layerId: String(layer.id) });
@@ -926,10 +1672,12 @@
         if (takeoffState.activeLayerId && !layerBelongsToEstimate(findLayer(takeoffState.activeLayerId), estimateId)) {
             takeoffState.activeLayerId = null;
         }
-        if (pendingLinks.length) window.dispatchEvent(new CustomEvent('takeoff:estimating-links-requested', { detail: {
-            version: 1, origin: 'takeoff', projectId: String(window.ProjectState?.projectId || ''),
-            estimateId, links: pendingLinks
-        } }));
+        if (pendingLinks.length) window.dispatchEvent(new CustomEvent('takeoff:estimating-links-requested', {
+            detail: {
+                version: 1, origin: 'takeoff', projectId: String(window.ProjectState?.projectId || ''),
+                estimateId, links: pendingLinks
+            }
+        }));
         const editorReloading = ensureEditorEstimate(estimateId);
         if (!editorReloading) syncAllLayersToCanvas({ suppressEstimatingSync: true });
         renderTakeoffPanel(); renderActiveLayerToolbar();
@@ -1161,10 +1909,15 @@
         const map = {
             'Solid Circle': '<i class="fas fa-circle"></i>',
             'Hollow Circle': '<i class="far fa-circle"></i>',
-            Square: '<i class="fas fa-square"></i>',
-            Triangle: '<i class="fas fa-play fa-rotate-270"></i>',
-            Diamond: '<i class="fas fa-diamond"></i>',
-            Cross: '<i class="fas fa-xmark"></i>'
+            'Checkmark': '<i class="fas fa-check"></i>',
+            'Octagon': '<i class="fas fa-stop"></i>',
+            'Square': '<i class="fas fa-square"></i>',
+            'Triangle': '<i class="fas fa-play fa-rotate-270"></i>',
+            'Diamond': '<i class="fas fa-diamond"></i>',
+            'Cross': '<i class="fas fa-plus"></i>',
+            'Pentagon': '<i class="fas fa-draw-polygon"></i>',
+            'Target': '<i class="fas fa-bullseye"></i>',
+            'Dimension': '<i class="fas fa-arrows-left-right-to-line"></i>'
         };
         return map[layer.symbol] || '<i class="fas fa-circle"></i>';
     }
@@ -1258,19 +2011,19 @@
                 </div>
                 <div class="pro-tree-children" ${expanded ? '' : 'hidden'}>
                     ${visibleLayers.map(layer => {
-                        const isVisible = layer.visible !== false;
-                        const editorLockState = callEditor('projectTakeoffGetLayerLockState', layer.id) || {};
-                        const isLocked = Boolean(layer.locked || editorLockState.locked);
-                        const subText = itemQuantitySubtitle(layer);
-                        const isLayerSelected = String(takeoffState.activeLayerId || '') === String(layer.id) || selectionState.selectedLayerIds.includes(String(layer.id));
-                        return `<div class="pro-tree-row pro-tree-item ${isLayerSelected || groupSelected ? 'active' : ''} ${groupSelected ? 'group-selected' : ''} ${isVisible ? '' : 'is-hidden'}" data-layer-row="${esc(layer.id)}" aria-selected="${groupSelected ? 'true' : 'false'}">
+                const isVisible = layer.visible !== false;
+                const editorLockState = callEditor('projectTakeoffGetLayerLockState', layer.id) || {};
+                const isLocked = Boolean(layer.locked || editorLockState.locked);
+                const subText = itemQuantitySubtitle(layer);
+                const isLayerSelected = !isLocked && (String(takeoffState.activeLayerId || '') === String(layer.id) || selectionState.selectedLayerIds.includes(String(layer.id)));
+                return `<div class="pro-tree-row pro-tree-item ${isLayerSelected || groupSelected ? 'active' : ''} ${groupSelected ? 'group-selected' : ''} ${isVisible ? '' : 'is-hidden'} ${isLocked ? 'is-locked-item' : ''}" data-layer-row="${esc(layer.id)}" aria-selected="${groupSelected ? 'true' : 'false'}">
                             <button class="pro-visibility-btn ${isVisible ? '' : 'is-off'}" type="button" data-layer-visibility="${esc(layer.id)}" title="${isVisible ? 'Hide item' : 'Show item'}" aria-label="${isVisible ? 'Hide item' : 'Show item'}"><i class="fas ${isVisible ? 'fa-eye' : 'fa-eye-slash'}"></i></button>
-                            <input class="pro-layer-active-check" type="checkbox" ${isLayerSelected ? 'checked' : ''} aria-label="Select item" data-layer-select="${esc(layer.id)}">
+                            <input class="pro-layer-active-check" type="checkbox" ${isLayerSelected ? 'checked' : ''} ${isLocked ? 'disabled title="Item is locked"' : ''} aria-label="Select item" data-layer-select="${esc(layer.id)}">
                             <div class="pro-tree-item-details">
                                 <div class="pro-tree-item-title" title="${esc(layer.name)}">${esc(layer.name)}</div>
                                 ${layer.tag ? `<div class="pro-tree-item-tag"><i class="fas fa-tag"></i> ${esc(layer.tag)}</div>` : ''}
                                 <div class="pro-tree-item-sub">
-                                    <span class="pro-color-dot" style="background:${esc(layer.color)}"></span>
+                                    ${renderLayerBadgeHtml(layer, 13)}
                                     <span class="pro-tree-qty">${esc(subText)}</span>
                                 </div>
                             </div>
@@ -1279,7 +2032,7 @@
                                 <button class="pro-row-menu-btn" type="button" data-layer-menu="${esc(layer.id)}" title="Item details" aria-label="Item details"><i class="fas fa-ellipsis-vertical"></i></button>
                             </div>
                         </div>`;
-                    }).join('')}
+            }).join('')}
                 </div>
             </div>`;
         }).join('') || '<div class="pro-drawing-empty">No takeoffs match your search.</div>';
@@ -1305,7 +2058,7 @@
         content.innerHTML = `
             <section class="pro-property-card">
                 <div class="pro-property-title">
-                    <span class="pro-color-dot" style="background:${esc(layer.color)}"></span>
+                    ${renderLayerBadgeHtml(layer, 16)}
                     <span><strong>${esc(layer.name)}</strong><small>${esc(group?.name || 'Ungrouped')}</small></span>
                 </div>
                 <span class="pro-status-pill"><i class="fas fa-circle-check"></i>${layer.visible === false ? 'Inactive' : 'Active'}</span>
@@ -1403,7 +2156,6 @@
                 input.type = 'text';
                 input.className = 'pro-tree-inline-edit';
                 input.value = currentName;
-                input.style.cssText = 'font: inherit; font-size: inherit; font-weight: 700; border: 1.5px solid var(--tk-primary, #fb5a3a); border-radius: 4px; padding: 1px 5px; background: var(--tk-bg-input, #fff); color: var(--tk-text-main, #0f172a); outline: none; width: 100%; box-sizing: border-box;';
 
                 nameSpan.replaceWith(input);
                 input.focus();
@@ -1418,9 +2170,18 @@
                     const val = input.value.trim();
                     if (save && val && val !== currentName) {
                         pushTakeoffHistory('rename-group');
-                        group.name = group.isDefault ? 'Default Group' : val;
+                        group.name = val;
+                        group.isDefault = false;
                         takeoffIsDirty = true;
                         saveTakeoffState();
+                        window.dispatchEvent(new CustomEvent('takeoff:estimating-group-rename-requested', {
+                            detail: {
+                                projectId: String(window.ProjectState?.projectId || ''),
+                                estimateId: activeEstimateId(),
+                                groupId: group.estimatingGroupId || `takeoff_group_${group.id}`,
+                                name: val
+                            }
+                        }));
                         showTakeoffToast?.('Group renamed.');
                     }
                     renderTakeoffPanel();
@@ -1456,16 +2217,15 @@
         });
         document.querySelectorAll('[data-layer-row]').forEach(row => {
             row.addEventListener('click', event => {
-                if (event.target.closest('button')) return;
+                if (event.target.closest('button') || event.target.closest('input[type="checkbox"]')) return;
                 const layerId = row.dataset.layerRow;
-                const isSelected = String(takeoffState.activeLayerId || '') === String(layerId) || selectionState.selectedLayerIds.includes(String(layerId));
-                if (isSelected) {
-                    clearActiveTakeoffLayer();
-                    toggleLayerSelection(layerId, false);
-                } else {
-                    setActiveTakeoffLayer(layerId);
-                    toggleLayerSelection(layerId, true);
+                const layer = findLayer(layerId);
+                const editorLockState = callEditor('projectTakeoffGetLayerLockState', layerId) || {};
+                if (layer?.locked || editorLockState.locked) {
+                    return; // Prevent selection if item is locked
                 }
+                // Single item selection: deselect others, select only this one
+                selectSingleLayer(layerId);
             });
         });
         document.querySelectorAll('[data-layer-visibility]').forEach(button => {
@@ -1476,9 +2236,27 @@
             });
         });
         document.querySelectorAll('[data-layer-select]').forEach(box => {
-            box.addEventListener('click', event => event.stopPropagation());
-            box.addEventListener('change', () => {
+            box.addEventListener('click', event => {
                 const layerId = box.dataset.layerSelect;
+                const layer = findLayer(layerId);
+                const editorLockState = callEditor('projectTakeoffGetLayerLockState', layerId) || {};
+                if (layer?.locked || editorLockState.locked) {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    box.checked = false;
+                    return false;
+                }
+                event.stopPropagation();
+            });
+            box.addEventListener('change', (event) => {
+                const layerId = box.dataset.layerSelect;
+                const layer = findLayer(layerId);
+                const editorLockState = callEditor('projectTakeoffGetLayerLockState', layerId) || {};
+                if (layer?.locked || editorLockState.locked) {
+                    box.checked = false;
+                    event.preventDefault();
+                    return false;
+                }
                 const checked = box.checked;
                 toggleLayerSelection(layerId, checked);
                 if (checked) {
@@ -1520,19 +2298,30 @@
     function initTakeoffState() {
         const pId = String(window.ProjectState?.projectId || 0);
         const storageKey = 'takeoff_project_groups_' + pId;
+        const isTemplateProject = Boolean(
+            window.ProjectState?.projectInfo?.project_template_id ||
+            new URLSearchParams(window.location.search).get('template_id')
+        );
         let storedGroups = null;
         try {
             const raw = localStorage.getItem(storageKey);
-            if (raw) storedGroups = JSON.parse(raw);
-        } catch (_) {}
+            if (raw !== null) storedGroups = JSON.parse(raw);
+        } catch (_) { }
 
-        if (Array.isArray(storedGroups) && storedGroups.length > 0) {
+        if (Array.isArray(storedGroups)) {
             takeoffState.groups = normalizeSavedGroups(storedGroups);
         } else {
-            takeoffState.groups = normalizeSavedGroups(seedGroupsFromProjectLayers());
+            const seeded = seedGroupsFromProjectLayers();
+            if (seeded.length > 0) {
+                takeoffState.groups = normalizeSavedGroups(seeded);
+            } else if (!isTemplateProject) {
+                takeoffState.groups = [defaultGroup(activeEstimateId())];
+            } else {
+                takeoffState.groups = [];
+            }
         }
         scopeLegacyTakeoffGroupsOnce();
-        ensureEstimateTakeoffWorkspace(activeEstimateId(), true);
+        ensureEstimateTakeoffWorkspace(activeEstimateId(), false);
         takeoffState.activeLayerId = null;
         takeoffState.canvasSnapshots = {};
         takeoffState.annotations = [];
@@ -1566,16 +2355,23 @@
             <div class="pro-layer-tab-pane" id="layerTabPaneDetails">
                 <div class="pro-layer-form">
                     <div class="pro-field">
-                        <label for="layerTypeInput">Takeoff Type</label>
-                        <div class="pro-custom-select-wrap">
-                            <span class="pro-type-icon" id="layerTypeIconPreview"><i class="fas fa-network-wired"></i></span>
-                            <select id="layerTypeInput">
+                        <label>Takeoff Type</label>
+                        <div class="pro-custom-dropdown" id="editLayerTypeDropdown">
+                            <button type="button" class="pro-custom-dropdown-trigger" id="editLayerTypeTrigger">
+                                <span class="pcd-trigger-left">
+                                    <span class="pcd-trigger-icon" id="editLayerTypeIconPreview"></span>
+                                    <span class="pcd-trigger-text" id="editLayerTypeText">Count</span>
+                                </span>
+                                <span class="pcd-caret"></span>
+                            </button>
+                            <div class="pro-custom-dropdown-menu pcd-type-menu" id="editLayerTypeMenu"></div>
+                            <select id="layerTypeInput" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                 ${TAKEOFF_TYPES.map(type => `<option value="${type}">${type}</option>`).join('')}
                             </select>
                         </div>
                     </div>
-                    <div class="pro-layer-2col">
-                        <div class="pro-field">
+                    <div class="pro-edit-selectors-row">
+                        <div class="pro-field col-stroke" id="layerStrokeCol">
                             <label for="layerStrokeInput">Line width</label>
                             <div class="pro-custom-select-wrap">
                                 <span class="pro-stroke-preview" id="layerStrokePreview"></span>
@@ -1590,12 +2386,55 @@
                                 </select>
                             </div>
                         </div>
-                        <div class="pro-field">
-                            <label for="layerColorInput">Color</label>
-                            <div class="pro-color-select-wrap">
-                                <span class="pro-color-swatch-circle" id="layerColorSwatch" title="Click to pick custom color"></span>
-                                <select id="layerColorInput">
-                                    ${TAKEOFF_COLORS.map(color => `<option value="${color.value}">${color.label}</option>`).join('')}
+                        <div class="pro-field col-uom" id="layerUomCol">
+                            <label>UoM</label>
+                            <div class="pro-custom-dropdown" id="editLayerUomDropdown">
+                                <button type="button" class="pro-custom-dropdown-trigger pcd-compact" id="editLayerUomTrigger">
+                                    <span class="pcd-trigger-text" id="editLayerUomText">ea</span>
+                                    <span class="pcd-caret"></span>
+                                </button>
+                                <div class="pro-custom-dropdown-menu pcd-uom-menu" id="editLayerUomMenu"></div>
+                                <select id="layerUomInput" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                    ${TAKEOFF_UOMS.map(uom => `<option value="${uom}">${uom}</option>`).join('')}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="pro-field col-symbol" id="layerSymbolCol">
+                            <label>Symbol</label>
+                            <div class="pro-custom-dropdown" id="editLayerSymbolDropdown">
+                                <button type="button" class="pro-custom-dropdown-trigger pcd-compact" id="editLayerSymbolTrigger">
+                                    <span class="pcd-trigger-icon" id="editLayerSymbolPreview"></span>
+                                    <span class="pcd-caret"></span>
+                                </button>
+                                <div class="pro-custom-dropdown-menu pcd-symbol-menu" id="editLayerSymbolMenu"></div>
+                                <select id="layerSymbolInput" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                    ${TAKEOFF_SYMBOLS.map(symbol => `<option value="${symbol}">${symbol}</option>`).join('')}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="pro-field col-size" id="layerSizeCol">
+                            <label>Size</label>
+                            <div class="pro-custom-dropdown" id="editLayerSizeDropdown">
+                                <button type="button" class="pro-custom-dropdown-trigger pcd-compact" id="editLayerSizeTrigger">
+                                    <span class="pcd-trigger-icon" id="editLayerSizePreview"></span>
+                                    <span class="pcd-caret"></span>
+                                </button>
+                                <div class="pro-custom-dropdown-menu pcd-size-menu" id="editLayerSizeMenu"></div>
+                                <select id="layerSizeInput" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                    ${TAKEOFF_SIZES.map(size => `<option value="${size}">${size}</option>`).join('')}
+                                </select>
+                            </div>
+                        </div>
+                        <div class="pro-field col-color" id="layerColorCol">
+                            <label>Color</label>
+                            <div class="pro-custom-dropdown" id="editLayerColorDropdown">
+                                <button type="button" class="pro-custom-dropdown-trigger pcd-compact" id="editLayerColorTrigger">
+                                    <span class="pcd-color-dot" id="editLayerColorSwatch" style="background:#00d2ff;"></span>
+                                    <span class="pcd-caret"></span>
+                                </button>
+                                <div class="pro-custom-dropdown-menu pcd-color-menu" id="editLayerColorMenu"></div>
+                                <select id="layerColorInput" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                    ${TAKEOFF_RICH_COLORS.map(c => `<option value="${c}">${c}</option>`).join('')}
                                     <option value="__custom__">Custom color...</option>
                                 </select>
                                 <input type="color" id="layerCustomColorPicker" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
@@ -1639,9 +2478,6 @@
                         <h3 id="takeoffLayerModalTitle">Edit takeoff layer</h3>
                         <p id="layerTypeHelp"></p>
                         <div id="layerCatalogSelected"></div>
-                        <select id="layerUomInput">${TAKEOFF_UOMS.map(uom => `<option>${uom}</option>`).join('')}</select>
-                        <select id="layerSymbolInput">${TAKEOFF_SYMBOLS.map(symbol => `<option>${symbol}</option>`).join('')}</select>
-                        <select id="layerSizeInput">${TAKEOFF_SIZES.map(size => `<option>${size}</option>`).join('')}</select>
                         <input id="layerDiameterInput" type="number">
                         <input id="layerSpacingInput" type="number">
                         <input id="layerHeightInput" type="number">
@@ -1713,13 +2549,37 @@
 
         $('layerNameInput').addEventListener('input', updateLayerSubmitState);
 
+        setupTypeDropdown('editLayer', $('layerTypeInput'));
+        setupUomDropdown('editLayer', $('layerUomInput'));
+        setupSymbolDropdown('editLayer', $('layerSymbolInput'));
+        setupSizeDropdown('editLayer', $('layerSizeInput'));
+        setupColorDropdown('editLayer', $('layerColorInput'), $('layerCustomColorPicker'));
+
         $('layerTypeInput').addEventListener('change', () => {
             const type = $('layerTypeInput').value;
             $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[type] || TAKEOFF_TYPE_HELP.Count;
-            $('layerUomInput').value = typeToUom(type);
+            filterUomDropdownByType('editLayer', type);
+            if (!isUomValidForType($('layerUomInput')?.value, type)) {
+                const newUom = defaultUomForType(type);
+                if ($('layerUomInput')) $('layerUomInput').value = newUom;
+                updateUomDropdownTrigger('editLayer', newUom);
+            }
+            updateTypeDropdownTrigger('editLayer', type);
             updateLayerTypeIcon();
             updateLayerTypeFields(type);
             updateLayerSubmitState();
+        });
+
+        $('layerUomInput')?.addEventListener('change', () => {
+            updateUomDropdownTrigger('editLayer', $('layerUomInput').value);
+        });
+
+        $('layerSymbolInput')?.addEventListener('change', () => {
+            updateSymbolDropdownTrigger('editLayer', $('layerSymbolInput').value);
+        });
+
+        $('layerSizeInput')?.addEventListener('change', () => {
+            updateSizeDropdownTrigger('editLayer', $('layerSizeInput').value);
         });
 
         $('layerStrokeInput').addEventListener('change', updateLayerStrokePreview);
@@ -1732,6 +2592,9 @@
             }
         });
         $('layerColorSwatch')?.addEventListener('click', () => {
+            $('layerCustomColorPicker')?.click();
+        });
+        $('editLayerColorSwatch')?.addEventListener('click', () => {
             $('layerCustomColorPicker')?.click();
         });
         $('layerCustomColorPicker')?.addEventListener('input', event => {
@@ -1757,6 +2620,13 @@
                     <button class="pro-icon-btn" type="button" data-create-layer-close aria-label="Close"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="pro-create-layer-body">
+                    <div class="pro-create-layer-field" style="display:none;">
+                        <label for="createLayerGroup">Target Group</label>
+                        <div class="pro-create-control-box" style="width:100%;">
+                            <select id="createLayerGroup" style="width:100%;font:inherit;font-size:12px;font-weight:600;padding:6px 10px;border:1px solid var(--tk-border, #e2e8f0);border-radius:6px;background:var(--tk-bg-surface, #fff);color:var(--tk-text-main, #0f172a);">
+                            </select>
+                        </div>
+                    </div>
                     <div class="pro-create-layer-field">
                         <label for="createLayerCatalogName">Catalog Item Name</label>
                         <div class="pro-create-catalog-row">
@@ -1766,74 +2636,82 @@
                             </button>
                         </div>
                     </div>
-                    <div class="pro-create-layer-field">
+                    <div class="pro-create-layer-field" style="display:none;">
                         <label for="createLayerTag">Tag</label>
                         <input id="createLayerTag" type="text" placeholder="Enter short text to tag this takeoff (optional)">
                     </div>
                     <div class="pro-create-layer-field">
                         <div class="pro-create-selectors-row">
                             <div class="col-type">
-                                <label for="createLayerType">Takeoff Type</label>
-                                <div class="pro-create-control-box">
-                                    <span class="pro-type-icon" id="createLayerTypeIcon" style="margin-right:6px;color:var(--tk-primary);font-size:12px;"><i class="fas fa-circle-dot"></i></span>
-                                    <select id="createLayerType">
+                                <label>Takeoff Type</label>
+                                <div class="pro-custom-dropdown" id="createLayerTypeDropdown">
+                                    <button type="button" class="pro-custom-dropdown-trigger" id="createLayerTypeTrigger">
+                                        <span class="pcd-trigger-left">
+                                            <span class="pcd-trigger-icon" id="createLayerTypeIconPreview"></span>
+                                            <span class="pcd-trigger-text" id="createLayerTypeText">Count</span>
+                                        </span>
+                                        <span class="pcd-caret"></span>
+                                    </button>
+                                    <div class="pro-custom-dropdown-menu pcd-type-menu" id="createLayerTypeMenu"></div>
+                                    <select id="createLayerType" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                         <option value="Count">Count</option>
                                         <option value="Linear">Linear</option>
                                         <option value="Linear with drop">Linear with drop</option>
                                         <option value="Linear avg. with drop">Linear avg. with drop</option>
-                                        <option value="Area">Area</option>
+                                        <option value="Count by distance">Count by distance</option>
                                         <option value="Area / Volume">Area / Volume</option>
                                     </select>
                                 </div>
                             </div>
-                            <div class="col-uom">
-                                <label for="createLayerUom">UoM</label>
-                                <div class="pro-create-control-box">
-                                    <select id="createLayerUom">
-                                        <option value="ea" selected>ea</option>
-                                        <option value="ft">ft</option>
-                                        <option value="lf">lf</option>
-                                        <option value="sq ft">sq ft</option>
-                                        <option value="m">m</option>
+                            <div class="col-uom" id="createLayerUomCol">
+                                <label>UoM</label>
+                                <div class="pro-custom-dropdown" id="createLayerUomDropdown">
+                                    <button type="button" class="pro-custom-dropdown-trigger pcd-compact" id="createLayerUomTrigger">
+                                        <span class="pcd-trigger-text" id="createLayerUomText">ea</span>
+                                        <span class="pcd-caret"></span>
+                                    </button>
+                                    <div class="pro-custom-dropdown-menu pcd-uom-menu" id="createLayerUomMenu"></div>
+                                    <select id="createLayerUom" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                        ${TAKEOFF_UOMS.map(uom => `<option value="${uom}">${uom}</option>`).join('')}
                                     </select>
                                 </div>
                             </div>
-                            <div class="col-symbol">
-                                <label for="createLayerSymbol">Symbol</label>
-                                <div class="pro-create-control-box">
-                                    <select id="createLayerSymbol">
-                                        <option value="Solid Circle" selected>●</option>
-                                        <option value="Ring">○</option>
-                                        <option value="Square">■</option>
-                                        <option value="Triangle">▲</option>
-                                        <option value="Star">★</option>
+                            <div class="col-symbol" id="createLayerSymbolCol">
+                                <label>Symbol</label>
+                                <div class="pro-custom-dropdown" id="createLayerSymbolDropdown">
+                                    <button type="button" class="pro-custom-dropdown-trigger pcd-compact" id="createLayerSymbolTrigger">
+                                        <span class="pcd-trigger-icon" id="createLayerSymbolPreview"></span>
+                                        <span class="pcd-caret"></span>
+                                    </button>
+                                    <div class="pro-custom-dropdown-menu pcd-symbol-menu" id="createLayerSymbolMenu"></div>
+                                    <select id="createLayerSymbol" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                        ${TAKEOFF_SYMBOLS.map(symbol => `<option value="${symbol}">${symbol}</option>`).join('')}
                                     </select>
                                 </div>
                             </div>
-                            <div class="col-size">
-                                <label for="createLayerSize">Size</label>
-                                <div class="pro-create-control-box">
-                                    <select id="createLayerSize">
-                                        <option value="Small">Small</option>
-                                        <option value="Medium" selected>Medium</option>
-                                        <option value="Large">Large</option>
-                                        <option value="X-Large">X-Large</option>
+                            <div class="col-size" id="createLayerSizeCol">
+                                <label>Size</label>
+                                <div class="pro-custom-dropdown" id="createLayerSizeDropdown">
+                                    <button type="button" class="pro-custom-dropdown-trigger pcd-compact" id="createLayerSizeTrigger">
+                                        <span class="pcd-trigger-icon" id="createLayerSizePreview"></span>
+                                        <span class="pcd-caret"></span>
+                                    </button>
+                                    <div class="pro-custom-dropdown-menu pcd-size-menu" id="createLayerSizeMenu"></div>
+                                    <select id="createLayerSize" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                        ${TAKEOFF_SIZES.map(size => `<option value="${size}">${size}</option>`).join('')}
                                     </select>
                                 </div>
                             </div>
-                            <div class="col-color">
-                                <label for="createLayerColor">Color</label>
-                                <div class="pro-create-control-box" style="justify-content:center;">
-                                    <span class="pro-color-swatch-circle" id="createLayerColorSwatch" style="width:14px;height:14px;border-radius:50%;background:#ec4899;display:inline-block;cursor:pointer;"></span>
-                                    <select id="createLayerColor" style="position:absolute;opacity:0;width:100%;height:100%;cursor:pointer;">
-                                        <option value="#ec4899" selected>Pink</option>
-                                        <option value="#ef4444">Red</option>
-                                        <option value="#f97316">Orange</option>
-                                        <option value="#eab308">Yellow</option>
-                                        <option value="#22c55e">Green</option>
-                                        <option value="#06b6d4">Cyan</option>
-                                        <option value="#3b82f6">Blue</option>
-                                        <option value="#a855f7">Purple</option>
+                            <div class="col-color" id="createLayerColorCol">
+                                <label>Color</label>
+                                <div class="pro-custom-dropdown" id="createLayerColorDropdown">
+                                    <button type="button" class="pro-custom-dropdown-trigger pcd-compact" id="createLayerColorTrigger">
+                                        <span class="pcd-color-dot" id="createLayerColorSwatch" style="background:#00d2ff;"></span>
+                                        <span class="pcd-caret"></span>
+                                    </button>
+                                    <div class="pro-custom-dropdown-menu pcd-color-menu" id="createLayerColorMenu"></div>
+                                    <select id="createLayerColor" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                        ${TAKEOFF_RICH_COLORS.map(c => `<option value="${c}">${c}</option>`).join('')}
                                         <option value="__custom__">Custom...</option>
                                     </select>
                                     <input type="color" id="createLayerCustomColorPicker" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
@@ -1861,8 +2739,27 @@
             openCatalogModal();
         });
 
+        setupTypeDropdown('createLayer', $('createLayerType'));
+        setupUomDropdown('createLayer', $('createLayerUom'));
+        setupSymbolDropdown('createLayer', $('createLayerSymbol'));
+        setupSizeDropdown('createLayer', $('createLayerSize'));
+        setupColorDropdown('createLayer', $('createLayerColor'), $('createLayerCustomColorPicker'));
+
         $('createLayerType')?.addEventListener('change', (e) => {
+            updateTypeDropdownTrigger('createLayer', e.target.value);
             updateCreateLayerTypeUi(e.target.value);
+        });
+
+        $('createLayerUom')?.addEventListener('change', () => {
+            updateUomDropdownTrigger('createLayer', $('createLayerUom').value);
+        });
+
+        $('createLayerSymbol')?.addEventListener('change', (e) => {
+            updateSymbolDropdownTrigger('createLayer', e.target.value);
+        });
+
+        $('createLayerSize')?.addEventListener('change', (e) => {
+            updateSizeDropdownTrigger('createLayer', e.target.value);
         });
 
         $('createLayerCatalogName')?.addEventListener('input', () => {
@@ -1896,6 +2793,11 @@
             setCreateLayerColor(e.target.value);
         });
 
+        $('createLayerGroup')?.addEventListener('change', (e) => {
+            takeoffState.pendingCreateGroupId = e.target.value;
+            takeoffState.activeGroupId = e.target.value;
+        });
+
         $('createLayerSubmitBtn')?.addEventListener('click', submitCreateLayerModal);
 
         modal.addEventListener('click', (e) => {
@@ -1909,71 +2811,84 @@
         const scopedGroups = takeoffState.groups.filter(g => groupBelongsToEstimate(g, activeEst));
         let targetGroup = null;
         if (groupId) {
-            targetGroup = findGroup(groupId);
-        } else {
-            // "+" button was clicked: add to the LAST group currently in the sidebar
-            targetGroup = scopedGroups[scopedGroups.length - 1];
+            targetGroup = findGroupExact(groupId) || findGroup(groupId);
+        } else if (takeoffState.activeGroupId) {
+            targetGroup = findGroupExact(takeoffState.activeGroupId) || findGroup(takeoffState.activeGroupId);
         }
-        if (!targetGroup || !groupBelongsToEstimate(targetGroup, activeEst)) {
-            targetGroup = scopedGroups[scopedGroups.length - 1];
-            if (!targetGroup) {
-                ensureEstimateTakeoffWorkspace(activeEst, true);
-                const refreshed = takeoffState.groups.filter(g => groupBelongsToEstimate(g, activeEst));
-                targetGroup = refreshed[refreshed.length - 1];
-            }
+        if (!targetGroup && scopedGroups.length > 0) {
+            targetGroup = scopedGroups[0];
         }
-        takeoffState.pendingCreateGroupId = targetGroup?.id || 'default';
-        takeoffState.activeGroupId = targetGroup?.id || takeoffState.activeGroupId;
+        if (!targetGroup) {
+            const newGrp = { id: makeId('grp'), estimateId: activeEst, name: 'Takeoff Group 1', isExpanded: true, isDefault: false, layers: [] };
+            takeoffState.groups.push(newGrp);
+            targetGroup = newGrp;
+        }
+        takeoffState.pendingCreateGroupId = String(targetGroup.id);
+        takeoffState.activeGroupId = String(targetGroup.id);
         takeoffState.pendingCatalogItem = null;
-        
+
         const modal = $('takeoffCreateLayerModal');
         if (!modal) return;
-        
+
+        const groupSelect = $('createLayerGroup');
+        if (groupSelect) {
+            const currentScoped = takeoffState.groups.filter(g => groupBelongsToEstimate(g, activeEst));
+            groupSelect.innerHTML = currentScoped.map(g => `<option value="${esc(g.id)}"${String(g.id) === String(targetGroup.id) ? ' selected' : ''}>${esc(g.name || 'Group')}</option>`).join('');
+            groupSelect.value = String(targetGroup.id);
+        }
+
         const nameInput = $('createLayerCatalogName');
         if (nameInput) nameInput.value = '';
         const tagInput = $('createLayerTag');
         if (tagInput) tagInput.value = '';
         if ($('createLayerType')) $('createLayerType').value = 'Count';
+        filterUomDropdownByType('createLayer', 'Count');
         updateCreateLayerTypeUi('Count');
         if ($('createLayerUom')) $('createLayerUom').value = 'ea';
         if ($('createLayerSymbol')) $('createLayerSymbol').value = 'Solid Circle';
         if ($('createLayerSize')) $('createLayerSize').value = 'Medium';
-        setCreateLayerColor('#ec4899');
+        updateTypeDropdownTrigger('createLayer', 'Count');
+        updateUomDropdownTrigger('createLayer', 'ea');
+        updateSymbolDropdownTrigger('createLayer', 'Solid Circle');
+        updateSizeDropdownTrigger('createLayer', 'Medium');
+        setCreateLayerColor('#00d2ff');
         updateCreateLayerSubmitState();
-        
+
         modal.hidden = false;
         setTimeout(() => $('createLayerCatalogName')?.focus(), 40);
     }
 
     function closeCreateLayerModal() {
         const modal = $('takeoffCreateLayerModal');
-        if (modal) modal.hidden = true;
+        if (modal) {
+            modal.classList.remove('is-behind');
+            modal.hidden = true;
+        }
     }
 
     function updateCreateLayerTypeUi(type) {
-        const icon = $('createLayerTypeIcon');
+        const isCount = type === 'Count' || type === 'Count by distance';
+        const symCol = $('createLayerSymbolCol');
+        const sizeCol = $('createLayerSizeCol');
+        if (symCol) symCol.style.display = isCount ? 'block' : 'none';
+        if (sizeCol) sizeCol.style.display = isCount ? 'block' : 'none';
+
         const help = $('createLayerHelpText');
         const uom = $('createLayerUom');
-        
-        if (icon) {
-            if (type === 'Linear avg. with drop' || type === 'Linear with drop') {
-                icon.innerHTML = '<i class="fas fa-network-wired"></i>';
-            } else if (type.includes('Linear')) {
-                icon.innerHTML = '<i class="fas fa-minus"></i>';
-            } else if (type.includes('Area')) {
-                icon.innerHTML = '<i class="far fa-square"></i>';
-            } else {
-                icon.innerHTML = '<i class="fas fa-circle-dot"></i>';
-            }
-        }
-        
+
         if (help) {
             help.textContent = TAKEOFF_TYPE_HELP[type] || 'Count Quantity items - EX: Light Fixtures, Electrical Outlets, Data Outlets';
         }
-        
+
+        filterUomDropdownByType('createLayer', type);
+
         if (uom) {
-            uom.value = typeToUom(type);
+            if (!isUomValidForType(uom.value, type)) {
+                uom.value = defaultUomForType(type);
+            }
+            updateUomDropdownTrigger('createLayer', uom.value);
         }
+        updateTypeDropdownTrigger('createLayer', type);
     }
 
     function setCreateLayerColor(hex) {
@@ -1985,6 +2900,7 @@
             if (match) select.value = match.value;
             else select.value = '__custom__';
         }
+        updateColorDropdownTrigger('createLayer', hex);
     }
 
     function updateCreateLayerSubmitState() {
@@ -1998,29 +2914,28 @@
     function submitCreateLayerModal() {
         const name = $('createLayerCatalogName')?.value.trim();
         if (!name) return closeCreateLayerModal();
-        
+
         const type = $('createLayerType')?.value || 'Count';
         const uom = $('createLayerUom')?.value || typeToUom(type);
         const symbol = $('createLayerSymbol')?.value || 'Solid Circle';
         const size = $('createLayerSize')?.value || 'Medium';
         const color = $('createLayerColorSwatch')?.style.background || '#ec4899';
-        
-        let targetGroupId = takeoffState.pendingCreateGroupId;
-        let group = findGroup(targetGroupId);
+
+        const chosenGroupId = $('createLayerGroup')?.value || takeoffState.pendingCreateGroupId;
+        let group = findGroupExact(chosenGroupId) || findGroup(chosenGroupId);
         if (!group) {
             const scopedGroups = takeoffState.groups.filter(g => groupBelongsToEstimate(g, activeEstimateId()));
-            group = scopedGroups[scopedGroups.length - 1];
-            if (!group) {
-                ensureEstimateTakeoffWorkspace(activeEstimateId(), true);
-                const refreshed = takeoffState.groups.filter(g => groupBelongsToEstimate(g, activeEstimateId()));
-                group = refreshed[refreshed.length - 1];
-            }
+            group = scopedGroups[0] || takeoffState.groups[0];
         }
-        
+        if (!group) {
+            group = { id: makeId('grp'), estimateId: activeEstimateId(), name: 'Takeoff Group 1', isExpanded: true, isDefault: false, layers: [] };
+            takeoffState.groups.push(group);
+        }
+
         const strokeWidth = type.includes('Area') ? 3 : 4;
         const radius = takeoffSizeRadius(size);
         const tag = $('createLayerTag')?.value.trim() || '';
-        
+
         const newLayer = {
             id: makeId('layer'),
             groupId: group.id,
@@ -2045,7 +2960,7 @@
             shapes: [],
             takeoffObjects: []
         };
-        
+
         if (takeoffState.pendingCatalogItem) {
             try {
                 Object.assign(newLayer, catalogItemMeta(takeoffState.pendingCatalogItem));
@@ -2053,12 +2968,12 @@
                 newLayer.catalogItemId = takeoffState.pendingCatalogItem.id;
             }
         }
-        
+
         pushTakeoffHistory('create-layer');
         group.layers.push(newLayer);
         group.isExpanded = true;
         takeoffState.activeGroupId = group.id;
-        
+
         closeCreateLayerModal();
         setActiveTakeoffLayer(newLayer.id, true);
         saveTakeoffState();
@@ -2157,6 +3072,13 @@
             const hasDrop = ['Linear with drop', 'Linear avg. with drop'].includes(type);
             dropField.style.display = hasDrop ? 'flex' : 'none';
         }
+        const isCount = type === 'Count' || type === 'Count by distance';
+        const symCol = $('layerSymbolCol');
+        const sizeCol = $('layerSizeCol');
+        const strokeCol = $('layerStrokeCol');
+        if (symCol) symCol.style.display = isCount ? 'block' : 'none';
+        if (sizeCol) sizeCol.style.display = isCount ? 'block' : 'none';
+        if (strokeCol) strokeCol.style.display = isCount ? 'none' : 'block';
     }
 
     function openLayerModal(groupId = takeoffState.activeGroupId, layerId = null) {
@@ -2193,7 +3115,7 @@
         if ($('layerSymbolInput')) $('layerSymbolInput').value = takeoffDisplaySymbol(layer?.symbol);
         if ($('layerSizeInput')) $('layerSizeInput').value = takeoffDisplaySize(layer?.size);
         if ($('layerDiameterInput')) $('layerDiameterInput').value = Number(layer?.markerDiameter || (takeoffSizeRadius(layer?.size || 'Medium') * 2));
-        
+
         const strokeVal = Math.round(Number(layer?.strokeWidth || 4));
         setSelectValue($('layerStrokeInput'), String(strokeVal));
         updateLayerStrokePreview();
@@ -2212,7 +3134,15 @@
 
         updateAssociatedCatalogCard(layer);
         updateLayerDrawingsList(layer);
-        updateLayerTypeIcon();
+        const currentEditType = $('layerTypeInput').value;
+        filterUomDropdownByType('editLayer', currentEditType);
+        if (!isUomValidForType($('layerUomInput')?.value, currentEditType)) {
+            setSelectValue($('layerUomInput'), defaultUomForType(currentEditType));
+        }
+        updateTypeDropdownTrigger('editLayer', currentEditType);
+        updateUomDropdownTrigger('editLayer', $('layerUomInput')?.value || 'ea');
+        updateSymbolDropdownTrigger('editLayer', $('layerSymbolInput')?.value || 'Solid Circle');
+        updateSizeDropdownTrigger('editLayer', $('layerSizeInput')?.value || 'Medium');
         updateCatalogSelectionIndicator();
         updateLayerColorSwatch();
         updateLayerTypeFields($('layerTypeInput').value);
@@ -2248,12 +3178,16 @@
             picker.value = hex.length === 4 ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}` : hex;
         }
         updateLayerColorSwatch();
+        updateColorDropdownTrigger('editLayer', hex);
     }
 
     function updateLayerColorSwatch() {
         const swatch = $('layerColorSwatch');
+        const editSwatch = $('editLayerColorSwatch');
         const color = ($('layerColorInput')?.value === '__custom__' ? $('layerCustomColorPicker')?.value : $('layerColorInput')?.value) || '#ef4444';
         if (swatch) swatch.style.background = color;
+        if (editSwatch) editSwatch.style.background = color;
+        updateColorDropdownTrigger('editLayer', color);
     }
 
     function updateLayerSubmitState() {
@@ -2283,15 +3217,21 @@
         takeoffState.pendingCatalogItem = item;
         const createModal = $('takeoffCreateLayerModal');
         if (createModal && !createModal.hidden) {
+            createModal.classList.remove('is-behind');
             if ($('createLayerCatalogName')) $('createLayerCatalogName').value = item.name || '';
             const inferred = window.TakeoffCatalogAdapter?.measurementType ? window.TakeoffCatalogAdapter.measurementType(item, inferTakeoffTypeFromUom(item.uom)) : inferTakeoffTypeFromUom(item.uom);
             if (inferred && $('createLayerType')) {
                 $('createLayerType').value = inferred;
                 updateCreateLayerTypeUi(inferred);
             }
-            if ($('createLayerUom')) $('createLayerUom').value = item.uom || 'ea';
+            if ($('createLayerUom')) {
+                $('createLayerUom').value = item.uom || 'ea';
+                updateUomDropdownTrigger('createLayer', item.uom || 'ea');
+            }
             const color = item.takeoffDefaults?.color || item.color;
             if (color) setCreateLayerColor(color);
+            const symbol = item.takeoffDefaults?.symbol || item.symbol;
+            if (symbol && $('createLayerSymbol')) $('createLayerSymbol').value = symbol;
             updateCreateLayerSubmitState();
             closeCatalogModal();
             setTimeout(() => $('createLayerCatalogName')?.focus(), 40);
@@ -2299,6 +3239,7 @@
         }
         $('layerNameInput').value = item.name || '';
         setSelectValue($('layerUomInput'), item.uom || 'ea');
+        updateUomDropdownTrigger('editLayer', item.uom || 'ea');
         const inferred = window.TakeoffCatalogAdapter?.measurementType ? window.TakeoffCatalogAdapter.measurementType(item, inferTakeoffTypeFromUom(item.uom)) : inferTakeoffTypeFromUom(item.uom);
         if (inferred) {
             $('layerTypeInput').value = inferred;
@@ -2418,100 +3359,206 @@
         }
     }
 
+    const browseCatalogState = {
+        activeTab: 'cost_catalog',
+        selectedCatalogId: null,
+        selectedGroupId: null,
+        selectedItemId: null,
+        itemQuery: '',
+        catalogQuery: '',
+        page: 1,
+        pageSize: 40,
+        expandedCatalogs: {}
+    };
+
     function ensureCatalogModal() {
         if ($('takeoffCatalogModal')) return;
         const modal = document.createElement('div');
         modal.id = 'takeoffCatalogModal';
         modal.className = 'pro-modal-backdrop pro-catalog-backdrop';
         modal.hidden = true;
-        modal.innerHTML = `<div class="pro-catalog-modal" role="dialog" aria-modal="true" aria-labelledby="takeoffCatalogModalTitle">
-            <div class="pro-layer-modal-head">
-                <h3 id="takeoffCatalogModalTitle">Browse Catalog</h3>
-                <button class="pro-icon-btn" type="button" data-catalog-close aria-label="Close"><i class="fas fa-times"></i></button>
-            </div>
-            <div class="pro-catalog-toolbar">
-                <div class="pro-field">
-                    <label for="takeoffCatalogSearch">Search catalog items</label>
-                    <input id="takeoffCatalogSearch" type="search" placeholder="Search catalog items...">
+        modal.innerHTML = `
+            <div class="pro-browse-catalog-modal" role="dialog" aria-modal="true" aria-labelledby="takeoffCatalogModalTitle">
+                <div class="pro-browse-catalog-head">
+                    <h2 id="takeoffCatalogModalTitle">Select catalog item</h2>
+                    <button class="pro-icon-btn" type="button" data-catalog-close aria-label="Close">&times;</button>
                 </div>
-                <div class="pro-field">
-                    <label for="takeoffCatalogCategory">Category</label>
-                    <select id="takeoffCatalogCategory"><option value="">All categories</option></select>
+                <div class="pro-browse-catalog-tabs">
+                    <button type="button" class="pro-browse-catalog-tab active" data-browse-tab="cost_catalog">Cost Catalog</button>
+                    <button type="button" class="pro-browse-catalog-tab" data-browse-tab="masterformat">Masterformat</button>
+                    <button type="button" class="pro-browse-catalog-tab" data-browse-tab="uniformat">Uniformat</button>
                 </div>
-                <div class="pro-field">
-                    <label for="takeoffCatalogUom">UoM</label>
-                    <select id="takeoffCatalogUom"><option value="">All UoM</option></select>
+                <div class="pro-browse-catalog-body">
+                    <aside class="pro-browse-cat-sidebar">
+                        <div class="pro-browse-cat-sidebar-head">Catalogs</div>
+                        <div class="pro-browse-cat-search">
+                            <input id="proBrowseCatSearch" type="search" placeholder="Search Catalogs" autocomplete="off">
+                            <i class="fas fa-magnifying-glass"></i>
+                        </div>
+                        <div class="pro-browse-cat-tree" id="proBrowseCatTree"></div>
+                    </aside>
+                    <main class="pro-browse-items-main">
+                        <div class="pro-browse-items-head">
+                            <div class="pro-browse-items-head-top">
+                                <span class="pro-browse-items-title" id="proBrowseItemsTitle">All Catalog Items</span>
+                            </div>
+                            <div class="pro-btn-create-item-row" style="margin-top:-2px; margin-bottom:4px;">
+                                <button type="button" class="pro-btn-create-item-link" id="proBrowseCreateNewItemBtn">
+                                    <i class="fas fa-plus"></i> Create New Item
+                                </button>
+                            </div>
+                            <div class="pro-browse-items-controls">
+                                <div class="pro-browse-items-controls-left">
+                                    <input type="checkbox" id="proBrowseSelectAll" aria-label="Select all items">
+                                    <button type="button" class="pro-cat-tool-btn">
+                                        <i class="fas fa-bars"></i> Common <i class="fas fa-caret-down"></i>
+                                    </button>
+                                    <button type="button" class="pro-cat-tool-btn">
+                                        <i class="fas fa-filter"></i> Filters
+                                    </button>
+                                </div>
+                                <div class="pro-browse-item-search">
+                                    <input id="proBrowseItemSearch" type="search" placeholder="Search catalog item name" autocomplete="off">
+                                    <i class="fas fa-magnifying-glass"></i>
+                                </div>
+                            </div>
+                        </div>
+                        <div class="pro-browse-items-list" id="proBrowseItemsList"></div>
+                        <div class="pro-browse-pagination">
+                            <span id="proBrowsePaginationText">0-0 of 0</span>
+                            <span>Page: <select id="proBrowsePageSelect" style="padding: 1px 4px; font-size: 11px; border: 1px solid var(--tk-border); border-radius: 4px; background: inherit; color: inherit;"></select></span>
+                            <div class="pro-browse-pagination-arrows">
+                                <button type="button" class="pro-browse-pagination-arrow" id="proBrowsePrevPage" disabled title="Previous page"><i class="fas fa-chevron-left"></i></button>
+                                <button type="button" class="pro-browse-pagination-arrow" id="proBrowseNextPage" disabled title="Next page"><i class="fas fa-chevron-right"></i></button>
+                            </div>
+                        </div>
+                    </main>
                 </div>
-                <a class="pro-toolbar-btn" href="/pages/cost_catalog.php" target="_blank" rel="noopener">
-                    <i class="fas fa-arrow-up-right-from-square"></i> Open Cost Catalog
-                </a>
-            </div>
-            <div class="pro-catalog-status" id="takeoffCatalogStatus" hidden></div>
-            <div class="pro-catalog-table-wrap">
-                <table class="pro-catalog-table">
-                    <thead>
-                        <tr>
-                            <th>Item Name</th>
-                            <th>Category</th>
-                            <th>UoM</th>
-                            <th>Unit Cost</th>
-                            <th>Labor Hours</th>
-                            <th>Description</th>
-                            <th></th>
-                        </tr>
-                    </thead>
-                    <tbody id="takeoffCatalogRows"></tbody>
-                </table>
-            </div>
-        </div>`;
+                <div class="pro-browse-catalog-foot">
+                    <button type="button" class="pro-btn-browse-cancel" data-catalog-close>Cancel</button>
+                    <button type="button" class="pro-btn-browse-select" id="proBrowseSelectBtn" disabled>Select</button>
+                </div>
+            </div>`;
         document.body.appendChild(modal);
+
         modal.querySelectorAll('[data-catalog-close]').forEach(btn => btn.addEventListener('click', closeCatalogModal));
-        modal.addEventListener('click', event => {
-            if (event.target.id === 'takeoffCatalogModal') closeCatalogModal();
-        });
-        $('takeoffCatalogSearch')?.addEventListener('input', event => {
-            clearTimeout(event.target._catalogTimer);
-            event.target._catalogTimer = setTimeout(() => {
-                catalogState.query = event.target.value.trim().toLowerCase();
+
+        modal.querySelectorAll('[data-browse-tab]').forEach(tabBtn => {
+            tabBtn.addEventListener('click', () => {
+                modal.querySelectorAll('[data-browse-tab]').forEach(b => b.classList.remove('active'));
+                tabBtn.classList.add('active');
+                browseCatalogState.activeTab = tabBtn.dataset.browseTab;
+                browseCatalogState.page = 1;
                 renderCatalogBrowser();
+            });
+        });
+
+        $('proBrowseCatSearch')?.addEventListener('input', e => {
+            browseCatalogState.catalogQuery = e.target.value.trim().toLowerCase();
+            renderCatalogSidebar();
+        });
+
+        $('proBrowseItemSearch')?.addEventListener('input', e => {
+            clearTimeout(e.target._timer);
+            e.target._timer = setTimeout(() => {
+                browseCatalogState.itemQuery = e.target.value.trim().toLowerCase();
+                browseCatalogState.page = 1;
+                renderCatalogItems();
             }, 120);
         });
-        $('takeoffCatalogCategory')?.addEventListener('change', event => {
-            catalogState.category = event.target.value;
-            renderCatalogBrowser();
+
+        $('proBrowseSelectBtn')?.addEventListener('click', () => {
+            const selected = getSelectedCatalogItem();
+            if (selected) {
+                applyCatalogItemToLayerForm(selected);
+            }
         });
-        $('takeoffCatalogUom')?.addEventListener('change', event => {
-            catalogState.uom = event.target.value;
-            renderCatalogBrowser();
+
+        $('proBrowseCreateNewItemBtn')?.addEventListener('click', () => {
+            window.open('/pages/cost_catalog.php', '_blank');
+        });
+
+        $('proBrowsePrevPage')?.addEventListener('click', () => {
+            if (browseCatalogState.page > 1) {
+                browseCatalogState.page--;
+                renderCatalogItems();
+            }
+        });
+
+        $('proBrowseNextPage')?.addEventListener('click', () => {
+            browseCatalogState.page++;
+            renderCatalogItems();
+        });
+
+        $('proBrowsePageSelect')?.addEventListener('change', e => {
+            browseCatalogState.page = Number(e.target.value) || 1;
+            renderCatalogItems();
         });
     }
 
     function openCatalogModal() {
         ensureTakeoffModal();
         ensureCatalogModal();
+        const createModal = $('takeoffCreateLayerModal');
+        if (createModal && !createModal.hidden) {
+            createModal.classList.add('is-behind');
+        }
+        browseCatalogState.selectedItemId = null;
+        browseCatalogState.page = 1;
+        browseCatalogState.itemQuery = '';
+        browseCatalogState.catalogQuery = '';
         $('takeoffCatalogModal').hidden = false;
-        renderCatalogBrowser();
         loadCatalogItems();
-        setTimeout(() => $('takeoffCatalogSearch')?.focus(), 40);
+        setTimeout(() => $('proBrowseItemSearch')?.focus(), 50);
     }
 
     function closeCatalogModal() {
         const modal = $('takeoffCatalogModal');
         if (modal) modal.hidden = true;
+        const createModal = $('takeoffCreateLayerModal');
+        if (createModal && !createModal.hidden) {
+            createModal.classList.remove('is-behind');
+            setTimeout(() => $('createLayerCatalogName')?.focus(), 50);
+        }
     }
 
     async function loadCatalogItems() {
-        if (catalogState.loaded || catalogState.loading) return;
+        if (catalogState.loaded || catalogState.loading) {
+            renderCatalogBrowser();
+            return;
+        }
         catalogState.loading = true;
         catalogState.error = '';
         renderCatalogBrowser();
         try {
-            const snapshot = await window.CatalogService.getSnapshot({ enabledForProjectsOnly: true });
-            catalogState.catalogs = snapshot.catalogs;
-            catalogState.groups = snapshot.categories;
-            catalogState.items = snapshot.items;
+            if (window.CatalogService) {
+                const snapshot = await window.CatalogService.getSnapshot({ enabledForProjectsOnly: false });
+                catalogState.catalogs = snapshot.catalogs || [];
+                catalogState.groups = snapshot.categories || [];
+                catalogState.items = snapshot.items || [];
+            } else {
+                const res = await fetch('../api/cost_catalog.php?action=list');
+                const json = await res.json();
+                if (json.status === 'success' && json.data) {
+                    catalogState.catalogs = (json.data.catalogs || []).map(c => ({ id: c.id, name: c.name, locked: Boolean(Number(c.locked || 0)) }));
+                    catalogState.groups = (json.data.groups || []).map(g => ({ id: g.id, catalogId: g.catalog_id, parentGroupId: g.parent_group_id, name: g.name }));
+                    catalogState.items = (json.data.items || json.data.allItems || []).map(i => ({
+                        id: i.id,
+                        name: i.name,
+                        description: i.description || '',
+                        type: i.item_type || 'material',
+                        uom: i.unit_of_measure || 'ea',
+                        color: i.color,
+                        symbol: i.symbol,
+                        pricing: { unitCost: Number(i.unit_cost || 0), laborHoursPerUnit: Number(i.labor_hours || 0) },
+                        catalog: { id: i.catalog_id, name: i.catalog_name || '' },
+                        category: { id: i.catalog_group_id, name: i.group_name || '' },
+                        supplier: { catalogNumber: i.catalog_number || '' },
+                        classification: { costCode: i.cost_code || '', masterformat: i.masterformat || '', uniformat: i.uniformat || '' }
+                    }));
+                }
+            }
             catalogState.loaded = true;
-            populateCatalogFilters();
         } catch (e) {
             console.warn('Cost Catalog load failed', e);
             catalogState.error = e.message || 'Unable to load Cost Catalog';
@@ -2521,107 +3568,274 @@
         }
     }
 
-    function populateCatalogFilters() {
-        const categorySelect = $('takeoffCatalogCategory');
-        const uomSelect = $('takeoffCatalogUom');
-        if (categorySelect) {
-            const categories = Array.from(new Set(catalogState.items.map(item => item.category.name || item.catalog.name || '').filter(Boolean))).sort();
-            categorySelect.innerHTML = '<option value="">All categories</option>' + categories.map(category => `<option value="${esc(category)}">${esc(category)}</option>`).join('');
-            categorySelect.value = catalogState.category;
-        }
-        if (uomSelect) {
-            const uoms = Array.from(new Set(catalogState.items.map(item => item.uom || '').filter(Boolean))).sort();
-            uomSelect.innerHTML = '<option value="">All UoM</option>' + uoms.map(uom => `<option value="${esc(uom)}">${esc(uom)}</option>`).join('');
-            uomSelect.value = catalogState.uom;
-        }
-    }
-
-    function catalogSearchMatch(item) {
-        const category = item.category.name || item.catalog.name || '';
-        if (catalogState.category && category !== catalogState.category) return false;
-        if (catalogState.uom && String(item.uom || '') !== catalogState.uom) return false;
-        const q = catalogState.query;
-        if (!q) return true;
-        return [
-            item.name,
-            item.description,
-            item.catalog.name,
-            item.category.name,
-            item.supplier.catalogNumber,
-            item.classification.costCode,
-            item.uom,
-            item.type,
-            item.supplier.manufacturer,
-            item.supplier.supplier
-        ].join(' ').toLowerCase().includes(q);
-    }
-
-    function money(value) {
-        const number = Number(value || 0);
-        return number ? `$${number.toFixed(2)}` : '-';
-    }
-
     function renderCatalogBrowser() {
-        const rows = $('takeoffCatalogRows');
-        const status = $('takeoffCatalogStatus');
-        if (!rows || !status) return;
-        status.setAttribute('role', 'status');
-        status.setAttribute('aria-live', 'polite');
-        if (catalogState.loading) {
-            status.hidden = false;
-            status.textContent = 'Loading Cost Catalog...';
-            rows.innerHTML = '';
-            return;
-        }
-        if (catalogState.error) {
-            status.hidden = false;
-            status.innerHTML = `${esc(catalogState.error)} <button class="pro-toolbar-btn" type="button" data-catalog-retry>Retry</button>`;
-            status.querySelector('[data-catalog-retry]')?.addEventListener('click', () => {
-                catalogState.loaded = false;
-                loadCatalogItems();
-            });
-            rows.innerHTML = '';
-            return;
-        }
-        status.hidden = true;
-        const items = catalogState.items.filter(catalogSearchMatch);
-        if (!catalogState.loaded) {
-            rows.innerHTML = '';
-            return;
-        }
-        if (!items.length) {
-            rows.innerHTML = `<tr><td colspan="7">
-                <div class="pro-catalog-empty">
-                    <strong>No catalog items found</strong>
-                    <span>Add items in Cost Catalog before selecting them for takeoff layers.</span>
-                    <a class="pro-toolbar-btn" href="/pages/cost_catalog.php" target="_blank" rel="noopener">Open Cost Catalog</a>
+        renderCatalogSidebar();
+        renderCatalogItems();
+    }
+
+    function renderCatalogSidebar() {
+        const tree = $('proBrowseCatTree');
+        if (!tree) return;
+        const q = browseCatalogState.catalogQuery;
+        const isAllActive = !browseCatalogState.selectedCatalogId && !browseCatalogState.selectedGroupId;
+
+        let html = `
+            <div class="pro-cat-tree-node ${isAllActive ? 'active' : ''}" data-cat-select="all">
+                <i class="fas fa-bars pro-cat-icon"></i>
+                <span class="node-name">All Catalog Items</span>
+            </div>
+            <div class="pro-cat-tree-node ${browseCatalogState.selectedCatalogId === '__recent__' ? 'active' : ''}" data-cat-select="recent">
+                <i class="fas fa-clock pro-cat-icon"></i>
+                <span class="node-name">Most Recently Used Items</span>
+            </div>
+        `;
+
+        (catalogState.catalogs || []).forEach(cat => {
+            if (q && !cat.name.toLowerCase().includes(q)) return;
+            const catId = String(cat.id);
+            const isCatActive = String(browseCatalogState.selectedCatalogId) === catId && !browseCatalogState.selectedGroupId;
+            const isExpanded = Boolean(browseCatalogState.expandedCatalogs[catId] ?? true);
+            const groups = (catalogState.groups || []).filter(g => String(g.catalogId) === catId && !g.parentGroupId);
+
+            html += `
+                <div class="pro-cat-tree-node ${isCatActive ? 'active' : ''}" data-cat-select="${esc(catId)}">
+                    ${groups.length ? `<i class="fas fa-caret-right node-carat ${isExpanded ? 'open' : ''}" data-cat-toggle="${esc(catId)}"></i>` : '<span style="width:14px;"></span>'}
+                    <i class="fas fa-folder node-icon"></i>
+                    <span class="node-name" title="${esc(cat.name)}">${esc(cat.name)}</span>
+                    ${cat.locked ? '<i class="fas fa-lock node-lock"></i>' : ''}
                 </div>
-            </td></tr>`;
+            `;
+
+            if (isExpanded && groups.length) {
+                html += '<div class="pro-cat-tree-children">';
+                groups.forEach(grp => {
+                    const grpId = String(grp.id);
+                    const isGrpActive = String(browseCatalogState.selectedGroupId) === grpId;
+                    html += `
+                        <div class="pro-cat-tree-node ${isGrpActive ? 'active' : ''}" data-cat-group-select="${esc(grpId)}" data-cat-parent="${esc(catId)}">
+                            <i class="fas fa-folder-open node-icon" style="font-size:11px;"></i>
+                            <span class="node-name" title="${esc(grp.name)}">${esc(grp.name)}</span>
+                        </div>
+                    `;
+                });
+                html += '</div>';
+            }
+        });
+
+        tree.innerHTML = html;
+
+        tree.querySelectorAll('[data-cat-toggle]').forEach(carat => {
+            carat.addEventListener('click', e => {
+                e.stopPropagation();
+                const cid = carat.dataset.catToggle;
+                browseCatalogState.expandedCatalogs[cid] = !browseCatalogState.expandedCatalogs[cid];
+                renderCatalogSidebar();
+            });
+        });
+
+        tree.querySelectorAll('[data-cat-select]').forEach(node => {
+            node.addEventListener('click', () => {
+                const target = node.dataset.catSelect;
+                if (target === 'all') {
+                    browseCatalogState.selectedCatalogId = null;
+                    browseCatalogState.selectedGroupId = null;
+                    if ($('proBrowseItemsTitle')) $('proBrowseItemsTitle').textContent = 'All Catalog Items';
+                } else if (target === 'recent') {
+                    browseCatalogState.selectedCatalogId = '__recent__';
+                    browseCatalogState.selectedGroupId = null;
+                    if ($('proBrowseItemsTitle')) $('proBrowseItemsTitle').textContent = 'Most Recently Used Items';
+                } else {
+                    browseCatalogState.selectedCatalogId = target;
+                    browseCatalogState.selectedGroupId = null;
+                    const cat = (catalogState.catalogs || []).find(c => String(c.id) === target);
+                    if ($('proBrowseItemsTitle')) $('proBrowseItemsTitle').textContent = cat ? cat.name : 'Catalog Items';
+                }
+                browseCatalogState.page = 1;
+                renderCatalogSidebar();
+                renderCatalogItems();
+            });
+        });
+
+        tree.querySelectorAll('[data-cat-group-select]').forEach(node => {
+            node.addEventListener('click', () => {
+                const grpId = node.dataset.catGroupSelect;
+                const parentCatId = node.dataset.catParent;
+                browseCatalogState.selectedCatalogId = parentCatId;
+                browseCatalogState.selectedGroupId = grpId;
+                const grp = (catalogState.groups || []).find(g => String(g.id) === grpId);
+                const cat = (catalogState.catalogs || []).find(c => String(c.id) === parentCatId);
+                if ($('proBrowseItemsTitle')) $('proBrowseItemsTitle').textContent = `${cat ? cat.name + ' > ' : ''}${grp ? grp.name : 'Group'}`;
+                browseCatalogState.page = 1;
+                renderCatalogSidebar();
+                renderCatalogItems();
+            });
+        });
+    }
+
+    function filterBrowseCatalogItems() {
+        const items = catalogState.items || [];
+        const q = browseCatalogState.itemQuery;
+        const catId = browseCatalogState.selectedCatalogId;
+        const grpId = browseCatalogState.selectedGroupId;
+        const tab = browseCatalogState.activeTab;
+
+        return items.filter(item => {
+            if (catId === '__recent__') {
+                // Return all items
+            } else if (grpId) {
+                if (String(item.category?.id || '') !== String(grpId)) return false;
+            } else if (catId) {
+                if (String(item.catalog?.id || '') !== String(catId)) return false;
+            }
+            if (tab === 'masterformat' && !item.classification?.masterformat) {
+                // Allow browsing under masterformat tab
+            }
+            if (tab === 'uniformat' && !item.classification?.uniformat) {
+                // Allow browsing under uniformat tab
+            }
+            if (q) {
+                const searchString = [
+                    item.name,
+                    item.description,
+                    item.catalog?.name,
+                    item.category?.name,
+                    item.supplier?.catalogNumber,
+                    item.classification?.costCode,
+                    item.uom
+                ].filter(Boolean).join(' ').toLowerCase();
+                if (!searchString.includes(q)) return false;
+            }
+            return true;
+        });
+    }
+
+    function renderCatalogItems() {
+        const list = $('proBrowseItemsList');
+        const selectBtn = $('proBrowseSelectBtn');
+        if (!list) return;
+
+        if (catalogState.loading) {
+            list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--tk-text-muted);"><i class="fas fa-spinner fa-spin" style="font-size: 24px; color: var(--tk-primary);"></i><p style="margin-top: 10px;">Loading catalog items...</p></div>';
             return;
         }
-        rows.innerHTML = items.slice(0, 250).map(item => {
-            const category = item.category.name || item.catalog.name || '-';
-            const unitCost = window.TakeoffCatalogAdapter.legacyUnitCost(item);
-            return `<tr data-catalog-item="${esc(item.id)}">
-                <td>
-                    <strong>${esc(item.name)}</strong>
-                    <small>${esc(item.supplier.catalogNumber || item.classification.costCode || '')}</small>
-                </td>
-                <td>${esc(category)}</td>
-                <td>${esc(item.uom || 'ea')}</td>
-                <td>${money(unitCost)}</td>
-                <td>${Number(item.pricing.laborHoursPerUnit || 0).toFixed(4)}</td>
-                <td>${esc(item.description || item.type || '-')}</td>
-                <td><button class="pro-create-layer-btn" type="button" data-catalog-select="${esc(item.id)}">Select</button></td>
-            </tr>`;
+
+        const filtered = filterBrowseCatalogItems();
+        const total = filtered.length;
+        const pageSize = browseCatalogState.pageSize;
+        const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        if (browseCatalogState.page > totalPages) browseCatalogState.page = totalPages;
+        const start = (browseCatalogState.page - 1) * pageSize;
+        const pageItems = filtered.slice(start, start + pageSize);
+
+        // Update pagination
+        const end = Math.min(start + pageItems.length, total);
+        const text = total > 0 ? `${start + 1}-${end} of ${total.toLocaleString()}` : '0 of 0';
+        if ($('proBrowsePaginationText')) $('proBrowsePaginationText').textContent = text;
+        if ($('proBrowsePrevPage')) $('proBrowsePrevPage').disabled = browseCatalogState.page <= 1;
+        if ($('proBrowseNextPage')) $('proBrowseNextPage').disabled = browseCatalogState.page >= totalPages;
+
+        const pageSelect = $('proBrowsePageSelect');
+        if (pageSelect) {
+            let opts = '';
+            for (let i = 1; i <= totalPages; i++) {
+                opts += `<option value="${i}"${i === browseCatalogState.page ? ' selected' : ''}>${i}</option>`;
+            }
+            pageSelect.innerHTML = opts;
+        }
+
+        if (!pageItems.length) {
+            list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--tk-text-muted);"><i class="fas fa-box-open" style="font-size: 28px; opacity: 0.5;"></i><p style="margin-top: 10px; font-size: 13px;">No catalog items match this criteria.</p></div>';
+            if (selectBtn) { selectBtn.disabled = true; selectBtn.classList.remove('is-active'); }
+            return;
+        }
+
+        list.innerHTML = pageItems.map(item => {
+            const isSelected = String(browseCatalogState.selectedItemId) === String(item.id);
+            const isAssembly = item.type === 'assembly';
+            const unitCost = Number(item.pricing?.unitCost || 0);
+            const laborHours = Number(item.pricing?.laborHoursPerUnit || 0);
+            const costStr = unitCost > 0 ? `$${unitCost.toFixed(2)}` : '$0.00';
+            const laborStr = laborHours > 0 ? `${laborHours % 1 === 0 ? laborHours.toFixed(0) : laborHours.toFixed(2)} hrs` : '0 hrs';
+            const catalogName = item.catalog?.name || 'Catalog';
+            const categoryName = item.category?.name ? ` > ${item.category.name}` : '';
+            const catPath = `${catalogName}${categoryName}`;
+            const code = item.supplier?.catalogNumber || 'n/a';
+
+            return `
+                <div class="pro-catalog-item-card ${isSelected ? 'is-selected' : ''}" data-browse-item="${esc(item.id)}">
+                    <input type="checkbox" ${isSelected ? 'checked' : ''} data-item-check="${esc(item.id)}" aria-label="Select ${esc(item.name)}">
+                    <div class="pro-catalog-item-content">
+                        <div class="pro-catalog-item-title">${esc(item.name)}</div>
+                        ${item.description ? `<div class="pro-catalog-item-desc">${esc(item.description)}</div>` : ''}
+                        <div class="pro-catalog-item-chips">
+                            ${isAssembly ? '<span class="pro-cat-badge-assembly">Assembly</span>' : ''}
+                            <span>UoM <strong>${esc(item.uom || 'ea')}</strong></span>
+                            <span>UC <strong>${costStr}</strong></span>
+                            <span>ULT <strong>${laborStr}</strong></span>
+                            <span>CN <strong>${esc(code)}</strong></span>
+                            <span>CC <strong>${esc(catPath)}</strong></span>
+                        </div>
+                    </div>
+                    <button type="button" class="pro-catalog-item-menu" title="Item actions" aria-label="Item actions"><i class="fas fa-ellipsis-vertical"></i></button>
+                </div>
+            `;
         }).join('');
-        rows.querySelectorAll('[data-catalog-item]').forEach(row => {
-            row.addEventListener('click', event => {
-                const id = event.target.closest('[data-catalog-select]')?.dataset.catalogSelect || row.dataset.catalogItem;
-                const item = catalogState.items.find(candidate => String(candidate.id) === String(id));
+
+        // Wire click handlers
+        list.querySelectorAll('[data-browse-item]').forEach(card => {
+            const id = card.dataset.browseItem;
+            card.addEventListener('click', (e) => {
+                if (e.target.closest('.pro-catalog-item-menu')) return;
+                browseCatalogState.selectedItemId = id;
+                updateBrowseSelectionUi();
+            });
+            card.addEventListener('dblclick', () => {
+                browseCatalogState.selectedItemId = id;
+                const item = getSelectedCatalogItem();
                 if (item) applyCatalogItemToLayerForm(item);
             });
         });
+
+        list.querySelectorAll('[data-item-check]').forEach(check => {
+            check.addEventListener('change', (e) => {
+                e.stopPropagation();
+                if (check.checked) {
+                    browseCatalogState.selectedItemId = check.dataset.itemCheck;
+                } else if (String(browseCatalogState.selectedItemId) === String(check.dataset.itemCheck)) {
+                    browseCatalogState.selectedItemId = null;
+                }
+                updateBrowseSelectionUi();
+            });
+        });
+
+        updateBrowseSelectionUi();
+    }
+
+    function updateBrowseSelectionUi() {
+        const list = $('proBrowseItemsList');
+        const selectBtn = $('proBrowseSelectBtn');
+        const selectedId = String(browseCatalogState.selectedItemId || '');
+
+        if (list) {
+            list.querySelectorAll('.pro-catalog-item-card').forEach(card => {
+                const cardId = String(card.dataset.browseItem || '');
+                const isSelected = selectedId && cardId === selectedId;
+                card.classList.toggle('is-selected', isSelected);
+                const checkbox = card.querySelector('input[type="checkbox"]');
+                if (checkbox) checkbox.checked = isSelected;
+            });
+        }
+
+        if (selectBtn) {
+            const hasSelected = Boolean(selectedId && getSelectedCatalogItem());
+            selectBtn.disabled = !hasSelected;
+            selectBtn.classList.toggle('is-active', hasSelected);
+        }
+    }
+
+    function getSelectedCatalogItem() {
+        if (!browseCatalogState.selectedItemId) return null;
+        return (catalogState.items || []).find(i => String(i.id) === String(browseCatalogState.selectedItemId));
     }
 
     let takeoffGroupModalReturnFocus = null;
@@ -2662,11 +3876,15 @@
         const group = { id, estimatingGroupId, estimateId, name: normalizedName, isExpanded: true, isDefault: false, layers: [] };
         takeoffState.groups.push(group);
         takeoffState.activeGroupId = group.id;
-        window.dispatchEvent(new CustomEvent('takeoff:estimating-group-create-requested', { detail: {
-            projectId: String(window.ProjectState?.projectId || ''), estimateId,
-            group: { id: estimatingGroupId, takeoffGroupId: group.id, name: group.name,
-                expanded: true, sortOrder: takeoffState.groups.filter(row => groupBelongsToEstimate(row)).length - 1, items: [] }
-        } }));
+        window.dispatchEvent(new CustomEvent('takeoff:estimating-group-create-requested', {
+            detail: {
+                projectId: String(window.ProjectState?.projectId || ''), estimateId,
+                group: {
+                    id: estimatingGroupId, takeoffGroupId: group.id, name: group.name,
+                    expanded: true, sortOrder: takeoffState.groups.filter(row => groupBelongsToEstimate(row)).length - 1, items: []
+                }
+            }
+        }));
         saveTakeoffState();
         renderTakeoffPanel();
         return true;
@@ -2798,8 +4016,55 @@
 
         const rect = button.getBoundingClientRect();
         menu.style.display = 'flex';
-        menu.style.top = `${rect.bottom + 4}px`;
-        menu.style.left = `${Math.min(window.innerWidth - 230, rect.left)}px`;
+        menu.style.visibility = 'hidden';
+        menu.style.top = '0px';
+        menu.style.left = '0px';
+
+        const menuRect = menu.getBoundingClientRect();
+        const bounds = getTakeoffBoundary(button);
+        const margin = 8;
+        const gap = 2;
+        const isSubhead = Boolean(button.closest('#takeoffSubheadItemInfo'));
+        let left = isSubhead ? rect.left : rect.right + gap;
+        let top = isSubhead ? rect.bottom + 4 : rect.top;
+
+        // Detect if footer exists and calculate bottom limit so menu never touches or overlaps the footer or boundary
+        const footer = document.querySelector('.est-version-bar') || $('takeoffEstimateTypesFooter');
+        const footerRect = footer ? footer.getBoundingClientRect() : null;
+        const bottomLimit = (footerRect && footerRect.top > 0) ? Math.min(footerRect.top - margin, bounds.bottom) : bounds.bottom;
+
+        // If it overflows the right edge of the boundary, flip to the left of the button
+        if (left + menuRect.width > (isSubhead ? window.innerWidth - 12 : bounds.right)) {
+            left = isSubhead ? window.innerWidth - menuRect.width - 12 : rect.left - menuRect.width - gap;
+        }
+
+        // If it overflows the bottom limit (or touches the footer), align bottom with button bottom or flip upwards
+        if (top + menuRect.height > (isSubhead ? window.innerHeight - 12 : bottomLimit)) {
+            top = isSubhead ? rect.top - menuRect.height - 4 : Math.max(bounds.top, rect.bottom - menuRect.height);
+        }
+
+        if (!isSubhead) {
+            left = Math.max(bounds.left, Math.min(left, bounds.right - menuRect.width));
+            top = Math.max(bounds.top, Math.min(top, bottomLimit - menuRect.height));
+        }
+
+        menu.style.left = `${Math.round(left)}px`;
+        menu.style.top = `${Math.round(top)}px`;
+        menu.style.visibility = 'visible';
+
+        menu.querySelectorAll('.pro-menu-item-has-sub').forEach(item => {
+            item.addEventListener('mouseenter', () => {
+                const sub = item.querySelector('.pro-menu-sub');
+                if (!sub) return;
+                sub.style.top = '0';
+                sub.style.bottom = 'auto';
+                const subRect = sub.getBoundingClientRect();
+                if (subRect.bottom > window.innerHeight - 12 || (bottomLimit && subRect.bottom > bottomLimit)) {
+                    sub.style.top = 'auto';
+                    sub.style.bottom = '0';
+                }
+            });
+        });
 
         menu.querySelector('[data-group-ctx="create-layer"]')?.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -2837,6 +4102,72 @@
         });
     }
 
+    function closeEstimatePickerPopup() {
+        const pop = $('takeoffEstimatePickerPopup');
+        if (pop) pop.remove();
+    }
+
+    function openEstimatePickerPopup(button, groupId, action = 'move') {
+        closeEstimatePickerPopup();
+        const state = loadEstimatingStateForSync();
+        const otherEstimates = (state?.estimates || []).filter(est => String(est.id) !== activeEstimateId());
+        if (!otherEstimates.length) {
+            showTakeoffToast?.('No other estimates in this project.');
+            return;
+        }
+        const pop = document.createElement('div');
+        pop.id = 'takeoffEstimatePickerPopup';
+        pop.className = 'pro-menu-sub open';
+        pop.style.display = 'flex';
+        pop.style.position = 'fixed';
+        pop.style.zIndex = '99999';
+        pop.innerHTML = `
+            <div style="padding: 4px 10px; font-size: 11px; font-weight: 600; color: var(--tk-text-muted); border-bottom: 1px solid var(--tk-border, #e2e8f0); margin-bottom: 2px;">
+                ${action === 'copy' ? 'Copy to estimate:' : 'Move to estimate:'}
+            </div>
+            ${otherEstimates.map(est => `
+                <button type="button" data-picker-est="${esc(est.id)}" style="display:flex;align-items:center;gap:7px;padding:6px 12px;width:100%;text-align:left;border:none;background:transparent;cursor:pointer;font-size:12px;color:inherit;">
+                    <i class="fas ${action === 'copy' ? 'fa-copy' : 'fa-arrow-right'}" style="font-size:11px;opacity:0.7;"></i>
+                    <span>${esc(est.name || 'Estimate')}</span>
+                </button>
+            `).join('')}
+        `;
+        document.body.appendChild(pop);
+        const rect = button.getBoundingClientRect();
+        let left = rect.left;
+        let top = rect.bottom + 4;
+        const popRect = pop.getBoundingClientRect();
+        if (left + popRect.width > window.innerWidth - 12) {
+            left = window.innerWidth - popRect.width - 12;
+        }
+        if (top + popRect.height > window.innerHeight - 12) {
+            top = rect.top - popRect.height - 4;
+        }
+        pop.style.left = `${Math.round(left)}px`;
+        pop.style.top = `${Math.round(top)}px`;
+
+        pop.querySelectorAll('[data-picker-est]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const estId = btn.dataset.pickerEst;
+                closeEstimatePickerPopup();
+                if (action === 'copy') {
+                    copyGroupToEstimate(groupId, estId);
+                } else {
+                    moveGroupToEstimate(groupId, estId);
+                }
+            });
+        });
+
+        const closeOnOutside = (e) => {
+            if (!pop.contains(e.target) && e.target !== button && !button.contains(e.target)) {
+                closeEstimatePickerPopup();
+                document.removeEventListener('pointerdown', closeOnOutside, true);
+            }
+        };
+        setTimeout(() => document.addEventListener('pointerdown', closeOnOutside, true), 10);
+    }
+
     function closeGroupContextMenu() {
         const menu = $('takeoffGroupContextMenu');
         if (menu) menu.style.display = 'none';
@@ -2853,8 +4184,17 @@
                 onSave: (newName) => {
                     if (!newName || !newName.trim()) return;
                     pushTakeoffHistory('rename-group');
-                    group.name = group.isDefault ? 'Default Group' : newName.trim();
+                    group.name = newName.trim();
+                    group.isDefault = false;
                     saveTakeoffState();
+                    window.dispatchEvent(new CustomEvent('takeoff:estimating-group-rename-requested', {
+                        detail: {
+                            projectId: String(window.ProjectState?.projectId || ''),
+                            estimateId: activeEstimateId(),
+                            groupId: group.estimatingGroupId || `takeoff_group_${group.id}`,
+                            name: group.name
+                        }
+                    }));
                     renderTakeoffPanel();
                     showTakeoffToast?.('Group renamed.');
                 }
@@ -2863,8 +4203,17 @@
             const newName = prompt('Enter new group name:', group.name);
             if (newName && newName.trim() && newName.trim() !== group.name) {
                 pushTakeoffHistory('rename-group');
-                group.name = group.isDefault ? 'Default Group' : newName.trim();
+                group.name = newName.trim();
+                group.isDefault = false;
                 saveTakeoffState();
+                window.dispatchEvent(new CustomEvent('takeoff:estimating-group-rename-requested', {
+                    detail: {
+                        projectId: String(window.ProjectState?.projectId || ''),
+                        estimateId: activeEstimateId(),
+                        groupId: group.estimatingGroupId || `takeoff_group_${group.id}`,
+                        name: group.name
+                    }
+                }));
                 renderTakeoffPanel();
             }
         }
@@ -2928,11 +4277,13 @@
         selectionState.selectedObjectIds = [];
         if (wanted.has(String(takeoffState.activeGroupId))) takeoffState.activeGroupId = takeoffState.groups.find(group => groupBelongsToEstimate(group))?.id || null;
         if (layerIds.includes(String(takeoffState.activeLayerId))) takeoffState.activeLayerId = null;
-        window.dispatchEvent(new CustomEvent('takeoff:estimating-groups-delete-requested', { detail: {
-            projectId: String(window.ProjectState?.projectId || ''), estimateId: activeEstimateId(), groupIds: estimatingGroupIds
-        } }));
+        window.dispatchEvent(new CustomEvent('takeoff:estimating-groups-delete-requested', {
+            detail: {
+                projectId: String(window.ProjectState?.projectId || ''), estimateId: activeEstimateId(), groupIds: estimatingGroupIds
+            }
+        }));
         saveTakeoffState();
-        renderTakeoffPanel(); renderSelectionBar(); renderInspector();
+        renderTakeoffPanel(); renderSelectionBar(); renderInspector(); updateSubheadSelectedItem();
         return true;
     }
 
@@ -2947,10 +4298,12 @@
         const [moved] = scoped.splice(from, 1);
         scoped.splice(to, 0, moved);
         scoped.forEach((group, index) => { group.sortOrder = index; takeoffState.groups[scopedIndexes[index]] = group; });
-        window.dispatchEvent(new CustomEvent('takeoff:estimating-groups-reorder-requested', { detail: {
-            projectId: String(window.ProjectState?.projectId || ''), estimateId,
-            groupIds: scoped.map(group => String(group.estimatingGroupId || `takeoff_group_${group.id}`))
-        } }));
+        window.dispatchEvent(new CustomEvent('takeoff:estimating-groups-reorder-requested', {
+            detail: {
+                projectId: String(window.ProjectState?.projectId || ''), estimateId,
+                groupIds: scoped.map(group => String(group.estimatingGroupId || `takeoff_group_${group.id}`))
+            }
+        }));
         saveTakeoffState(); renderTakeoffPanel();
         return true;
     }
@@ -3073,6 +4426,39 @@
         if (!info || info.__actionsBound) return;
         info.__actionsBound = true;
         info.addEventListener('click', event => {
+            const groupBtn = event.target.closest('[data-subhead-group-action]');
+            if (groupBtn) {
+                event.stopPropagation();
+                const action = groupBtn.dataset.subheadGroupAction;
+                const groupId = selectionState.selectedGroupIds?.[0] || takeoffState.activeGroupId;
+                const group = findGroup(groupId);
+                if (!group) {
+                    showPrepared('No group selected.');
+                    return;
+                }
+
+                if (action === 'create-layer') {
+                    openCreateLayerModal(groupId);
+                } else if (action === 'rename') {
+                    promptRenameGroup(group);
+                } else if (action === 'copy') {
+                    duplicateGroup(groupId);
+                } else if (action === 'copy-other') {
+                    openEstimatePickerPopup(groupBtn, groupId, 'copy');
+                } else if (action === 'move-other') {
+                    openEstimatePickerPopup(groupBtn, groupId, 'move');
+                } else if (action === 'delete') {
+                    if (selectionState.selectedGroupIds.length > 1) {
+                        deleteTakeoffGroups(selectionState.selectedGroupIds);
+                    } else {
+                        deleteGroup(groupId);
+                    }
+                } else if (action === 'more') {
+                    openGroupContextMenu(groupBtn, groupId);
+                }
+                return;
+            }
+
             const btn = event.target.closest('[data-subhead-item-action]');
             if (!btn) return;
             event.stopPropagation();
@@ -3109,40 +4495,41 @@
     }
 
     function syncTakeoffSubheadAlignment() {
-        // 5: Align takeoffSubheadItemInfo left edge with pro-sheet-select left edge
-        const sheetSelect = document.getElementById('takeoffSheetSelect');
+        // 5: takeoffSubheadItemInfo is centered horizontally via CSS
         const itemInfo = document.getElementById('takeoffSubheadItemInfo');
-        if (sheetSelect && itemInfo) {
-            if (itemInfo.classList.contains('is-visible') && itemInfo.style.display !== 'none' && document.body.classList.contains('is-takeoff-tab')) {
-                itemInfo.style.marginLeft = '0px';
-                const sheetRect = sheetSelect.getBoundingClientRect();
-                const infoRect = itemInfo.getBoundingClientRect();
-                if (sheetRect.left > 0 && infoRect.left > 0) {
-                    const diff = Math.round(sheetRect.left - infoRect.left);
-                    itemInfo.style.marginLeft = `${Math.max(0, diff)}px`;
-                }
-            } else {
-                itemInfo.style.marginLeft = '0px';
-            }
+        if (itemInfo) {
+            itemInfo.style.marginLeft = '';
         }
 
-        // 3: Match drawing scale button width with save project button & align left edges
+        // 3: Match drawing scale button width with save project button & center in exact same location
         const saveBtn = document.getElementById('saveProjectBtn');
         const scaleBtn = document.getElementById('takeoffScaleStatus');
         const scaleSlot = document.getElementById('takeoffSubheadScaleSlot');
         if (saveBtn && scaleBtn && scaleSlot) {
             const saveRect = saveBtn.getBoundingClientRect();
             if (saveRect.width > 0) {
-                const widthPx = `${Math.round(saveRect.width)}px`;
+                // 1. Give scale button the width of save project minus 2px (1px each side)
+                const targetW = Math.max(20, Math.round(saveRect.width) - 2);
+                const widthPx = `${targetW}px`;
                 scaleBtn.style.width = widthPx;
                 scaleBtn.style.minWidth = widthPx;
                 scaleBtn.style.maxWidth = widthPx;
+                scaleBtn.style.overflow = 'hidden';
+                scaleBtn.style.textOverflow = 'ellipsis';
+                scaleBtn.style.whiteSpace = 'nowrap';
 
+                // 2. Reset marginRight to 0 to read the natural unshifted layout position
                 scaleSlot.style.marginRight = '0px';
                 const scaleRect = scaleBtn.getBoundingClientRect();
-                const diff = Math.round(scaleRect.left - saveRect.left);
+
+                // 3. Align centers: calculate how much scale is further right than save, nudged 2.5px right
+                const saveCenter = saveRect.left + (saveRect.width / 2);
+                const scaleCenter = scaleRect.left + (scaleRect.width / 2);
+                const diff = Number(((scaleCenter - saveCenter) - 2.5).toFixed(1));
                 if (diff > 0) {
                     scaleSlot.style.marginRight = `${diff}px`;
+                } else {
+                    scaleSlot.style.marginRight = '0px';
                 }
             }
         }
@@ -3153,15 +4540,65 @@
         const info = $('takeoffSubheadItemInfo');
         if (!info) return;
         bindSubheadItemActions();
+
+        const selectedGroupIds = selectionState.selectedGroupIds || [];
+        const isGroupSelected = selectedGroupIds.length > 0;
+        const selectedGroup = isGroupSelected ? findGroup(selectedGroupIds[0]) : null;
+
         const activeLayerId = takeoffState.activeLayerId || selectionState.activeLayerId;
         const activeLayer = typeof findLayer === 'function' ? findLayer(activeLayerId) : null;
         const selectedCount = selectionState.selectedObjectIds?.length || 0;
 
-        if (activeLayer || selectedCount > 0) {
-            const dot = $('takeoffSubheadItemDot');
-            const name = $('takeoffSubheadItemName');
-            const meta = $('takeoffSubheadItemMeta');
-            if (dot) dot.style.background = activeLayer?.color || '#2563eb';
+        const dot = $('takeoffSubheadItemDot');
+        const name = $('takeoffSubheadItemName');
+        const meta = $('takeoffSubheadItemMeta');
+        const actionsContainer = info.querySelector('.takeoff-subhead-item-actions');
+
+        if (isGroupSelected && selectedGroup) {
+            info.classList.add('is-visible', 'is-group-info');
+            info.style.display = 'inline-flex';
+            if (dot) {
+                dot.style.background = 'transparent';
+                dot.innerHTML = '<i class="fas fa-folder" style="color: #f59e0b; font-size: 11.5px;"></i>';
+            }
+            if (name) {
+                name.textContent = selectedGroupIds.length > 1 ? `${selectedGroupIds.length} groups selected` : selectedGroup.name;
+            }
+            if (meta) {
+                const layerCount = (selectedGroup.layers || []).length;
+                meta.textContent = `${layerCount} ${layerCount === 1 ? 'item' : 'items'}`;
+            }
+
+            if (actionsContainer) {
+                actionsContainer.innerHTML = `
+                    <button type="button" class="subhead-item-act-btn" data-subhead-group-action="create-layer" title="Create New Takeoff Layer">
+                        <i class="fas fa-plus"></i><span>New Item</span>
+                    </button>
+                    <button type="button" class="subhead-item-act-btn" data-subhead-group-action="rename" title="Rename Group">
+                        <i class="fas fa-pen"></i><span>Rename</span>
+                    </button>
+                    <button type="button" class="subhead-item-act-btn" data-subhead-group-action="copy" title="Copy Group">
+                        <i class="far fa-copy"></i><span>Copy</span>
+                    </button>
+                    <button type="button" class="subhead-item-act-btn" data-subhead-group-action="move-other" title="Move to other estimate">
+                        <i class="fas fa-arrows-turn-to-dots"></i><span>Move to</span>
+                    </button>
+                    <button type="button" class="subhead-item-act-btn danger" data-subhead-group-action="delete" title="Delete Group">
+                        <i class="fas fa-trash"></i><span>Delete</span>
+                    </button>
+                    <button type="button" class="subhead-item-act-btn icon-only" data-subhead-group-action="more" title="More group options">
+                        <i class="fas fa-ellipsis-vertical"></i>
+                    </button>
+                `;
+            }
+        } else if (activeLayer || selectedCount > 0) {
+            info.classList.add('is-visible');
+            info.classList.remove('is-group-info');
+            info.style.display = 'inline-flex';
+            if (dot) {
+                dot.innerHTML = '';
+                dot.style.background = activeLayer?.color || '#2563eb';
+            }
             if (name) name.textContent = activeLayer?.name || (selectedCount > 1 ? `${selectedCount} elements selected` : '1 element selected');
             if (meta) {
                 if (selectedCount > 1) {
@@ -3172,10 +4609,22 @@
                     meta.textContent = 'Selected element';
                 }
             }
-            info.classList.add('is-visible');
-            info.style.display = 'inline-flex';
+
+            if (actionsContainer) {
+                actionsContainer.innerHTML = `
+                    <button type="button" class="subhead-item-act-btn" data-subhead-item-action="copy" title="Copy item or selection">
+                        <i class="fas fa-copy"></i><span>Copy</span>
+                    </button>
+                    <button type="button" class="subhead-item-act-btn" data-subhead-item-action="move" title="Move item to group">
+                        <i class="fas fa-folder-tree"></i><span>Move to</span>
+                    </button>
+                    <button type="button" class="subhead-item-act-btn danger" data-subhead-item-action="delete" title="Delete item or selection">
+                        <i class="fas fa-trash"></i><span>Delete</span>
+                    </button>
+                `;
+            }
         } else {
-            info.classList.remove('is-visible');
+            info.classList.remove('is-visible', 'is-group-info');
             info.style.display = 'none';
         }
         syncTakeoffSubheadAlignment();
@@ -3343,7 +4792,7 @@
             <div class="pro-viewer-layers-list">
                 ${layers.map(layer => `<label class="pro-viewer-layer-row">
                     <input type="checkbox" ${layer.visible === false ? '' : 'checked'} data-viewer-layer-visible="${esc(layer.id)}">
-                    <span class="pro-color-dot" style="background:${esc(layer.color)}"></span>
+                    ${renderLayerBadgeHtml(layer, 14)}
                     <span>${esc(layer.name)}</span>
                     <small>${esc(quantityLabel(layer))}</small>
                 </label>`).join('') || '<div class="pro-drawing-empty">No takeoff layers yet.</div>'}
@@ -3476,6 +4925,30 @@
         renderTakeoffPanel();
         renderSelectionBar();
         renderInspector();
+        updateSubheadSelectedItem();
+    }
+
+    function selectSingleLayer(layerId) {
+        const layer = findLayer(layerId);
+        if (!layer) return;
+        const editorLockState = callEditor('projectTakeoffGetLayerLockState', layer.id) || {};
+        if (layer.locked || editorLockState.locked) return;
+
+        // Reset any existing multi-group and multi-layer selection
+        selectionState.selectedGroupIds = [];
+        selectionState.selectedLayerIds = [String(layer.id)];
+        selectionState.activeLayerId = layer.id;
+
+        // Activate this layer in the takeoff editor for drawing
+        setActiveTakeoffLayer(layer.id, false);
+
+        // Select objects for this single layer on canvas
+        const selectedIds = callEditor('projectTakeoffSelectGroup', [String(layer.id)]);
+        selectionState.selectedObjectIds = Array.isArray(selectedIds) ? selectedIds : [];
+
+        renderTakeoffPanel();
+        renderSelectionBar();
+        renderInspector();
     }
 
     function toggleLayerSelection(layerId, selected) {
@@ -3510,6 +4983,7 @@
         renderTakeoffPanel();
         renderSelectionBar();
         renderInspector();
+        updateSubheadSelectedItem();
     }
 
     function toggleLayerLock(layerId) {
@@ -3687,7 +5161,7 @@
                <button type="button" data-menu-act="group-copy"><i class="fas fa-copy"></i> Copy</button>
                <button type="button" data-menu-act="group-copy-estimate"><i class="fas fa-copy"></i> Copy to other estimate</button>
                <button type="button" data-menu-act="group-move-estimate"><i class="fas fa-arrow-right"></i> Move to other estimate</button>
-               ${group?.isDefault ? '' : '<button type="button" class="danger" data-menu-act="group-delete"><i class="fas fa-trash"></i> Delete</button>'}`
+               <button type="button" class="danger" data-menu-act="group-delete"><i class="fas fa-trash"></i> Delete</button>`
             : `<button type="button" data-menu-act="layer-edit"><i class="fas fa-sliders"></i> Item properties & size</button>
                <button type="button" data-menu-act="layer-rename"><i class="fas fa-pen"></i> Rename</button>
                <button type="button" data-menu-act="layer-duplicate"><i class="fas fa-copy"></i> Duplicate</button>
@@ -3699,7 +5173,7 @@
                 const action = item.dataset.menuAct;
                 menu.classList.remove('open');
                 activeRowMenuAnchor = null;
-                if (action === 'group-create') openLayerModal(id);
+                if (action === 'group-create') openCreateLayerModal(id);
                 if (action === 'group-rename') renameGroup(id);
                 if (action === 'group-copy') duplicateGroup(id);
                 if (action === 'group-copy-estimate') showPrepared('Copy to other estimate is ready to be connected.');
@@ -3931,7 +5405,7 @@
         }
         if (command === 'previous' || command === 'next') return changeActiveSheet(command === 'next' ? 1 : -1);
         if (command === 'fullscreen') {
-            const shell = document.querySelector('.pro-canvas-shell');
+            const shell = $('takeoffWorkspace') || document.querySelector('.pro-takeoff-workspace') || document.querySelector('.pro-canvas-shell');
             if (!document.fullscreenElement && shell?.requestFullscreen) {
                 shell.requestFullscreen().catch(() => showPrepared('Fullscreen could not start.'));
             } else if (document.fullscreenElement && document.exitFullscreen) {
@@ -3975,10 +5449,35 @@
 
     let activeRowMenuAnchor = null;
 
+    function getTakeoffBoundary(el) {
+        const margin = 8;
+        const boundaryEl = el?.closest?.('.pro-takeoff-workspace, .workspace-shell, body') || document.body;
+        if (!boundaryEl || boundaryEl === document.body || boundaryEl === document.documentElement) {
+            return {
+                left: margin,
+                top: margin,
+                right: window.innerWidth - margin,
+                bottom: window.innerHeight - margin,
+                width: window.innerWidth - (margin * 2),
+                height: window.innerHeight - (margin * 2)
+            };
+        }
+        const bRect = boundaryEl.getBoundingClientRect();
+        return {
+            left: Math.max(margin, bRect.left + margin),
+            top: Math.max(margin, bRect.top + margin),
+            right: Math.min(window.innerWidth - margin, bRect.right - margin),
+            bottom: Math.min(window.innerHeight - margin, bRect.bottom - margin),
+            width: Math.max(0, Math.min(window.innerWidth - margin, bRect.right - margin) - Math.max(margin, bRect.left + margin)),
+            height: Math.max(0, Math.min(window.innerHeight - margin, bRect.bottom - margin) - Math.max(margin, bRect.top + margin))
+        };
+    }
+
     function positionRowMenu(button) {
         const menu = $('takeoffRowMenu');
         if (!menu) return;
         const rect = button.getBoundingClientRect();
+        const bounds = getTakeoffBoundary(button);
         const margin = 8;
         const gap = 6;
         menu.style.left = '0px';
@@ -3988,11 +5487,11 @@
         const menuRect = menu.getBoundingClientRect();
         let left = rect.right - menuRect.width;
         let top = rect.bottom + gap;
-        if (top + menuRect.height > window.innerHeight - margin) {
+        if (top + menuRect.height > bounds.bottom) {
             top = rect.top - menuRect.height - gap;
         }
-        left = Math.max(margin, Math.min(left, window.innerWidth - menuRect.width - margin));
-        top = Math.max(margin, Math.min(top, window.innerHeight - menuRect.height - margin));
+        left = Math.max(bounds.left, Math.min(left, bounds.right - menuRect.width));
+        top = Math.max(bounds.top, Math.min(top, bounds.bottom - menuRect.height));
         menu.style.left = `${Math.round(left)}px`;
         menu.style.top = `${Math.round(top)}px`;
         menu.style.visibility = 'visible';
@@ -4026,17 +5525,39 @@
         }
     }
 
-    function syncScaleStatus() {
-        const scaleText = (editorDocument()?.getElementById('scale-display')?.textContent || '').trim();
+    function syncScaleStatus(forcePresetSync = false) {
         const button = $('takeoffScaleStatus');
         if (!button) return;
-        const label = button.querySelector('span');
+        const editorDoc = editorDocument();
+        const scaleText = (editorDoc?.getElementById('scale-display')?.textContent || '').trim();
+        const label = button.querySelector('#takeoffScaleLabel') || button.querySelector('span:not(.pro-scale-dot)') || button.querySelector('span');
         const icon = button.querySelector('i');
-        const hasScale = Boolean(scaleText && scaleText !== '--' && !scaleText.toLowerCase().includes('not set'));
+        const hasScale = Boolean(scaleText && scaleText !== '--' && !scaleText.toLowerCase().includes('not set') && scaleText !== '0');
         button.classList.toggle('is-set', hasScale);
         if (icon) icon.style.display = 'none';
         if (label) label.textContent = hasScale ? `Scale: ${scaleText}` : 'Not Drawing Scale';
+
+        const panel = $('takeoffScalePanel');
+        const isPanelOpen = panel?.classList.contains('open');
+        const presetSelect = $('takeoffScalePreset');
+        const isUserDirty = presetSelect?.dataset?.userDirty === '1';
+
+        // Only update preset dropdown if forced, or if panel is closed and user isn't actively selecting
+        if (presetSelect && (forcePresetSync || (!isPanelOpen && !isUserDirty))) {
+            if (hasScale) {
+                for (let i = 0; i < presetSelect.options.length; i++) {
+                    if (presetSelect.options[i].text.trim().toLowerCase() === scaleText.toLowerCase() ||
+                        presetSelect.options[i].value.trim().toLowerCase() === scaleText.toLowerCase()) {
+                        presetSelect.selectedIndex = i;
+                        break;
+                    }
+                }
+            } else {
+                presetSelect.value = '';
+            }
+        }
     }
+    window.syncScaleStatus = syncScaleStatus;
 
     function hasScaleSet() {
         const scaleText = (editorDocument()?.getElementById('scale-display')?.textContent || '').trim();
@@ -4076,36 +5597,51 @@
     function openScalePanel(mode) {
         const panel = $('takeoffScalePanel');
         const toggle = $('takeoffScaleStatus');
+        const presetSelect = $('takeoffScalePreset');
         if (!panel) return;
+        if (presetSelect) delete presetSelect.dataset.userDirty;
         syncScalePresets();
+        syncScaleStatus(true);
         panel.classList.add('open');
         toggle?.setAttribute('aria-expanded', 'true');
         if (mode) setScaleMode(mode);
     }
 
     function closeScalePanel() {
+        const presetSelect = $('takeoffScalePreset');
+        if (presetSelect) delete presetSelect.dataset.userDirty;
         $('takeoffScalePanel')?.classList.remove('open');
         $('takeoffScaleStatus')?.setAttribute('aria-expanded', 'false');
     }
 
     function applyScalePreset(value) {
         if (!value) return;
+        const applyCheckbox = $('takeoffScaleApplyAll');
+        const applyAll = Boolean(applyCheckbox?.checked);
         const editorSelect = editorDocument()?.getElementById('cal-preset');
         if (editorSelect) editorSelect.value = value;
-        const result = callEditor('applyScalePreset', value);
+        const result = callEditor('applyScalePreset', value, applyAll);
+        const presetSelect = $('takeoffScalePreset');
+        if (presetSelect) delete presetSelect.dataset.userDirty;
         Promise.resolve(result).finally(() => {
-            syncScaleStatus();
+            if (applyCheckbox) applyCheckbox.checked = false;
+            syncScaleStatus(true);
             syncScaleHint();
         });
     }
 
     function applyManualScale() {
         const feet = $('takeoffManualFeet')?.value;
+        const applyCheckbox = $('takeoffScaleApplyAll');
+        const applyAll = Boolean(applyCheckbox?.checked);
         const editorInput = editorDocument()?.getElementById('cal-val');
         if (editorInput) editorInput.value = feet || '';
-        const result = callEditor('finishCal', true);
+        const result = callEditor('finishCal', true, applyAll);
+        const presetSelect = $('takeoffScalePreset');
+        if (presetSelect) delete presetSelect.dataset.userDirty;
         Promise.resolve(result).finally(() => {
-            syncScaleStatus();
+            if (applyCheckbox) applyCheckbox.checked = false;
+            syncScaleStatus(true);
             syncScaleHint();
         });
     }
@@ -4119,8 +5655,29 @@
         });
         document.querySelector('[data-scale-close]')?.addEventListener('click', closeScalePanel);
         $('takeoffScaleMode')?.addEventListener('change', event => setScaleMode(event.target.value));
-        $('takeoffScalePreset')?.addEventListener('change', event => applyScalePreset(event.target.value));
-        document.querySelector('[data-scale-apply-manual]')?.addEventListener('click', applyManualScale);
+        $('takeoffScalePreset')?.addEventListener('change', () => {
+            const target = $('takeoffScalePreset');
+            if (target) target.dataset.userDirty = '1';
+        });
+        $('takeoffScaleApplyBtn')?.addEventListener('click', () => {
+            const mode = $('takeoffScaleMode')?.value;
+            if (mode === 'manual') {
+                applyManualScale();
+            } else {
+                const presetVal = $('takeoffScalePreset')?.value;
+                if (presetVal) {
+                    applyScalePreset(presetVal);
+                } else {
+                    showToast('Please select a scale preset', 'warning');
+                    return;
+                }
+            }
+            closeScalePanel();
+        });
+        document.querySelector('[data-scale-apply-manual]')?.addEventListener('click', () => {
+            applyManualScale();
+            closeScalePanel();
+        });
         document.querySelector('[data-scale-clear-line]')?.addEventListener('click', () => {
             callEditor('clearCalLine');
             syncScaleHint();
@@ -4134,9 +5691,7 @@
         });
         setInterval(() => {
             if (document.hidden || !$('takeoffScalePanel')?.classList.contains('open')) return;
-            syncScaleStatus();
             syncScaleHint();
-            syncScalePresets();
         }, 1200);
     }
 
@@ -4169,7 +5724,15 @@
         const filterItemBtn = $('takeoffFilterItemSheets');
 
         if (activeLayer) {
-            if (dot) dot.style.background = activeLayer.color || '#2563eb';
+            if (dot) {
+                dot.innerHTML = getLayerBadgeSvg(activeLayer, 14);
+                dot.style.background = 'transparent';
+                dot.style.display = 'inline-flex';
+                dot.style.alignItems = 'center';
+                dot.style.justifyContent = 'center';
+                dot.style.width = '14px';
+                dot.style.height = '14px';
+            }
             if (text) text.textContent = activeLayer.name || 'Item sin nombre';
             if (pill) {
                 pill.title = `Item activo: ${activeLayer.name} (${activeLayer.type || 'conteo'})`;
@@ -4185,7 +5748,15 @@
             if (countBadge) countBadge.textContent = matchCount;
             if (filterItemBtn) filterItemBtn.disabled = false;
         } else {
-            if (dot) dot.style.background = '#94a3b8';
+            if (dot) {
+                dot.innerHTML = '<svg viewBox="0 0 24 24" width="14" height="14" fill="#94a3b8"><circle cx="12" cy="12" r="8.5"/></svg>';
+                dot.style.background = 'transparent';
+                dot.style.display = 'inline-flex';
+                dot.style.alignItems = 'center';
+                dot.style.justifyContent = 'center';
+                dot.style.width = '14px';
+                dot.style.height = '14px';
+            }
             if (text) text.textContent = 'Ningún item seleccionado';
             if (pill) {
                 pill.title = 'Selecciona un item en Takeoff para ver sus marcas en los planos';
@@ -4346,9 +5917,7 @@
             button.addEventListener('click', () => {
                 const pg = Number(button.dataset.drawingPage);
                 renderSheetPreview(doc, pg);
-            });
-            button.addEventListener('dblclick', () => {
-                selectDrawingSheet(doc, Number(button.dataset.drawingPage));
+                selectDrawingSheet(doc, pg);
             });
         });
 
@@ -4493,7 +6062,7 @@
         try {
             const currentUrl = new URL(frame.getAttribute('src') || '', window.location.href);
             currentFrameId = Number(currentUrl.searchParams.get('id') || 0);
-        } catch (e) {}
+        } catch (e) { }
         if (currentFrameId !== Number(doc.id)) {
             frame.style.display = 'block';
             const onLoad = () => {
@@ -4534,6 +6103,9 @@
         if (info?.pageNum) drawingState.selectedPage = Number(info.pageNum);
         setDrawingLabel();
         renderDrawingDropdown();
+        syncScaleStatus();
+        setTimeout(syncScaleStatus, 250);
+        setTimeout(syncScaleStatus, 700);
     }
 
     function bindDrawingDropdown() {
@@ -4655,6 +6227,10 @@
                 updateZoomUi(Math.round(Math.max(25, Math.min(400, reportedPercent))));
                 return;
             }
+            if (event.data?.type === 'project-takeoff-scale-changed') {
+                syncScaleStatus();
+                return;
+            }
             if (event.data?.type !== 'takeoff-editor-ready') return;
             const doc = activeDrawingDoc();
             if (doc && Number(event.data.fileId) === Number(doc.id)) {
@@ -4663,6 +6239,7 @@
                 drawingState.selectedPage = Number(event.data.pageNum || 1);
                 setDrawingLabel();
                 renderDrawingDropdown();
+                syncScaleStatus();
             }
         });
         $('takeoffFrame')?.addEventListener('load', () => {
@@ -4693,7 +6270,7 @@
         if (!workspace) return;
         const willCollapse = forceState !== null ? Boolean(forceState) : !workspace.classList.contains('items-collapsed');
         workspace.classList.toggle('items-collapsed', willCollapse);
-        
+
         const tabBtn = $('takeoffSidebarCollapseTab');
         if (tabBtn) {
             const icon = tabBtn.querySelector('i');
@@ -4706,7 +6283,7 @@
 
         try {
             localStorage.setItem('takeoff_sidebar_collapsed', willCollapse ? '1' : '0');
-        } catch (e) {}
+        } catch (e) { }
 
         requestAnimationFrame(syncWorkspaceDensity);
         setTimeout(notifyEditorVisible, 80);
@@ -4730,7 +6307,7 @@
             if (savedCollapsed === '1') {
                 toggleTakeoffSidebar(true);
             }
-        } catch (e) {}
+        } catch (e) { }
 
         collapseTab?.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -4744,7 +6321,7 @@
         resizer.addEventListener('pointerdown', (e) => {
             if (e.target.closest('#takeoffSidebarCollapseTab')) return;
             if (workspace.classList.contains('items-collapsed')) return;
-            
+
             isDragging = true;
             startX = e.clientX;
             const currentComputed = parseInt(getComputedStyle(workspace).getPropertyValue('--tk-sidebar-width'), 10) || 320;
@@ -4771,13 +6348,13 @@
             document.body.style.userSelect = '';
             try {
                 if (e.pointerId) resizer.releasePointerCapture(e.pointerId);
-            } catch (err) {}
-            
+            } catch (err) { }
+
             const finalWidth = parseInt(getComputedStyle(workspace).getPropertyValue('--tk-sidebar-width'), 10) || 320;
             try {
                 localStorage.setItem('takeoff_sidebar_width', `${finalWidth}px`);
-            } catch (err) {}
-            
+            } catch (err) { }
+
             requestAnimationFrame(syncWorkspaceDensity);
             setTimeout(notifyEditorVisible, 50);
         };
@@ -4859,9 +6436,9 @@
         }
 
         $('takeoffCompareBtn')?.addEventListener('click', () => {
-            window.dispatchEvent(new CustomEvent('takeoff:estimating-action-requested', {
-                detail: { action: 'compare-estimates', sourceTab: 'takeoff' }
-            }));
+            if (typeof window.showTakeoffToast === 'function') {
+                window.showTakeoffToast('Drawing comparison feature coming soon.');
+            }
         });
 
         $('takeoffDownloadDrawingBtn')?.addEventListener('click', (e) => {
@@ -4975,6 +6552,12 @@
             viewerState.isFullscreen = Boolean(document.fullscreenElement);
             const icon = document.querySelector('[data-viewer-command="fullscreen"] i');
             if (icon) icon.className = viewerState.isFullscreen ? 'fas fa-compress' : 'fas fa-expand';
+            $('takeoffWorkspace')?.classList.toggle('is-fullscreen', viewerState.isFullscreen);
+            document.body.classList.toggle('takeoff-is-fullscreen', viewerState.isFullscreen);
+            setTimeout(() => {
+                callEditor('projectTakeoffFitToView');
+                if (typeof syncTakeoffSubheadAlignment === 'function') syncTakeoffSubheadAlignment();
+            }, 100);
         });
         document.addEventListener('scroll', refreshOpenRowMenu, true);
         $('takeoffScalePanel')?.addEventListener('click', event => event.stopPropagation());
@@ -5007,13 +6590,13 @@
                 runSelectionAction('delete');
                 return;
             }
-                if (event.key === 'Escape') {
+            if (event.key === 'Escape') {
                 viewerState.continuousTool = false;
                 callEditor('clearPlacementTool');
                 callEditor('projectTakeoffSetContinuous', false);
                 callEditor('projectTakeoffSetTool', 'select');
-                    callEditor('projectTakeoffClearSelection');
-                    setSelectedObjects([]);
+                callEditor('projectTakeoffClearSelection');
+                setSelectedObjects([]);
                 callEditor('setMode', 'smart');
                 setActiveTool('smart');
                 renderActiveLayerToolbar();

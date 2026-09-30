@@ -369,7 +369,8 @@ if (dash_table_exists($pdo, 'estimators')) {
     try {
         $stmt = $pdo->query("SELECT id, display_name AS name, trade AS role FROM estimators WHERE deleted_at IS NULL ORDER BY display_name ASC");
         $availableEstimators = $stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : [];
-    } catch (Throwable $e) {}
+    } catch (Throwable $e) {
+    }
 }
 if (dash_table_exists($pdo, 'users')) {
     try {
@@ -385,7 +386,8 @@ if (dash_table_exists($pdo, 'users')) {
                 ];
             }
         }
-    } catch (Throwable $e) {}
+    } catch (Throwable $e) {
+    }
 }
 if (empty($availableEstimators)) {
     $availableEstimators = [
@@ -519,7 +521,7 @@ $state = [
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="../assets/global_tools.css">
+    <link rel="stylesheet" href="../assets/global_tools.css?v=view-trans-20260929-1">
     <script>
         (function () {
             try {
@@ -837,10 +839,10 @@ $state = [
             }
         }
     </style>
-    <link rel="stylesheet" href="../assets/project_overview.css?v=doc-modal-confirm-20260925-5">
-    <link rel="stylesheet" href="../assets/project_takeoff.css?v=takeoff-layout-v3-20260929-1">
-    <link rel="stylesheet" href="../assets/project_estimating.css?v=estimating-assembly-hierarchy-20260902-1">
-    <link rel="stylesheet" href="../assets/project_proposal.css?v=proposal-workspace-20260810-1">
+    <link rel="stylesheet" href="../assets/project_overview.css?v=btn-blue-tabs-20260930-2">
+    <link rel="stylesheet" href="../assets/project_takeoff.css?v=scale-stage-pill-dark-20260930-38">
+    <link rel="stylesheet" href="../assets/project_estimating.css?v=unified-hierarchy-20260930-1">
+    <link rel="stylesheet" href="../assets/project_proposal.css?v=unified-hierarchy-20260930-1">
 </head>
 
 <body>
@@ -867,7 +869,8 @@ $state = [
                             <div class="bb-status-menu-panel project-status-menu" id="projectStatusMenu"></div>
                         </div>
                         <!-- Active Takeoff Item info with quick actions -->
-                        <div class="takeoff-subhead-item-info" id="takeoffSubheadItemInfo" style="display:none;" title="Active Takeoff Item">
+                        <div class="takeoff-subhead-item-info" id="takeoffSubheadItemInfo" style="display:none;"
+                            title="Active Takeoff Item">
                             <div class="takeoff-subhead-item-main">
                                 <span class="pro-active-layer-dot" id="takeoffSubheadItemDot"></span>
                                 <strong class="takeoff-subhead-item-name" id="takeoffSubheadItemName"></strong>
@@ -875,13 +878,16 @@ $state = [
                             </div>
                             <div class="takeoff-subhead-item-divider"></div>
                             <div class="takeoff-subhead-item-actions">
-                                <button type="button" class="subhead-item-act-btn" data-subhead-item-action="copy" title="Copy item or selection">
+                                <button type="button" class="subhead-item-act-btn" data-subhead-item-action="copy"
+                                    title="Copy item or selection">
                                     <i class="fas fa-copy"></i><span>Copy</span>
                                 </button>
-                                <button type="button" class="subhead-item-act-btn" data-subhead-item-action="move" title="Move item to group">
+                                <button type="button" class="subhead-item-act-btn" data-subhead-item-action="move"
+                                    title="Move item to group">
                                     <i class="fas fa-folder-tree"></i><span>Move to</span>
                                 </button>
-                                <button type="button" class="subhead-item-act-btn danger" data-subhead-item-action="delete" title="Delete item or selection">
+                                <button type="button" class="subhead-item-act-btn danger"
+                                    data-subhead-item-action="delete" title="Delete item or selection">
                                     <i class="fas fa-trash"></i><span>Delete</span>
                                 </button>
                             </div>
@@ -905,13 +911,28 @@ $state = [
                             <div class="pd-presence-avatar self" style="background: #5b4364; z-index: 4;"
                                 title="Isaac Diaz (You) - Lead Estimator">
                                 <span>ID</span>
-                                <span class="pd-presence-dot"></span>
+                                <span class="pd-presence-dot" title="Active now"></span>
+                            </div>
+                            <div class="pd-presence-avatar" style="background: #2563eb; z-index: 3;"
+                                title="Sarah Connor - Senior Architect">
+                                <span>SC</span>
+                                <span class="pd-presence-dot" title="Active now"></span>
+                            </div>
+                            <div class="pd-presence-avatar" style="background: #059669; z-index: 2;"
+                                title="Marcus Vance - Project Manager">
+                                <span>MV</span>
+                                <span class="pd-presence-dot" title="Active now"></span>
+                            </div>
+                            <div class="pd-presence-avatar" style="background: #d97706; z-index: 1;"
+                                title="Elena Gomez - Electrical Estimator">
+                                <span>EG</span>
+                                <span class="pd-presence-dot" title="Active now"></span>
                             </div>
                         </div>
                         <div class="pd-presence-menu" id="pdPresenceMenu">
                             <div class="pd-presence-menu-head">
                                 <span>Active in Project</span>
-                                <span class="pd-presence-count" id="pdPresenceCount">1 active</span>
+                                <span class="pd-presence-count" id="pdPresenceCount">4 active</span>
                             </div>
                             <div class="pd-presence-list" id="pdPresenceList">
                                 <div class="pd-presence-user-row">
@@ -922,6 +943,36 @@ $state = [
                                     <div class="pd-presence-user-info">
                                         <span class="pd-presence-user-name">Isaac Diaz (You)</span>
                                         <span class="pd-presence-user-role">Lead Estimator • Active now</span>
+                                    </div>
+                                </div>
+                                <div class="pd-presence-user-row">
+                                    <div class="pd-presence-avatar"
+                                        style="background: #2563eb; width: 24px; height: 24px; font-size: 9.5px; margin: 0;">
+                                        <span>SC</span>
+                                    </div>
+                                    <div class="pd-presence-user-info">
+                                        <span class="pd-presence-user-name">Sarah Connor</span>
+                                        <span class="pd-presence-user-role">Senior Architect • Active now</span>
+                                    </div>
+                                </div>
+                                <div class="pd-presence-user-row">
+                                    <div class="pd-presence-avatar"
+                                        style="background: #059669; width: 24px; height: 24px; font-size: 9.5px; margin: 0;">
+                                        <span>MV</span>
+                                    </div>
+                                    <div class="pd-presence-user-info">
+                                        <span class="pd-presence-user-name">Marcus Vance</span>
+                                        <span class="pd-presence-user-role">Project Manager • Active now</span>
+                                    </div>
+                                </div>
+                                <div class="pd-presence-user-row">
+                                    <div class="pd-presence-avatar"
+                                        style="background: #d97706; width: 24px; height: 24px; font-size: 9.5px; margin: 0;">
+                                        <span>EG</span>
+                                    </div>
+                                    <div class="pd-presence-user-info">
+                                        <span class="pd-presence-user-name">Elena Gomez</span>
+                                        <span class="pd-presence-user-role">Electrical Estimator • Active now</span>
                                     </div>
                                 </div>
                             </div>
@@ -958,48 +1009,43 @@ $state = [
                 <div class="takeoff-subhead-sheet-group" id="takeoffSubheadSheetGroup">
                     <div class="takeoff-subhead-drawing-wrap">
                         <div class="pro-drawing-selector">
-                            <button class="pro-sheet-select pro-sheet-trigger" id="takeoffSheetSelect"
-                                type="button" aria-expanded="false">
+                            <button class="pro-sheet-select pro-sheet-trigger" id="takeoffSheetSelect" type="button"
+                                aria-expanded="false">
                                 <span
                                     id="takeoffSheetLabel"><?= htmlspecialchars($selectedDoc['filename'] ?? 'No drawing selected') ?></span>
                                 <i class="fas fa-chevron-down"></i>
                             </button>
-                            <div class="pro-drawing-dropdown" id="takeoffDrawingDropdown"
-                                aria-label="Drawing selector">
+                            <div class="pro-drawing-dropdown" id="takeoffDrawingDropdown" aria-label="Drawing selector">
                                 <div class="pro-drawing-dropdown-head">
                                     <div>
-                                        <div class="pro-drawing-crumbs">Drawing Sources <i
-                                                class="fas fa-chevron-right"></i> Estimating Tool</div>
                                         <strong>Drawings &amp; Sheets</strong>
                                     </div>
                                     <button class="pro-icon-btn" type="button" data-drawing-close
-                                        aria-label="Close drawing selector"><i
-                                            class="fas fa-times"></i></button>
+                                        aria-label="Close drawing selector"><i class="fas fa-times"></i></button>
                                 </div>
-                                <div class="pro-drawing-active-bar" id="takeoffDrawingActiveBar">
+                                <div class="pro-drawing-active-bar" id="takeoffDrawingActiveBar"
+                                    style="display: none !important;" hidden>
                                     <div class="pro-drawing-active-info" id="takeoffDrawingActiveInfo">
                                         <span class="pro-drawing-active-label">Item Activo:</span>
-                                        <span class="pro-drawing-active-pill" id="takeoffDrawingActivePill"
-                                            title="Item actualmente seleccionado para cotización">
-                                            <span class="pro-drawing-active-dot"
-                                                id="takeoffDrawingActiveDot"></span>
+                                        <span class="pro-drawing-active-pill" id="takeoffDrawingActivePill">
+                                            <span class="pro-drawing-active-dot" id="takeoffDrawingActiveDot"></span>
                                             <span id="takeoffDrawingActiveText">Ningún item seleccionado</span>
                                         </span>
                                     </div>
                                     <div class="pro-drawing-filters">
-                                        <button class="pro-drawing-filter-btn active"
-                                            id="takeoffFilterAllSheets" type="button"
+                                        <button class="pro-drawing-filter-btn" id="takeoffFilterAllSheets" type="button"
                                             data-drawing-filter="all">Todas las Hojas</button>
                                         <button class="pro-drawing-filter-btn" id="takeoffFilterItemSheets"
                                             type="button" data-drawing-filter="item">Solo con este Item <span
-                                                class="pro-filter-count"
-                                                id="takeoffFilterItemCount">0</span></button>
+                                                class="pro-filter-count" id="takeoffFilterItemCount">0</span></button>
                                     </div>
                                 </div>
                                 <div class="pro-drawing-search">
-                                    <input id="takeoffDrawingSearch" type="search"
-                                        placeholder="Search drawing or sheet...">
-                                    <i class="fas fa-magnifying-glass"></i>
+                                    <div class="pro-drawing-search-wrap">
+                                        <input id="takeoffDrawingSearch" type="search"
+                                            placeholder="Search drawing or sheet...">
+                                        <i class="fas fa-magnifying-glass"></i>
+                                    </div>
                                 </div>
                                 <div class="pro-drawing-grid">
                                     <div class="pro-drawing-col">
@@ -1013,35 +1059,10 @@ $state = [
                                         <div id="takeoffSheetList" class="pro-drawing-list"></div>
                                     </div>
                                     <div class="pro-drawing-preview">
-                                        <div class="pro-drawing-col-title">Preview &amp; Takeoff</div>
+                                        <div class="pro-drawing-col-title">Preview</div>
                                         <div class="pro-preview-container">
                                             <div id="takeoffSheetPreview" class="pro-preview-box">
                                                 <span>Select a sheet</span>
-                                            </div>
-                                            <div class="pro-preview-details" id="takeoffPreviewDetails">
-                                                <div class="pro-preview-sheet-header">
-                                                    <h4 id="takeoffPreviewTitle">Sheet Preview</h4>
-                                                    <span class="pro-preview-sheet-sub"
-                                                        id="takeoffPreviewSub">Selecciona una hoja para ver sus
-                                                        marcas</span>
-                                                </div>
-                                                <div class="pro-preview-takeoff-section">
-                                                    <div class="pro-preview-section-title">
-                                                        <span><i class="fas fa-layer-group"></i> Items en esta
-                                                            hoja</span>
-                                                        <span class="pro-preview-item-count"
-                                                            id="takeoffPreviewItemCount">0 items</span>
-                                                    </div>
-                                                    <div class="pro-preview-items-list"
-                                                        id="takeoffPreviewItemsList">
-                                                        <div class="pro-preview-empty-takeoff">Sin marcas en
-                                                            esta hoja</div>
-                                                    </div>
-                                                </div>
-                                                <button class="pro-open-sheet-btn" id="takeoffOpenSheetBtn"
-                                                    type="button" disabled>
-                                                    <i class="fas fa-arrow-right-to-bracket"></i> Abrir Hoja
-                                                </button>
                                             </div>
                                         </div>
                                     </div>
@@ -1049,25 +1070,27 @@ $state = [
                             </div>
                         </div>
                     </div>
-                    <button class="pro-actions-btn takeoff-subhead-compare-btn" id="takeoffCompareBtn" type="button" title="Compare estimates">
+                    <button class="pro-actions-btn takeoff-subhead-compare-btn" id="takeoffCompareBtn" type="button"
+                        title="Compare drawings">
                         <i class="fas fa-code-compare"></i><span>Compare</span>
                     </button>
                 </div>
                 <!-- Right tools: Download icon first, then Drawing Scale directly underneath Save Project -->
                 <div class="takeoff-subhead-tabs-tools" id="takeoffSubheadTabsTools">
-                    <button class="pro-actions-btn takeoff-subhead-download-btn icon-only" id="takeoffDownloadDrawingBtn" type="button"
-                        title="Download current drawing" aria-label="Download current drawing">
+                    <button class="pro-actions-btn takeoff-subhead-download-btn icon-only"
+                        id="takeoffDownloadDrawingBtn" type="button" title="Download current drawing"
+                        aria-label="Download current drawing">
                         <i class="fas fa-download"></i>
                     </button>
                     <div class="takeoff-subhead-scale-slot" id="takeoffSubheadScaleSlot">
                         <div class="pro-scale-wrap">
                             <button class="pro-scale-status" id="takeoffScaleStatus" type="button" data-scale-toggle
                                 aria-expanded="false">
+                                <span class="pro-scale-dot"></span>
                                 <i class="fas fa-triangle-exclamation" style="display:none;"></i>
-                                <span>Not Drawing Scale</span>
+                                <span id="takeoffScaleLabel">Not Drawing Scale</span>
                             </button>
-                            <div class="pro-scale-panel" id="takeoffScalePanel"
-                                aria-label="Takeoff scale calibration">
+                            <div class="pro-scale-panel" id="takeoffScalePanel" aria-label="Takeoff scale calibration">
                                 <div class="pro-scale-panel-head">
                                     <strong>Drawing Scale</strong>
                                     <button class="pro-icon-btn" type="button" data-scale-close
@@ -1097,6 +1120,17 @@ $state = [
                                 </div>
                                 <div class="pro-scale-hint" id="takeoffScaleHint">Choose a preset scale or calibrate
                                     manually.</div>
+                                <div class="pro-scale-scope-row"
+                                    style="margin-top: 10px; padding-top: 8px; border-top: 1px solid var(--tk-border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; gap: 7px;">
+                                    <label
+                                        style="cursor: pointer; user-select: none; font-size: 0.72rem; color: var(--tk-text-muted, #64748b); margin: 0; font-weight: 500; display: flex; align-items: center; gap: 7px;">
+                                        <input type="checkbox" id="takeoffScaleApplyAll"
+                                            style="cursor: pointer; width: 14px; height: 14px; accent-color: var(--tk-primary, #fb5a3a);">
+                                        <span>Aplicar a todas las páginas</span>
+                                    </label>
+                                    <button type="button" id="takeoffScaleApplyBtn" class="pro-toolbar-btn"
+                                        style="height: 25px; min-height: 25px; padding: 0 12px; font-size: 0.74rem; border-radius: 4px; background: var(--tk-primary, #fb5a3a); color: #fff; border: none; cursor: pointer; font-weight: 600;">Aplicar</button>
+                                </div>
                             </div>
                         </div>
                     </div>
@@ -1135,15 +1169,20 @@ $state = [
                                 <label class="overview-field">
                                     <span>Estimator</span>
                                     <div class="pd-input-with-actions">
-                                        <select id="poEstimator" class="pd-composer-input" data-initial-value="<?= htmlspecialchars($estimatorName) ?>">
+                                        <select id="poEstimator" class="pd-composer-input"
+                                            data-initial-value="<?= htmlspecialchars($estimatorName) ?>">
                                             <option value="">-- Select an Estimator --</option>
                                             <?php foreach ($availableEstimators as $est): ?>
-                                                <option value="<?= htmlspecialchars($est['name']) ?>" <?= strtolower(trim($estimatorName)) === strtolower(trim($est['name'])) ? 'selected' : '' ?>>
-                                                    <?= htmlspecialchars($est['name']) ?> (<?= htmlspecialchars($est['role'] ?? 'Estimator') ?>)
+                                                <option value="<?= htmlspecialchars($est['name']) ?>"
+                                                    <?= strtolower(trim($estimatorName)) === strtolower(trim($est['name'])) ? 'selected' : '' ?>>
+                                                    <?= htmlspecialchars($est['name']) ?>
+                                                    (<?= htmlspecialchars($est['role'] ?? 'Estimator') ?>)
                                                 </option>
                                             <?php endforeach; ?>
                                             <?php if (!empty($estimatorName) && $estimatorName !== 'Unassigned' && !in_array(strtolower(trim($estimatorName)), array_map(fn($u) => strtolower(trim($u['name'])), $availableEstimators))): ?>
-                                                <option value="<?= htmlspecialchars($estimatorName) ?>" selected><?= htmlspecialchars($estimatorName) ?> (Custom)</option>
+                                                <option value="<?= htmlspecialchars($estimatorName) ?>" selected>
+                                                    <?= htmlspecialchars($estimatorName) ?> (Custom)
+                                                </option>
                                             <?php endif; ?>
                                         </select>
                                         <span class="pd-field-caret"><i class="fas fa-chevron-down"></i></span>
@@ -1226,11 +1265,13 @@ $state = [
                                 <div class="pd-customer-section">
                                     <div class="pd-customer-row">
                                         <div class="pd-company-avatar" id="customerAvatarLetter">
-                                            <?= htmlspecialchars($companyInitial) ?></div>
+                                            <?= htmlspecialchars($companyInitial) ?>
+                                        </div>
                                         <div class="pd-customer-details" style="flex: 1; min-width: 0;">
                                             <div class="pd-customer-name" id="displayCustomerCompany"
                                                 style="font-weight: 700; font-size: 13.5px;">
-                                                <?= htmlspecialchars($displayCompany) ?></div>
+                                                <?= htmlspecialchars($displayCompany) ?>
+                                            </div>
                                             <div class="pd-contact-sub-line" id="displayContactSummary"
                                                 style="font-size: 11.5px; color: var(--text-muted); margin-top: 1px;">
                                                 <?= htmlspecialchars($displayContact . ', ' . $displayPhone . ', ' . $displayEmail) ?>
@@ -1251,7 +1292,8 @@ $state = [
                                             <div class="pd-contact-icon-box"><i class="fas fa-location-dot"></i></div>
                                             <div class="pd-contact-details" style="flex: 1; min-width: 0;">
                                                 <div class="pd-contact-main-line" id="displayProjectAddressText">
-                                                    <?= htmlspecialchars($displayAddress) ?></div>
+                                                    <?= htmlspecialchars($displayAddress) ?>
+                                                </div>
                                             </div>
                                             <button class="pd-row-dots-btn" type="button" id="editProjectAddressBtn"
                                                 title="Edit project address"><i class="fas fa-pen"></i></button>
@@ -1314,9 +1356,11 @@ $state = [
                                             <div class="pd-note-content-wrap">
                                                 <div class="pd-note-author"><?= htmlspecialchars($author) ?></div>
                                                 <div class="pd-note-time">
-                                                    <?= htmlspecialchars($note['timestamp'] ?? 'just now') ?></div>
+                                                    <?= htmlspecialchars($note['timestamp'] ?? 'just now') ?>
+                                                </div>
                                                 <div class="pd-note-bubble">
-                                                    <?= nl2br(htmlspecialchars($note['content'] ?? '')) ?></div>
+                                                    <?= nl2br(htmlspecialchars($note['content'] ?? '')) ?>
+                                                </div>
                                             </div>
                                             <div class="pd-item-menu-wrap">
                                                 <button type="button" class="pd-row-dots-btn" data-note-menu="<?= $idx ?>"
@@ -1370,7 +1414,8 @@ $state = [
                                             <div class="pd-task-content-wrap">
                                                 <div class="pd-task-title"><?= htmlspecialchars($task['title'] ?? '') ?></div>
                                                 <div class="pd-task-assignee">For
-                                                    <?= htmlspecialchars($task['responsible'] ?? 'Isaac De Jesús') ?></div>
+                                                    <?= htmlspecialchars($task['responsible'] ?? 'Isaac De Jesús') ?>
+                                                </div>
                                             </div>
                                             <?php if (!empty($task['due_date'])): ?>
                                                 <div class="pd-task-due-badge">Due <?= htmlspecialchars($task['due_date']) ?></div>
@@ -1392,37 +1437,46 @@ $state = [
                 <!-- State 1: Empty View (Image 1) -->
                 <div class="documents-empty-view" id="documentsEmptyView">
                     <div class="doc-empty-card" id="docEmptyDropzone">
-                        <svg class="doc-empty-icon" width="130" height="120" viewBox="0 0 130 120" fill="none" xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
+                        <svg class="doc-empty-icon" width="130" height="120" viewBox="0 0 130 120" fill="none"
+                            xmlns="http://www.w3.org/2000/svg" aria-hidden="true">
                             <!-- Radiating spark rays -->
-                            <path d="M52 14L48 8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-                            <path d="M65 11V4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
-                            <path d="M78 14L82 8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round"/>
+                            <path d="M52 14L48 8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+                            <path d="M65 11V4" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
+                            <path d="M78 14L82 8" stroke="currentColor" stroke-width="2.2" stroke-linecap="round" />
 
                             <!-- Blue folders inside box -->
-                            <path d="M36 29C36 27.5 37.2 26.5 38.8 26.5H58L62 30H92C93.5 30 94.5 31.2 94.5 32.5V45H36V29Z" fill="#004b9e"/>
-                            <path d="M38 34C38 32.5 39.2 31.5 40.8 31.5H62L66 35H95C96.5 35 97.5 36.2 97.5 37.5V48H38V34Z" fill="#0055b8"/>
+                            <path
+                                d="M36 29C36 27.5 37.2 26.5 38.8 26.5H58L62 30H92C93.5 30 94.5 31.2 94.5 32.5V45H36V29Z"
+                                fill="#004b9e" />
+                            <path
+                                d="M38 34C38 32.5 39.2 31.5 40.8 31.5H62L66 35H95C96.5 35 97.5 36.2 97.5 37.5V48H38V34Z"
+                                fill="#0055b8" />
 
                             <!-- Shadow under box -->
-                            <ellipse cx="65" cy="114" rx="46" ry="5" class="doc-svg-shadow"/>
+                            <ellipse cx="65" cy="114" rx="46" ry="5" class="doc-svg-shadow" />
 
                             <!-- Box body -->
-                            <rect x="33" y="44" width="64" height="64" rx="2" class="doc-svg-box" stroke-width="2.4"/>
+                            <rect x="33" y="44" width="64" height="64" rx="2" class="doc-svg-box" stroke-width="2.4" />
 
                             <!-- Top lip line -->
-                            <line x1="33" y1="46" x2="97" y2="46" stroke="currentColor" stroke-width="2"/>
+                            <line x1="33" y1="46" x2="97" y2="46" stroke="currentColor" stroke-width="2" />
 
                             <!-- Handle cutout -->
-                            <rect x="57" y="52" width="16" height="7" rx="3.5" fill="currentColor"/>
+                            <rect x="57" y="52" width="16" height="7" rx="3.5" fill="currentColor" />
 
                             <!-- Left corner bracket -->
-                            <path d="M34 50V108H46" stroke="currentColor" stroke-width="3" stroke-linecap="square"/>
+                            <path d="M34 50V108H46" stroke="currentColor" stroke-width="3" stroke-linecap="square" />
 
                             <!-- Front label paper with orange border -->
-                            <rect x="49" y="66" width="36" height="28" rx="1.5" class="doc-svg-label" stroke="#fb5a3a" stroke-width="2"/>
+                            <rect x="49" y="66" width="36" height="28" rx="1.5" class="doc-svg-label" stroke="#fb5a3a"
+                                stroke-width="2" />
                             <!-- Text lines on label -->
-                            <line x1="54" y1="73" x2="78" y2="73" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" class="doc-svg-line"/>
-                            <line x1="54" y1="78" x2="74" y2="78" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" class="doc-svg-line"/>
-                            <line x1="54" y1="83" x2="68" y2="83" stroke="#cbd5e1" stroke-width="2" stroke-linecap="round" class="doc-svg-line"/>
+                            <line x1="54" y1="73" x2="78" y2="73" stroke="#cbd5e1" stroke-width="2"
+                                stroke-linecap="round" class="doc-svg-line" />
+                            <line x1="54" y1="78" x2="74" y2="78" stroke="#cbd5e1" stroke-width="2"
+                                stroke-linecap="round" class="doc-svg-line" />
+                            <line x1="54" y1="83" x2="68" y2="83" stroke="#cbd5e1" stroke-width="2"
+                                stroke-linecap="round" class="doc-svg-line" />
                         </svg>
 
                         <h2 class="doc-empty-title">Upload Documents to Get Started</h2>
@@ -1466,13 +1520,14 @@ $state = [
                         <div class="doc-main-topbar">
                             <h2 id="documentsContentTitle">Custom Drawings</h2>
                             <div class="doc-topbar-actions">
-                                <button type="button" class="btn-main orange doc-move-takeoff-btn" id="docMoveToTakeoffBtn" title="Move current document to Takeoff workspace">
+                                <button type="button" class="btn-main orange doc-move-takeoff-btn"
+                                    id="docMoveToTakeoffBtn" title="Move current document to Takeoff workspace">
                                     <i class="fas fa-ruler-combined"></i>
                                     <span>Move to Takeoff</span>
                                 </button>
                                 <div class="doc-slider-wrap" title="Adjust row density">
-                                    <input id="documentsZoom" class="doc-density-slider" type="range" min="0" max="2" step="1" value="1"
-                                        aria-label="Document row density">
+                                    <input id="documentsZoom" class="doc-density-slider" type="range" min="0" max="2"
+                                        step="1" value="1" aria-label="Document row density">
                                 </div>
                             </div>
                         </div>
@@ -1544,9 +1599,9 @@ $state = [
                             </div>
                         </div>
                         <div class="pro-takeoff-actions-row">
-                            <button class="pro-visibility-btn pro-global-eye-btn" type="button" data-takeoff-action="toggle-global-visibility"
-                                title="Show/hide all takeoffs" aria-label="Show/hide all takeoffs"><i
-                                    class="fas fa-eye"></i></button>
+                            <button class="pro-visibility-btn pro-global-eye-btn" type="button"
+                                data-takeoff-action="toggle-global-visibility" title="Show/hide all takeoffs"
+                                aria-label="Show/hide all takeoffs"><i class="fas fa-eye"></i></button>
                             <div class="pro-menu-wrap">
                                 <button class="pro-actions-btn" type="button"
                                     data-takeoff-menu-toggle="takeoffItemsActions" aria-label="Takeoff actions">
@@ -1555,7 +1610,8 @@ $state = [
                                 <div class="pro-menu" id="takeoffItemsActions">
                                     <button type="button" data-takeoff-action="create-layer"><i class="fas fa-plus"></i>
                                         Create New Layer</button>
-                                    <button type="button" data-takeoff-action="create-group"><i class="fas fa-folder-plus"></i>
+                                    <button type="button" data-takeoff-action="create-group"><i
+                                            class="fas fa-folder-plus"></i>
                                         Create New Group</button>
                                     <button type="button" data-takeoff-action="collapse-all"><i
                                             class="fas fa-down-left-and-up-right-to-center"></i> Collapse All</button>
@@ -1569,7 +1625,8 @@ $state = [
 
                     <!-- Draggable Resizer & Collapse Flap Tab -->
                     <div class="pro-sidebar-resizer" id="takeoffSidebarResizer" title="Drag to resize sidebar">
-                        <button class="pro-sidebar-collapse-tab" id="takeoffSidebarCollapseTab" type="button" title="Hide Sidebar" aria-label="Hide Sidebar">
+                        <button class="pro-sidebar-collapse-tab" id="takeoffSidebarCollapseTab" type="button"
+                            title="Hide Sidebar" aria-label="Hide Sidebar">
                             <i class="fas fa-chevron-left"></i>
                         </button>
                     </div>
@@ -1643,13 +1700,14 @@ $state = [
                                 <span id="takeoffZoomPercent">100%</span>
                                 <button class="pro-icon-btn" type="button" data-viewer-command="zoom-in"
                                     title="Zoom in"><i class="fas fa-plus"></i></button>
-                                <button class="pro-chip-btn" type="button" data-viewer-command="fit">Fit</button>
                                 <div class="takeoff-subhead-page-wrap" id="takeoffFloatingPageWrap">
                                     <span class="takeoff-subhead-page-badge" title="Sheet Page Count">
                                         <span id="takeoffTopPage">1 / 1</span>
                                     </span>
                                     <span id="takeoffTopProgress" style="display:none;"></span>
                                 </div>
+                                <button class="pro-chip-btn pro-floating-fit-btn" type="button"
+                                    data-viewer-command="fit" title="Fit to view">Fit</button>
                                 <button class="pro-icon-btn" type="button" data-viewer-command="fullscreen"
                                     title="Fullscreen"><i class="fas fa-expand"></i></button>
                             </div>
@@ -2080,7 +2138,8 @@ $state = [
     </div>
 
     <!-- Document / Folder Rename Modal (Same styling as Note Modal) -->
-    <div class="pd-modal-backdrop" id="pdDocRenameModal" role="dialog" aria-modal="true" aria-labelledby="docRenameModalTitle">
+    <div class="pd-modal-backdrop" id="pdDocRenameModal" role="dialog" aria-modal="true"
+        aria-labelledby="docRenameModalTitle">
         <div class="pd-modal" style="width: min(460px, 100%);">
             <div class="pd-modal-head">
                 <h3 id="docRenameModalTitle"><i class="fas fa-pen" style="color: var(--primary);"></i> Rename</h3>
@@ -2090,12 +2149,14 @@ $state = [
             <div class="pd-modal-body" style="grid-template-columns: 1fr;">
                 <label class="overview-field full">
                     <span id="docRenameInputLabel">Name</span>
-                    <input id="modalDocRenameInput" class="pd-composer-input" placeholder="Enter name..." autocomplete="off">
+                    <input id="modalDocRenameInput" class="pd-composer-input" placeholder="Enter name..."
+                        autocomplete="off">
                 </label>
             </div>
             <div class="pd-modal-foot">
                 <button type="button" class="btn-ghost" data-close-modal="pdDocRenameModal">Cancel</button>
-                <button type="button" class="btn-main orange" id="modalSaveDocRenameBtn"><i class="fas fa-check"></i> Save</button>
+                <button type="button" class="btn-main orange" id="modalSaveDocRenameBtn"><i class="fas fa-check"></i>
+                    Save</button>
             </div>
         </div>
     </div>
@@ -2143,15 +2204,15 @@ $state = [
     <script>
         window.ProjectState = <?= json_encode($state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
         <?php if (!empty($_GET['stage'])): ?>
-        try {
-            localStorage.setItem('takeoff.bidBoardStage', <?= json_encode($_GET['stage']) ?>);
-            sessionStorage.setItem('takeoff.bidBoardStage', <?= json_encode($_GET['stage']) ?>);
-        } catch (e) {}
+                try {
+                    localStorage.setItem('takeoff.bidBoardStage', <?= json_encode($_GET['stage']) ?>);
+                    sessionStorage.setItem('takeoff.bidBoardStage' , <?= json_encode($_GET['stage']) ?>);
+                } catch (e) { }
         <?php elseif (!empty($project['status'])): ?>
-        try {
-            localStorage.setItem('takeoff.bidBoardStage', <?= json_encode(dash_status_label($project['status'])) ?>);
-            sessionStorage.setItem('takeoff.bidBoardStage', <?= json_encode(dash_status_label($project['status'])) ?>);
-        } catch (e) {}
+                try {
+                    localStorage.setItem('takeoff.bidBoardStage', <?= json_encode(dash_status_label($project['status'])) ?>);
+                    sessionStorage.setItem('takeoff.bidBoardStage', <?= json_encode(dash_status_label($project['status'])) ?>);
+                } catch (e) { }
         <?php endif; ?>
 
         const tabs = document.querySelectorAll('[data-tab]');
@@ -2391,25 +2452,25 @@ $state = [
                     if (res.status === 'success') location.reload();
                     else alert('Upload failed: ' + (res.msg || 'Unknown error'));
                 })
-                .catch(() => alert('Upload failed.'));
+                .catch(() => alert('Upload failed.'))               ;
         });
 
         setActiveTab(ProjectState.activeTab || 'overview', false);
     </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script>if (window.pdfjsLib) window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';</script>
-    <script src="../assets/project_overview.js?v=modal-guard-20260929-1"></script>
+    <script src="../assets/project_overview.js?v=active-users-4-20260930-1"></script>
     <script src="../assets/estimating_catalog_snapshot_service.js?v=estimating-catalog-snapshot-20260827-1"></script>
     <script src="../assets/catalog_change_detection_service.js?v=catalog-change-detection-20260827-1"></script>
     <script src="../assets/takeoff_estimating_sync_service.js?v=estimating-linked-part-20260831-1"></script>
-    <script src="../assets/project_estimate_footer.js?v=estimate-star-orange-20260929-1"></script>
+    <script src="../assets/project_estimate_footer.js?v=estimate-star-orange-20260929-6"></script>
     <script src="../assets/catalog_item_contract.js?v=catalog-item-contract-20260826-1"></script>
     <script src="../assets/catalog_metadata.js?v=catalog-metadata-20260826-1"></script>
     <script src="../assets/catalog_service.js?v=catalog-service-20260826-1"></script>
     <script src="../assets/boq_catalog_adapter.js?v=boq-catalog-boundary-20260826-1"></script>
     <script src="../assets/takeoff_catalog_adapter.js?v=takeoff-catalog-boundary-20260826-1"></script>
     <script src="../assets/takeoff_color_palette.js?v=takeoff-duplicate-color-20260831-1"></script>
-    <script src="../assets/project_takeoff.js?v=takeoff-persist-20260929-1"></script>
+    <script src="../assets/project_takeoff.js?v=takeoff-custom-dropdowns-20260930-3"></script>
     <script src="../assets/assembly_expansion_service.js?v=assembly-expansion-20260828-1"></script>
     <script src="../assets/estimating_assembly_expansion_adapter.js?v=estimating-assembly-adapter-20260828-1"></script>
     <script src="../assets/quantity_format_service.js?v=quantity-context-format-20260831-1"></script>
@@ -2419,7 +2480,7 @@ $state = [
     <script src="../assets/estimating_workspace_service.js?v=workspace-primary-20260929-1"></script>
     <script src="../assets/catalog_update_application_service.js?v=catalog-update-application-20260827-2"></script>
     <script src="../assets/estimating_catalog_adapter.js?v=estimating-catalog-snapshot-20260827-1"></script>
-    <script src="../assets/project_estimating.js?v=estimating-all-modals-20260929-1"></script>
+    <script src="../assets/project_estimating.js?v=estimating-all-modals-20260929-5"></script>
     <script src="../assets/catalog_update_ui.js?v=catalog-update-ui-20260827-1"></script>
     <script src="../assets/project_proposal.js?v=quantity-context-format-20260831-1"></script>
     <script src="../assets/global_tools.js"></script>

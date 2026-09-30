@@ -280,7 +280,9 @@
             const dy = points[index].y - points[index - 1].y;
             px += Math.sqrt(dx * dx + dy * dy);
         }
-        const horizontal = getPlanScale() > 0 ? px / getPlanScale() : 0;
+        const segPage = segment.page_number ?? segment.page ?? (typeof pageNum !== 'undefined' ? pageNum : 1);
+        const scale = getPlanScale(segPage);
+        const horizontal = scale > 0 ? px / scale : 0;
         const subtype = normalizeLinearSubtype(segment.takeoff_subtype || segment.takeoff_type || segment.type);
         const dropLength = subtype === 'linear' ? 0 : Math.max(0, num(segment.drop_length ?? segment.dropLength));
         // Each committed vertex is a defined drop point. Editing vertices via
@@ -294,6 +296,7 @@
         segment.drop_total = drops;
         segment.measured_length = measured;
         segment.total_length = measured * num(segment.multiplier || 1);
+        segment.scale_pixels_per_unit = scale;
         segment.unit = 'ft';
         return segment.total_length;
     }
@@ -331,21 +334,27 @@
             pxArea += point.x * next.y - next.x * point.y;
         });
         pxArea = Math.abs(pxArea) / 2;
-        const scale = getPlanScale();
+        const segPage = segment.page_number ?? segment.page ?? (typeof pageNum !== 'undefined' ? pageNum : 1);
+        const scale = getPlanScale(segPage);
         const measured = scale > 0 ? pxArea / (scale * scale) : 0;
         segment.measured_area = measured;
         segment.total_area = measured * num(segment.multiplier || 1);
         segment.total_length = segment.total_area;
+        segment.scale_pixels_per_unit = scale;
         segment.unit = segment.unit || 'sq ft';
         return segment.total_area;
     }
 
-    function getPlanScale() {
+    function getPlanScale(pageNumber = null) {
+        const targetPage = pageNumber !== null && pageNumber !== undefined ? pageNumber : (typeof pageNum !== 'undefined' ? pageNum : null);
+        if (targetPage !== null && window.sheetScales && window.sheetScales[targetPage] > 0) {
+            return Number(window.sheetScales[targetPage]);
+        }
         return (typeof pixelsPerFoot !== 'undefined' && Number(pixelsPerFoot) > 0) ? Number(pixelsPerFoot) : 0;
     }
 
-    function hasPlanScale() {
-        return getPlanScale() > 0;
+    function hasPlanScale(pageNumber = null) {
+        return getPlanScale(pageNumber) > 0;
     }
 
     function formatFeetLabel(feet) {
@@ -357,16 +366,42 @@
         return `${num(area).toFixed(2)} sq ft`;
     }
 
-    function pointsLength(points) {
+    function pointsLength(points, pageNumber = null) {
         let px = 0;
         for (let index = 1; index < (points || []).length; index++) {
             const dx = points[index].x - points[index - 1].x;
             const dy = points[index].y - points[index - 1].y;
             px += Math.sqrt(dx * dx + dy * dy);
         }
-        const scale = getPlanScale();
+        const scale = getPlanScale(pageNumber);
         return scale > 0 ? px / scale : 0;
     }
+
+    window.projectTakeoffUpdateScale = function(pNum, scaleValue, applyAll) {
+        if (!window.sheetScales) window.sheetScales = {};
+        if (applyAll) {
+            (state.segments || []).forEach(segment => {
+                if (segment.takeoff_type === 'linear' || segment.type === 'linear') {
+                    calculateLinearLength(segment);
+                } else if (segment.takeoff_type === 'area' || segment.type === 'area') {
+                    calculateAreaQuantity(segment);
+                }
+            });
+        } else {
+            (state.segments || []).forEach(segment => {
+                const segPage = segment.page_number ?? segment.page ?? 1;
+                if (Number(segPage) === Number(pNum)) {
+                    if (segment.takeoff_type === 'linear' || segment.type === 'linear') {
+                        calculateLinearLength(segment);
+                    } else if (segment.takeoff_type === 'area' || segment.type === 'area') {
+                        calculateAreaQuantity(segment);
+                    }
+                }
+            });
+        }
+        try { renderProperties(); } catch (e) {}
+        try { emitData(); } catch (e) {}
+    };
 
     function calculateItemCost(item, quantity) {
         if (!item) return { unitCost: 0, material: 0, labor: 0, equipment: 0, total: 0, laborHours: 0, waste: 0, markup: 0 };

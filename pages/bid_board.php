@@ -419,7 +419,7 @@
     </div>
 
     <script src="../assets/global_tools.js?v=brightronix-responsive-v3"></script>
-    <script src="../assets/bid_board.js?v=brightronix-responsive-info-v4"></script>
+    <script src="../assets/bid_board.js?v=brightronix-boundary-v5"></script>
 </body>
 
 </html>
