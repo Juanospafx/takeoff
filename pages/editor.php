@@ -177,13 +177,42 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             display: flex;
             align-items: center;
             justify-content: center;
-            background: #343a40;
-            color: #e2e8f0;
+            background: #eaedf2;
+            color: #fb5a3a;
             font-weight: 700;
             letter-spacing: .01em;
         }
         .drawing-loading.hidden {
-            display: none;
+            display: none !important;
+        }
+        .drawing-loading-pill {
+            display: inline-flex;
+            align-items: center;
+            gap: 10px;
+            padding: 8px 20px;
+            border-radius: 9999px;
+            background: #ffffff;
+            border: 1px solid rgba(251, 90, 58, 0.45);
+            color: #fb5a3a;
+            font-size: 13px;
+            font-weight: 700;
+            letter-spacing: 0.02em;
+            box-shadow: 0 4px 16px rgba(0, 0, 0, 0.08), 0 0 12px rgba(251, 90, 58, 0.15);
+        }
+        .drawing-loading-pill i {
+            font-size: 14px;
+            color: #fb5a3a;
+        }
+        [data-theme="dark"] .drawing-loading,
+        body.theme-dark .drawing-loading {
+            background: #141822;
+        }
+        [data-theme="dark"] .drawing-loading-pill,
+        body.theme-dark .drawing-loading-pill {
+            background: #1e293b;
+            border-color: rgba(251, 90, 58, 0.5);
+            color: #fb5a3a;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 16px rgba(251, 90, 58, 0.25);
         }
 
         /* --- SIDEBAR IZQUIERDA (Overlay Universal) --- */
@@ -566,7 +595,10 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         <canvas id="c"></canvas>
         <div id="konva-overlay"></div>
         <div class="drawing-loading" id="drawingLoading">
-            <span><i class="fas fa-spinner fa-spin me-2"></i>Loading drawing...</span>
+            <div class="drawing-loading-pill">
+                <i class="fas fa-circle-notch fa-spin"></i>
+                <span>Loading drawing...</span>
+            </div>
         </div>
         
         <div class="floating-controls">
@@ -823,8 +855,15 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         fireRightClick: true,  
         stopContextMenu: true,
         allowTouchScrolling: false,
-        renderOnAddRemove: true, // Mantener renderizado automÃ¡tico
-        stateful: false // OptimizaciÃ³n de rendimiento
+        renderOnAddRemove: true, // Mantener renderizado automático
+        stateful: false, // Optimización de rendimiento
+        imageSmoothing: true
+    });
+    canvas.on('before:render', () => {
+        if (canvas.contextContainer) {
+            canvas.contextContainer.imageSmoothingEnabled = true;
+            canvas.contextContainer.imageSmoothingQuality = 'high';
+        }
     });
     const useKonvaRuler = true;
     const konvaOverlay = document.getElementById('konva-overlay');
@@ -845,7 +884,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
     const isMobileViewport = window.innerWidth <= 768;
     const dpr = window.devicePixelRatio || 1;
     const PDF_PADDING = isMobileViewport ? 18 : 36;
-    const MAX_PDF_RENDER_SCALE = 4;
+    const MAX_PDF_RENDER_SCALE = 1.5;
     let pdfDoc = null, pageNum = 1;
     let pdfWorldWidth = 0;
     let pdfWorldHeight = 0;
@@ -857,6 +896,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
     let pdfRerenderTimer = null;
     let zoomNotificationFrame = null;
     let pendingZoomNotification = null;
+    let currentPdfBgImage = null;
     const pdfBitmapCache = new Map();
     const PDF_BITMAP_CACHE_LIMIT = 4;
     const drawingLoading = document.getElementById('drawingLoading');
@@ -878,6 +918,49 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         });
     }
     window.notifyTakeoffZoomChanged = notifyTakeoffZoomChanged;
+
+    function clampViewportTransform(vpt) {
+        if (!vpt || !canvas) return vpt;
+        const w = document.getElementById('canvas-wrapper');
+        if (!w) return vpt;
+
+        const viewW = w.clientWidth || canvas.getWidth();
+        const viewH = w.clientHeight || canvas.getHeight();
+        if (!viewW || !viewH) return vpt;
+
+        const docWorldW = pdfWorldWidth || (canvas.backgroundImage ? (canvas.backgroundImage.width || canvas.backgroundImage.getScaledWidth?.() || 0) : 0);
+        const docWorldH = pdfWorldHeight || (canvas.backgroundImage ? (canvas.backgroundImage.height || canvas.backgroundImage.getScaledHeight?.() || 0) : 0);
+        if (!docWorldW || !docWorldH) return vpt;
+
+        const zoom = vpt[0] || canvas.getZoom() || 1;
+        const docW = docWorldW * zoom;
+        const docH = docWorldH * zoom;
+
+        // Generous limit margins so the canvas has plenty of workspace and movement freedom
+        const marginX = Math.max(viewW * 0.5, 450);
+        const marginY = Math.max(viewH * 0.5, 350);
+
+        // Keep at least a noticeable portion of the plan visible so it can never be lost
+        const minKeepX = Math.min(100, Math.max(40, docW * 0.25));
+        const minKeepY = Math.min(100, Math.max(40, docH * 0.25));
+
+        const minX = Math.max(minKeepX - docW, Math.min(-marginX, viewW - docW - marginX));
+        const maxX = Math.min(viewW - minKeepX, Math.max(marginX, viewW - docW + marginX));
+
+        const minY = Math.max(minKeepY - docH, Math.min(-marginY, viewH - docH - marginY));
+        const maxY = Math.min(viewH - minKeepY, Math.max(marginY, viewH - docH + marginY));
+
+        vpt[4] = Math.max(minX, Math.min(maxX, vpt[4]));
+        vpt[5] = Math.max(minY, Math.min(maxY, vpt[5]));
+        return vpt;
+    }
+    window.clampViewportTransform = clampViewportTransform;
+
+    const originalSetViewportTransform = canvas.setViewportTransform.bind(canvas);
+    canvas.setViewportTransform = function (vpt) {
+        clampViewportTransform(vpt);
+        return originalSetViewportTransform(vpt);
+    };
 
     // STATES
     let pixelsPerFoot = 0;
@@ -1292,7 +1375,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
     window.addEventListener('message', event => {
         if (!event.data || event.data.type !== 'takeoff-visible') return;
         resize();
-        if (pdfDoc && !canvas.backgroundImage) {
+        if (pdfDoc && !canvas.backgroundImage && !isRenderingPage) {
             renderPage(pageNum, true);
         } else if (pdfDoc) {
             fitPdfToView(false);
@@ -1916,11 +1999,15 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         konvaStage.container().addEventListener('wheel', function(e) {
             e.preventDefault();
             const delta = e.deltaY;
-            let zoom = canvas.getZoom() * (0.999 ** delta);
-            if (zoom > 20) zoom = 20; if (zoom < 0.05) zoom = 0.05;
+            const factor = Math.abs(delta) >= 30 ? (delta < 0 ? 1.18 : 0.85) : (0.9975 ** delta);
+            let zoom = canvas.getZoom() * factor;
+            const minZoom = Math.min(0.25, pdfFitZoom ? pdfFitZoom * 0.5 : 0.25);
+            if (zoom > 4.0) zoom = 4.0; if (zoom < minZoom) zoom = minZoom;
             const rect = konvaStage.container().getBoundingClientRect();
             const point = new fabric.Point(e.clientX - rect.left, e.clientY - rect.top);
             canvas.zoomToPoint(point, zoom);
+            clampViewportTransform(canvas.viewportTransform);
+            canvas.setViewportTransform(canvas.viewportTransform);
             notifyTakeoffZoomChanged('wheel');
             updateTextScales(zoom);
             syncKonvaToFabric();
@@ -1989,6 +2076,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
                 const vpt = canvas.viewportTransform;
                 vpt[4] += evt.clientX - panStart.x;
                 vpt[5] += evt.clientY - panStart.y;
+                clampViewportTransform(vpt);
                 panStart = { x: evt.clientX, y: evt.clientY };
                 canvas.requestRenderAll();
                 syncKonvaToFabric();
@@ -2076,6 +2164,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             const vpt = canvas.viewportTransform;
             vpt[4] += evt.clientX - panStart.x;
             vpt[5] += evt.clientY - panStart.y;
+            clampViewportTransform(vpt);
             panStart = { x: evt.clientX, y: evt.clientY };
             canvas.requestRenderAll();
             syncKonvaToFabric();
@@ -2411,16 +2500,20 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
                 const vpt = canvas.viewportTransform;
                 vpt[4] += deltaX;
                 vpt[5] += deltaY;
+                clampViewportTransform(vpt);
 
                 // Aplicar Zoom
                 if(lastDist > 0) {
                     const scale = dist / lastDist;
                     let newZoom = canvas.getZoom() * scale;
-                    if (newZoom > 20) newZoom = 20; if (newZoom < 0.1) newZoom = 0.1;
+                    const minZoom = Math.min(0.25, pdfFitZoom ? pdfFitZoom * 0.5 : 0.25);
+                    if (newZoom > 4.0) newZoom = 4.0; if (newZoom < minZoom) newZoom = minZoom;
                     
                     // Zoom hacia el punto central de los dedos
                     const point = new fabric.Point(currentClientX, currentClientY);
                     canvas.zoomToPoint(point, newZoom);
+                    clampViewportTransform(canvas.viewportTransform);
+                    canvas.setViewportTransform(canvas.viewportTransform);
                     notifyTakeoffZoomChanged('pinch');
                     updateTextScales(newZoom);
                     if (useKonvaRuler) syncKonvaToFabric();
@@ -2543,16 +2636,17 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
     function showDrawingLoading(show) {
         if (!drawingLoading) return;
         if (show) {
-            drawingLoading.innerHTML = '<span><i class="fas fa-spinner fa-spin me-2"></i>Loading drawing...</span>';
+            drawingLoading.innerHTML = '<div class="drawing-loading-pill"><i class="fas fa-circle-notch fa-spin"></i><span>Loading drawing...</span></div>';
         }
         drawingLoading.classList.toggle('hidden', !show);
     }
 
     function showDrawingError(message = 'Unable to load this sheet') {
         if (!drawingLoading) return;
-        drawingLoading.innerHTML = `<div class="text-center">
-            <div class="mb-2"><i class="fas fa-triangle-exclamation me-2"></i>${message}</div>
-            <button type="button" class="btn btn-sm btn-light" onclick="retryPdfLoad()">Retry</button>
+        drawingLoading.innerHTML = `<div class="drawing-loading-pill" style="border-color: #ef4444; color: #ef4444;">
+            <i class="fas fa-triangle-exclamation"></i>
+            <span>${message}</span>
+            <button type="button" class="btn btn-sm btn-outline-danger ms-2 py-0 px-2" style="font-size: 11px; border-radius: 9999px;" onclick="retryPdfLoad()">Retry</button>
         </div>`;
         drawingLoading.classList.remove('hidden');
     }
@@ -2619,14 +2713,12 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
     }
 
     function pdfRenderScaleForZoom(zoom) {
-        // Never round down: a bitmap slightly below the viewport zoom is
-        // immediately blurred by Fabric. Quarter-step ceilings balance crisp
-        // line work with cache reuse while DPR supplies display density.
-        return Math.min(MAX_PDF_RENDER_SCALE, Math.max(1, Math.ceil((Number(zoom) || 1) * 4) / 4));
+        // Fixed optimal resolution (150%): avoids repeated re-rasterization during zoom
+        return MAX_PDF_RENDER_SCALE;
     }
 
     function pdfBitmapCacheKey(num, zoom) {
-        return `${num}@${pdfRenderScaleForZoom(zoom)}@${dpr}`;
+        return `${num}@${MAX_PDF_RENDER_SCALE}`;
     }
 
     function touchPdfBitmapCache(key, bitmap) {
@@ -2647,6 +2739,8 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         activePdfRenderTask = null;
     }
 
+
+
     async function renderPageToBitmap(num, zoom, token) {
         const cacheKey = pdfBitmapCacheKey(num, zoom);
         const cached = pdfBitmapCache.get(cacheKey);
@@ -2660,19 +2754,15 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         pdfWorldWidth = baseViewport.width;
         pdfWorldHeight = baseViewport.height;
 
-        const outputScale = dpr;
         const viewportScale = pdfRenderScaleForZoom(zoom);
         const viewport = page.getViewport({ scale: viewportScale });
         const renderCanvas = document.createElement('canvas');
         const renderCtx = renderCanvas.getContext('2d', { alpha: false });
 
-        renderCanvas.width = Math.max(1, Math.floor(viewport.width * outputScale));
-        renderCanvas.height = Math.max(1, Math.floor(viewport.height * outputScale));
-        renderCanvas.style.width = viewport.width + 'px';
-        renderCanvas.style.height = viewport.height + 'px';
-        renderCtx.setTransform(outputScale, 0, 0, outputScale, 0, 0);
+        renderCanvas.width = Math.max(1, Math.round(viewport.width));
+        renderCanvas.height = Math.max(1, Math.round(viewport.height));
         renderCtx.fillStyle = '#ffffff';
-        renderCtx.fillRect(0, 0, viewport.width, viewport.height);
+        renderCtx.fillRect(0, 0, renderCanvas.width, renderCanvas.height);
         cancelActivePdfRender();
         const renderTask = page.render({ canvasContext: renderCtx, viewport });
         activePdfRenderTask = renderTask;
@@ -2709,20 +2799,19 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             currentPdfRenderScale = bitmap.renderScale;
             showDrawingLoading(false);
             if (loadAnnotations) loadPageAnnotations(pageNum);
-            // The user may have continued zooming while PDF.js rendered. Keep
-            // this bitmap visible, then silently refine again if necessary.
-            if (pdfRenderScaleForZoom(canvas.getZoom()) > currentPdfRenderScale) {
-                schedulePdfRerender();
-            }
         });
     }
 
+    let isRenderingPage = false;
     async function renderPage(num, loadAnnotations = true) {
+        if (isRenderingPage) return;
+        isRenderingPage = true;
         updatePageListUI(num);
-        if(!pdfDoc) return;
+        if(!pdfDoc) {
+            isRenderingPage = false;
+            return;
+        }
         const isBackgroundRefresh = !loadAnnotations && !!canvas.backgroundImage;
-        // Zoom only refreshes the PDF bitmap resolution. Keep the current
-        // background visible and reserve the loader for real document/page loads.
         if (!isBackgroundRefresh) showDrawingLoading(true);
         try {
             await waitForWrapperSize();
@@ -2745,22 +2834,19 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             if (isBackgroundRefresh) return;
             showDrawingError('Unable to load this sheet');
             showToast("Error rendering PDF page", "error");
+        } finally {
+            isRenderingPage = false;
         }
     }
 
     function schedulePdfRerender() {
-        if (!pdfDoc) return;
-        clearTimeout(pdfRerenderTimer);
-        pdfRerenderTimer = setTimeout(() => {
-            const z = canvas.getZoom();
-            const desiredScale = pdfRenderScaleForZoom(z);
-            if (desiredScale > currentPdfRenderScale || Math.abs(z - currentPdfRenderZoom) > 0.5) {
-                renderPage(pageNum, false);
-            }
-        }, 180);
+        // Disabled: PDF is rendered once at fixed optimal resolution (150%).
+        // Canvas zooms via GPU hardware acceleration without CPU rasterization overhead.
+        return;
     }
 
     function setBg(img, worldWidth = img.width, worldHeight = img.height) {
+        currentPdfBgImage = img;
         img.excludeFromHistory = true;
         img.set({
             originX: 'left',
@@ -2770,14 +2856,26 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             scaleX: worldWidth / img.width,
             scaleY: worldHeight / img.height,
             selectable: false,
-            evented: false
+            evented: false,
+            imageSmoothing: true
         });
+        if (canvas.contextContainer) {
+            canvas.contextContainer.imageSmoothingEnabled = true;
+            canvas.contextContainer.imageSmoothingQuality = 'high';
+        }
+        if (canvas.contextTop) {
+            canvas.contextTop.imageSmoothingEnabled = true;
+            canvas.contextTop.imageSmoothingQuality = 'high';
+        }
         canvas.setBackgroundImage(img, canvas.renderAll.bind(canvas));
         showDrawingLoading(false);
     }
 
     function jumpToPage(targetPage) {
         saveCurrentPageAnnotations();
+        currentPdfBgImage = null;
+        isRenderingPage = false;
+        cancelActivePdfRender();
         canvas.clear(); undoStack = []; historyIndex = -1;
         pageNum = targetPage; 
         loadCalibrationForPage(false);
@@ -2864,8 +2962,12 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
     function loadPageAnnotations(pg) {
         historyProcessing = true;
         const state = getSavedPageState(pg);
+        const bgToKeep = canvas.backgroundImage || currentPdfBgImage;
         if(state.fabric) {
             canvas.loadFromJSON(state.fabric, function() { 
+                if (bgToKeep) {
+                    canvas.backgroundImage = bgToKeep;
+                }
                 const objects = canvas.getObjects();
                 objects.forEach(obj => {
                     if (obj.isMeasureLine) {
@@ -2878,16 +2980,20 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
                         obj.set({ lockMovementX:true, lockMovementY:true, borderColor:'#22c55e' });
                     }
                 });
-                  if (useKonvaRuler) loadKonvaForPage(pg, state.konva);
-                  updateTextScales(canvas.getZoom()); 
-                  canvas.requestRenderAll(); 
-                  refreshMeasureLabels();
-                  historyProcessing = false; 
-                  saveHistory(); 
-              });
+                if (useKonvaRuler) loadKonvaForPage(pg, state.konva);
+                updateTextScales(canvas.getZoom()); 
+                canvas.requestRenderAll(); 
+                refreshMeasureLabels();
+                historyProcessing = false; 
+                saveHistory(); 
+            });
         } else {
+            if (bgToKeep && !canvas.backgroundImage) {
+                canvas.backgroundImage = bgToKeep;
+                canvas.requestRenderAll();
+            }
             if (useKonvaRuler) loadKonvaForPage(pg, state.konva);
-            historyProcessing = false;
+            historyProcessing = false; 
             saveHistory(); 
         }
     }
@@ -3237,6 +3343,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             else { clientX = evt.clientX; clientY = evt.clientY; }
                 const vpt = this.viewportTransform;
                 vpt[4] += clientX - this.lastPosX; vpt[5] += clientY - this.lastPosY;
+                clampViewportTransform(vpt);
                 this.requestRenderAll();
                 this.lastPosX = clientX; this.lastPosY = clientY;
                 if (useKonvaRuler) syncKonvaToFabric();
@@ -3898,9 +4005,14 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
     });
 
     canvas.on('mouse:wheel', function(opt) {
-        let delta = opt.e.deltaY; let zoom = canvas.getZoom() * (0.999 ** delta);
-        if (zoom > 20) zoom = 20; if (zoom < 0.05) zoom = 0.05;
+        let delta = opt.e.deltaY;
+        const factor = Math.abs(delta) >= 30 ? (delta < 0 ? 1.18 : 0.85) : (0.9975 ** delta);
+        let zoom = canvas.getZoom() * factor;
+        const minZoom = Math.min(0.25, pdfFitZoom ? pdfFitZoom * 0.5 : 0.25);
+        if (zoom > 4.0) zoom = 4.0; if (zoom < minZoom) zoom = minZoom;
         canvas.zoomToPoint({ x: opt.e.offsetX, y: opt.e.offsetY }, zoom);
+        clampViewportTransform(canvas.viewportTransform);
+        canvas.setViewportTransform(canvas.viewportTransform);
         notifyTakeoffZoomChanged('wheel');
         if (useKonvaRuler) syncKonvaToFabric();
         updateTextScales(zoom);

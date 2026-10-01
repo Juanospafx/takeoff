@@ -1443,6 +1443,13 @@
                 });
             }
 
+            if (incoming.length) {
+                const firstId = localDocuments[localDocuments.length - incoming.length]?.id;
+                if (firstId) {
+                    selectedDocumentsId = firstId;
+                }
+            }
+
             persistLocalDocuments();
             syncDocumentsToProjectState();
             renderDocumentsPage();
@@ -1905,7 +1912,7 @@
                         <i class="fas fa-ellipsis-vertical"></i>
                     </button>
                     <div class="documents-menu row-menu" data-doc-menu="${escapeHtml(sheet.id)}">
-                        <button type="button" data-doc-action="takeoff" data-doc-id="${escapeHtml(doc.id)}"><i class="fas fa-ruler-combined"></i> Takeoff Page ${sheet.pageNumber}</button>
+                        <button type="button" data-doc-action="takeoff" data-doc-id="${escapeHtml(doc.id)}" data-page-num="${sheet.pageNumber}"><i class="fas fa-ruler-combined"></i> Takeoff Page ${sheet.pageNumber}</button>
                         <button type="button" data-doc-action="view-sheet" data-doc-id="${escapeHtml(doc.id)}" data-page-num="${sheet.pageNumber}"><i class="fas fa-eye"></i> View File</button>
                     </div>
                 </div>
@@ -2026,7 +2033,8 @@
             const sheetRow = event.target.closest('.doc-list-item-row');
             if (sheetRow && sheetRow.dataset.parentDocId) {
                 selectedDocumentsId = sheetRow.dataset.parentDocId;
-                startDocumentsTakeoff();
+                const pageNum = sheetRow.dataset.pageNum ? Number(sheetRow.dataset.pageNum) : 1;
+                startDocumentsTakeoff(pageNum);
                 return;
             }
             const row = event.target.closest('.doc-file-row');
@@ -2357,7 +2365,8 @@
         }
         if (action === 'takeoff') {
             selectedDocumentsId = doc.id;
-            startDocumentsTakeoff();
+            const pageNum = trigger?.dataset?.pageNum ? Number(trigger.dataset.pageNum) : 1;
+            startDocumentsTakeoff(pageNum);
             return;
         }
         if (action === 'rename') {
@@ -2654,7 +2663,7 @@
         renderDocumentsPage();
     }
 
-    async function startDocumentsTakeoff() {
+    async function startDocumentsTakeoff(targetPage = 1) {
         if (startTakeoffInFlight) return;
         startTakeoffInFlight = true;
         const startButton = $('documentsStartTakeoffBtn');
@@ -2665,38 +2674,70 @@
                 showToast('Upload drawings before starting takeoff.');
                 return;
             }
-            const doc = findDocumentById(selectedDocumentsId) || drawings[0];
+            let targetPageNum = Number(targetPage) || 1;
+            let doc = findDocumentById(selectedDocumentsId);
+            if (!doc && typeof selectedDocumentsId === 'string' && selectedDocumentsId.includes('-p')) {
+                const parts = selectedDocumentsId.split('-p');
+                const parsedDoc = findDocumentById(parts[0]);
+                if (parsedDoc) {
+                    doc = parsedDoc;
+                    const p = parseInt(parts[1], 10);
+                    if (!isNaN(p) && p > 0) targetPageNum = p;
+                }
+            }
+            if (!doc && selectedDocumentsFolder.startsWith('document:')) {
+                const folderDocId = selectedDocumentsFolder.replace('document:', '');
+                doc = findDocumentById(folderDocId);
+            }
+            if (!doc) {
+                doc = drawings[0];
+            }
             selectedDocumentsId = doc.id;
             let takeoffFileId = doc.backendId || doc.id;
             if (doc.source === 'local') {
-                const file = sessionFiles.get(String(doc.id));
+                let file = sessionFiles.get(String(doc.id));
                 if (!file) {
+                    const existingMatch = (window.ProjectState?.documents || []).find(row =>
+                        row.source === 'legacy_file' &&
+                        (row.filename === doc.filename || row.title === doc.filename || row.filename === doc.name)
+                    );
+                    if (existingMatch && existingMatch.id) {
+                        takeoffFileId = Number(existingMatch.id);
+                        doc.backendId = takeoffFileId;
+                        doc.source = 'existing';
+                        doc.originalSource = 'legacy_file';
+                    }
+                }
+                if (!file && doc.source === 'local') {
                     showToast('Select this PDF again so it can be uploaded for Takeoff.');
+                    openDocumentPicker('Drawings');
                     return;
                 }
-                try {
-                    const form = new FormData();
-                    form.append('project_id', window.ProjectState?.projectId || '');
-                    form.append('file', file, file.name);
-                    const response = await fetch('../api/project_document_takeoff.php', { method: 'POST', body: form, headers: { Accept: 'application/json' } });
-                    const result = await response.json().catch(() => null);
-                    if (!response.ok || !result?.success || !result.file?.id) throw new Error(result?.message || `HTTP ${response.status}`);
-                    takeoffFileId = Number(result.file.id);
-                    const alias = { id: takeoffFileId, source: 'legacy_file', filename: result.file.filename, title: result.file.filename, path: `../${result.file.filepath}`, extension: doc.extension, mime_type: doc.type };
-                    window.ProjectState.documents = (window.ProjectState.documents || []).filter(row =>
-                        !(row.source === 'local_metadata' && String(row.id) === String(doc.id)) &&
-                        !(row.source === 'legacy_file' && Number(row.id) === takeoffFileId)
-                    );
-                    window.ProjectState.documents.push(alias);
-                    localDocuments = localDocuments.filter(row => String(row.id) !== String(doc.id));
-                    sessionFiles.delete(String(doc.id));
-                    const objectUrl = sessionFileUrls.get(String(doc.id));
-                    if (objectUrl) URL.revokeObjectURL(objectUrl);
-                    sessionFileUrls.delete(String(doc.id));
-                    persistLocalDocuments();
-                } catch (error) {
-                    showToast(error.message || 'Unable to upload this PDF for Takeoff.');
-                    return;
+                if (file) {
+                    try {
+                        const form = new FormData();
+                        form.append('project_id', window.ProjectState?.projectId || '');
+                        form.append('file', file, file.name);
+                        const response = await fetch('../api/project_document_takeoff.php', { method: 'POST', body: form, headers: { Accept: 'application/json' } });
+                        const result = await response.json().catch(() => null);
+                        if (!response.ok || !result?.success || !result.file?.id) throw new Error(result?.message || `HTTP ${response.status}`);
+                        takeoffFileId = Number(result.file.id);
+                        const alias = { id: takeoffFileId, source: 'legacy_file', filename: result.file.filename, title: result.file.filename, path: `../${result.file.filepath}`, extension: doc.extension, mime_type: doc.type };
+                        window.ProjectState.documents = (window.ProjectState.documents || []).filter(row =>
+                            !(row.source === 'local_metadata' && String(row.id) === String(doc.id)) &&
+                            !(row.source === 'legacy_file' && Number(row.id) === takeoffFileId)
+                        );
+                        window.ProjectState.documents.push(alias);
+                        localDocuments = localDocuments.filter(row => String(row.id) !== String(doc.id));
+                        sessionFiles.delete(String(doc.id));
+                        const objectUrl = sessionFileUrls.get(String(doc.id));
+                        if (objectUrl) URL.revokeObjectURL(objectUrl);
+                        sessionFileUrls.delete(String(doc.id));
+                        persistLocalDocuments();
+                    } catch (error) {
+                        showToast(error.message || 'Unable to upload this PDF for Takeoff.');
+                        return;
+                    }
                 }
             }
             if (doc.source === 'existing') {
@@ -2736,14 +2777,18 @@
             window.ProjectState.selectedDocumentId = takeoffFileId;
             window.ProjectState.selectedDrawingId = takeoffFileId;
             if (typeof window.setActiveTab === 'function') window.setActiveTab('takeoff');
-            if (typeof window.projectTakeoffRefreshDrawings === 'function') window.projectTakeoffRefreshDrawings();
-            const frame = $('takeoffFrame');
-            const empty = $('takeoffEmpty');
-            if (frame) {
-                frame.src = `editor.php?id=${encodeURIComponent(takeoffFileId)}&embedded=1`;
-                frame.style.display = 'block';
+            if (typeof window.projectTakeoffRefreshDrawings === 'function') window.projectTakeoffRefreshDrawings(takeoffFileId);
+            if (typeof window.activateTakeoffDocument === 'function') {
+                window.activateTakeoffDocument(takeoffFileId, targetPageNum);
+            } else {
+                const frame = $('takeoffFrame');
+                const empty = $('takeoffEmpty');
+                if (frame) {
+                    frame.src = `editor.php?id=${encodeURIComponent(takeoffFileId)}&embedded=1`;
+                    frame.style.display = 'block';
+                }
+                if (empty) empty.style.display = 'none';
             }
-            if (empty) empty.style.display = 'none';
         } finally {
             startTakeoffInFlight = false;
             if (startButton) startButton.disabled = false;
@@ -3106,8 +3151,13 @@
         });
         $('docMoveToTakeoffBtn')?.addEventListener('click', () => {
             let targetDocId = null;
+            let targetPage = 1;
             if (selectedDocumentsFolder.startsWith('document:')) {
                 targetDocId = selectedDocumentsFolder.replace('document:', '');
+                if (selectedDocumentsId && String(selectedDocumentsId).startsWith(targetDocId + '-p')) {
+                    const p = parseInt(selectedDocumentsId.replace(targetDocId + '-p', ''), 10);
+                    if (!isNaN(p) && p > 0) targetPage = p;
+                }
             } else if (selectedDocumentsId) {
                 targetDocId = selectedDocumentsId;
             } else {
@@ -3119,7 +3169,7 @@
                 return;
             }
             selectedDocumentsId = targetDocId;
-            startDocumentsTakeoff();
+            startDocumentsTakeoff(targetPage);
         });
 
         $('modalSaveDocRenameBtn')?.addEventListener('click', () => {

@@ -6255,14 +6255,28 @@
         });
     }
 
-    window.projectTakeoffRefreshDrawings = function () {
+    window.projectTakeoffRefreshDrawings = function (targetDocId = null) {
         drawingState.documents = drawingDocs();
-        if (!drawingState.documents.some(doc => Number(doc.id) === Number(drawingState.selectedDocumentId)) && drawingState.documents[0]) {
+        const preferredId = targetDocId || window.ProjectState?.selectedDocumentId;
+        if (preferredId && drawingState.documents.some(doc => Number(doc.id) === Number(preferredId))) {
+            drawingState.selectedDocumentId = Number(preferredId);
+            drawingState.browseDocumentId = Number(preferredId);
+        } else if (!drawingState.documents.some(doc => Number(doc.id) === Number(drawingState.selectedDocumentId)) && drawingState.documents[0]) {
             drawingState.selectedDocumentId = drawingState.documents[0].id;
             drawingState.browseDocumentId = drawingState.documents[0].id;
         }
         setDrawingLabel();
         renderDrawingDropdown();
+    };
+
+    window.activateTakeoffDocument = function (documentId, pageNumber = 1) {
+        window.projectTakeoffRefreshDrawings(documentId);
+        const doc = drawingState.documents.find(d => Number(d.id) === Number(documentId));
+        if (doc) {
+            selectDrawingSheet(doc, pageNumber);
+        } else if (drawingState.documents[0]) {
+            selectDrawingSheet(drawingState.documents[0], pageNumber);
+        }
     };
 
     function toggleTakeoffSidebar(forceState = null) {

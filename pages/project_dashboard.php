@@ -1697,7 +1697,7 @@ $state = [
                                     title="Zoom out"><i class="fas fa-minus"></i></button>
                                 <input id="takeoffZoomSlider" type="range" min="25" max="400" value="100"
                                     aria-label="Zoom">
-                                <span id="takeoffZoomPercent">100%</span>
+                                <span id="takeoffZoomPercent" style="display:none;">100%</span>
                                 <button class="pro-icon-btn" type="button" data-viewer-command="zoom-in"
                                     title="Zoom in"><i class="fas fa-plus"></i></button>
                                 <div class="takeoff-subhead-page-wrap" id="takeoffFloatingPageWrap">
