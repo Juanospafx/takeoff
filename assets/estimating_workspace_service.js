@@ -125,11 +125,15 @@
             ? row.creationMode : (index ? 'all' : 'primary');
         const takeoffSyncMode = row.takeoffSyncMode === 'linked-only'
             || row.takeoffSync?.mode === 'linked-only' ? 'linked-only' : 'mirror';
+        const explicitPrimaryId = String(row.primary_estimate_id || window.ProjectState?.projectMeta?.primary_estimate_id || '');
+        const isPrimary = explicitPrimaryId ? String(row.id) === explicitPrimaryId : Boolean(row.is_primary ?? row.isPrimary ?? (index === 0));
         return {
             id: text(row.id) || uid('estimate'),
             dbEstimateId: projectId(row.dbEstimateId) || undefined,
             isActive: row.isActive === true,
             isLocked: row.isLocked === true,
+            is_primary: isPrimary,
+            isPrimary: isPrimary,
             revision: Math.max(0, numeric(row.revision)),
             estimateRevision: Math.max(1, numeric(row.estimateRevision, 1)),
             parentEstimateId: text(row.parentEstimateId) || null,

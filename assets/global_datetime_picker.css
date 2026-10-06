@@ -1,0 +1,387 @@
+/* ==========================================================
+   GLOBAL DATE & TIME PICKER (BRIGHTRONIX TAKEOFF)
+   Sleek, theme-aware custom date & time picker popover
+   Strictly enforces 10-minute intervals (00, 10, 20, 30, 40, 50)
+   ========================================================== */
+
+.gdp-popover {
+    position: fixed;
+    z-index: 999999;
+    background: #ffffff;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    border-radius: 12px;
+    box-shadow: 0 16px 40px rgba(15, 23, 42, 0.18), 0 2px 8px rgba(0, 0, 0, 0.06);
+    color: #1e293b;
+    font-family: 'Outfit', 'Inter', system-ui, -apple-system, sans-serif;
+    font-size: 13px;
+    display: none;
+    box-sizing: border-box;
+    user-select: none;
+    min-width: 270px;
+    max-width: 95vw;
+    animation: gdpPopupAnim 0.18s cubic-bezier(0.16, 1, 0.3, 1) both;
+}
+
+.gdp-popover.open {
+    display: block;
+}
+
+[data-theme="dark"] .gdp-popover,
+body.theme-dark .gdp-popover {
+    background: #242a38 !important;
+    border-color: #2f384a !important;
+    box-shadow: 0 18px 48px rgba(0, 0, 0, 0.65), 0 2px 8px rgba(0, 0, 0, 0.35) !important;
+    color: #f1f5f9 !important;
+}
+
+[data-theme="dark"] .gdp-wrapper,
+body.theme-dark .gdp-wrapper,
+[data-theme="dark"] .gdp-main-content,
+body.theme-dark .gdp-main-content,
+[data-theme="dark"] .gdp-calendar-section,
+body.theme-dark .gdp-calendar-section,
+[data-theme="dark"] .gdp-time-section,
+body.theme-dark .gdp-time-section {
+    background: #242a38 !important;
+}
+
+@keyframes gdpPopupAnim {
+    from {
+        opacity: 0;
+        transform: translateY(-6px) scale(0.98);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+.gdp-wrapper {
+    display: flex;
+    flex-direction: column;
+    min-width: 270px;
+    box-sizing: border-box;
+}
+
+.gdp-main-content {
+    display: flex;
+    flex-direction: row;
+    gap: 0;
+    box-sizing: border-box;
+}
+
+/* Date Section */
+.gdp-calendar-section {
+    width: 270px;
+    padding: 14px 14px 10px;
+    box-sizing: border-box;
+}
+
+.gdp-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    margin-bottom: 12px;
+}
+
+.gdp-title {
+    font-size: 13.5px;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+[data-theme="dark"] .gdp-title {
+    color: #ffffff;
+}
+
+.gdp-nav-btns {
+    display: flex;
+    gap: 4px;
+}
+
+.gdp-nav-btn {
+    width: 26px;
+    height: 26px;
+    border-radius: 6px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: transparent;
+    color: #64748b;
+    cursor: pointer;
+    display: inline-grid;
+    place-items: center;
+    font-size: 12px;
+    transition: all 0.15s ease;
+}
+
+.gdp-nav-btn:hover {
+    background: rgba(0, 0, 0, 0.05);
+    color: #0f172a;
+}
+
+[data-theme="dark"] .gdp-nav-btn {
+    border-color: rgba(255, 255, 255, 0.10);
+    color: #94a3b8;
+}
+
+[data-theme="dark"] .gdp-nav-btn:hover {
+    background: rgba(255, 255, 255, 0.10);
+    color: #ffffff;
+}
+
+.gdp-weekdays-row {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    text-align: center;
+    font-size: 11px;
+    font-weight: 600;
+    color: #94a3b8;
+    margin-bottom: 6px;
+}
+
+.gdp-days-grid {
+    display: grid;
+    grid-template-columns: repeat(7, 1fr);
+    gap: 3px;
+}
+
+.gdp-day-btn {
+    width: 32px;
+    height: 32px;
+    border-radius: 6px;
+    border: none;
+    background: transparent;
+    color: #334155;
+    font-size: 12.5px;
+    font-weight: 500;
+    cursor: pointer;
+    display: inline-grid;
+    place-items: center;
+    margin: 0 auto;
+    transition: all 0.12s ease;
+    font-family: inherit;
+}
+
+.gdp-day-btn:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: #0f172a;
+}
+
+[data-theme="dark"] .gdp-day-btn {
+    color: #cbd5e1;
+}
+
+[data-theme="dark"] .gdp-day-btn:hover {
+    background: rgba(255, 255, 255, 0.10);
+    color: #ffffff;
+}
+
+.gdp-day-btn.empty {
+    visibility: hidden;
+    pointer-events: none;
+}
+
+.gdp-day-btn.today {
+    font-weight: 700;
+    border: 1px dashed var(--primary, #fb5a3a);
+}
+
+.gdp-day-btn.selected,
+[data-theme="dark"] .gdp-day-btn.selected,
+body.theme-dark .gdp-day-btn.selected {
+    background: var(--primary, #fb5a3a) !important;
+    border-color: var(--primary, #fb5a3a) !important;
+    color: #ffffff !important;
+    font-weight: 700;
+    box-shadow: none !important;
+}
+
+/* Time Section */
+.gdp-time-section {
+    width: 260px;
+    padding: 14px 14px 10px;
+    border-left: 1px solid rgba(0, 0, 0, 0.06);
+    box-sizing: border-box;
+}
+
+[data-theme="dark"] .gdp-time-section,
+body.theme-dark .gdp-time-section {
+    border-left-color: #2f384a !important;
+}
+
+.gdp-time-section.standalone {
+    border-left: none;
+    width: 270px;
+}
+
+.gdp-time-display {
+    text-align: center;
+    padding: 6px 10px;
+    border-radius: 8px;
+    background: rgba(0, 0, 0, 0.03);
+    margin-bottom: 12px;
+    font-size: 16px;
+    font-weight: 700;
+    letter-spacing: 0.02em;
+    color: #0f172a;
+}
+
+[data-theme="dark"] .gdp-time-display,
+body.theme-dark .gdp-time-display {
+    background: #1f2633 !important;
+    border: 1px solid #2f384a !important;
+    color: #ffffff !important;
+}
+
+.gdp-time-columns {
+    display: flex;
+    gap: 8px;
+}
+
+.gdp-time-col {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+.gdp-col-label {
+    font-size: 10.5px;
+    font-weight: 700;
+    color: #94a3b8;
+    text-transform: uppercase;
+    text-align: center;
+    margin-bottom: 2px;
+}
+
+.gdp-scroll-box {
+    display: grid;
+    grid-template-columns: repeat(2, 1fr);
+    gap: 4px;
+    max-height: 170px;
+    overflow-y: auto;
+}
+
+.gdp-scroll-box.minutes {
+    grid-template-columns: 1fr;
+}
+
+.gdp-pill-btn {
+    height: 28px;
+    border-radius: 6px;
+    border: 1px solid rgba(0, 0, 0, 0.08);
+    background: transparent;
+    color: #334155;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    display: inline-grid;
+    place-items: center;
+    transition: background-color 0.12s ease, border-color 0.12s ease, color 0.12s ease;
+    font-family: inherit;
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+.gdp-pill-btn:hover {
+    background: var(--primary, #fb5a3a) !important;
+    border-color: var(--primary, #fb5a3a) !important;
+    color: #ffffff !important;
+    box-shadow: none !important;
+}
+
+[data-theme="dark"] .gdp-pill-btn,
+body.theme-dark .gdp-pill-btn {
+    border-color: #2f384a;
+    background: #1f2633;
+    color: #cbd5e1;
+    box-shadow: none !important;
+}
+
+[data-theme="dark"] .gdp-pill-btn:hover,
+body.theme-dark .gdp-pill-btn:hover {
+    background: var(--primary, #fb5a3a) !important;
+    border-color: var(--primary, #fb5a3a) !important;
+    color: #ffffff !important;
+    box-shadow: none !important;
+}
+
+.gdp-pill-btn.selected,
+[data-theme="dark"] .gdp-pill-btn.selected,
+body.theme-dark .gdp-pill-btn.selected {
+    background: var(--primary, #fb5a3a) !important;
+    border-color: var(--primary, #fb5a3a) !important;
+    color: #ffffff !important;
+    font-weight: 700 !important;
+    box-shadow: none !important;
+}
+
+.gdp-pill-btn.selected:hover,
+[data-theme="dark"] .gdp-pill-btn.selected:hover,
+body.theme-dark .gdp-pill-btn.selected:hover {
+    background: var(--primary-hover, #e14e32) !important;
+    border-color: var(--primary-hover, #e14e32) !important;
+    color: #ffffff !important;
+    box-shadow: none !important;
+}
+
+.gdp-ampm-wrap {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    width: 44px;
+}
+
+/* Footer Actions */
+.gdp-footer {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 8px 12px;
+    border-top: 1px solid rgba(0, 0, 0, 0.06);
+    background: rgba(0, 0, 0, 0.02);
+    border-radius: 0 0 12px 12px;
+}
+
+[data-theme="dark"] .gdp-footer,
+body.theme-dark .gdp-footer {
+    border-top-color: #2f384a !important;
+    background: rgba(0, 0, 0, 0.16) !important;
+}
+
+.gdp-action-btn {
+    border: none;
+    background: transparent;
+    font-size: 11.5px;
+    font-weight: 600;
+    color: #64748b;
+    cursor: pointer;
+    padding: 4px 8px;
+    border-radius: 4px;
+    transition: all 0.15s ease;
+    font-family: inherit;
+}
+
+.gdp-action-btn:hover {
+    background: rgba(0, 0, 0, 0.06);
+    color: #0f172a;
+}
+
+[data-theme="dark"] .gdp-action-btn {
+    color: #94a3b8;
+}
+
+[data-theme="dark"] .gdp-action-btn:hover {
+    background: rgba(255, 255, 255, 0.10);
+    color: #ffffff;
+}
+
+.gdp-action-btn.done-btn {
+    background: var(--primary, #fb5a3a);
+    color: #ffffff;
+    padding: 4px 12px;
+}
+
+.gdp-action-btn.done-btn:hover {
+    background: #e14e32;
+    color: #ffffff;
+}

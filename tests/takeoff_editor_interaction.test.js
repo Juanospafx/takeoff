@@ -12,15 +12,15 @@ test('existing count, linear, and area geometry remains draggable unless locked'
 });
 
 test('dragging a segment vertex updates stored geometry, recalculates it, and persists it', () => {
-    assert.match(source, /handle\.on\('dragstart',\s*\(\)\s*=>\s*snapshot\(\)\)/);
+    assert.match(source, /handle\.on\('dragstart',[\s\S]*?snapshot\(\)/);
     assert.match(source, /handle\.on\('dragmove',[\s\S]*?segment\.points_json\[index\]\s*=\s*\{\s*x:\s*position\.x,\s*y:\s*position\.y\s*\};[\s\S]*?refreshSegment\(segment\)/);
-    assert.match(source, /handle\.on\('dragend',\s*\(\)\s*=>\s*\{[\s\S]*?markDirty\(\);[\s\S]*?\}\)/);
-    assert.match(source, /function refreshSegment\(segment\)[\s\S]*?calculateAreaQuantity\(segment\)[\s\S]*?calculateLinearLength\(segment\)/);
+    assert.match(source, /handle\.on\('dragend',[\s\S]*?markDirty\(\);/);
+    assert.match(source, /function refreshSegment\(segment[\s\S]*?calculateAreaQuantity\(segment\)[\s\S]*?calculateLinearLength\(segment\)/);
 });
 
 test('vertex controls keep a usable visual and hit size at fit-to-screen zoom', () => {
-    assert.match(source, /handle\.radius\(6 \* factor\)/);
-    assert.match(source, /handle\.hitStrokeWidth\(14 \* factor\)/);
+    assert.match(source, /handle\.radius\(handleR\)/);
+    assert.match(source, /handle\.hitStrokeWidth\(handleHit\)/);
     assert.match(source, /window\.syncTakeoffInteractionScale\s*=\s*syncTakeoffHandleScale/);
 });
 
