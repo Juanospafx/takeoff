@@ -139,9 +139,10 @@
         .form-control { background: var(--bg-body); border: 1px solid var(--border); color: white; border-radius: 10px; padding: 12px; }
         .form-control:focus { background: var(--bg-body); color: white; border-color: var(--primary); box-shadow: none; }
         
-        #toast-container { position: absolute; bottom: 80px; right: 18px; z-index: 2000; width: min(380px, calc(100% - 36px)); pointer-events: none; }
-        .toast-msg { background: var(--bg-panel); border: 1px solid var(--border); padding: 10px 14px; border-radius: 10px; margin-top: 8px; box-shadow: 0 8px 22px rgba(0,0,0,0.38); color: white; display: flex; align-items: flex-start; gap: 9px; font-size: 13px; line-height: 1.35; animation: slideIn 0.2s; }
-        @keyframes slideIn { from { transform: translateX(50px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
+        #toast-container { position: absolute; top: 18px; left: 50%; transform: translateX(-50%); z-index: 2500; width: auto; max-width: min(520px, calc(100% - 32px)); pointer-events: none; display: flex; flex-direction: column; align-items: center; gap: 6px; }
+        .toast-msg { background: rgba(15, 23, 42, 0.92); backdrop-filter: blur(8px); -webkit-backdrop-filter: blur(8px); border: 1px solid rgba(255, 255, 255, 0.14); border-radius: 9999px; padding: 6px 14px; box-shadow: 0 6px 20px rgba(0,0,0,0.28); color: #f8fafc; display: inline-flex; align-items: center; gap: 8px; font-size: 12.5px; font-weight: 500; line-height: 1.25; animation: toastFadeIn 0.18s cubic-bezier(0.16, 1, 0.3, 1); white-space: nowrap; max-width: 100%; }
+        .toast-msg i { font-size: 13px; flex-shrink: 0; }
+        @keyframes toastFadeIn { from { transform: translateY(-10px) scale(0.96); opacity: 0; } to { transform: translateY(0) scale(1); opacity: 1; } }
 
         /* --- STAMP MENU --- */
         .stamp-menu { position: absolute; right: 70px; top: 200px; background: var(--bg-panel); border: 1px solid var(--border); border-radius: 15px; padding: 10px; display: none; flex-direction: column; gap: 5px; box-shadow: 0 5px 20px rgba(0,0,0,0.5); z-index: 100; }
@@ -199,7 +200,7 @@
             .tool-btn { margin: 0 2px; }
             .stamp-menu { top: auto; bottom: 80px; right: 50%; transform: translateX(50%); }
             
-            #toast-container { bottom: 90px; }
+            #toast-container { top: 14px; bottom: auto; }
 
             #btn-save { width: 40px; height: 40px; padding: 0; border-radius: 50%; justify-content: center; }
             #btn-save span { display: none !important; }
