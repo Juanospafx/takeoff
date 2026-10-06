@@ -839,8 +839,8 @@ $state = [
             }
         }
     </style>
-    <link rel="stylesheet" href="../assets/project_overview.css?v=btn-blue-tabs-20260930-2">
-    <link rel="stylesheet" href="../assets/project_takeoff.css?v=scale-stage-pill-dark-20260930-38">
+    <link rel="stylesheet" href="../assets/project_overview.css?v=btn-blue-tabs-20261005-3">
+    <link rel="stylesheet" href="../assets/project_takeoff.css?v=scale-stage-pill-dark-20261005-40">
     <link rel="stylesheet" href="../assets/project_estimating.css?v=unified-hierarchy-20260930-1">
     <link rel="stylesheet" href="../assets/project_proposal.css?v=unified-hierarchy-20260930-1">
 </head>
@@ -1652,21 +1652,15 @@ $state = [
                                         class="fas fa-draw-polygon"></i></button>
                                 <button class="pro-tool-btn" type="button" data-tool-command="measure"
                                     title="Measure"><i class="fas fa-ruler-horizontal"></i></button>
-                                <button class="pro-tool-btn" type="button" data-tool-command="freehand"
-                                    title="Freehand"><i class="fas fa-signature"></i></button>
                                 <button class="pro-tool-btn" type="button" data-tool-command="text" title="Note"><i
                                         class="fas fa-note-sticky"></i></button>
                                 <button class="pro-tool-btn" type="button" data-tool-command="cloud" title="Cloud"><i
                                         class="fas fa-cloud"></i></button>
-                                <button class="pro-tool-btn" type="button" data-tool-command="pin" title="Pin"><i
-                                        class="fas fa-location-dot"></i></button>
                                 <div class="pro-tool-separator"></div>
                                 <button class="pro-tool-btn" type="button" data-tool-command="undo" title="Undo"><i
                                         class="fas fa-rotate-left"></i></button>
                                 <button class="pro-tool-btn" type="button" data-tool-command="redo" title="Redo"><i
                                         class="fas fa-rotate-right"></i></button>
-                                <button class="pro-tool-btn danger" type="button" data-tool-command="delete"
-                                    title="Delete"><i class="fas fa-trash"></i></button>
                                 <div class="pro-tool-separator"></div>
                                 <button class="pro-tool-btn" type="button" id="takeoffToolsDockToggle"
                                     title="Dock left / right" aria-label="Dock left or right"><i
@@ -1675,7 +1669,7 @@ $state = [
 
                             <?php if ($selectedDoc && $selectedDoc['source'] === 'legacy_file'): ?>
                                 <iframe id="takeoffFrame" class="takeoff-frame pro-takeoff-frame"
-                                    src="editor.php?id=<?= (int) $selectedDoc['id'] ?>&embedded=1&estimate_key=est_primary&inherit_legacy=1"></iframe>
+                                    src="editor.php?id=<?= (int) $selectedDoc['id'] ?>&embedded=1&estimate_key=est_primary&inherit_legacy=1&_t=<?= time() ?>"></iframe>
                             <?php else: ?>
                                 <div id="takeoffEmpty" class="takeoff-empty pro-takeoff-empty">
                                     <div>
@@ -1689,6 +1683,9 @@ $state = [
                             <?php endif; ?>
 
                             <div class="pro-floating-controls">
+                                <button class="pro-icon-btn" type="button" id="takeoffControlsDockToggle"
+                                    title="Dock left / right" aria-label="Dock left or right"><i
+                                        class="fas fa-right-left"></i></button>
                                 <button class="pro-icon-btn" type="button" data-viewer-command="previous"
                                     title="Previous sheet"><i class="fas fa-chevron-left"></i></button>
                                 <button class="pro-icon-btn" type="button" data-viewer-command="next"
@@ -2167,35 +2164,34 @@ $state = [
         <button type="button" class="danger" id="pdItemActionDelete"><i class="fas fa-trash"></i> Delete</button>
     </div>
 
-    <div class="pro-group-modal" id="takeoffGroupModal" hidden>
-        <div class="pro-group-dialog" role="dialog" aria-modal="true" aria-labelledby="takeoffGroupModalTitle"
-            aria-describedby="takeoffGroupModalDescription">
-            <div class="pro-group-dialog-head">
-                <div class="pro-group-dialog-icon" aria-hidden="true"><i class="fas fa-folder-plus"></i></div>
-                <div>
-                    <h2 id="takeoffGroupModalTitle">Create new group</h2>
-                    <p id="takeoffGroupModalDescription">Organize related takeoff layers and measurements in one group.
-                    </p>
-                </div>
-                <button class="pro-icon-btn" type="button" data-group-modal-close
-                    aria-label="Close create group dialog"><i class="fas fa-times"></i></button>
+    <!-- Takeoff Group Create / Rename Modal (System Standard pd-modal style) -->
+    <div class="pd-modal-backdrop" id="takeoffGroupModal" role="dialog" aria-modal="true"
+        aria-labelledby="takeoffGroupModalTitle" hidden style="display:none;">
+        <div class="pd-modal" style="width: min(480px, 100%);">
+            <div class="pd-modal-head">
+                <h3 id="takeoffGroupModalTitle"><i class="fas fa-folder-plus" id="takeoffGroupModalIcon" style="color: var(--primary);"></i> <span id="takeoffGroupModalHeading">Create new group</span></h3>
+                <button class="pd-modal-head-close" type="button" data-group-modal-close
+                    aria-label="Close dialog"><i class="fas fa-times"></i></button>
             </div>
             <form id="takeoffGroupForm" novalidate>
-                <label class="pro-group-field" for="takeoffGroupName">
-                    <span>Group name</span>
-                    <input id="takeoffGroupName" name="groupName" type="text" maxlength="120" autocomplete="off"
-                        placeholder="For example, Lighting" required
-                        aria-describedby="takeoffGroupNameHint takeoffGroupNameError">
-                </label>
-                <div class="pro-group-field-meta">
-                    <small id="takeoffGroupNameHint">Use a clear scope or system name.</small>
-                    <small id="takeoffGroupNameCount">0 / 120</small>
+                <div class="pd-modal-body" style="grid-template-columns: 1fr; gap: 14px;">
+                    <div class="pd-field">
+                        <label class="pro-group-field" for="takeoffGroupName" id="takeoffGroupNameLabel">Group Name</label>
+                        <input id="takeoffGroupName" name="groupName" class="pd-composer-input" type="text" maxlength="120"
+                            autocomplete="off" placeholder="For example, Lighting" required
+                            aria-describedby="takeoffGroupNameHint takeoffGroupNameError">
+                    </div>
+                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: var(--text-muted, #64748b); margin-top: -6px;">
+                        <span id="takeoffGroupNameHint">Use a clear scope or system name.</span>
+                        <span id="takeoffGroupNameCount">0 / 120</span>
+                    </div>
+                    <div class="pro-group-error" id="takeoffGroupNameError" role="alert" hidden style="color: #ef4444; font-size: 12px; margin-top: -4px;"></div>
                 </div>
-                <div class="pro-group-error" id="takeoffGroupNameError" role="alert" hidden></div>
-                <div class="pro-group-dialog-actions">
-                    <button class="pro-dialog-secondary" type="button" data-group-modal-close>Cancel</button>
-                    <button class="pro-dialog-primary" id="takeoffGroupCreateSubmit" type="submit"><i
-                            class="fas fa-folder-plus" aria-hidden="true"></i> Create group</button>
+                <div class="pd-modal-foot">
+                    <button type="button" class="btn-ghost" data-group-modal-close>Cancel</button>
+                    <button type="submit" class="btn-main orange" id="takeoffGroupCreateSubmit">
+                        <i class="fas fa-check" id="takeoffGroupSubmitIcon"></i> <span id="takeoffGroupSubmitText">Create group</span>
+                    </button>
                 </div>
             </form>
         </div>
@@ -2204,15 +2200,15 @@ $state = [
     <script>
         window.ProjectState = <?= json_encode($state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
         <?php if (!empty($_GET['stage'])): ?>
-                try {
-                    localStorage.setItem('takeoff.bidBoardStage', <?= json_encode($_GET['stage']) ?>);
-                    sessionStorage.setItem('takeoff.bidBoardStage' , <?= json_encode($_GET['stage']) ?>);
-                } catch (e) { }
+            try {
+                localStorage.setItem('takeoff.bidBoardStage', <?= json_encode($_GET['stage']) ?>);
+                sessionStorage.setItem('takeoff.bidBoardStage', <?= json_encode($_GET['stage']) ?>);
+            } catch (e) { }
         <?php elseif (!empty($project['status'])): ?>
-                try {
-                    localStorage.setItem('takeoff.bidBoardStage', <?= json_encode(dash_status_label($project['status'])) ?>);
-                    sessionStorage.setItem('takeoff.bidBoardStage', <?= json_encode(dash_status_label($project['status'])) ?>);
-                } catch (e) { }
+            try {
+                localStorage.setItem('takeoff.bidBoardStage', <?= json_encode(dash_status_label($project['status'])) ?>);
+                sessionStorage.setItem('takeoff.bidBoardStage', <?= json_encode(dash_status_label($project['status'])) ?>);
+            } catch (e) { }
         <?php endif; ?>
 
         const tabs = document.querySelectorAll('[data-tab]');
@@ -2452,7 +2448,7 @@ $state = [
                     if (res.status === 'success') location.reload();
                     else alert('Upload failed: ' + (res.msg || 'Unknown error'));
                 })
-                .catch(() => alert('Upload failed.'))               ;
+                .catch(() => alert('Upload failed.'));
         });
 
         setActiveTab(ProjectState.activeTab || 'overview', false);
@@ -2470,7 +2466,7 @@ $state = [
     <script src="../assets/boq_catalog_adapter.js?v=boq-catalog-boundary-20260826-1"></script>
     <script src="../assets/takeoff_catalog_adapter.js?v=takeoff-catalog-boundary-20260826-1"></script>
     <script src="../assets/takeoff_color_palette.js?v=takeoff-duplicate-color-20260831-1"></script>
-    <script src="../assets/project_takeoff.js?v=takeoff-custom-dropdowns-20260930-3"></script>
+    <script src="../assets/project_takeoff.js?v=<?= filemtime(__DIR__ . '/../assets/project_takeoff.js') ?>"></script>
     <script src="../assets/assembly_expansion_service.js?v=assembly-expansion-20260828-1"></script>
     <script src="../assets/estimating_assembly_expansion_adapter.js?v=estimating-assembly-adapter-20260828-1"></script>
     <script src="../assets/quantity_format_service.js?v=quantity-context-format-20260831-1"></script>

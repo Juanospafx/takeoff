@@ -4042,12 +4042,34 @@ body.theme-dark .pro-scale-panel select option {
     align-items: center;
     gap: 4px;
     min-height: 28px;
+    max-width: calc(100% - 28px);
     padding: 3px 6px;
     border: 1px solid var(--tk-border);
     border-radius: 6px;
     background: var(--tk-bg-panel);
     box-shadow: var(--tk-shadow-md);
     color: var(--tk-text-main);
+    transition: left 0.2s ease, right 0.2s ease;
+    overflow-x: auto;
+    scrollbar-width: none;
+}
+
+.pro-floating-controls::-webkit-scrollbar {
+    display: none;
+}
+
+.pro-floating-controls.is-docked-left {
+    right: auto !important;
+    left: 28px !important;
+}
+
+/* Offset when both toolbars are on the same side so they never collide */
+.pro-floating-tools:not(.is-docked-right) ~ .pro-floating-controls.is-docked-left {
+    left: 60px !important;
+}
+
+.pro-floating-tools.is-docked-right ~ .pro-floating-controls:not(.is-docked-left) {
+    right: 60px !important;
 }
 
 .pro-takeoff-inspector {
@@ -5358,10 +5380,45 @@ body:not(.is-takeoff-tab) #takeoffSubheadItemInfo,
 }
 
 .takeoff-subhead-item-info .pro-active-layer-dot {
-    width: 8px;
-    height: 8px;
-    border-radius: 50%;
-    flex-shrink: 0;
+    width: 16px !important;
+    height: 16px !important;
+    min-width: 16px !important;
+    min-height: 16px !important;
+    border-radius: 0 !important;
+    flex-shrink: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    line-height: 1 !important;
+    box-shadow: none !important;
+    overflow: hidden;
+    vertical-align: middle;
+}
+
+.takeoff-subhead-item-info .pro-active-layer-dot:empty {
+    width: 8px !important;
+    height: 8px !important;
+    min-width: 8px !important;
+    min-height: 8px !important;
+    border-radius: 50% !important;
+    margin: 0 4px !important;
+}
+
+.takeoff-subhead-item-info .pro-active-layer-dot:has(i) {
+    width: 16px !important;
+    height: 16px !important;
+    border-radius: 0 !important;
+}
+
+.takeoff-subhead-item-info .pro-active-layer-dot i {
+    font-size: 11.5px !important;
+    line-height: 1 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    margin: 0 !important;
+    padding: 0 !important;
+    vertical-align: middle;
 }
 
 .takeoff-subhead-item-info .takeoff-subhead-item-name {
@@ -5470,6 +5527,35 @@ body.theme-dark .subhead-item-act-btn:hover {
 body.theme-dark .subhead-item-act-btn.danger:hover {
     background: rgba(239, 68, 68, 0.2);
     color: #fca5a5;
+}
+
+[data-theme="dark"] .subhead-note-size-select,
+body.theme-dark .subhead-note-size-select,
+.theme-dark .subhead-note-size-select,
+[data-theme="dark"] select,
+body.theme-dark select,
+.theme-dark select {
+    background: #1e293b !important;
+    color: #f8fafc !important;
+    border-color: #334155 !important;
+    color-scheme: dark !important;
+}
+
+[data-theme="dark"] select option,
+body.theme-dark select option,
+.theme-dark select option,
+[data-theme="dark"] .subhead-note-size-select option,
+body.theme-dark .subhead-note-size-select option {
+    background: #1e293b !important;
+    color: #f8fafc !important;
+}
+
+[data-theme="dark"] select:focus,
+body.theme-dark select:focus,
+.theme-dark select:focus {
+    background: #1e293b !important;
+    color: #f8fafc !important;
+    border-color: #3b82f6 !important;
 }
 
 /* Hide brightronix footer in takeoff tab to maximize canvas space */
@@ -5766,6 +5852,9 @@ body.theme-dark #takeoffDownloadDrawingBtn:hover {
     gap: 3px;
     width: 38px;
     min-height: auto;
+    max-height: calc(100% - 24px);
+    overflow-y: auto;
+    overflow-x: hidden;
     padding: 6px 3px;
     border: 1px solid var(--tk-border, #cbd5e1);
     border-radius: 8px;
@@ -5775,11 +5864,40 @@ body.theme-dark #takeoffDownloadDrawingBtn:hover {
     color: var(--tk-text-main, #0f172a);
     user-select: none;
     transition: left 0.2s ease, right 0.2s ease;
+    scrollbar-width: thin;
+    scrollbar-color: rgba(148, 163, 184, 0.35) transparent;
+}
+
+.pro-floating-tools::-webkit-scrollbar {
+    width: 3px;
+}
+
+.pro-floating-tools::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.35);
+    border-radius: 3px;
 }
 
 .pro-floating-tools.is-docked-right {
     left: auto !important;
     right: 14px !important;
+}
+
+@media (max-height: 680px) {
+    .pro-floating-tools {
+        top: 8px;
+        gap: 2px;
+        padding: 4px 2px;
+        width: 34px;
+        max-height: calc(100% - 16px);
+    }
+    .pro-floating-tools .pro-tool-btn {
+        width: 28px !important;
+        height: 28px !important;
+        font-size: 14px !important;
+    }
+    .pro-floating-tools .pro-tool-btn i {
+        font-size: 14px !important;
+    }
 }
 
 [data-theme="dark"] .pro-floating-tools,
@@ -5800,10 +5918,15 @@ body.theme-dark .pro-floating-tools {
     border-radius: 6px;
     background: transparent;
     color: var(--tk-text-muted, #64748b);
-    font-size: 13.5px;
+    font-size: 16px;
     cursor: pointer;
     transition: all 0.15s ease;
     position: relative;
+}
+
+.pro-floating-tools .pro-tool-btn i {
+    font-size: 16px;
+    line-height: 1;
 }
 
 /* Tooltips show to the right by default when floating tools is on the left */
@@ -8182,4 +8305,49 @@ body.theme-dark .pcd-section-header {
 [data-theme="dark"] .pcd-divider,
 body.theme-dark .pcd-divider {
     background: #2f384a;
+}
+
+.toast-lite {
+    position: fixed;
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 999999;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: #0f172a;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06);
+    border-radius: 9999px;
+    padding: 4px 14px;
+    height: 28px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.3;
+    pointer-events: none;
+    white-space: nowrap;
+    animation: toastLiteFadeIn 0.2s ease-out;
+}
+
+[data-theme="dark"] .toast-lite,
+body.theme-dark .toast-lite {
+    background: rgba(15, 23, 42, 0.94);
+    color: #f8fafc;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.36);
+}
+
+@keyframes toastLiteFadeIn {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -6px);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, 0);
+    }
 }

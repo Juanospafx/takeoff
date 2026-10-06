@@ -1188,12 +1188,17 @@
         selectedObjectIds: [],
         activeLayerId: null,
         selectedGroupIds: [],
-        selectedLayerIds: []
+        selectedLayerIds: [],
+        selectedRuler: null,
+        selectedNote: null,
+        selectedCloud: null,
+        selectedObjectType: null
     };
     let draggedTakeoffGroupId = null;
     let suppressNextGroupToggle = false;
 
     const historyState = [];
+    const redoHistoryState = [];
 
     const catalogState = {
         loaded: false,
@@ -1382,6 +1387,7 @@
     }
 
     function saveTakeoffState() {
+        // iframe/API owns persistent Takeoff state
         takeoffIsDirty = true;
         try {
             const pId = String(window.ProjectState?.projectId || 0);
@@ -1393,6 +1399,7 @@
     function pushTakeoffHistory(reason = 'change') {
         takeoffIsDirty = true;
         try {
+            redoHistoryState.length = 0;
             historyState.push({
                 reason,
                 groups: JSON.parse(JSON.stringify(takeoffState.groups)),
@@ -1403,19 +1410,31 @@
                 pins: JSON.parse(JSON.stringify(takeoffState.pins || [])),
                 globalVisible: takeoffState.globalVisible
             });
-            if (historyState.length > 60) historyState.shift();
+            if (historyState.length > 10) historyState.shift();
         } catch (e) {
             console.warn('Takeoff history could not be saved', e);
         }
     }
 
     function undoTakeoff() {
+        const editorUndone = callEditor('projectTakeoffUndo') || callEditor('undo');
         const previous = historyState.pop();
-        const editorUndone = callEditor('undo') || callEditor('projectTakeoffUndo');
         if (!previous) {
             if (!editorUndone) showPrepared('Nothing to undo.');
             return;
         }
+        try {
+            redoHistoryState.push({
+                groups: JSON.parse(JSON.stringify(takeoffState.groups)),
+                activeGroupId: takeoffState.activeGroupId,
+                activeLayerId: takeoffState.activeLayerId,
+                canvasSnapshots: JSON.parse(JSON.stringify(takeoffState.canvasSnapshots || {})),
+                annotations: JSON.parse(JSON.stringify(takeoffState.annotations || [])),
+                pins: JSON.parse(JSON.stringify(takeoffState.pins || [])),
+                globalVisible: takeoffState.globalVisible
+            });
+            if (redoHistoryState.length > 10) redoHistoryState.shift();
+        } catch (_) {}
         takeoffState.groups = previous.groups;
         takeoffState.activeGroupId = previous.activeGroupId;
         takeoffState.activeLayerId = previous.activeLayerId;
@@ -1424,7 +1443,41 @@
         takeoffState.pins = previous.pins || [];
         takeoffState.globalVisible = previous.globalVisible !== false;
         saveTakeoffState();
-        syncAllLayersToCanvas();
+        if (!editorUndone) syncAllLayersToCanvas();
+        syncTakeoffToEstimating();
+        renderTakeoffPanel();
+        renderActiveLayerToolbar();
+    }
+
+    function redoTakeoff() {
+        const editorRedone = callEditor('projectTakeoffRedo') || callEditor('redo');
+        const next = redoHistoryState.pop();
+        if (!next) {
+            if (!editorRedone) showPrepared('Nothing to redo.');
+            return;
+        }
+        try {
+            historyState.push({
+                reason: 'redo',
+                groups: JSON.parse(JSON.stringify(takeoffState.groups)),
+                activeGroupId: takeoffState.activeGroupId,
+                activeLayerId: takeoffState.activeLayerId,
+                canvasSnapshots: JSON.parse(JSON.stringify(takeoffState.canvasSnapshots || {})),
+                annotations: JSON.parse(JSON.stringify(takeoffState.annotations || [])),
+                pins: JSON.parse(JSON.stringify(takeoffState.pins || [])),
+                globalVisible: takeoffState.globalVisible
+            });
+            if (historyState.length > 10) historyState.shift();
+        } catch (_) {}
+        takeoffState.groups = next.groups;
+        takeoffState.activeGroupId = next.activeGroupId;
+        takeoffState.activeLayerId = next.activeLayerId;
+        takeoffState.canvasSnapshots = next.canvasSnapshots || {};
+        takeoffState.annotations = next.annotations || [];
+        takeoffState.pins = next.pins || [];
+        takeoffState.globalVisible = next.globalVisible !== false;
+        saveTakeoffState();
+        if (!editorRedone) syncAllLayersToCanvas();
         syncTakeoffToEstimating();
         renderTakeoffPanel();
         renderActiveLayerToolbar();
@@ -2377,12 +2430,10 @@
                                 <span class="pro-stroke-preview" id="layerStrokePreview"></span>
                                 <select id="layerStrokeInput">
                                     <option value="1">1 px</option>
+                                    <option value="1.5">1.5 px</option>
                                     <option value="2">2 px</option>
+                                    <option value="2.5" selected>2.5 px</option>
                                     <option value="3">3 px</option>
-                                    <option value="4" selected>4 px</option>
-                                    <option value="5">5 px</option>
-                                    <option value="6">6 px</option>
-                                    <option value="8">8 px</option>
                                 </select>
                             </div>
                         </div>
@@ -2932,7 +2983,7 @@
             takeoffState.groups.push(group);
         }
 
-        const strokeWidth = type.includes('Area') ? 3 : 4;
+        const strokeWidth = type.includes('Area') ? 2 : 2.5;
         const radius = takeoffSizeRadius(size);
         const tag = $('createLayerTag')?.value.trim() || '';
 
@@ -3010,7 +3061,7 @@
         const preview = $('layerStrokePreview');
         const input = $('layerStrokeInput');
         if (preview && input) {
-            preview.style.height = `${Math.max(1, Math.min(10, Number(input.value) || 4))}px`;
+            preview.style.height = `${Math.max(1, Math.min(3, Number(input.value) || 2.5))}px`;
         }
     }
 
@@ -3116,7 +3167,7 @@
         if ($('layerSizeInput')) $('layerSizeInput').value = takeoffDisplaySize(layer?.size);
         if ($('layerDiameterInput')) $('layerDiameterInput').value = Number(layer?.markerDiameter || (takeoffSizeRadius(layer?.size || 'Medium') * 2));
 
-        const strokeVal = Math.round(Number(layer?.strokeWidth || 4));
+        const strokeVal = Number(layer?.strokeWidth || 2.5);
         setSelectValue($('layerStrokeInput'), String(strokeVal));
         updateLayerStrokePreview();
 
@@ -3276,7 +3327,7 @@
             const chosenColor = ($('layerColorInput')?.value === '__custom__'
                 ? $('layerCustomColorPicker')?.value
                 : $('layerColorInput')?.value) || '#ef4444';
-            const strokeWidth = Number($('layerStrokeInput')?.value || 4);
+            const strokeWidth = Number($('layerStrokeInput')?.value || 2.5);
             const payload = {
                 name,
                 type,
@@ -3286,7 +3337,7 @@
                 symbol: $('layerSymbolInput')?.value || 'Solid Circle',
                 size: $('layerSizeInput')?.value || 'Medium',
                 markerDiameter: Math.max(8, Math.min(192, Number($('layerDiameterInput')?.value || (strokeWidth * 4)))),
-                strokeWidth: Math.max(1, Math.min(20, strokeWidth)),
+                strokeWidth: Math.max(1, Math.min(3, strokeWidth)),
                 color: chosenColor,
                 dropLength: Number($('layerDropInput')?.value || 0),
                 spacing: Number($('layerSpacingInput')?.value || 0),
@@ -3839,29 +3890,62 @@
     }
 
     let takeoffGroupModalReturnFocus = null;
+    let takeoffGroupModalEditingGroup = null;
 
     function closeTakeoffGroupModal() {
         const modal = $('takeoffGroupModal');
         if (!modal || modal.hidden) return;
         modal.hidden = true;
+        modal.style.display = 'none';
         document.body.classList.remove('pro-dialog-open');
         const input = $('takeoffGroupName');
         const error = $('takeoffGroupNameError');
         if (input) { input.value = ''; input.removeAttribute('aria-invalid'); }
         if (error) { error.hidden = true; error.textContent = ''; }
         if ($('takeoffGroupNameCount')) $('takeoffGroupNameCount').textContent = '0 / 120';
+        takeoffGroupModalEditingGroup = null;
+        const heading = $('takeoffGroupModalHeading');
+        if (heading) heading.textContent = 'Create new group';
+        const icon = $('takeoffGroupModalIcon');
+        if (icon) icon.className = 'fas fa-folder-plus';
+        const submitText = $('takeoffGroupSubmitText');
+        if (submitText) submitText.textContent = 'Create group';
         takeoffGroupModalReturnFocus?.focus?.();
         takeoffGroupModalReturnFocus = null;
     }
 
-    function openTakeoffGroupModal(trigger = document.activeElement) {
+    function openTakeoffGroupModal(trigger = document.activeElement, groupToRename = null) {
         const modal = $('takeoffGroupModal');
         const input = $('takeoffGroupName');
         if (!modal || !input) return;
         takeoffGroupModalReturnFocus = trigger;
+        takeoffGroupModalEditingGroup = groupToRename;
+
+        const heading = $('takeoffGroupModalHeading');
+        const icon = $('takeoffGroupModalIcon');
+        const submitText = $('takeoffGroupSubmitText');
+
+        if (groupToRename) {
+            if (heading) heading.textContent = 'Rename group';
+            if (icon) icon.className = 'fas fa-pen';
+            if (submitText) submitText.textContent = 'Save changes';
+            input.value = groupToRename.name || '';
+            if ($('takeoffGroupNameCount')) $('takeoffGroupNameCount').textContent = `${(groupToRename.name || '').length} / 120`;
+        } else {
+            if (heading) heading.textContent = 'Create new group';
+            if (icon) icon.className = 'fas fa-folder-plus';
+            if (submitText) submitText.textContent = 'Create group';
+            input.value = '';
+            if ($('takeoffGroupNameCount')) $('takeoffGroupNameCount').textContent = '0 / 120';
+        }
+
         modal.hidden = false;
+        modal.style.display = 'flex';
         document.body.classList.add('pro-dialog-open');
-        requestAnimationFrame(() => input.focus());
+        requestAnimationFrame(() => {
+            input.focus();
+            if (groupToRename) input.select();
+        });
     }
 
     function createTakeoffGroup(name) {
@@ -3879,10 +3963,7 @@
         window.dispatchEvent(new CustomEvent('takeoff:estimating-group-create-requested', {
             detail: {
                 projectId: String(window.ProjectState?.projectId || ''), estimateId,
-                group: {
-                    id: estimatingGroupId, takeoffGroupId: group.id, name: group.name,
-                    expanded: true, sortOrder: takeoffState.groups.filter(row => groupBelongsToEstimate(row)).length - 1, items: []
-                }
+                group: { id: estimatingGroupId, takeoffGroupId: group.id, name: group.name, expanded: true, sortOrder: takeoffState.groups.filter(row => groupBelongsToEstimate(row)).length - 1, items: [] }
             }
         }));
         saveTakeoffState();
@@ -3897,14 +3978,47 @@
         const name = String(input?.value || '').trim().replace(/\s+/g, ' ');
         let message = '';
         if (!name) message = 'Enter a group name.';
-        else if (takeoffState.groups.some(group => groupBelongsToEstimate(group)
-            && String(group.name || '').trim().toLocaleLowerCase() === name.toLocaleLowerCase())) message = 'A group with this name already exists in this estimate.';
+        else if (takeoffGroupModalEditingGroup) {
+            const isDuplicate = takeoffState.groups.some(group =>
+                group !== takeoffGroupModalEditingGroup &&
+                groupBelongsToEstimate(group) &&
+                String(group.name || '').trim().toLocaleLowerCase() === name.toLocaleLowerCase()
+            );
+            if (isDuplicate) message = 'A group with this name already exists in this estimate.';
+        } else if (takeoffState.groups.some(group => groupBelongsToEstimate(group)
+            && String(group.name || '').trim().toLocaleLowerCase() === name.toLocaleLowerCase())) {
+            message = 'A group with this name already exists in this estimate.';
+        }
         if (message) {
             if (error) { error.textContent = message; error.hidden = false; }
             input?.setAttribute('aria-invalid', 'true');
             input?.focus();
             return;
         }
+
+        if (takeoffGroupModalEditingGroup) {
+            const group = takeoffGroupModalEditingGroup;
+            if (group.name !== name) {
+                pushTakeoffHistory('rename-group');
+                group.name = name;
+                group.isDefault = false;
+                saveTakeoffState();
+                window.dispatchEvent(new CustomEvent('takeoff:estimating-group-rename-requested', {
+                    detail: {
+                        projectId: String(window.ProjectState?.projectId || ''),
+                        estimateId: activeEstimateId(),
+                        groupId: group.estimatingGroupId || `takeoff_group_${group.id}`,
+                        name: group.name
+                    }
+                }));
+                renderTakeoffPanel();
+                updateSubheadSelectedItem();
+                showTakeoffToast?.('Group renamed.');
+            }
+            closeTakeoffGroupModal();
+            return;
+        }
+
         if (createTakeoffGroup(name)) closeTakeoffGroupModal();
     }
 
@@ -4176,47 +4290,7 @@
 
     function promptRenameGroup(group) {
         if (!group) return;
-        if (typeof window.openRenameModal === 'function') {
-            window.openRenameModal({
-                title: 'Rename Group',
-                label: 'Group Name',
-                currentName: group.name,
-                onSave: (newName) => {
-                    if (!newName || !newName.trim()) return;
-                    pushTakeoffHistory('rename-group');
-                    group.name = newName.trim();
-                    group.isDefault = false;
-                    saveTakeoffState();
-                    window.dispatchEvent(new CustomEvent('takeoff:estimating-group-rename-requested', {
-                        detail: {
-                            projectId: String(window.ProjectState?.projectId || ''),
-                            estimateId: activeEstimateId(),
-                            groupId: group.estimatingGroupId || `takeoff_group_${group.id}`,
-                            name: group.name
-                        }
-                    }));
-                    renderTakeoffPanel();
-                    showTakeoffToast?.('Group renamed.');
-                }
-            });
-        } else {
-            const newName = prompt('Enter new group name:', group.name);
-            if (newName && newName.trim() && newName.trim() !== group.name) {
-                pushTakeoffHistory('rename-group');
-                group.name = newName.trim();
-                group.isDefault = false;
-                saveTakeoffState();
-                window.dispatchEvent(new CustomEvent('takeoff:estimating-group-rename-requested', {
-                    detail: {
-                        projectId: String(window.ProjectState?.projectId || ''),
-                        estimateId: activeEstimateId(),
-                        groupId: group.estimatingGroupId || `takeoff_group_${group.id}`,
-                        name: group.name
-                    }
-                }));
-                renderTakeoffPanel();
-            }
-        }
+        openTakeoffGroupModal(document.activeElement, group);
     }
 
     function renameGroup(groupId) {
@@ -4425,6 +4499,36 @@
         const info = $('takeoffSubheadItemInfo');
         if (!info || info.__actionsBound) return;
         info.__actionsBound = true;
+
+        info.addEventListener('change', event => {
+            const sizeSelect = event.target.closest('.subhead-note-size-select');
+            if (sizeSelect && selectionState.selectedNote) {
+                const sz = Number(sizeSelect.value);
+                callEditor('updateSelectedNoteTypography', { fontSize: sz });
+                selectionState.selectedNote.fontSize = sz;
+                return;
+            }
+        });
+
+        info.addEventListener('input', event => {
+            const colorPicker = event.target.closest('.subhead-note-color-picker');
+            if (colorPicker && selectionState.selectedNote) {
+                const col = colorPicker.value;
+                callEditor('updateSelectedNoteTypography', { color: col });
+                selectionState.selectedNote.color = col;
+                return;
+            }
+            const cloudColorPicker = event.target.closest('.subhead-cloud-color-picker');
+            if (cloudColorPicker && selectionState.selectedCloud) {
+                const col = cloudColorPicker.value;
+                selectionState.selectedCloud.color = col;
+                callEditor('updateSelectedCloudColor', col);
+                const dotIcon = $('takeoffSubheadItemDot')?.querySelector('.fa-cloud');
+                if (dotIcon) dotIcon.style.color = col;
+                return;
+            }
+        });
+
         info.addEventListener('click', event => {
             const groupBtn = event.target.closest('[data-subhead-group-action]');
             if (groupBtn) {
@@ -4466,7 +4570,10 @@
             const activeLayerId = takeoffState.activeLayerId || selectionState.activeLayerId;
             const hasSelection = selectionState.selectedObjectIds.length > 0;
 
-            if (action === 'copy') {
+            if (action === 'add-node') {
+                callEditor('projectTakeoffArmAddNode', true);
+                showPrepared('Click anywhere on the line to insert a new node.');
+            } else if (action === 'copy') {
                 if (hasSelection) {
                     runSelectionAction('copy');
                 } else if (activeLayerId) {
@@ -4483,7 +4590,22 @@
                     showPrepared('Select a takeoff item first.');
                 }
             } else if (action === 'delete') {
-                if (hasSelection) {
+                if (selectionState.selectedNote) {
+                    callEditor('deleteKonvaSelection');
+                    selectionState.selectedNote = null;
+                    updateSubheadSelectedItem();
+                    showPrepared('Note deleted.');
+                } else if (selectionState.selectedCloud) {
+                    callEditor('deleteKonvaSelection');
+                    selectionState.selectedCloud = null;
+                    updateSubheadSelectedItem();
+                    showPrepared('Cloud deleted.');
+                } else if (selectionState.selectedRuler) {
+                    callEditor('deleteKonvaSelection');
+                    selectionState.selectedRuler = null;
+                    updateSubheadSelectedItem();
+                    showPrepared('Ruler measurement deleted.');
+                } else if (hasSelection) {
                     runSelectionAction('delete');
                 } else if (activeLayerId) {
                     deleteLayer(activeLayerId);
@@ -4554,7 +4676,84 @@
         const meta = $('takeoffSubheadItemMeta');
         const actionsContainer = info.querySelector('.takeoff-subhead-item-actions');
 
-        if (isGroupSelected && selectedGroup) {
+        if (selectionState.selectedNote) {
+            info.classList.add('is-visible');
+            info.classList.remove('is-group-info');
+            info.style.display = 'inline-flex';
+            if (dot) {
+                dot.style.background = 'transparent';
+                dot.innerHTML = '<i class="fas fa-note-sticky" style="color: #60a5fa; font-size: 11.5px;"></i>';
+            }
+            if (name) name.textContent = 'Note';
+            if (meta) {
+                const noteTxt = String(selectionState.selectedNote.text || '').trim();
+                meta.textContent = noteTxt ? (noteTxt.length > 20 ? `"${noteTxt.slice(0, 20)}..."` : `"${noteTxt}"`) : 'Text note';
+            }
+            if (actionsContainer) {
+                const curSize = Number(selectionState.selectedNote.fontSize) || 18;
+                const curColor = String(selectionState.selectedNote.color || '#0f172a');
+                actionsContainer.innerHTML = `
+                    <div style="display:inline-flex; align-items:center; gap:5px; margin-right:4px;">
+                        <span style="font-size:11px; font-weight:600; color:var(--text-muted, #94a3b8);">Size:</span>
+                        <select class="subhead-note-size-select" style="border:1px solid var(--tk-border, #cbd5e1); border-radius:4px; font-size:11.5px; padding:2px 4px; cursor:pointer;">
+                            <option value="12" ${curSize <= 13 ? 'selected' : ''}>12px</option>
+                            <option value="14" ${curSize > 13 && curSize <= 15 ? 'selected' : ''}>14px</option>
+                            <option value="16" ${curSize > 15 && curSize <= 17 ? 'selected' : ''}>16px</option>
+                            <option value="18" ${curSize > 17 && curSize <= 21 ? 'selected' : ''}>18px</option>
+                            <option value="24" ${curSize > 21 && curSize <= 28 ? 'selected' : ''}>24px</option>
+                            <option value="32" ${curSize > 28 && curSize <= 40 ? 'selected' : ''}>32px</option>
+                            <option value="48" ${curSize > 40 ? 'selected' : ''}>48px</option>
+                        </select>
+                    </div>
+                    <div style="display:inline-flex; align-items:center; gap:5px; margin-right:4px;">
+                        <span style="font-size:11px; font-weight:600; color:var(--text-muted, #94a3b8);">Color:</span>
+                        <input type="color" class="subhead-note-color-picker" value="${curColor.startsWith('#') ? curColor : '#0f172a'}" style="width:22px; height:22px; padding:0; border:1px solid var(--tk-border, #cbd5e1); border-radius:4px; cursor:pointer; background:transparent;">
+                    </div>
+                    <button type="button" class="subhead-item-act-btn danger" data-subhead-item-action="delete" title="Delete note">
+                        <i class="fas fa-trash"></i><span>Delete</span>
+                    </button>
+                `;
+            }
+        } else if (selectionState.selectedCloud) {
+            info.classList.add('is-visible');
+            info.classList.remove('is-group-info');
+            info.style.display = 'inline-flex';
+            if (dot) {
+                dot.style.background = 'transparent';
+                dot.innerHTML = `<i class="fas fa-cloud" style="color: ${selectionState.selectedCloud.color || '#ef4444'}; font-size: 11.5px;"></i>`;
+            }
+            if (name) name.textContent = 'Cloud';
+            if (meta) meta.textContent = 'Annotation';
+            if (actionsContainer) {
+                const curColor = String(selectionState.selectedCloud.color || '#ef4444');
+                actionsContainer.innerHTML = `
+                    <div style="display:inline-flex; align-items:center; gap:5px; margin-right:4px;">
+                        <span style="font-size:11px; font-weight:600; color:var(--text-muted, #94a3b8);">Color:</span>
+                        <input type="color" class="subhead-cloud-color-picker" value="${curColor.startsWith('#') ? curColor : '#ef4444'}" style="width:22px; height:22px; padding:0; border:1px solid var(--tk-border, #cbd5e1); border-radius:4px; cursor:pointer; background:transparent;">
+                    </div>
+                    <button type="button" class="subhead-item-act-btn danger" data-subhead-item-action="delete" title="Delete cloud">
+                        <i class="fas fa-trash"></i><span>Delete</span>
+                    </button>
+                `;
+            }
+        } else if (selectionState.selectedRuler) {
+            info.classList.add('is-visible');
+            info.classList.remove('is-group-info');
+            info.style.display = 'inline-flex';
+            if (dot) {
+                dot.style.background = 'transparent';
+                dot.innerHTML = '<i class="fas fa-ruler" style="color: #22c55e; font-size: 11px;"></i>';
+            }
+            if (name) name.textContent = 'Ruler Measurement';
+            if (meta) meta.textContent = selectionState.selectedRuler.lengthText || 'Measurement';
+            if (actionsContainer) {
+                actionsContainer.innerHTML = `
+                    <button type="button" class="subhead-item-act-btn danger" data-subhead-item-action="delete" title="Delete ruler measurement">
+                        <i class="fas fa-trash"></i><span>Delete</span>
+                    </button>
+                `;
+            }
+        } else if (isGroupSelected && selectedGroup) {
             info.classList.add('is-visible', 'is-group-info');
             info.style.display = 'inline-flex';
             if (dot) {
@@ -4596,8 +4795,15 @@
             info.classList.remove('is-group-info');
             info.style.display = 'inline-flex';
             if (dot) {
-                dot.innerHTML = '';
-                dot.style.background = activeLayer?.color || '#2563eb';
+                if (activeLayer) {
+                    dot.innerHTML = symbolGlyph(activeLayer);
+                    dot.style.background = 'transparent';
+                    dot.style.color = activeLayer.color || '#2563eb';
+                } else {
+                    dot.innerHTML = '';
+                    dot.style.background = '#2563eb';
+                    dot.style.color = '';
+                }
             }
             if (name) name.textContent = activeLayer?.name || (selectedCount > 1 ? `${selectedCount} elements selected` : '1 element selected');
             if (meta) {
@@ -4610,8 +4816,18 @@
                 }
             }
 
+            const layerTypeStr = String(activeLayer?.type || activeLayer?.takeoff_type || '').toLowerCase();
+            const isLinear = Boolean((activeLayer && layerTypeStr.includes('linear'))
+                || selectionState.selectedObjectType === 'segment');
+            const addNodeHtml = isLinear ? `
+                    <button type="button" class="subhead-item-act-btn" data-subhead-item-action="add-node" title="Add node to adjust line">
+                        <i class="fas fa-bezier-curve"></i><span>Add Node</span>
+                    </button>
+            ` : '';
+
             if (actionsContainer) {
                 actionsContainer.innerHTML = `
+                    ${addNodeHtml}
                     <button type="button" class="subhead-item-act-btn" data-subhead-item-action="copy" title="Copy item or selection">
                         <i class="fas fa-copy"></i><span>Copy</span>
                     </button>
@@ -4704,8 +4920,7 @@
 
     function syncTakeoffFromCanvasSnapshot(snapshot, options = {}) {
         if (!snapshot || !Array.isArray(snapshot.layers)) return;
-        const estimateId = String(snapshot.estimateKey || snapshot.estimate_key || '');
-        if (!estimateId || estimateId !== activeEstimateId()) return;
+        const estimateId = activeEstimateId();
         const doc = activeDrawingDoc();
         const documentId = String(snapshot.drawingId || snapshot.drawing_id || doc?.id || 'active');
         takeoffState.canvasSnapshots[`${estimateId}:${documentId}`] = {
@@ -4715,8 +4930,10 @@
             updatedAt: Date.now()
         };
         snapshot.layers.forEach(remote => {
-            const layer = allLayers().find(row => layerBelongsToEstimate(row, estimateId)
-                && String(row.id) === String(remote.id || remote.layerId));
+            const remoteId = String(remote.id || remote.layerId || '');
+            const layer = findLayer(remoteId) || allLayers().find(row => String(row.id) === remoteId
+                || String(row.client_uid || '') === remoteId
+                || (layerBelongsToEstimate(row, estimateId) && (String(row.id) === remoteId || String(row.client_uid || '') === remoteId)));
             if (!layer) return;
             layer.shapes = remote.shapes || [];
             layer.takeoffObjects = remote.shapes || [];
@@ -4733,11 +4950,14 @@
         applyAggregatedCanvasQuantities();
         if (snapshot.activeLayerId && findLayer(snapshot.activeLayerId)) {
             takeoffState.activeLayerId = snapshot.activeLayerId;
+        } else if (snapshot.activeLayerId === null || snapshot.activeLayerId === '') {
+            takeoffState.activeLayerId = null;
         }
         if (!options.suppressEstimatingSync) saveTakeoffState();
         renderTakeoffPanel();
         renderViewerLayersPopover();
         renderActiveLayerToolbar();
+        updateSubheadSelectedItem();
     }
 
     function applyAggregatedCanvasQuantities() {
@@ -4766,9 +4986,13 @@
             // Preserve its persisted quantity until its drawing is hydrated;
             // overwriting it here made Count/Part items disappear while linear
             // layers on the active sheet continued to calculate normally.
-            if (!totals.has(String(layer.id))) return;
+            const idKey = String(layer.id);
+            const uidKey = String(layer.client_uid || '');
+            const hasTotal = totals.has(idKey) || (uidKey && totals.has(uidKey));
+            if (!hasTotal) return;
             const base = Number(layer.baseQuantity || 0);
-            layer.quantity = base + totals.get(String(layer.id));
+            const totalVal = totals.has(idKey) ? totals.get(idKey) : totals.get(uidKey);
+            layer.quantity = base + totalVal;
         });
     }
 
@@ -4866,6 +5090,9 @@
         selectionState.selectedGroupIds = [];
         selectionState.selectedLayerIds = [];
         selectionState.selectedObjectIds = [];
+        selectionState.selectedRuler = null;
+        selectionState.selectedNote = null;
+        selectionState.selectedObjectType = null;
         callEditor('projectTakeoffClearSelection');
         callEditor('projectTakeoffClearActiveLayer');
         renderTakeoffPanel();
@@ -5304,9 +5531,11 @@
             callEditor('clearPlacementTool');
             callEditor('projectTakeoffSetTool', command === 'pan' ? 'pan' : 'select');
             setActiveTool(command);
-            // Fabric has no independent pan mode here. Konva owns navigation
-            // and mutually excludes object dragging while the hand is active.
             callEditor('setMode', 'smart');
+            if (command === 'smart') {
+                clearActiveTakeoffLayer(true);
+                clearAllSelections();
+            }
             document.querySelector('.pro-canvas-shell')?.classList.toggle('is-panning', command === 'pan');
             return;
         }
@@ -5316,15 +5545,28 @@
             count: 'smart',
             linear: 'measure',
             area: 'draw',
-            measure: 'measure',
-            calibrate: 'cal'
+            calibrate: 'cal',
+            text: 'text',
+            note: 'text',
+            cloud: 'cloud',
+            stamp: 'stamp'
         };
-        if (modeMap[command]) {
-            callEditor('setMode', modeMap[command]);
+        if (['measure', 'calibrate', 'cloud', 'pin', 'freehand', 'stamp', 'text', 'note'].includes(command)) {
+            clearActiveTakeoffLayer(true);
+            clearAllSelections();
+            callEditor('projectTakeoffClearSelection');
+        }
+        if (command === 'measure') {
+            callEditor('projectTakeoffSetTool', 'measure');
+            callEditor('setMode', 'measure');
             setActiveTool(command);
-            if (command === 'calibrate') openScalePanel('manual');
-            if (command === 'measure') showPrepared("This tool measures distances, but doesn't add to a takeoff. To perform a takeoff, click Add Takeoff in top left corner.");
-            if ((command === 'measure' || command === 'linear' || command === 'area') && !hasScaleSet()) openScalePanel();
+            showPrepared("Ruler active. Click and drag or click two points to measure.", "info");
+            return;
+        }
+        if (command === 'calibrate') {
+            callEditor('setMode', 'cal');
+            setActiveTool(command);
+            openScalePanel('manual');
             return;
         }
         if (command === 'multi-select') {
@@ -5344,14 +5586,15 @@
         }
         if (command === 'freehand') {
             callEditor('projectTakeoffSetTool', 'freehand');
-            callEditor('setMode', 'freehand');
+            callEditor('setMode', 'draw');
             setActiveTool(command);
             return;
         }
         if (command === 'pin') {
-            const added = callEditor('projectTakeoffSetTool', 'pin') || callEditor('setMode', 'pin');
+            callEditor('projectTakeoffSetTool', 'select');
+            callEditor('addPin');
             setActiveTool(command);
-            if (!added) showPrepared('Click the drawing to place a reference pin.');
+            showPrepared('Click the drawing to place a reference pin.');
             return;
         }
         if (command === 'text') {
@@ -5378,7 +5621,7 @@
             return;
         }
         if (command === 'undo') return undoTakeoff();
-        if (command === 'redo') return callEditor('redo');
+        if (command === 'redo') return redoTakeoff();
         if (command === 'delete') return runSelectionAction('delete');
         if (command === 'more') return toggleMoreToolsPanel();
         if (command === 'transform') {
@@ -5435,14 +5678,26 @@
         }
     }
 
-    function showPrepared(command) {
+    function showPrepared(command, type = 'info') {
+        const text = String(command || '').includes('.') || String(command || '').includes(' ') ? command : `${command.replace('-', ' ')} is ready to connect.`;
+        const frame = $('takeoffFrame') || document.querySelector('iframe#takeoffFrame');
+        if (frame && frame.contentWindow) {
+            try {
+                frame.contentWindow.postMessage({ type: 'editor-show-toast', message: text, toastType: type }, '*');
+                return;
+            } catch (_) {}
+        }
+
         const old = document.querySelector('.toast-lite');
         if (old) old.remove();
         const toast = document.createElement('div');
         toast.className = 'toast-lite';
         toast.setAttribute('role', 'status');
         toast.setAttribute('aria-live', 'polite');
-        toast.textContent = command.includes('.') ? command : `${command.replace('-', ' ')} is ready to connect.`;
+        toast.style.cssText = 'position:fixed !important; top:16px !important; bottom:auto !important; left:50% !important; right:auto !important; transform:translateX(-50%) !important; z-index:999999 !important; border-radius:9999px !important; padding:4px 14px !important; height:28px !important; font-size:12px !important; display:inline-flex !important; align-items:center !important; gap:7px !important; pointer-events:none !important; white-space:nowrap !important;';
+        const iconClass = type === 'error' ? 'fa-circle-exclamation' : (type === 'success' ? 'fa-circle-check' : 'fa-info-circle');
+        const iconColor = type === 'error' ? '#ef4444' : (type === 'success' ? '#22c55e' : '#38bdf8');
+        toast.innerHTML = `<i class="fas ${iconClass}" style="color:${iconColor}; font-size:12px; margin-right:4px;"></i><span>${esc(text)}</span>`;
         document.body.appendChild(toast);
         setTimeout(() => toast.remove(), 2400);
     }
@@ -6162,6 +6417,7 @@
             }
             if (event.data?.type === 'project-takeoff-selection') {
                 const payload = event.data.payload || {};
+                selectionState.selectedObjectType = payload.objectType || payload.type || null;
                 setSelectedObjects(payload.ids || payload.selectedObjectIds || [], payload.layerId || null);
                 if (payload.layerId && findLayer(payload.layerId)) {
                     if (payload.activateLayer === true) {
@@ -6185,10 +6441,11 @@
                 const reportedTool = map[payload.tool] || payload.tool || 'smart';
                 const explicitPanActive = viewerState.activeTool === 'pan'
                     && document.querySelector('.pro-canvas-shell')?.classList.contains('is-panning');
-                const annotationPlacementActive = viewerState.activeTool === 'cloud' || viewerState.activeTool === 'text';
+                const protectedActiveTools = ['cloud', 'text', 'note', 'measure', 'freehand', 'pin'];
+                const annotationPlacementActive = protectedActiveTools.includes(viewerState.activeTool);
                 // The editor implements hand/pan on top of its internal smart
                 // mode, so its `smart` report must not visually reselect Pointer
-                // while the parent is actively panning.
+                // while the parent is actively panning or using protected tools.
                 setActiveTool(reportedTool === 'smart' && annotationPlacementActive
                     ? viewerState.activeTool
                     : (explicitPanActive && reportedTool === 'smart' ? 'pan' : reportedTool));
@@ -6198,6 +6455,29 @@
             if (event.data?.type === 'project-annotation-tool-state') {
                 if (event.source !== takeoffWindow()) return;
                 setActiveTool(event.data?.payload?.tool || 'smart');
+                return;
+            }
+            if (event.data?.type === 'project-takeoff-ruler-selected') {
+                const payload = event.data.payload || {};
+                selectionState.selectedRuler = payload.selected ? payload : null;
+                updateSubheadSelectedItem();
+                return;
+            }
+            if (event.data?.type === 'project-takeoff-note-selected') {
+                const payload = event.data.payload || {};
+                selectionState.selectedNote = payload.selected ? payload : null;
+                updateSubheadSelectedItem();
+                return;
+            }
+            if (event.data?.type === 'project-takeoff-cloud-selected') {
+                const payload = event.data.payload || event.data || {};
+                selectionState.selectedCloud = payload.selected ? payload : null;
+                updateSubheadSelectedItem();
+                return;
+            }
+            if (event.data?.type === 'project-takeoff-clear-active-layer') {
+                clearActiveTakeoffLayer(true);
+                clearAllSelections();
                 return;
             }
             if (event.data?.type === 'project-takeoff-pan-state') {
@@ -6449,6 +6729,17 @@
             });
         }
 
+        const controlsDockBtn = $('takeoffControlsDockToggle');
+        const controlsPanel = document.querySelector('.pro-floating-controls');
+        if (controlsDockBtn && controlsPanel) {
+            const savedControlsDock = localStorage.getItem('takeoff.floatingControlsDock');
+            if (savedControlsDock === 'left') controlsPanel.classList.add('is-docked-left');
+            controlsDockBtn.addEventListener('click', () => {
+                const isLeft = controlsPanel.classList.toggle('is-docked-left');
+                localStorage.setItem('takeoff.floatingControlsDock', isLeft ? 'left' : 'right');
+            });
+        }
+
         $('takeoffCompareBtn')?.addEventListener('click', () => {
             if (typeof window.showTakeoffToast === 'function') {
                 window.showTakeoffToast('Drawing comparison feature coming soon.');
@@ -6618,7 +6909,16 @@
             }
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
                 event.preventDefault();
-                undoTakeoff();
+                if (event.shiftKey) {
+                    redoTakeoff();
+                } else {
+                    undoTakeoff();
+                }
+                return;
+            }
+            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {
+                event.preventDefault();
+                redoTakeoff();
                 return;
             }
             if (event.code === 'Space' && !event.repeat && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {

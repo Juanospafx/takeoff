@@ -3083,14 +3083,47 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 
 .toast-lite {
     position: fixed;
-    right: 18px;
-    bottom: 18px;
-    z-index: 3000;
-    background: #18212f;
-    color: #fff;
-    border-radius: 8px;
-    padding: 10px 12px;
-    box-shadow: 0 18px 48px rgba(15, 23, 42, .24);
+    top: 16px;
+    left: 50%;
+    transform: translateX(-50%);
+    z-index: 999999;
+    display: inline-flex;
+    align-items: center;
+    gap: 7px;
+    background: rgba(255, 255, 255, 0.96);
+    backdrop-filter: blur(8px);
+    -webkit-backdrop-filter: blur(8px);
+    color: #0f172a;
+    border: 1px solid rgba(0, 0, 0, 0.12);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06);
+    border-radius: 9999px;
+    padding: 4px 14px;
+    height: 28px;
+    font-size: 12px;
+    font-weight: 500;
+    line-height: 1.3;
+    pointer-events: none;
+    white-space: nowrap;
+    animation: toastLiteFadeIn 0.2s ease-out;
+}
+
+[data-theme="dark"] .toast-lite,
+body.theme-dark .toast-lite {
+    background: rgba(15, 23, 42, 0.94);
+    color: #f8fafc;
+    border: 1px solid rgba(255, 255, 255, 0.14);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.36);
+}
+
+@keyframes toastLiteFadeIn {
+    from {
+        opacity: 0;
+        transform: translate(-50%, -6px);
+    }
+    to {
+        opacity: 1;
+        transform: translate(-50%, 0);
+    }
 }
 
 [data-theme="dark"] .workspace-shell,
