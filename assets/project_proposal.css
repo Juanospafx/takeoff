@@ -31,29 +31,44 @@
 }
 
 .proposal-settings-head {
-    min-height: 68px;
-    padding: 14px 16px;
+    height: 40px;
+    min-height: 40px;
+    max-height: 40px;
+    padding: 0 12px;
     display: flex;
     align-items: center;
     justify-content: space-between;
-    gap: 12px;
+    gap: 10px;
     border-bottom: 1px solid #d8e0ea;
     background: #fff;
+    box-sizing: border-box;
+}
+
+.proposal-settings-head > div {
+    display: flex;
+    align-items: center;
+    gap: 8px;
 }
 
 .proposal-settings-head h2 {
     margin: 0;
-    font-size: 16px;
-    font-weight: 800;
-    color: #172033;
+    font-size: 13px !important;
+    font-weight: 700 !important;
+    font-family: 'Outfit', sans-serif !important;
+    color: var(--text-main, #0f172a) !important;
+    letter-spacing: -0.01em !important;
+    line-height: 1.2 !important;
 }
 
 .proposal-settings-head span {
-    display: block;
-    margin-top: 2px;
-    color: #667085;
-    font-size: 12px;
-    font-weight: 700;
+    display: inline-block;
+    margin: 0;
+    color: var(--text-muted, #64748b);
+    font-size: 11px;
+    font-weight: 500;
+    background: rgba(0, 0, 0, 0.05);
+    padding: 1px 6px;
+    border-radius: 4px;
 }
 
 .proposal-settings-scroll {
@@ -69,20 +84,22 @@
 }
 
 .proposal-export-btn {
-    height: 36px;
+    height: 28px;
     border: 0;
-    border-radius: 6px;
-    padding: 0 12px;
+    border-radius: 5px;
+    padding: 0 10px;
     display: inline-flex;
     align-items: center;
-    gap: 8px;
-    background: #f97316;
+    gap: 6px;
+    background: var(--primary, #fb5a3a);
     color: #fff;
-    font-weight: 800;
+    font-size: 11.5px;
+    font-weight: 600;
     box-shadow: 0 1px 2px rgba(15, 23, 42, .12);
+    cursor: pointer;
 }
 
-.proposal-export-btn:hover { background: #ea580c; }
+.proposal-export-btn:hover { background: var(--primary-hover, #e14e32); }
 
 .proposal-export-menu {
     position: absolute;
@@ -174,7 +191,7 @@
     transition: transform .18s ease;
 }
 
-.proposal-switch input:checked + .proposal-slider { background: #1677c7; }
+.proposal-switch input:checked + .proposal-slider { background: var(--primary, #fb5a3a); }
 .proposal-switch input:checked + .proposal-slider::after { transform: translateX(16px); }
 
 .proposal-select-row select {
@@ -487,7 +504,12 @@
 [data-theme="dark"] .proposal-customer-title,
 [data-theme="dark"] .proposal-export-menu button,
 [data-theme="dark"] .proposal-feature-banner button {
-    color: #f8fafc;
+    color: var(--text-main, #ffffff) !important;
+}
+
+[data-theme="dark"] .proposal-settings-head span {
+    background: rgba(255, 255, 255, 0.08);
+    color: #94a3b8 !important;
 }
 
 [data-theme="dark"] .proposal-settings-head span,

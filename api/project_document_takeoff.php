@@ -41,10 +41,28 @@ try {
         echo json_encode(['success' => false, 'message' => 'Method not allowed.']);
         exit;
     }
+    // If a multipart POST was sent but both $_POST and $_FILES are empty,
+    // PHP dropped the payload because it exceeded post_max_size.
+    $isMultipart = isset($_SERVER['CONTENT_TYPE']) && stripos($_SERVER['CONTENT_TYPE'], 'multipart/form-data') !== false;
+    if ($isMultipart && empty($_POST) && empty($_FILES) && isset($_SERVER['CONTENT_LENGTH']) && (int)$_SERVER['CONTENT_LENGTH'] > 0) {
+        takeoff_json_error(413, 'POST_TOO_LARGE', 'The uploaded file exceeds the server upload limit.');
+    }
+
     $body = json_decode(file_get_contents('php://input'), true) ?: [];
     $projectValue = $_POST['project_id'] ?? ($body['project_id'] ?? null);
     $projectId = is_numeric($projectValue) ? (int)$projectValue : 0;
     if ($projectId < 1) takeoff_json_error(422, 'INVALID_PROJECT', 'A valid project is required.');
+
+    if (isset($_FILES['file']) && !empty($_FILES['file']['error']) && $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
+        $uploadErr = (int)$_FILES['file']['error'];
+        if ($uploadErr === UPLOAD_ERR_INI_SIZE || $uploadErr === UPLOAD_ERR_FORM_SIZE) {
+            takeoff_json_error(413, 'FILE_TOO_LARGE', 'The uploaded file exceeds the maximum allowed file size.');
+        } elseif ($uploadErr === UPLOAD_ERR_PARTIAL) {
+            takeoff_json_error(400, 'UPLOAD_PARTIAL', 'The upload was interrupted. Please try again.');
+        } else {
+            takeoff_json_error(500, 'UPLOAD_FAILED', 'Failed to upload file (Error code: ' . $uploadErr . ').');
+        }
+    }
 
     if (!empty($_FILES['file']) && is_uploaded_file($_FILES['file']['tmp_name'])) {
         $original = basename((string)$_FILES['file']['name']);

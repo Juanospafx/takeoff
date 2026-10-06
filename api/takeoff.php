@@ -699,6 +699,8 @@ try {
             $pixelsPerUnit = n($input['pixels_per_unit'] ?? 0);
             $scaleName = trim((string)($input['scale_name'] ?? 'Custom')) ?: 'Custom';
             $estimateKey = trim((string)($input['estimate_key'] ?? ''));
+            $applyToAll = !empty($input['apply_to_all']);
+            $pageCount = max(1, i($input['page_count'] ?? 1, 1));
             if ($drawingId <= 0 || $pixelsPerUnit <= 0) out_json(['status' => 'error', 'msg' => 'drawing_id and a positive pixels_per_unit are required'], 422);
             if ($estimateKey === '') out_json(['status' => 'error', 'msg' => 'estimate_key is required'], 422);
             $projectId = project_id_for_file($pdo, $drawingId, i($input['project_id'] ?? 0));
@@ -708,7 +710,13 @@ try {
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)
                  ON DUPLICATE KEY UPDATE project_id=VALUES(project_id), scale_name=VALUES(scale_name), pixels_per_unit=VALUES(pixels_per_unit), unit=VALUES(unit), calibration_json=VALUES(calibration_json), updated_by=VALUES(updated_by), updated_at=CURRENT_TIMESTAMP"
             );
-            $stmt->execute([$projectId ?: null, $drawingId, $pageNumber, $scaleName, $pixelsPerUnit, $input['unit'] ?? 'ft', json_value($input['calibration_json'] ?? null), $userId, $userId]);
+            if ($applyToAll && $pageCount > 1) {
+                for ($p = 1; $p <= $pageCount; $p++) {
+                    $stmt->execute([$projectId ?: null, $drawingId, $p, $scaleName, $pixelsPerUnit, $input['unit'] ?? 'ft', json_value($input['calibration_json'] ?? null), $userId, $userId]);
+                }
+            } else {
+                $stmt->execute([$projectId ?: null, $drawingId, $pageNumber, $scaleName, $pixelsPerUnit, $input['unit'] ?? 'ft', json_value($input['calibration_json'] ?? null), $userId, $userId]);
+            }
             $stmt = $pdo->prepare("SELECT project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_sheet_scales WHERE drawing_id = ? AND page_number = ? LIMIT 1");
             $stmt->execute([$drawingId, $pageNumber]);
             $rows = decode_json_fields(array_filter([$stmt->fetch(PDO::FETCH_ASSOC)]), ['calibration_json']);
