@@ -6,7 +6,7 @@ on:
   workflow_dispatch:
 
 concurrency:
-  group: ftp-deploy-${{ github.repository }}-${{ github.ref }}
+  group: takeoff-production
   cancel-in-progress: false
 
 jobs:
@@ -50,6 +50,7 @@ jobs:
           # Verify critical runtime paths are present in artifact
           test -d "$ARTIFACT_DIR/api"
           test -d "$ARTIFACT_DIR/core"
+          test -d "$ARTIFACT_DIR/assets"
           test -f "$ARTIFACT_DIR/bin/dispatch-won-project-outbox.php"
 
           echo "Deployment artifact generated successfully."
