@@ -34,5 +34,10 @@ coverage/
 deploy_artifact/
 deploy_artifact*/
 harness/scratch/
-*.sql
+# Database dumps and backups (protects dumps without hiding legitimate migrations)
 *.dump
+*.sql.bak
+*.sql.backup
+*.sql.gz
+dumps/
+backups/

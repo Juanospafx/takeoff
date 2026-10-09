@@ -6,13 +6,13 @@ declare(strict_types=1);
  *
  * Verifies:
  * 1. Deploy triggers: push main only + workflow_dispatch (manual safe trigger).
- * 2. Concurrency configuration preventing concurrent deployments without canceling active runs.
+ * 2. Concurrency configuration with fixed takeoff-production group (no github.ref) and cancel-in-progress: false.
  * 3. FTP-Deploy-Action publishes a dedicated artifact directory, not `./`.
  * 4. Artifact creation excludes non-production and sensitive files (.git, .github, .env, tests, docs, db, harness, etc.).
- * 5. Runtime dependencies remain included (api/, core/, bin/dispatch-won-project-outbox.php, assets).
+ * 5. Runtime dependencies remain physically verified (api/, core/, assets, bin/dispatch-won-project-outbox.php).
  * 6. FTP/21 risk documentation and retention without FTPS unverified changes.
  * 7. Secrets hygiene: no HMAC secret exposure, no FTP credentials leaked outside deploy action step.
- * 8. .gitignore protections for sensitive and local transient artifacts.
+ * 8. .gitignore protections for sensitive artifacts, protecting dumps/backups without global *.sql hiding migrations.
  */
 
 function runDeploymentWorkflowContractTests(): void
@@ -44,9 +44,20 @@ function runDeploymentWorkflowContractTests(): void
     }
 
     // 3. Acceptance criteria: Concurrency configuration
-    // Concurrency group per repository/environment, cancel-in-progress: false
-    if (!preg_match('/concurrency:\s*\n\s+group:\s*([^\n]+)\n\s+cancel-in-progress:\s*false/m', $deployYml)) {
-        throw new RuntimeException("FAIL: Concurrency group and cancel-in-progress: false must be configured to prevent overlapping deploys without killing in-flight deploys.");
+    // Concurrency uses fixed group takeoff-production without github.ref and cancel-in-progress: false
+    if (!preg_match('/concurrency:\s*\n\s+group:\s*([^\n]+)\n\s+cancel-in-progress:\s*([^\n]+)/m', $deployYml, $concurrencyMatches)) {
+        throw new RuntimeException("FAIL: Concurrency group and cancel-in-progress must be configured.");
+    }
+    $concurrencyGroup = trim($concurrencyMatches[1], " \t'\"");
+    $cancelInProgress = trim($concurrencyMatches[2], " \t'\"");
+    if ($concurrencyGroup !== 'takeoff-production') {
+        throw new RuntimeException("FAIL: Concurrency group must be fixed 'takeoff-production', found '{$concurrencyGroup}'.");
+    }
+    if (str_contains($concurrencyGroup, 'github.ref')) {
+        throw new RuntimeException("FAIL: Concurrency group must not contain github.ref.");
+    }
+    if ($cancelInProgress !== 'false') {
+        throw new RuntimeException("FAIL: Concurrency cancel-in-progress must be false.");
     }
 
     // 4. Acceptance criteria: Build artifact directory and FTP-Deploy-Action publishes that directory, not ./
@@ -80,6 +91,7 @@ function runDeploymentWorkflowContractTests(): void
     $runtimePaths = [
         $repoRoot . '/api',
         $repoRoot . '/core',
+        $repoRoot . '/assets',
         $repoRoot . '/bin/dispatch-won-project-outbox.php',
     ];
     foreach ($runtimePaths as $path) {
@@ -88,9 +100,17 @@ function runDeploymentWorkflowContractTests(): void
         }
     }
 
-    // In deploy.yml, ensure the build step verifies existence of api, core, and dispatch-won-project-outbox.php
-    if (!str_contains($deployYml, 'api') || !str_contains($deployYml, 'core') || !str_contains($deployYml, 'dispatch-won-project-outbox.php')) {
-        throw new RuntimeException("FAIL: deploy.yml must verify inclusion of api, core, and bin/dispatch-won-project-outbox.php in the artifact.");
+    // In deploy.yml, ensure the build step physically verifies existence of api, core, assets, and bin/dispatch-won-project-outbox.php
+    $requiredArtifactChecks = [
+        'test -d "$ARTIFACT_DIR/api"',
+        'test -d "$ARTIFACT_DIR/core"',
+        'test -d "$ARTIFACT_DIR/assets"',
+        'test -f "$ARTIFACT_DIR/bin/dispatch-won-project-outbox.php"',
+    ];
+    foreach ($requiredArtifactChecks as $check) {
+        if (!str_contains($deployYml, $check)) {
+            throw new RuntimeException("FAIL: deploy.yml must physically verify artifact path with '{$check}'.");
+        }
     }
 
     // 7. Acceptance criteria: Port 21 (FTP) is preserved with documentation of security risk; no FTPS forced without provider evidence
@@ -144,6 +164,19 @@ function runDeploymentWorkflowContractTests(): void
     foreach ($forbiddenGitignorePatterns as $patternRegex) {
         if (preg_match($patternRegex, $gitignore)) {
             throw new RuntimeException("FAIL: .gitignore must not ignore critical runtime directories ({$patternRegex}).");
+        }
+    }
+
+    // Ensure .gitignore does NOT use global *.sql pattern, preserving legitimate migrations
+    if (preg_match('/^\s*\/?\*\.sql\s*$/m', $gitignore)) {
+        throw new RuntimeException("FAIL: .gitignore must not use global *.sql pattern; it hides legitimate migrations.");
+    }
+
+    // Ensure .gitignore protects database dumps and backups without hiding legitimate migrations
+    $dumpBackupPatterns = ['dump', 'backup'];
+    foreach ($dumpBackupPatterns as $pattern) {
+        if (stripos($gitignore, $pattern) === false) {
+            throw new RuntimeException("FAIL: .gitignore must protect database {$pattern} files.");
         }
     }
 
