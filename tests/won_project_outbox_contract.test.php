@@ -2,31 +2,173 @@
 declare(strict_types=1);
 
 /**
- * Contract Tests: WonProjectOutboxDispatcher, Configuration, HMAC, and Dispatching
- *
- * Freezes the consumer/dispatcher interfaces:
- *   WonProjectIntegrationConfig::load(): WonProjectIntegrationConfig
- *   WonProjectOutboxDispatcher::dispatchBatch(int $limit = 50): array
+ * Contract Tests: WonProjectOutboxDispatcher, WonProjectIntegrationConfig, WonProjectHmacClient
  *
  * Verifies:
- *   - Config loading, validation, precedence, and HTTPS enforcement
- *   - HMAC SHA-256 signing contract and request headers compatible with Electroplan
- *   - Outbox lifecycle: pending -> locked -> delivered
- *   - Transient errors, attempt backoff policy, and exponential backoff
- *   - Terminal failure handling (max attempts reached -> failed status)
- *   - Concurrent dispatch locking (avoid duplicate in-flight dispatch)
- *   - Feature flag disabled behavior (export_enabled = false skips dispatch)
+ *   - Configuration loading, safe defaults (export disabled), precedence (env > private file > defaults)
+ *   - Rejection of private config file within repository or doc root
+ *   - HTTPS enforcement for endpoint, rejecting HTTP, missing host, or URL credentials
+ *   - Timeout validation (positive integer) and secret presence requirement
+ *   - HMAC SHA-256 signing contract matches canonical test vector using sign() and transport callable
+ *   - HTTP method POST, exact path, timestamp, raw body, headers: Content-Type, X-Client-Id, X-Timestamp, X-Signature
+ *   - No network, curl, or redirect dependency
+ *   - OutboxDispatcher: feature flag disabled bypasses dispatch without querying or preparing locks
+ *   - Backoff delay formula: delay = min(3600, 30 * (2 ^ attempts))
+ *   - Retry operator restricted strictly to concrete positive record IDs
+ *   - Terminal failure on unrecoverable HTTP status (400, 401, 403, 409, 422) or max attempts (5)
+ *   - Transient failure (5xx, network error) increments attempts, schedules next_attempt_at, status pending
+ *   - Error sanitization: secrets, endpoints, tokens, SQL statements redacted
+ *   - GET_LOCK / RELEASE_LOCK and concurrent lease locking verified via controlled PDO double
  *
- * Uses SQLite in-memory and structural inspection. No external network or Inventory calls.
+ * Runs without PDO drivers (pdo_sqlite / pdo_mysql), external network, curl, or MariaDB.
  */
 
 namespace Brightronix\Takeoff\Tests\Contracts;
 
 use PDO;
+use PDOStatement;
 use ReflectionClass;
-use ReflectionMethod;
 use ReflectionNamedType;
+use ReturnTypeWillChange;
+use RuntimeException;
+use InvalidArgumentException;
 use Throwable;
+use WonProjectIntegrationConfig;
+use WonProjectHmacClient;
+use WonProjectOutboxDispatcher;
+
+require_once __DIR__ . '/../core/config/WonProjectIntegrationConfig.php';
+require_once __DIR__ . '/../core/services/WonProjectHmacClient.php';
+require_once __DIR__ . '/../core/services/WonProjectOutboxDispatcher.php';
+
+// -----------------------------------------------------------------------------
+// Controlled In-Memory Test Doubles for Outbox Tests
+// -----------------------------------------------------------------------------
+
+class OutboxTestDoublePdoStatement extends PDOStatement
+{
+    private array $rows;
+    private int $cursor = 0;
+    private int $rowCount;
+    public ?array $boundParams = null;
+    public ?string $sql = null;
+    /** @var callable|null */
+    public $onExecute = null;
+
+    public function __construct(array $rows = [], int $rowCount = 0, ?string $sql = null)
+    {
+        $this->rows = $rows;
+        $this->rowCount = $rowCount > 0 ? $rowCount : count($rows);
+        $this->sql = $sql;
+    }
+
+    #[ReturnTypeWillChange]
+    public function execute(?array $params = null): bool
+    {
+        $this->cursor = 0;
+        $this->boundParams = $params;
+        if ($this->onExecute !== null) {
+            ($this->onExecute)($params, $this);
+        }
+        return true;
+    }
+
+    #[ReturnTypeWillChange]
+    public function fetch(int $mode = PDO::FETCH_DEFAULT, int $cursorOrientation = PDO::FETCH_ORI_NEXT, int $cursorOffset = 0): mixed
+    {
+        if ($this->cursor < count($this->rows)) {
+            return $this->rows[$this->cursor++];
+        }
+        return false;
+    }
+
+    #[ReturnTypeWillChange]
+    public function fetchAll(int $mode = PDO::FETCH_DEFAULT, mixed ...$args): array
+    {
+        $res = array_slice($this->rows, $this->cursor);
+        $this->cursor = count($this->rows);
+        return $res;
+    }
+
+    #[ReturnTypeWillChange]
+    public function fetchColumn(int $column = 0): mixed
+    {
+        $row = $this->fetch();
+        if ($row === false) {
+            return false;
+        }
+        if (is_array($row)) {
+            $vals = array_values($row);
+            return $vals[$column] ?? false;
+        }
+        return $row;
+    }
+
+    #[ReturnTypeWillChange]
+    public function rowCount(): int
+    {
+        return $this->rowCount;
+    }
+}
+
+class OutboxTestDoublePdo extends PDO
+{
+    public array $log = [];
+    public array $executedStatements = [];
+    public string $driverName = 'mysql';
+    /** @var array<string, callable|OutboxTestDoublePdoStatement> */
+    public array $handlers = [];
+    public array $tableRows = [];
+
+    public function __construct(string $driverName = 'mysql')
+    {
+        $this->driverName = $driverName;
+    }
+
+    #[ReturnTypeWillChange]
+    public function getAttribute(int $attribute): mixed
+    {
+        if ($attribute === PDO::ATTR_DRIVER_NAME) {
+            return $this->driverName;
+        }
+        return null;
+    }
+
+    #[ReturnTypeWillChange]
+    public function prepare(string $query, array $options = []): OutboxTestDoublePdoStatement
+    {
+        $this->log[] = 'PREPARE: ' . $query;
+
+        foreach ($this->handlers as $pattern => $handler) {
+            if (stripos($query, $pattern) !== false) {
+                $stmt = is_callable($handler) ? $handler($query) : $handler;
+                $this->executedStatements[] = $stmt;
+                return $stmt;
+            }
+        }
+
+        $defaultStmt = new OutboxTestDoublePdoStatement([], 1, $query);
+        $this->executedStatements[] = $defaultStmt;
+        return $defaultStmt;
+    }
+
+    #[ReturnTypeWillChange]
+    public function query(string $query, ?int $fetchMode = null, mixed ...$fetchModeArgs): OutboxTestDoublePdoStatement|false
+    {
+        $stmt = $this->prepare($query);
+        $stmt->execute();
+        return $stmt;
+    }
+
+    public function whenQueryContains(string $pattern, callable|OutboxTestDoublePdoStatement $handler): void
+    {
+        $this->handlers[$pattern] = $handler;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Test Suite Runner
+// -----------------------------------------------------------------------------
 
 final class WonProjectOutboxContractTestRunner
 {
@@ -35,21 +177,30 @@ final class WonProjectOutboxContractTestRunner
     public function run(): int
     {
         echo "======================================================================\n";
-        echo "TEST SUITE: WonProject Outbox & Dispatcher Contract (TASK-0059)\n";
+        echo "TEST SUITE: WonProject Outbox & Dispatcher Contract\n";
         echo "======================================================================\n\n";
 
         $tests = [
             'testStructuralFreezeWonProjectIntegrationConfig' => 'Interface frozen: WonProjectIntegrationConfig::load()',
-            'testConfigPrecedenceAndDefaultsContract' => 'Configuration precedence and safe defaults frozen (5 approved variables)',
+            'testConfigPrecedenceAndDefaultsContract' => 'Configuration precedence: env > private file > defaults (export disabled by default)',
+            'testConfigRejectsPrivateConfigFileInsideRepository' => 'Configuration rejects private config file located inside repo or doc root',
+            'testConfigHttpsEnforcementAndCredentialRejection' => 'HTTPS enforcement: configuration rejects plain HTTP, missing host, or URL credentials',
+            'testConfigRequiresPositiveTimeoutAndSecretsWhenEnabled' => 'Configuration requires positive timeout, active key ID, and secret when enabled',
+            'testConfigCleanSanitizationDoesNotLeakSecrets' => 'Configuration toArray() and debugInfo() never leak HMAC secret material',
             'testStructuralFreezeWonProjectOutboxDispatcher' => 'Interface frozen: WonProjectOutboxDispatcher::dispatchBatch(int): array',
-            'testConfigHttpsEnforcement' => 'HTTPS enforcement: configuration rejects plain HTTP endpoints in production',
-            'testHmacSha256SignatureCalculationContract' => 'HMAC SHA-256 signature calculation matches canonical test vector',
-            'testHmacHeadersContract' => 'HMAC headers contract (Content-Type, X-Client-Id, X-Timestamp, X-Signature, X-Correlation-Id)',
-            'testOutboxLifecyclePendingToDelivered' => 'Outbox lifecycle: pending record is locked then delivered on HTTP 200/201',
-            'testTransientFailureIncrementsAttemptsAndAppliesBackoff' => 'Transient failure: attempts incremented and next_attempt_at scheduled with exponential backoff',
-            'testTerminalFailureTransitionsToFailedStatus' => 'Terminal failure: when attempt limit is exceeded, record transitions to failed',
-            'testConcurrentDispatchLockingPreventsDuplicateDispatch' => 'Concurrent locking: locked records are excluded from concurrent dispatch batches',
-            'testFeatureFlagDisabledBypassesBatchDispatch' => 'Feature flag: when export_enabled is false, dispatchBatch returns early with zero dispatches',
+            'testHmacSha256SignatureDeterministicVector' => 'HMAC SHA-256 canonical signature matches deterministic test vector with sign()',
+            'testHmacClientSendDispatchesHeadersAndExactRawBodyViaTransport' => 'HMAC Client sends required headers (X-Client-Id, X-Timestamp, X-Signature) and exact body without network',
+            'testHmacClientErrorSanitizationPreventsSecretLeaking' => 'HMAC Client redacts endpoints, secrets, tokens, and authorization headers from errors',
+            'testFeatureFlagDisabledBypassesBatchDispatch' => 'Feature flag: when export_enabled is false, dispatchBatch returns status disabled without queries',
+            'testBackoffDelayFormula' => 'Exponential backoff formula: delay = min(3600, 30 * (2 ^ attempts))',
+            'testOutboxLifecyclePendingToDelivered' => 'Outbox lifecycle: pending record transitions to delivered on HTTP 200/201 response',
+            'testTerminalFailureOn409OrMaxAttempts' => 'Terminal failure: unrecoverable HTTP 409 or 5 attempts transitions status to failed with next_attempt_at NULL',
+            'testTransientFailure5xxIncrementsAttemptsAndSchedulesRetry' => 'Transient failure: HTTP 503 increments attempts and schedules backoff with DB server clock (CURRENT_TIMESTAMP/DATE_ADD)',
+            'testConcurrentLockContractsGetLockAndReleaseLock' => 'Named lock contracts: GET_LOCK acquired before claim and RELEASE_LOCK guaranteed in finally',
+            'testLockNameDerivedFromDatabaseStableBoundedAndUnexposed' => 'Namespaced lock: derived from DATABASE(), stable, bounded <= 64 chars, unexposed cleartext name, identical at acquire/release',
+            'testTransientFailureSchedulesRetryWithSqliteClock' => 'Transient failure: SQLite branch schedules backoff with server clock datetime()',
+            'testMigrationSchemaAllowsNullNextAttemptAtForTerminalFailed' => 'Migration schema allows NULL next_attempt_at for terminal failure',
+            'testOperatorRetryFailedRequiresConcretePositiveId' => 'Operator retryFailed: requires positive record ID, resets status, attempts, error without mass retry',
         ];
 
         foreach ($tests as $method => $description) {
@@ -70,23 +221,14 @@ final class WonProjectOutboxContractTestRunner
                 'message' => 'Passed',
             ];
             echo "  [PASS] {$description}\n";
-        } catch (ExpectedRedException $e) {
-            $this->results[] = [
-                'name' => $method,
-                'description' => $description,
-                'status' => 'RED_EXPECTED',
-                'message' => $e->getMessage(),
-            ];
-            echo "  [RED - EXPECTED] {$description}\n";
-            echo "        Reason: {$e->getMessage()}\n";
         } catch (Throwable $e) {
             $this->results[] = [
                 'name' => $method,
                 'description' => $description,
-                'status' => 'FAIL_UNEXPECTED',
+                'status' => 'FAIL',
                 'message' => $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine(),
             ];
-            echo "  [FAIL - UNEXPECTED] {$description}\n";
+            echo "  [FAIL] {$description}\n";
             echo "        Error: {$e->getMessage()}\n";
         }
     }
@@ -94,29 +236,24 @@ final class WonProjectOutboxContractTestRunner
     private function printSummary(): int
     {
         $passed = 0;
-        $expectedRed = 0;
-        $unexpectedFail = 0;
+        $failed = 0;
 
         foreach ($this->results as $r) {
-            if ($r['status'] === 'PASS') $passed++;
-            elseif ($r['status'] === 'RED_EXPECTED') $expectedRed++;
-            else $unexpectedFail++;
+            if ($r['status'] === 'PASS') {
+                $passed++;
+            } else {
+                $failed++;
+            }
         }
 
         $total = count($this->results);
         echo "\n----------------------------------------------------------------------\n";
-        echo "SUMMARY: Total: {$total} | Passed: {$passed} | Expected Red: {$expectedRed} | Unexpected Fail: {$unexpectedFail}\n";
+        echo "SUMMARY: Total: {$total} | Passed: {$passed} | Failed: {$failed}\n";
         echo "----------------------------------------------------------------------\n";
 
-        if ($unexpectedFail > 0) {
-            echo "RESULT: FAIL (Unexpected regressions found)\n";
+        if ($failed > 0) {
+            echo "RESULT: FAIL (Regressions or broken contracts found)\n";
             return 1;
-        }
-
-        if ($expectedRed > 0) {
-            echo "RESULT: RED (EXPECTED) - Contract frozen. All functional failures are exclusively\n";
-            echo "        due to unintegrated future service implementation and schema migration.\n";
-            return 0;
         }
 
         echo "RESULT: GREEN (All tests passed)\n";
@@ -124,15 +261,13 @@ final class WonProjectOutboxContractTestRunner
     }
 
     // -------------------------------------------------------------------------
-    // Test Cases: Interface Freezing & Invariants
+    // Test Cases: Configuration & Security
     // -------------------------------------------------------------------------
 
     private function testStructuralFreezeWonProjectIntegrationConfig(): void
     {
         $className = 'WonProjectIntegrationConfig';
-        if (!class_exists($className)) {
-            throw new ExpectedRedException("Interface frozen: Class '{$className}' not found. Pending implementation in future task.");
-        }
+        $this->assertTrue(class_exists($className), "WonProjectIntegrationConfig class must exist");
 
         $ref = new ReflectionClass($className);
         $this->assertTrue($ref->hasMethod('load'), "WonProjectIntegrationConfig must declare static load() method");
@@ -142,90 +277,203 @@ final class WonProjectOutboxContractTestRunner
 
     private function testConfigPrecedenceAndDefaultsContract(): void
     {
-        // Freezes the five approved configuration variables:
-        // 1. WON_PROJECT_EXPORT_ENABLED (bool, default false)
-        // 2. WON_PROJECT_HMAC_ACTIVE_KEY_ID (string, default '')
-        // 3. WON_PROJECT_HMAC_ACTIVE_SECRET (string, default '')
-        // 4. ELECTROPLAN_WON_PROJECT_ENDPOINT (string, default '')
-        // 5. WON_PROJECT_REQUEST_TIMEOUT_SECONDS (int, default 30)
-        //
-        // Precedence:
-        // 1. Environment variables ($_ENV / getenv)
-        // 2. Optional private local configuration file
-        // 3. Safe defaults (disabled / export_enabled = false)
-        //
-        // Isolation: No external network calls, no Inventory System dependencies.
-
-        $approvedVariables = [
+        $vars = [
             'WON_PROJECT_EXPORT_ENABLED',
             'WON_PROJECT_HMAC_ACTIVE_KEY_ID',
             'WON_PROJECT_HMAC_ACTIVE_SECRET',
             'ELECTROPLAN_WON_PROJECT_ENDPOINT',
             'WON_PROJECT_REQUEST_TIMEOUT_SECONDS',
+            'WON_PROJECT_PRIVATE_CONFIG',
         ];
-        $this->assertCount(5, $approvedVariables, "Must define exactly 5 approved configuration variables");
 
-        // Safe defaults contract evaluation
-        $safeDefaults = [
-            'WON_PROJECT_EXPORT_ENABLED' => false,
-            'WON_PROJECT_HMAC_ACTIVE_KEY_ID' => '',
-            'WON_PROJECT_HMAC_ACTIVE_SECRET' => '',
-            'ELECTROPLAN_WON_PROJECT_ENDPOINT' => '',
-            'WON_PROJECT_REQUEST_TIMEOUT_SECONDS' => 30,
-        ];
-        $this->assertFalse($safeDefaults['WON_PROJECT_EXPORT_ENABLED'], "Safe default must have export_enabled deactivated");
+        // Clean env before test
+        $backup = [];
+        foreach ($vars as $v) {
+            $backup[$v] = $_ENV[$v] ?? null;
+            unset($_ENV[$v], $_SERVER[$v]);
+            putenv($v);
+        }
 
-        // Precedence resolution simulation
-        $resolveConfig = function (array $env, array $fileConfig, array $defaults): array {
-            $resolved = [];
-            foreach ($defaults as $name => $defaultVal) {
-                if (array_key_exists($name, $env) && $env[$name] !== null) {
-                    $resolved[$name] = $env[$name];
-                } elseif (array_key_exists($name, $fileConfig) && $fileConfig[$name] !== null) {
-                    $resolved[$name] = $fileConfig[$name];
+        $tempFile = null;
+        try {
+            // 1. Safe defaults when nothing is set
+            $cfgDefault = WonProjectIntegrationConfig::load();
+            $this->assertFalse($cfgDefault->isExportEnabled(), "Safe default must disable export");
+            $this->assertEquals(30, $cfgDefault->getTimeoutSeconds(), "Default timeout must be 30");
+            $this->assertEquals('', $cfgDefault->getHmacKeyId(), "Default key ID is empty");
+            $this->assertEquals('', $cfgDefault->getHmacSecret(), "Default secret is empty");
+            $this->assertEquals('', $cfgDefault->getEndpoint(), "Default endpoint is empty");
+
+            // 2. Private file outside repository
+            $tempDir = sys_get_temp_dir();
+            $tempFile = $tempDir . DIRECTORY_SEPARATOR . 'test_won_config_' . bin2hex(random_bytes(6)) . '.php';
+            file_put_contents($tempFile, "<?php return [
+                'WON_PROJECT_EXPORT_ENABLED' => true,
+                'WON_PROJECT_HMAC_ACTIVE_KEY_ID' => 'file-key-1',
+                'WON_PROJECT_HMAC_ACTIVE_SECRET' => 'file-secret-min-32-chars-length123',
+                'ELECTROPLAN_WON_PROJECT_ENDPOINT' => 'https://electroplan.test/api/won',
+                'WON_PROJECT_REQUEST_TIMEOUT_SECONDS' => 45,
+            ];");
+
+            $cfgFile = WonProjectIntegrationConfig::load($tempFile);
+            $this->assertTrue($cfgFile->isExportEnabled(), "File enables export");
+            $this->assertEquals('file-key-1', $cfgFile->getHmacKeyId(), "File provides key ID");
+            $this->assertEquals(45, $cfgFile->getTimeoutSeconds(), "File provides timeout");
+
+            // 3. Environment overrides private file (highest precedence)
+            $_ENV['WON_PROJECT_HMAC_ACTIVE_KEY_ID'] = 'env-override-key';
+            $_ENV['WON_PROJECT_REQUEST_TIMEOUT_SECONDS'] = '60';
+
+            $cfgEnv = WonProjectIntegrationConfig::load($tempFile);
+            $this->assertEquals('env-override-key', $cfgEnv->getHmacKeyId(), "Environment overrides file key ID");
+            $this->assertEquals(60, $cfgEnv->getTimeoutSeconds(), "Environment overrides file timeout");
+        } finally {
+            if ($tempFile !== null && file_exists($tempFile)) {
+                @unlink($tempFile);
+            }
+            foreach ($backup as $k => $v) {
+                if ($v !== null) {
+                    $_ENV[$k] = $v;
                 } else {
-                    $resolved[$name] = $defaultVal;
+                    unset($_ENV[$k], $_SERVER[$k]);
                 }
             }
-            return $resolved;
-        };
-
-        // Case 1: Defaults apply when neither env nor file is provided
-        $configDefault = $resolveConfig([], [], $safeDefaults);
-        $this->assertFalse($configDefault['WON_PROJECT_EXPORT_ENABLED'], "Defaults must disable export");
-
-        // Case 2: File overrides defaults
-        $configFile = $resolveConfig(
-            [],
-            [
-                'WON_PROJECT_EXPORT_ENABLED' => true,
-                'WON_PROJECT_HMAC_ACTIVE_KEY_ID' => 'file-key-id',
-            ],
-            $safeDefaults
-        );
-        $this->assertTrue($configFile['WON_PROJECT_EXPORT_ENABLED'], "File can enable export");
-        $this->assertEquals('file-key-id', $configFile['WON_PROJECT_HMAC_ACTIVE_KEY_ID'], "File provides active key ID");
-
-        // Case 3: Environment overrides file (highest precedence)
-        $configEnv = $resolveConfig(
-            ['WON_PROJECT_HMAC_ACTIVE_KEY_ID' => 'env-key-id'],
-            ['WON_PROJECT_HMAC_ACTIVE_KEY_ID' => 'file-key-id'],
-            $safeDefaults
-        );
-        $this->assertEquals('env-key-id', $configEnv['WON_PROJECT_HMAC_ACTIVE_KEY_ID'], "Environment must take precedence over file");
-
-        $className = 'WonProjectIntegrationConfig';
-        if (!class_exists($className)) {
-            throw new ExpectedRedException("WonProjectIntegrationConfig not yet implemented to test live configuration precedence.");
         }
     }
+
+    private function testConfigRejectsPrivateConfigFileInsideRepository(): void
+    {
+        $internalPaths = [
+            'core/config/private.php',
+            'api/private.php',
+            'contracts/private.php',
+            './tests/private.php',
+        ];
+
+        foreach ($internalPaths as $path) {
+            $threw = false;
+            try {
+                WonProjectIntegrationConfig::load($path);
+            } catch (InvalidArgumentException $e) {
+                $threw = true;
+                $this->assertTrue(str_contains(strtolower($e->getMessage()), 'outside'), "Must mention file must be outside repo/docroot");
+            }
+            $this->assertTrue($threw, "Must reject internal repo path: {$path}");
+        }
+
+        // Must reject non-php extensions
+        $nonPhp = sys_get_temp_dir() . DIRECTORY_SEPARATOR . 'config.json';
+        $threwExt = false;
+        try {
+            WonProjectIntegrationConfig::load($nonPhp);
+        } catch (InvalidArgumentException $e) {
+            $threwExt = true;
+            $this->assertTrue(str_contains(strtolower($e->getMessage()), 'php'), "Must require PHP extension");
+        }
+        $this->assertTrue($threwExt, "Must reject non-php configuration file");
+    }
+
+    private function testConfigHttpsEnforcementAndCredentialRejection(): void
+    {
+        $invalidEndpoints = [
+            'http://insecure.example.com/api/won' => 'Plain HTTP is rejected',
+            'https://user:pass@secure.example.com/api/won' => 'URL credentials in HTTPS are rejected',
+            'https://' => 'Missing host is rejected',
+            'ftp://files.example.com/api/won' => 'FTP scheme is rejected',
+        ];
+
+        foreach ($invalidEndpoints as $endpoint => $desc) {
+            $config = new WonProjectIntegrationConfig([
+                'WON_PROJECT_EXPORT_ENABLED' => true,
+                'WON_PROJECT_HMAC_ACTIVE_KEY_ID' => 'key-123',
+                'WON_PROJECT_HMAC_ACTIVE_SECRET' => 'secret-32-chars-long-string-value-here',
+                'ELECTROPLAN_WON_PROJECT_ENDPOINT' => $endpoint,
+                'WON_PROJECT_REQUEST_TIMEOUT_SECONDS' => 30,
+            ]);
+
+            $threw = false;
+            try {
+                $config->validate();
+            } catch (InvalidArgumentException $e) {
+                $threw = true;
+            }
+            $this->assertTrue($threw, "Endpoint must be rejected ({$desc}): {$endpoint}");
+        }
+
+        // Valid HTTPS endpoint passes validation
+        $validConfig = new WonProjectIntegrationConfig([
+            'WON_PROJECT_EXPORT_ENABLED' => true,
+            'WON_PROJECT_HMAC_ACTIVE_KEY_ID' => 'key-123',
+            'WON_PROJECT_HMAC_ACTIVE_SECRET' => 'secret-32-chars-long-string-value-here',
+            'ELECTROPLAN_WON_PROJECT_ENDPOINT' => 'https://electroplan.example.com/api/v1/won-projects',
+            'WON_PROJECT_REQUEST_TIMEOUT_SECONDS' => 30,
+        ]);
+        $validConfig->validate();
+        $this->assertEquals('https://electroplan.example.com/api/v1/won-projects', $validConfig->getEndpoint(), "Valid HTTPS endpoint accepted");
+    }
+
+    private function testConfigRequiresPositiveTimeoutAndSecretsWhenEnabled(): void
+    {
+        // 1. Missing secret
+        $noSecret = new WonProjectIntegrationConfig([
+            'WON_PROJECT_EXPORT_ENABLED' => true,
+            'WON_PROJECT_HMAC_ACTIVE_KEY_ID' => 'key-123',
+            'WON_PROJECT_HMAC_ACTIVE_SECRET' => '',
+            'ELECTROPLAN_WON_PROJECT_ENDPOINT' => 'https://example.com/api',
+            'WON_PROJECT_REQUEST_TIMEOUT_SECONDS' => 30,
+        ]);
+        $threw = false;
+        try {
+            $noSecret->validate();
+        } catch (InvalidArgumentException) {
+            $threw = true;
+        }
+        $this->assertTrue($threw, "Validation must reject enabled config without HMAC secret");
+
+        // 2. Non-positive timeout
+        $badTimeout = new WonProjectIntegrationConfig([
+            'WON_PROJECT_EXPORT_ENABLED' => true,
+            'WON_PROJECT_HMAC_ACTIVE_KEY_ID' => 'key-123',
+            'WON_PROJECT_HMAC_ACTIVE_SECRET' => 'secret-32-chars-long-string-value-here',
+            'ELECTROPLAN_WON_PROJECT_ENDPOINT' => 'https://example.com/api',
+            'WON_PROJECT_REQUEST_TIMEOUT_SECONDS' => 0,
+        ]);
+        $threwTimeout = false;
+        try {
+            $badTimeout->validate();
+        } catch (InvalidArgumentException) {
+            $threwTimeout = true;
+        }
+        $this->assertTrue($threwTimeout, "Validation must reject non-positive timeout");
+    }
+
+    private function testConfigCleanSanitizationDoesNotLeakSecrets(): void
+    {
+        $secretValue = 'top-secret-super-sensitive-signing-key-value';
+        $config = new WonProjectIntegrationConfig([
+            'WON_PROJECT_EXPORT_ENABLED' => true,
+            'WON_PROJECT_HMAC_ACTIVE_KEY_ID' => 'key-123',
+            'WON_PROJECT_HMAC_ACTIVE_SECRET' => $secretValue,
+            'ELECTROPLAN_WON_PROJECT_ENDPOINT' => 'https://example.com/api',
+            'WON_PROJECT_REQUEST_TIMEOUT_SECONDS' => 30,
+        ]);
+
+        $arr = $config->toArray();
+        $this->assertFalse(array_key_exists('WON_PROJECT_HMAC_ACTIVE_SECRET', $arr), "toArray() must omit HMAC secret");
+
+        $debug = $config->__debugInfo();
+        $this->assertFalse(array_key_exists('WON_PROJECT_HMAC_ACTIVE_SECRET', $debug), "__debugInfo() must omit HMAC secret");
+        $this->assertFalse(in_array($secretValue, $debug, true), "Secret must not appear anywhere in debug array");
+    }
+
+    // -------------------------------------------------------------------------
+    // Test Cases: HMAC Client
+    // -------------------------------------------------------------------------
 
     private function testStructuralFreezeWonProjectOutboxDispatcher(): void
     {
         $className = 'WonProjectOutboxDispatcher';
-        if (!class_exists($className)) {
-            throw new ExpectedRedException("Interface frozen: Class '{$className}' not found. Pending implementation in future task.");
-        }
+        $this->assertTrue(class_exists($className), "WonProjectOutboxDispatcher class must exist");
 
         $ref = new ReflectionClass($className);
         $this->assertTrue($ref->hasMethod('dispatchBatch'), "WonProjectOutboxDispatcher must declare dispatchBatch method");
@@ -233,345 +481,541 @@ final class WonProjectOutboxContractTestRunner
         $this->assertTrue($method->isPublic(), "dispatchBatch must be public");
 
         $params = $method->getParameters();
-        $this->assertGreaterThanOrEqual(0, count($params), "dispatchBatch may accept optional limit");
-        if (isset($params[0])) {
-            $pType = $params[0]->getType();
-            if ($pType instanceof ReflectionNamedType) {
-                $this->assertEquals('int', $pType->getName(), "First parameter of dispatchBatch must be int limit");
-            }
-        }
+        $this->assertGreaterThanOrEqual(1, count($params), "dispatchBatch accepts optional limit parameter");
     }
 
-    private function testConfigHttpsEnforcement(): void
+    private function testHmacSha256SignatureDeterministicVector(): void
     {
-        // HTTPS invariant: Production or staging dispatch endpoints MUST use HTTPS scheme.
-        $insecureUrl = 'http://api.brightronix.com/v1/won-projects';
-        $secureUrl = 'https://api.brightronix.com/v1/won-projects';
+        $secret = 'super-secret-hmac-key-minimum-32-chars-long';
+        $config = new WonProjectIntegrationConfig([
+            'WON_PROJECT_EXPORT_ENABLED' => true,
+            'WON_PROJECT_HMAC_ACTIVE_KEY_ID' => 'key-test',
+            'WON_PROJECT_HMAC_ACTIVE_SECRET' => $secret,
+            'ELECTROPLAN_WON_PROJECT_ENDPOINT' => 'https://electroplan.test/api/v1/integrations/takeoff/won-projects',
+            'WON_PROJECT_REQUEST_TIMEOUT_SECONDS' => 30,
+        ]);
 
-        $parsedInsecure = parse_url($insecureUrl);
-        $parsedSecure = parse_url($secureUrl);
+        $client = new WonProjectHmacClient($config);
 
-        $this->assertEquals('http', $parsedInsecure['scheme'] ?? null, "Parsed insecure URL scheme");
-        $this->assertEquals('https', $parsedSecure['scheme'] ?? null, "Parsed secure URL scheme");
-
-        $isHttpsOnly = function (string $url): bool {
-            $parts = parse_url($url);
-            return isset($parts['scheme']) && strtolower($parts['scheme']) === 'https';
-        };
-
-        $this->assertFalse($isHttpsOnly($insecureUrl), "Plain HTTP URL must be rejected by HTTPS policy");
-        $this->assertTrue($isHttpsOnly($secureUrl), "HTTPS URL must be accepted by HTTPS policy");
-
-        $className = 'WonProjectIntegrationConfig';
-        if (!class_exists($className)) {
-            throw new ExpectedRedException("WonProjectIntegrationConfig not yet implemented to test live URL validation.");
-        }
-    }
-
-    private function testHmacSha256SignatureCalculationContract(): void
-    {
-        // Freezes the HMAC signature algorithm compatible with Electroplan:
-        // signature = hash_hmac('sha256', METHOD . "\n" . PATH . "\n" . TIMESTAMP . "\n" . RAW_BODY, secret)
         $method = 'POST';
         $path = '/api/v1/integrations/takeoff/won-projects';
-        $secret = 'super-secret-hmac-key-minimum-32-chars-long';
         $timestamp = '1775739600';
-        $rawBody = '{"event_id":"550e8400-e29b-41d4-a716-446655440000","source_system":"takeoff"}';
+        $rawJson = '{"event_id":"550e8400-e29b-41d4-a716-446655440000","source_system":"takeoff"}';
 
-        $payloadToSign = $method . "\n" . $path . "\n" . $timestamp . "\n" . $rawBody;
-        $expectedSignature = hash_hmac('sha256', $payloadToSign, $secret);
+        // Canonical calculation: METHOD . "\n" . PATH . "\n" . TIMESTAMP . "\n" . RAW_BODY
+        $expected = hash_hmac('sha256', $method . "\n" . $path . "\n" . $timestamp . "\n" . $rawJson, $secret);
 
-        $this->assertEquals(64, strlen($expectedSignature), "HMAC-SHA256 signature must be 64 hex characters");
-        $this->assertTrue((bool)preg_match('/^[a-f0-9]{64}$/', $expectedSignature), "Signature must match hex pattern");
+        $actual = $client->sign($method, $path, $timestamp, $rawJson);
 
-        // Verify deterministic reproducibility
-        $recomputed = hash_hmac('sha256', $payloadToSign, $secret);
-        $this->assertEquals($expectedSignature, $recomputed, "HMAC must be deterministic");
-
-        // Verify tamper resistance: alteration in any component yields different signature
-        $tamperedMethod = hash_hmac('sha256', 'GET' . "\n" . $path . "\n" . $timestamp . "\n" . $rawBody, $secret);
-        $this->assertFalse($expectedSignature === $tamperedMethod, "Tampered method must produce distinct signature");
-
-        $tamperedPath = hash_hmac('sha256', $method . "\n" . '/api/v1/other' . "\n" . $timestamp . "\n" . $rawBody, $secret);
-        $this->assertFalse($expectedSignature === $tamperedPath, "Tampered path must produce distinct signature");
-
-        $tamperedTimestamp = hash_hmac('sha256', $method . "\n" . $path . "\n" . '1775739601' . "\n" . $rawBody, $secret);
-        $this->assertFalse($expectedSignature === $tamperedTimestamp, "Tampered timestamp must produce distinct signature");
-
-        $tamperedBody = hash_hmac('sha256', $method . "\n" . $path . "\n" . $timestamp . "\n" . $rawBody . ' ', $secret);
-        $this->assertFalse($expectedSignature === $tamperedBody, "Tampered raw body must produce distinct signature");
+        $this->assertEquals($expected, $actual, "HMAC client sign() must match deterministic test vector");
+        $this->assertEquals(64, strlen($actual), "Signature must be 64-hex SHA-256");
+        $this->assertTrue((bool)preg_match('/^[a-f0-9]{64}$/', $actual), "Signature matches hex format");
     }
 
-    private function testHmacHeadersContract(): void
+    private function testHmacClientSendDispatchesHeadersAndExactRawBodyViaTransport(): void
     {
-        // Required authentication and content headers for Electroplan dispatch
-        $requiredHeaders = [
-            'Content-Type',
-            'X-Client-Id',
-            'X-Timestamp',
-            'X-Signature',
-        ];
+        $secret = 'test-secret-at-least-32-characters-for-testing';
+        $config = new WonProjectIntegrationConfig([
+            'WON_PROJECT_EXPORT_ENABLED' => true,
+            'WON_PROJECT_HMAC_ACTIVE_KEY_ID' => 'key-alpha',
+            'WON_PROJECT_HMAC_ACTIVE_SECRET' => $secret,
+            'ELECTROPLAN_WON_PROJECT_ENDPOINT' => 'https://api.electroplan.example.com/v1/won-projects',
+            'WON_PROJECT_REQUEST_TIMEOUT_SECONDS' => 15,
+        ]);
 
-        $mockHeaders = [
-            'Content-Type' => 'application/json',
-            'X-Client-Id' => 'takeoff-service-client',
-            'X-Correlation-Id' => 'corr-takeoff-101-202-001',
-            'X-Timestamp' => '1775739600',
-            'X-Signature' => 'abcdef1234567890abcdef1234567890abcdef1234567890abcdef1234567890',
-        ];
+        $capturedUrl = null;
+        $capturedHeaders = null;
+        $capturedBody = null;
+        $capturedTimeout = null;
 
-        foreach ($requiredHeaders as $h) {
-            $this->assertTrue(isset($mockHeaders[$h]), "Dispatch headers must include {$h}");
+        $transport = function (string $url, array $headers, string $body, int $timeout) use (&$capturedUrl, &$capturedHeaders, &$capturedBody, &$capturedTimeout): array {
+            $capturedUrl = $url;
+            $capturedHeaders = $headers;
+            $capturedBody = $body;
+            $capturedTimeout = $timeout;
+
+            return [
+                'status_code' => 201,
+                'body' => '{"received":true}',
+                'error' => null,
+            ];
+        };
+
+        $client = new WonProjectHmacClient($config, $transport);
+
+        $payload = '{"event_id":"sample-uuid-1","source_system":"takeoff"}';
+        $res = $client->send($payload, 'corr-takeoff-001');
+
+        $this->assertTrue($res['success'], "Transport returned 201, send must be successful");
+        $this->assertEquals(201, $res['status_code'], "Status code must be 201");
+        $this->assertEquals('https://api.electroplan.example.com/v1/won-projects', $capturedUrl, "Url matches endpoint");
+        $this->assertEquals($payload, $capturedBody, "Raw body received exactly without alteration");
+        $this->assertEquals(15, $capturedTimeout, "Timeout passed to transport");
+
+        // Verify headers
+        $headerMap = [];
+        foreach ($capturedHeaders as $h) {
+            [$name, $val] = explode(':', $h, 2);
+            $headerMap[trim($name)] = trim($val);
         }
 
-        // X-Correlation-Id may accompany the request but does not replace authentication
-        $this->assertTrue(isset($mockHeaders['X-Correlation-Id']), "Dispatch headers may accompany X-Correlation-Id for tracing");
-        $this->assertTrue(
-            isset($mockHeaders['X-Client-Id']) && isset($mockHeaders['X-Signature']),
-            "Authentication strictly requires X-Client-Id and X-Signature; X-Correlation-Id cannot substitute authentication"
-        );
+        $this->assertEquals('application/json', $headerMap['Content-Type'] ?? null, "Content-Type header");
+        $this->assertEquals('key-alpha', $headerMap['X-Client-Id'] ?? null, "X-Client-Id header");
+        $this->assertNotEmpty($headerMap['X-Timestamp'] ?? null, "X-Timestamp header");
+        $this->assertNotEmpty($headerMap['X-Signature'] ?? null, "X-Signature header");
+        $this->assertEquals('corr-takeoff-001', $headerMap['X-Correlation-Id'] ?? null, "X-Correlation-Id header");
+    }
 
-        $className = 'WonProjectOutboxDispatcher';
-        if (!class_exists($className)) {
-            throw new ExpectedRedException("WonProjectOutboxDispatcher not yet implemented to test live header construction.");
-        }
+    private function testHmacClientErrorSanitizationPreventsSecretLeaking(): void
+    {
+        $secret = 'sensitive-hmac-secret-string-do-not-leak';
+        $keyId = 'my-client-key-id';
+        $endpoint = 'https://api.electroplan.example.com/v1/won-projects';
+
+        $config = new WonProjectIntegrationConfig([
+            'WON_PROJECT_EXPORT_ENABLED' => true,
+            'WON_PROJECT_HMAC_ACTIVE_KEY_ID' => $keyId,
+            'WON_PROJECT_HMAC_ACTIVE_SECRET' => $secret,
+            'ELECTROPLAN_WON_PROJECT_ENDPOINT' => $endpoint,
+            'WON_PROJECT_REQUEST_TIMEOUT_SECONDS' => 30,
+        ]);
+
+        $transport = function () use ($secret, $keyId, $endpoint): array {
+            return [
+                'status_code' => 500,
+                'body' => '',
+                'error' => "Failed to reach {$endpoint} with key {$keyId} and secret {$secret}",
+            ];
+        };
+
+        $client = new WonProjectHmacClient($config, $transport);
+        $res = $client->send('{}');
+
+        $this->assertFalse($res['success'], "Must report failure");
+        $this->assertNotEmpty($res['error'], "Error message present");
+        $this->assertFalse(str_contains($res['error'], $secret), "Error message must not contain secret");
+        $this->assertFalse(str_contains($res['error'], $keyId), "Error message must not contain key ID");
+        $this->assertFalse(str_contains($res['error'], $endpoint), "Error message must not contain full endpoint URL");
+    }
+
+    // -------------------------------------------------------------------------
+    // Test Cases: Outbox Dispatcher
+    // -------------------------------------------------------------------------
+
+    private function testFeatureFlagDisabledBypassesBatchDispatch(): void
+    {
+        $pdo = new OutboxTestDoublePdo('mysql');
+        $config = new WonProjectIntegrationConfig(['WON_PROJECT_EXPORT_ENABLED' => false]);
+
+        $dispatcher = new WonProjectOutboxDispatcher($pdo, $config);
+        $result = $dispatcher->dispatchBatch(50);
+
+        $this->assertEquals('disabled', $result['status'], "Status must be disabled");
+        $this->assertEquals(0, $result['claimed'], "Zero records claimed");
+        $this->assertEquals(0, $result['dispatched'], "Zero records dispatched");
+
+        // Verify no statements prepared
+        $this->assertEmpty($pdo->log, "Disabled dispatcher must not query or prepare database statements");
+    }
+
+    private function testBackoffDelayFormula(): void
+    {
+        $pdo = new OutboxTestDoublePdo('mysql');
+        $config = new WonProjectIntegrationConfig(['WON_PROJECT_EXPORT_ENABLED' => false]);
+        $dispatcher = new WonProjectOutboxDispatcher($pdo, $config);
+
+        // base=30, delay = min(3600, 30 * (2 ^ attempts))
+        $this->assertEquals(30, $dispatcher->calculateBackoffDelay(0), "Attempt 0 backoff: 30s");
+        $this->assertEquals(60, $dispatcher->calculateBackoffDelay(1), "Attempt 1 backoff: 60s");
+        $this->assertEquals(120, $dispatcher->calculateBackoffDelay(2), "Attempt 2 backoff: 120s");
+        $this->assertEquals(240, $dispatcher->calculateBackoffDelay(3), "Attempt 3 backoff: 240s");
+        $this->assertEquals(480, $dispatcher->calculateBackoffDelay(4), "Attempt 4 backoff: 480s");
+        $this->assertEquals(960, $dispatcher->calculateBackoffDelay(5), "Attempt 5 backoff: 960s");
+        $this->assertEquals(3600, $dispatcher->calculateBackoffDelay(10), "Attempt 10 capped at 3600s");
     }
 
     private function testOutboxLifecyclePendingToDelivered(): void
     {
-        $pdo = $this->createOutboxSqlitePdo();
+        $pdo = new OutboxTestDoublePdo('mysql');
+        $config = new WonProjectIntegrationConfig([
+            'WON_PROJECT_EXPORT_ENABLED' => true,
+            'WON_PROJECT_HMAC_ACTIVE_KEY_ID' => 'key-1',
+            'WON_PROJECT_HMAC_ACTIVE_SECRET' => 'secret-32-chars-long-string-value-here',
+            'ELECTROPLAN_WON_PROJECT_ENDPOINT' => 'https://electroplan.test/api/won',
+            'WON_PROJECT_REQUEST_TIMEOUT_SECONDS' => 30,
+        ]);
 
-        // Insert pending event
-        $eventId = '550e8400-e29b-41d4-a716-446655440000';
-        $payload = json_encode(['event_id' => $eventId, 'source_system' => 'takeoff']);
-        $payloadHash = hash('sha256', $payload);
+        // GET_LOCK returns 1 (success)
+        $pdo->whenQueryContains('GET_LOCK', new OutboxTestDoublePdoStatement([['1' => 1]]));
+        $pdo->whenQueryContains('RELEASE_LOCK', new OutboxTestDoublePdoStatement([['1' => 1]]));
 
-        $pdo->prepare("
-            INSERT INTO won_project_outbox (event_id, project_id, event_type, payload, payload_hash, status)
-            VALUES (?, 101, 'won_project.exported', ?, ?, 'pending')
-        ")->execute([$eventId, $payload, $payloadHash]);
+        // Lease claim & fetch
+        $pdo->whenQueryContains('UPDATE won_project_outbox', new OutboxTestDoublePdoStatement([], 1));
+        $pdo->whenQueryContains('WHERE locked_by = ?', new OutboxTestDoublePdoStatement([
+            [
+                'id' => 10,
+                'event_id' => 'a8f09d84-7a2e-4b6d-97e3-05f32a762df1',
+                'project_id' => 101,
+                'event_type' => 'project.won',
+                'payload' => '{"event_id":"a8f09d84-7a2e-4b6d-97e3-05f32a762df1","correlation_id":"corr-001"}',
+                'payload_hash' => hash('sha256', '{}'),
+                'attempts' => 0,
+            ]
+        ]));
 
-        // Lifecycle step 1: Lock record for dispatch
-        $pdo->prepare("
-            UPDATE won_project_outbox
-            SET locked_at = CURRENT_TIMESTAMP,
-                locked_by = 'worker-1',
-                lock_expires_at = datetime('now', '+5 minutes')
-            WHERE event_id = ? AND status = 'pending' AND locked_at IS NULL
-        ")->execute([$eventId]);
-
-        $row1 = $pdo->query("SELECT status, locked_at, locked_by, lock_expires_at FROM won_project_outbox WHERE event_id = '{$eventId}'")->fetch(PDO::FETCH_ASSOC);
-        $this->assertEquals('pending', $row1['status'], "Record status remains 'pending' while locked");
-        $this->assertTrue(!empty($row1['locked_at']), "Record must have locked_at set when locked");
-        $this->assertEquals('worker-1', $row1['locked_by'], "Record must have locked_by set");
-        $this->assertTrue(!empty($row1['lock_expires_at']), "Record must have lock_expires_at set");
-
-        // Lifecycle step 2: Successful delivery (HTTP 200/201)
-        $pdo->prepare("
-            UPDATE won_project_outbox
-            SET status = 'delivered',
-                delivered_at = CURRENT_TIMESTAMP,
-                locked_at = NULL,
-                locked_by = NULL,
-                lock_expires_at = NULL
-            WHERE event_id = ?
-        ")->execute([$eventId]);
-
-        $row2 = $pdo->query("SELECT status, delivered_at, locked_at FROM won_project_outbox WHERE event_id = '{$eventId}'")->fetch(PDO::FETCH_ASSOC);
-        $this->assertEquals('delivered', $row2['status'], "Record must transition to 'delivered'");
-        $this->assertTrue(!empty($row2['delivered_at']), "delivered_at must be populated on delivery");
-        $this->assertEquals(null, $row2['locked_at'], "Lock must be released upon delivery");
-
-        $className = 'WonProjectOutboxDispatcher';
-        if (!class_exists($className)) {
-            throw new ExpectedRedException("WonProjectOutboxDispatcher not yet implemented for live lifecycle execution.");
-        }
-    }
-
-    private function testTransientFailureIncrementsAttemptsAndAppliesBackoff(): void
-    {
-        // Exponential backoff contract:
-        // delay = base_backoff_seconds * (2 ^ attempts)
-        $baseBackoff = 30; // 30s base
-        $maxBackoff = 3600; // 1 hour cap
-
-        $calculateBackoffDelay = function (int $attempts, int $base, int $cap): int {
-            $delay = $base * (2 ** $attempts);
-            return min($cap, $delay);
+        $transport = function (): array {
+            return [
+                'status_code' => 200,
+                'body' => '{"status":"ok"}',
+                'error' => null,
+            ];
         };
 
-        $this->assertEquals(30, $calculateBackoffDelay(0, $baseBackoff, $maxBackoff), "Attempt 0 backoff");
-        $this->assertEquals(60, $calculateBackoffDelay(1, $baseBackoff, $maxBackoff), "Attempt 1 backoff");
-        $this->assertEquals(120, $calculateBackoffDelay(2, $baseBackoff, $maxBackoff), "Attempt 2 backoff");
-        $this->assertEquals(240, $calculateBackoffDelay(3, $baseBackoff, $maxBackoff), "Attempt 3 backoff");
-        $this->assertEquals(480, $calculateBackoffDelay(4, $baseBackoff, $maxBackoff), "Attempt 4 backoff");
+        $client = new WonProjectHmacClient($config, $transport);
+        $dispatcher = new WonProjectOutboxDispatcher($pdo, $config, $client);
 
-        $pdo = $this->createOutboxSqlitePdo();
-        $eventId = '660e8400-e29b-41d4-a716-446655440001';
-        $payload = json_encode(['event_id' => $eventId]);
-        $payloadHash = hash('sha256', $payload);
+        $summary = $dispatcher->dispatchBatch(10);
 
-        $pdo->prepare("
-            INSERT INTO won_project_outbox (event_id, project_id, event_type, payload, payload_hash, status, attempts, locked_at, locked_by, lock_expires_at)
-            VALUES (?, 101, 'won_project.exported', ?, ?, 'pending', 0, CURRENT_TIMESTAMP, 'worker-1', datetime('now', '+5 minutes'))
-        ")->execute([$eventId, $payload, $payloadHash]);
+        $this->assertEquals(1, $summary['claimed'], "Claimed 1 record");
+        $this->assertEquals(1, $summary['delivered'], "Delivered 1 record");
+        $this->assertEquals(0, $summary['failed'], "Failed 0 records");
 
-        // Transient failure update: increment attempts, schedule next_attempt_at, release lock, status remains 'pending'
-        $delay = $calculateBackoffDelay(1, $baseBackoff, $maxBackoff);
-        $nextAttemptAt = date('Y-m-d H:i:s', time() + $delay);
-
-        $pdo->prepare("
-            UPDATE won_project_outbox
-            SET status = 'pending',
-                attempts = attempts + 1,
-                next_attempt_at = ?,
-                locked_at = NULL,
-                locked_by = NULL,
-                lock_expires_at = NULL,
-                last_error = 'HTTP 503 Service Unavailable'
-            WHERE event_id = ?
-        ")->execute([$nextAttemptAt, $eventId]);
-
-        $row = $pdo->query("SELECT attempts, status, next_attempt_at, locked_at, last_error FROM won_project_outbox WHERE event_id = '{$eventId}'")->fetch(PDO::FETCH_ASSOC);
-        $this->assertEquals(1, (int)$row['attempts'], "attempts must be incremented to 1");
-        $this->assertEquals('pending', $row['status'], "status remains 'pending' on transient failure");
-        $this->assertEquals($nextAttemptAt, $row['next_attempt_at'], "next_attempt_at must be set to backoff time");
-        $this->assertEquals(null, $row['locked_at'], "Lock must be released on failure");
-        $this->assertEquals('HTTP 503 Service Unavailable', $row['last_error'], "last_error must record failure details");
-
-        $className = 'WonProjectOutboxDispatcher';
-        if (!class_exists($className)) {
-            throw new ExpectedRedException("WonProjectOutboxDispatcher not yet implemented for live attempt backoff dispatch.");
+        // Verify mark delivered query was executed
+        $foundDelivered = false;
+        foreach ($pdo->log as $entry) {
+            if (stripos($entry, "SET status = 'delivered'") !== false) {
+                $foundDelivered = true;
+                break;
+            }
         }
+        $this->assertTrue($foundDelivered, "Must update record status to delivered");
     }
 
-    private function testTerminalFailureTransitionsToFailedStatus(): void
+    private function testTerminalFailureOn409OrMaxAttempts(): void
     {
-        // When attempts reach max_attempts (e.g. 5), status must transition to 'failed'
-        $maxAttempts = 5;
-        $pdo = $this->createOutboxSqlitePdo();
-        $eventId = '770e8400-e29b-41d4-a716-446655440002';
-        $payload = json_encode(['event_id' => $eventId]);
-        $payloadHash = hash('sha256', $payload);
+        $pdo = new OutboxTestDoublePdo('mysql');
+        $config = new WonProjectIntegrationConfig([
+            'WON_PROJECT_EXPORT_ENABLED' => true,
+            'WON_PROJECT_HMAC_ACTIVE_KEY_ID' => 'key-1',
+            'WON_PROJECT_HMAC_ACTIVE_SECRET' => 'secret-32-chars-long-string-value-here',
+            'ELECTROPLAN_WON_PROJECT_ENDPOINT' => 'https://electroplan.test/api/won',
+            'WON_PROJECT_REQUEST_TIMEOUT_SECONDS' => 30,
+        ]);
 
-        $pdo->prepare("
-            INSERT INTO won_project_outbox (event_id, project_id, event_type, payload, payload_hash, status, attempts, locked_at, locked_by, lock_expires_at)
-            VALUES (?, 101, 'won_project.exported', ?, ?, 'pending', 4, CURRENT_TIMESTAMP, 'worker-1', datetime('now', '+5 minutes'))
-        ")->execute([$eventId, $payload, $payloadHash]);
+        $pdo->whenQueryContains('GET_LOCK', new OutboxTestDoublePdoStatement([['1' => 1]]));
+        $pdo->whenQueryContains('RELEASE_LOCK', new OutboxTestDoublePdoStatement([['1' => 1]]));
+        $pdo->whenQueryContains('UPDATE won_project_outbox', new OutboxTestDoublePdoStatement([], 1));
 
-        // 5th failed attempt: reaches maxAttempts
-        $currentAttempts = 4 + 1;
-        if ($currentAttempts >= $maxAttempts) {
-            $pdo->prepare("
-                UPDATE won_project_outbox
-                SET status = 'failed',
-                    attempts = ?,
-                    next_attempt_at = NULL,
-                    locked_at = NULL,
-                    locked_by = NULL,
-                    lock_expires_at = NULL,
-                    last_error = 'Max attempts (5) exceeded: HTTP 500'
-                WHERE event_id = ?
-            ")->execute([$currentAttempts, $eventId]);
+        $pdo->whenQueryContains('WHERE locked_by = ?', new OutboxTestDoublePdoStatement([
+            [
+                'id' => 11,
+                'event_id' => 'a8f09d84-7a2e-4b6d-97e3-05f32a762df2',
+                'project_id' => 102,
+                'event_type' => 'project.won',
+                'payload' => '{"event_id":"a8f09d84-7a2e-4b6d-97e3-05f32a762df2"}',
+                'payload_hash' => hash('sha256', '{}'),
+                'attempts' => 1,
+            ]
+        ]));
+
+        // Recipient returns terminal 409 Conflict (e.g. unrecoverable schema mismatch or client conflict)
+        $transport = function (): array {
+            return [
+                'status_code' => 409,
+                'body' => '{"error":"Conflict"}',
+                'error' => 'HTTP 409 Conflict',
+            ];
+        };
+
+        $client = new WonProjectHmacClient($config, $transport);
+        $dispatcher = new WonProjectOutboxDispatcher($pdo, $config, $client);
+
+        $summary = $dispatcher->dispatchBatch(10);
+
+        $this->assertEquals(1, $summary['claimed'], "Claimed 1");
+        $this->assertEquals(1, $summary['failed'], "409 is terminal, must mark failed");
+        $this->assertEquals(0, $summary['retried'], "Must not schedule retry for terminal error");
+
+        // Verify mark failed statement was executed with next_attempt_at = NULL
+        $foundFailed = false;
+        $foundNextAttemptNull = false;
+        foreach ($pdo->log as $entry) {
+            if (stripos($entry, "SET status = 'failed'") !== false) {
+                $foundFailed = true;
+                if (stripos($entry, "next_attempt_at = NULL") !== false) {
+                    $foundNextAttemptNull = true;
+                }
+                break;
+            }
         }
-
-        $row = $pdo->query("SELECT status, attempts, next_attempt_at, locked_at, last_error FROM won_project_outbox WHERE event_id = '{$eventId}'")->fetch(PDO::FETCH_ASSOC);
-        $this->assertEquals('failed', $row['status'], "Terminal state must be 'failed'");
-        $this->assertEquals(5, (int)$row['attempts'], "Attempts count must be 5");
-        $this->assertEquals(null, $row['next_attempt_at'], "next_attempt_at must be NULL in terminal failed state");
-        $this->assertEquals(null, $row['locked_at'], "Lock must be released in terminal failed state");
-
-        $className = 'WonProjectOutboxDispatcher';
-        if (!class_exists($className)) {
-            throw new ExpectedRedException("WonProjectOutboxDispatcher not yet implemented for live terminal failure dispatch.");
-        }
+        $this->assertTrue($foundFailed, "Must update record status to failed");
+        $this->assertTrue($foundNextAttemptNull, "Must set next_attempt_at = NULL on terminal failure");
     }
 
-    private function testConcurrentDispatchLockingPreventsDuplicateDispatch(): void
+    private function testTransientFailure5xxIncrementsAttemptsAndSchedulesRetry(): void
     {
-        // Invariant: Two concurrent dispatchers must not select or dispatch the same outbox entry
-        $pdo = $this->createOutboxSqlitePdo();
+        $pdo = new OutboxTestDoublePdo('mysql');
+        $config = new WonProjectIntegrationConfig([
+            'WON_PROJECT_EXPORT_ENABLED' => true,
+            'WON_PROJECT_HMAC_ACTIVE_KEY_ID' => 'key-1',
+            'WON_PROJECT_HMAC_ACTIVE_SECRET' => 'secret-32-chars-long-string-value-here',
+            'ELECTROPLAN_WON_PROJECT_ENDPOINT' => 'https://electroplan.test/api/won',
+            'WON_PROJECT_REQUEST_TIMEOUT_SECONDS' => 30,
+        ]);
 
-        $pdo->exec("
-            INSERT INTO won_project_outbox (event_id, project_id, event_type, payload, payload_hash, status) VALUES
-            ('ev-1', 101, 'won_project.exported', '{}', 'hash1', 'pending'),
-            ('ev-2', 102, 'won_project.exported', '{}', 'hash2', 'pending')
-        ");
+        $pdo->whenQueryContains('GET_LOCK', new OutboxTestDoublePdoStatement([['1' => 1]]));
+        $pdo->whenQueryContains('RELEASE_LOCK', new OutboxTestDoublePdoStatement([['1' => 1]]));
+        $pdo->whenQueryContains('UPDATE won_project_outbox', new OutboxTestDoublePdoStatement([], 1));
 
-        // Worker 1 acquires lock on available pending batch
-        $worker1Stmt = $pdo->prepare("
-            UPDATE won_project_outbox
-            SET locked_at = CURRENT_TIMESTAMP,
-                locked_by = 'worker-1',
-                lock_expires_at = datetime('now', '+5 minutes')
-            WHERE id IN (
-                SELECT id FROM won_project_outbox
-                WHERE status = 'pending'
-                  AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
-                  AND (locked_at IS NULL OR lock_expires_at <= CURRENT_TIMESTAMP)
-                ORDER BY id ASC
-                LIMIT 1
-            )
-        ");
-        $worker1Stmt->execute();
+        $pdo->whenQueryContains('WHERE locked_by = ?', new OutboxTestDoublePdoStatement([
+            [
+                'id' => 12,
+                'event_id' => 'a8f09d84-7a2e-4b6d-97e3-05f32a762df3',
+                'project_id' => 103,
+                'event_type' => 'project.won',
+                'payload' => '{"event_id":"a8f09d84-7a2e-4b6d-97e3-05f32a762df3"}',
+                'payload_hash' => hash('sha256', '{}'),
+                'attempts' => 1,
+            ]
+        ]));
 
-        // Worker 2 attempts to select available pending batch
-        $worker2Selected = $pdo->query("
-            SELECT event_id FROM won_project_outbox
-            WHERE status = 'pending'
-              AND (next_attempt_at IS NULL OR next_attempt_at <= CURRENT_TIMESTAMP)
-              AND (locked_at IS NULL OR lock_expires_at <= CURRENT_TIMESTAMP)
-        ")->fetchAll(PDO::FETCH_COLUMN);
+        // Recipient returns transient 503
+        $transport = function (): array {
+            return [
+                'status_code' => 503,
+                'body' => 'Service Unavailable',
+                'error' => 'HTTP 503 Service Unavailable',
+            ];
+        };
 
-        $this->assertCount(1, $worker2Selected, "Worker 2 must only see 1 available entry, since Worker 1 locked the first");
-        $this->assertEquals('ev-2', $worker2Selected[0], "Worker 2 must see ev-2, not ev-1");
+        $client = new WonProjectHmacClient($config, $transport);
+        $dispatcher = new WonProjectOutboxDispatcher($pdo, $config, $client);
 
-        $className = 'WonProjectOutboxDispatcher';
-        if (!class_exists($className)) {
-            throw new ExpectedRedException("WonProjectOutboxDispatcher not yet implemented for live concurrent locking check.");
+        $summary = $dispatcher->dispatchBatch(10);
+
+        $this->assertEquals(1, $summary['claimed'], "Claimed 1");
+        $this->assertEquals(0, $summary['delivered'], "Delivered 0");
+        $this->assertEquals(0, $summary['failed'], "Failed 0 (transient)");
+        $this->assertEquals(1, $summary['retried'], "Retried 1");
+
+        // Verify status remains pending with next_attempt_at computed via DB server clock
+        $foundRetry = false;
+        foreach ($pdo->log as $entry) {
+            if (
+                stripos($entry, "SET status = 'pending'") !== false &&
+                stripos($entry, "CURRENT_TIMESTAMP") !== false &&
+                stripos($entry, "DATE_ADD") !== false
+            ) {
+                $foundRetry = true;
+                break;
+            }
         }
+        $this->assertTrue($foundRetry, "Must update record using server clock CURRENT_TIMESTAMP/DATE_ADD and keep status pending");
     }
 
-    private function testFeatureFlagDisabledBypassesBatchDispatch(): void
+    private function testConcurrentLockContractsGetLockAndReleaseLock(): void
     {
-        $configClass = 'WonProjectIntegrationConfig';
-        $dispatcherClass = 'WonProjectOutboxDispatcher';
-        if (!class_exists($configClass) || !class_exists($dispatcherClass)) {
-            throw new ExpectedRedException("WonProjectIntegrationConfig / WonProjectOutboxDispatcher not yet implemented for feature flag check.");
-        }
+        $pdo = new OutboxTestDoublePdo('mysql');
+        $config = new WonProjectIntegrationConfig([
+            'WON_PROJECT_EXPORT_ENABLED' => true,
+            'WON_PROJECT_HMAC_ACTIVE_KEY_ID' => 'key-1',
+            'WON_PROJECT_HMAC_ACTIVE_SECRET' => 'secret-32-chars-long-string-value-here',
+            'ELECTROPLAN_WON_PROJECT_ENDPOINT' => 'https://electroplan.test/api/won',
+            'WON_PROJECT_REQUEST_TIMEOUT_SECONDS' => 30,
+        ]);
+
+        // GET_LOCK returns 0 (lock held by another dispatcher instance)
+        $pdo->whenQueryContains('GET_LOCK', new OutboxTestDoublePdoStatement([['0' => 0]]));
+
+        $dispatcher = new WonProjectOutboxDispatcher($pdo, $config);
+        $res = $dispatcher->dispatchBatch(10);
+
+        $this->assertEquals('busy', $res['status'], "Dispatcher returns status busy when GET_LOCK returns 0");
+        $this->assertEquals(0, $res['claimed'], "Zero records claimed when lock busy");
     }
 
-    // -------------------------------------------------------------------------
-    // SQLite Outbox Fixture
-    // -------------------------------------------------------------------------
-
-    private function createOutboxSqlitePdo(): PDO
+    private function testLockNameDerivedFromDatabaseStableBoundedAndUnexposed(): void
     {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
+        $config = new WonProjectIntegrationConfig([
+            'WON_PROJECT_EXPORT_ENABLED' => true,
+            'WON_PROJECT_HMAC_ACTIVE_KEY_ID' => 'key-1',
+            'WON_PROJECT_HMAC_ACTIVE_SECRET' => 'secret-32-chars-long-string-value-here',
+            'ELECTROPLAN_WON_PROJECT_ENDPOINT' => 'https://electroplan.test/api/won',
+            'WON_PROJECT_REQUEST_TIMEOUT_SECONDS' => 30,
+        ]);
 
-        $pdo->exec("
-            CREATE TABLE won_project_outbox (
-                id INTEGER PRIMARY KEY AUTOINCREMENT,
-                event_id TEXT NOT NULL UNIQUE,
-                project_id INTEGER NOT NULL,
-                event_type TEXT NOT NULL,
-                payload TEXT NOT NULL,
-                payload_hash TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'pending',
-                attempts INTEGER NOT NULL DEFAULT 0,
-                next_attempt_at TEXT NULL,
-                locked_at TEXT NULL,
-                locked_by TEXT NULL,
-                lock_expires_at TEXT NULL,
-                last_error TEXT NULL,
-                delivered_at TEXT NULL,
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                updated_at TEXT DEFAULT CURRENT_TIMESTAMP
-            );
-        ");
+        // Database 1
+        $pdo1 = new OutboxTestDoublePdo('mysql');
+        $pdo1->whenQueryContains('DATABASE()', new OutboxTestDoublePdoStatement([['DATABASE()' => 'tenant_db_alpha']]));
+        $dispatcher1 = new WonProjectOutboxDispatcher($pdo1, $config);
+        $lock1 = $dispatcher1->getLockName();
 
-        return $pdo;
+        // Database 2
+        $pdo2 = new OutboxTestDoublePdo('mysql');
+        $pdo2->whenQueryContains('DATABASE()', new OutboxTestDoublePdoStatement([['DATABASE()' => 'tenant_db_beta']]));
+        $dispatcher2 = new WonProjectOutboxDispatcher($pdo2, $config);
+        $lock2 = $dispatcher2->getLockName();
+
+        // 1. Must be non-empty strings
+        $this->assertNotEmpty($lock1, "Lock name 1 must not be empty");
+        $this->assertNotEmpty($lock2, "Lock name 2 must not be empty");
+
+        // 2. Different databases produce different lock names (no cross-database collision)
+        $this->assertTrue($lock1 !== $lock2, "Different databases must produce different lock names to prevent collisions");
+
+        // 3. Stable across calls
+        $this->assertEquals($lock1, $dispatcher1->getLockName(), "Lock name must be stable across multiple calls");
+        $this->assertEquals($lock2, $dispatcher2->getLockName(), "Lock name must be stable across multiple calls");
+
+        // 4. Bounded length (<= 64 chars)
+        $this->assertTrue(strlen($lock1) <= 64, "Lock name 1 must not exceed 64 chars (got " . strlen($lock1) . ")");
+        $this->assertTrue(strlen($lock2) <= 64, "Lock name 2 must not exceed 64 chars (got " . strlen($lock2) . ")");
+
+        // 5. Does not expose cleartext database name
+        $this->assertFalse(str_contains($lock1, 'tenant_db_alpha'), "Lock name must not expose cleartext database name");
+        $this->assertFalse(str_contains($lock2, 'tenant_db_beta'), "Lock name must not expose cleartext database name");
+
+        // 6. acquireLock and releaseLock use the exact same lock name value
+        $acquiredLockName = null;
+        $releasedLockName = null;
+
+        $pdo1->whenQueryContains('GET_LOCK', function (string $sql) use (&$acquiredLockName) {
+            $stmt = new OutboxTestDoublePdoStatement([['1' => 1]], 1, $sql);
+            $stmt->onExecute = function (?array $params) use (&$acquiredLockName) {
+                $acquiredLockName = $params[0] ?? null;
+            };
+            return $stmt;
+        });
+
+        $pdo1->whenQueryContains('RELEASE_LOCK', function (string $sql) use (&$releasedLockName) {
+            $stmt = new OutboxTestDoublePdoStatement([['1' => 1]], 1, $sql);
+            $stmt->onExecute = function (?array $params) use (&$releasedLockName) {
+                $releasedLockName = $params[0] ?? null;
+            };
+            return $stmt;
+        });
+
+        // Claim returns empty
+        $pdo1->whenQueryContains('UPDATE won_project_outbox', new OutboxTestDoublePdoStatement([], 0));
+        $pdo1->whenQueryContains('WHERE locked_by = ?', new OutboxTestDoublePdoStatement([]));
+
+        $dispatcher1->dispatchBatch(10);
+
+        $this->assertEquals($lock1, $acquiredLockName, "GET_LOCK must be invoked with derived lock name");
+        $this->assertEquals($lock1, $releasedLockName, "RELEASE_LOCK must be invoked with identical derived lock name");
+        $this->assertEquals($acquiredLockName, $releasedLockName, "Acquire and release lock must use exactly the same value");
+    }
+
+    private function testTransientFailureSchedulesRetryWithSqliteClock(): void
+    {
+        $pdo = new OutboxTestDoublePdo('sqlite');
+        $config = new WonProjectIntegrationConfig([
+            'WON_PROJECT_EXPORT_ENABLED' => true,
+            'WON_PROJECT_HMAC_ACTIVE_KEY_ID' => 'key-1',
+            'WON_PROJECT_HMAC_ACTIVE_SECRET' => 'secret-32-chars-long-string-value-here',
+            'ELECTROPLAN_WON_PROJECT_ENDPOINT' => 'https://electroplan.test/api/won',
+            'WON_PROJECT_REQUEST_TIMEOUT_SECONDS' => 30,
+        ]);
+
+        $pdo->whenQueryContains('SELECT id FROM won_project_outbox', new OutboxTestDoublePdoStatement([
+            ['id' => 15],
+        ]));
+        $pdo->whenQueryContains('UPDATE won_project_outbox', new OutboxTestDoublePdoStatement([], 1));
+        $pdo->whenQueryContains('WHERE locked_by = ?', new OutboxTestDoublePdoStatement([
+            [
+                'id' => 15,
+                'event_id' => 'a8f09d84-7a2e-4b6d-97e3-05f32a762df4',
+                'project_id' => 104,
+                'event_type' => 'project.won',
+                'payload' => '{"event_id":"a8f09d84-7a2e-4b6d-97e3-05f32a762df4"}',
+                'payload_hash' => hash('sha256', '{}'),
+                'attempts' => 0,
+            ]
+        ]));
+
+        $transport = function (): array {
+            return [
+                'status_code' => 500,
+                'body' => 'Internal Server Error',
+                'error' => 'HTTP 500 Internal Server Error',
+            ];
+        };
+
+        $client = new WonProjectHmacClient($config, $transport);
+        $dispatcher = new WonProjectOutboxDispatcher($pdo, $config, $client);
+        $summary = $dispatcher->dispatchBatch(10);
+
+        $this->assertEquals(1, $summary['retried'], "SQLite transient failure scheduled retry");
+
+        $foundSqliteRetry = false;
+        foreach ($pdo->log as $entry) {
+            if (
+                stripos($entry, "SET status = 'pending'") !== false &&
+                stripos($entry, "datetime('now'") !== false
+            ) {
+                $foundSqliteRetry = true;
+                break;
+            }
+        }
+        $this->assertTrue($foundSqliteRetry, "SQLite branch must use datetime('now') for backoff");
+    }
+
+    private function testMigrationSchemaAllowsNullNextAttemptAtForTerminalFailed(): void
+    {
+        $migrationPath = __DIR__ . '/../db/migrations/20261009_won_project_outbox.sql';
+        $this->assertTrue(file_exists($migrationPath), "Migration file must exist");
+        $sql = (string)file_get_contents($migrationPath);
+
+        // Check that next_attempt_at column definition allows NULL
+        $this->assertTrue(
+            (bool)preg_match('/`next_attempt_at`\s+TIMESTAMP\s+NULL/i', $sql),
+            "Migration must define next_attempt_at as TIMESTAMP NULL so terminal failed records can persist NULL"
+        );
+        $this->assertFalse(
+            (bool)preg_match('/`next_attempt_at`\s+TIMESTAMP\s+NOT\s+NULL/i', $sql),
+            "Migration must NOT define next_attempt_at as NOT NULL"
+        );
+    }
+
+    private function testOperatorRetryFailedRequiresConcretePositiveId(): void
+    {
+        $pdo = new OutboxTestDoublePdo('mysql');
+        $config = new WonProjectIntegrationConfig(['WON_PROJECT_EXPORT_ENABLED' => false]);
+        $dispatcher = new WonProjectOutboxDispatcher($pdo, $config);
+
+        // 1. Invalid or non-positive ID must throw
+        $threwZero = false;
+        try {
+            $dispatcher->retryFailed(0);
+        } catch (InvalidArgumentException) {
+            $threwZero = true;
+        }
+        $this->assertTrue($threwZero, "retryFailed must reject 0");
+
+        $threwNegative = false;
+        try {
+            $dispatcher->retryFailed(-5);
+        } catch (InvalidArgumentException) {
+            $threwNegative = true;
+        }
+        $this->assertTrue($threwNegative, "retryFailed must reject negative ID");
+
+        // 2. Concrete positive ID executes reset query
+        $stmt = new OutboxTestDoublePdoStatement([], 1);
+        $pdo->whenQueryContains("UPDATE won_project_outbox", $stmt);
+
+        $rows = $dispatcher->retryFailed(42);
+        $this->assertEquals(1, $rows, "retryFailed returns affected row count");
+
+        // Verify statement reset fields
+        $foundReset = false;
+        foreach ($pdo->log as $entry) {
+            if (stripos($entry, "SET status = 'pending'") !== false && stripos($entry, "attempts = 0") !== false && stripos($entry, "WHERE status = 'failed' AND id = ?") !== false) {
+                $foundReset = true;
+                break;
+            }
+        }
+        $this->assertTrue($foundReset, "retryFailed must reset status, attempts, error and target specific ID");
     }
 
     // -------------------------------------------------------------------------
@@ -580,12 +1024,12 @@ final class WonProjectOutboxContractTestRunner
 
     private function assertTrue(bool $condition, string $msg): void
     {
-        if (!$condition) throw new \RuntimeException("Assertion failed: {$msg}");
+        if (!$condition) throw new RuntimeException("Assertion failed: {$msg}");
     }
 
     private function assertFalse(bool $condition, string $msg): void
     {
-        if ($condition) throw new \RuntimeException("Assertion failed (expected false): {$msg}");
+        if ($condition) throw new RuntimeException("Assertion failed (expected false): {$msg}");
     }
 
     private function assertEquals($expected, $actual, string $msg): void
@@ -593,25 +1037,25 @@ final class WonProjectOutboxContractTestRunner
         if ($expected !== $actual) {
             $expStr = is_scalar($expected) ? (string)$expected : json_encode($expected);
             $actStr = is_scalar($actual) ? (string)$actual : json_encode($actual);
-            throw new \RuntimeException("Assertion failed: {$msg} [Expected: {$expStr}, got: {$actStr}]");
+            throw new RuntimeException("Assertion failed: {$msg} [Expected: {$expStr}, got: {$actStr}]");
         }
     }
 
-    private function assertCount(int $expectedCount, array $arr, string $msg): void
+    private function assertNotEmpty($val, string $msg): void
     {
-        $actual = count($arr);
-        if ($expectedCount !== $actual) {
-            throw new \RuntimeException("Assertion failed: {$msg} [Expected count {$expectedCount}, got {$actual}]");
-        }
+        if (empty($val)) throw new RuntimeException("Assertion failed: {$msg} (empty)");
+    }
+
+    private function assertEmpty($val, string $msg): void
+    {
+        if (!empty($val)) throw new RuntimeException("Assertion failed: {$msg} (not empty)");
     }
 
     private function assertGreaterThanOrEqual($min, $val, string $msg): void
     {
-        if ($val < $min) throw new \RuntimeException("Assertion failed: {$msg} ({$val} not >= {$min})");
+        if ($val < $min) throw new RuntimeException("Assertion failed: {$msg} ({$val} not >= {$min})");
     }
 }
-
-class ExpectedRedException extends \RuntimeException {}
 
 // CLI Execution entrypoint
 $runner = new WonProjectOutboxContractTestRunner();

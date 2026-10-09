@@ -44,6 +44,7 @@
 --        locked_at = NULL, locked_by = NULL, lock_expires_at = NULL
 --    - On terminal failure (attempts >= max_attempts, e.g. 5):
 --        status = 'failed'
+--        next_attempt_at = NULL
 --        locked_at = NULL, locked_by = NULL, lock_expires_at = NULL
 --    - Error sanitization:
 --        `last_error` must contain only sanitized diagnostic summaries (strip credentials,
@@ -68,7 +69,7 @@ CREATE TABLE IF NOT EXISTS `won_project_outbox` (
     `payload_hash` CHAR(64) NOT NULL COMMENT 'SHA-256 hexadecimal digest of payload for deduplication and integrity check',
     `status` ENUM('pending', 'delivered', 'failed') NOT NULL DEFAULT 'pending' COMMENT 'Event delivery lifecycle status',
     `attempts` INT UNSIGNED NOT NULL DEFAULT 0 COMMENT 'Number of delivery attempts executed',
-    `next_attempt_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Timestamp for scheduling next dispatch attempt under backoff',
+    `next_attempt_at` TIMESTAMP NULL DEFAULT CURRENT_TIMESTAMP COMMENT 'Timestamp for scheduling next dispatch attempt under backoff',
     `locked_at` TIMESTAMP NULL DEFAULT NULL COMMENT 'Timestamp when worker acquired lock lease',
     `locked_by` VARCHAR(191) NULL DEFAULT NULL COMMENT 'Worker/dispatcher node identifier holding active lock lease',
     `lock_expires_at` TIMESTAMP NULL DEFAULT NULL COMMENT 'Lease expiration timestamp to prevent zombie locks',

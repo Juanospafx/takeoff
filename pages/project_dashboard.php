@@ -1,5 +1,21 @@
 <?php
+require_once __DIR__ . '/../core/auth/session.php';
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/config/WonProjectIntegrationConfig.php';
+
+if (empty($_SESSION['won_project_csrf_token'])) {
+    $_SESSION['won_project_csrf_token'] = bin2hex(random_bytes(32));
+}
+$wonProjectCsrfToken = (string) $_SESSION['won_project_csrf_token'];
+$isAdminUser = strtolower(trim((string) ($_SESSION['role'] ?? ''))) === 'admin';
+
+$integrationEnabled = false;
+try {
+    $wonConfig = WonProjectIntegrationConfig::load();
+    $integrationEnabled = $wonConfig->isExportEnabled();
+} catch (Throwable) {
+    $integrationEnabled = false;
+}
 
 $projectId = (int) ($_GET['id'] ?? $_GET['project_id'] ?? 0);
 $isDraftProject = $projectId <= 0 && isset($_GET['draft']);
@@ -843,6 +859,7 @@ $state = [
     <link rel="stylesheet" href="../assets/project_takeoff.css?v=scale-stage-pill-dark-20261005-40">
     <link rel="stylesheet" href="../assets/project_estimating.css?v=unified-hierarchy-20260930-1">
     <link rel="stylesheet" href="../assets/project_proposal.css?v=unified-hierarchy-20260930-1">
+    <link rel="stylesheet" href="../assets/won_project_export.css?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.css') ?>">
 </head>
 
 <body>
@@ -868,6 +885,27 @@ $state = [
                             </button>
                             <div class="bb-status-menu-panel project-status-menu" id="projectStatusMenu"></div>
                         </div>
+                        <?php if ($projectId > 0): ?>
+                        <div class="won-export-container" id="wonProjectExportContainer">
+                            <?php if ($isAdminUser): ?>
+                            <button type="button" class="btn-mark-won" id="markAsWonBtn"
+                                <?= ($project['status'] ?? '') === 'accepted' ? 'disabled' : '' ?>>
+                                <i class="fas fa-trophy"></i>
+                                <span>Mark as Won</span>
+                            </button>
+                            <button type="button" class="btn-retry-export" id="retryWonExportBtn" style="display:none;">
+                                <i class="fas fa-arrows-rotate"></i>
+                                <span>Retry Export</span>
+                            </button>
+                            <?php endif; ?>
+                            <span class="won-export-status-badge" id="wonExportStatusBadge" style="display:none;">
+                                <span class="won-export-dot"></span>
+                                <span class="won-export-label" id="wonExportStatusLabel"></span>
+                                <span class="won-export-meta" id="wonExportStatusMeta"></span>
+                            </span>
+                            <div class="won-export-alert" id="wonProjectAlert" role="alert" aria-live="polite" style="display:none;"></div>
+                        </div>
+                        <?php endif; ?>
                         <!-- Active Takeoff Item info with quick actions -->
                         <div class="takeoff-subhead-item-info" id="takeoffSubheadItemInfo" style="display:none;"
                             title="Active Takeoff Item">
@@ -2199,6 +2237,12 @@ $state = [
 
     <script>
         window.ProjectState = <?= json_encode($state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+        window.WonProjectConfig = <?= json_encode([
+            'projectId' => (int) $projectId,
+            'token' => $wonProjectCsrfToken,
+            'isAdmin' => $isAdminUser,
+            'integrationEnabled' => $integrationEnabled,
+        ]) ?>;
         <?php if (!empty($_GET['stage'])): ?>
             try {
                 localStorage.setItem('takeoff.bidBoardStage', <?= json_encode($_GET['stage']) ?>);
@@ -2479,6 +2523,7 @@ $state = [
     <script src="../assets/project_estimating.js?v=estimating-all-modals-20260929-5"></script>
     <script src="../assets/catalog_update_ui.js?v=catalog-update-ui-20260827-1"></script>
     <script src="../assets/project_proposal.js?v=quantity-context-format-20260831-1"></script>
+    <script src="../assets/won_project_export.js?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.js') ?>"></script>
     <script src="../assets/global_tools.js"></script>
 </body>
 
