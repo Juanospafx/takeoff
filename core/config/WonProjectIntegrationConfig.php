@@ -23,6 +23,7 @@ class WonProjectIntegrationConfig
     public const KEY_HMAC_SECRET = 'WON_PROJECT_HMAC_ACTIVE_SECRET';
     public const KEY_ENDPOINT = 'ELECTROPLAN_WON_PROJECT_ENDPOINT';
     public const KEY_TIMEOUT_SECONDS = 'WON_PROJECT_REQUEST_TIMEOUT_SECONDS';
+    public const KEY_PRIVATE_CONFIG = 'WON_PROJECT_PRIVATE_CONFIG';
 
     public const APPROVED_VARIABLES = [
         self::KEY_EXPORT_ENABLED,
@@ -30,6 +31,15 @@ class WonProjectIntegrationConfig
         self::KEY_HMAC_SECRET,
         self::KEY_ENDPOINT,
         self::KEY_TIMEOUT_SECONDS,
+    ];
+
+    public const SUPPORTED_VARIABLES = [
+        self::KEY_EXPORT_ENABLED,
+        self::KEY_HMAC_KEY_ID,
+        self::KEY_HMAC_SECRET,
+        self::KEY_ENDPOINT,
+        self::KEY_TIMEOUT_SECONDS,
+        self::KEY_PRIVATE_CONFIG,
     ];
 
     private const DEFAULTS = [
@@ -69,12 +79,22 @@ class WonProjectIntegrationConfig
 
         // 2. Optional private local configuration file
         $filePath = $privateConfigFile;
-        if ($filePath === null || trim($filePath) === '') {
-            $filePath = self::readEnv('WON_PROJECT_PRIVATE_CONFIG');
+        if ($filePath !== null && trim($filePath) === '') {
+            throw new InvalidArgumentException("Private configuration file path cannot be empty");
+        }
+
+        if ($filePath === null) {
+            $envPath = self::readEnv(self::KEY_PRIVATE_CONFIG);
+            if ($envPath !== null) {
+                if (trim((string)$envPath) === '') {
+                    throw new InvalidArgumentException("Private configuration file path cannot be empty");
+                }
+                $filePath = (string)$envPath;
+            }
         }
 
         $fileConfig = [];
-        if ($filePath !== null && trim($filePath) !== '') {
+        if ($filePath !== null) {
             $trimmedPath = trim($filePath);
 
             // Extension must be PHP
@@ -87,24 +107,37 @@ class WonProjectIntegrationConfig
                 throw new InvalidArgumentException("Private configuration file must be located outside repository and document root");
             }
 
-            if (file_exists($trimmedPath)) {
-                $realPath = realpath($trimmedPath);
-                if ($realPath === false || !is_file($realPath)) {
-                    throw new InvalidArgumentException("Invalid private configuration file");
-                }
+            // Must exist
+            if (!file_exists($trimmedPath)) {
+                throw new InvalidArgumentException("Private configuration file does not exist");
+            }
 
-                if (self::isInsideRepoOrDocRoot($realPath)) {
-                    throw new InvalidArgumentException("Private configuration file must be located outside repository and document root");
-                }
+            $realPath = realpath($trimmedPath);
+            if ($realPath === false || !is_file($realPath)) {
+                throw new InvalidArgumentException("Private configuration file must be a regular file");
+            }
 
+            if (!is_readable($realPath)) {
+                throw new InvalidArgumentException("Private configuration file is not readable");
+            }
+
+            if (self::isInsideRepoOrDocRoot($realPath)) {
+                throw new InvalidArgumentException("Private configuration file must be located outside repository and document root");
+            }
+
+            try {
                 $loaded = (static function (string $file): mixed {
                     return include $file;
                 })($realPath);
-
-                if (is_array($loaded)) {
-                    $fileConfig = $loaded;
-                }
+            } catch (\Throwable) {
+                throw new InvalidArgumentException("Failed to load private configuration file");
             }
+
+            if (!is_array($loaded)) {
+                throw new InvalidArgumentException("Private configuration file must return a configuration array");
+            }
+
+            $fileConfig = $loaded;
         }
 
         // Apply file overrides over defaults
