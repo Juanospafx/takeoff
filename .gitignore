@@ -8,3 +8,31 @@ ruvector.db
 .claude-flow/data/
 .claude-flow/daemon.pid
 .claude-flow/daemon-state.json
+
+# Environment and sensitive configuration
+.env
+.env.*
+!.env.example
+
+# Logs and error dumps
+logs/
+*.log
+npm-debug.log*
+yarn-debug.log*
+yarn-error.log*
+
+# Local runtime storage, caches, and temporary files
+tmp/
+temp/
+cache/
+.cache/
+coverage/
+.phpunit.cache/
+.phpunit.result.cache
+
+# Local outputs, build artifacts and harness scratch files
+deploy_artifact/
+deploy_artifact*/
+harness/scratch/
+*.sql
+*.dump
