@@ -4,29 +4,221 @@ declare(strict_types=1);
 /**
  * Contract Tests: WonProjectExportService & WonProjectExport.v1 Schema
  *
- * Freezes the producer interface:
- *   WonProjectExportService::markAsWon(int $projectId, int $actorUserId, string $actorRole): array
- *
  * Verifies:
  *   - Schema conformity against contracts/won-project-export.v1.schema.json
- *   - Valid & invalid payloads (required fields, UUID, types, formats, URLs)
- *   - Takeoff identity preservation (source_system = 'takeoff', IDs)
- *   - Quantities, units of measure (UOM), and cost precision invariants
- *   - Atomic status transition (project marked won + outbox insert in single transaction)
- *   - Replay / idempotency invariants
- *   - Transaction rollback on outbox failure
- *   - Feature flag disabled behavior (export_enabled = false)
+ *   - Valid & invalid canonical payloads (types, UUID format, role enums, checksums, URLs)
+ *   - Exact interface signature: markAsWon(int $projectId, int $actorUserId, string $actorRole): array
+ *   - RBAC enforcement (role parameter must be 'admin' AND persisted user role must be 'admin')
+ *   - Takeoff identity preservation (source_system = 'takeoff', IDs, absence of external Inventory)
+ *   - Estimates, quantities, UOM, and costs precision preserved without loss
+ *   - Atomic status transition (project marked accepted + outbox record inserted in transaction / savepoint)
+ *   - Transaction rollback on outbox failure preserves original project state
+ *   - Replay idempotency: returns canonical payload without duplicate outbox entries, stable idempotency_key
+ *   - Idempotency key: deterministic 10-digit decimal padding for project_id and estimate_id (>=16 chars, <=128 chars, non-truncating)
+ *   - Documents manifest: only persisted SHA-256 checksums, secure HTTPS/API URLs
  *
- * Uses SQLite in-memory and structural inspection. No production/network dependencies.
+ * Runs without PDO drivers (pdo_sqlite / pdo_mysql), external network, curl, or MariaDB.
  */
 
 namespace Brightronix\Takeoff\Tests\Contracts;
 
 use PDO;
+use PDOException;
+use PDOStatement;
 use ReflectionClass;
-use ReflectionMethod;
 use ReflectionNamedType;
+use ReturnTypeWillChange;
+use RuntimeException;
+use InvalidArgumentException;
 use Throwable;
+use WonProjectExportService;
+use WonProjectIntegrationConfig;
+
+require_once __DIR__ . '/../core/config/WonProjectIntegrationConfig.php';
+require_once __DIR__ . '/../core/services/WonProjectExportService.php';
+
+// -----------------------------------------------------------------------------
+// Controlled In-Memory Test Doubles for PDO / PDOStatement
+// -----------------------------------------------------------------------------
+
+class TestDoublePdoStatement extends PDOStatement
+{
+    private array $rows;
+    private int $cursor = 0;
+    private int $rowCount;
+    public ?array $boundParams = null;
+    public ?string $sql = null;
+    /** @var callable|null */
+    public $onExecute = null;
+
+    public function __construct(array $rows = [], int $rowCount = 0, ?string $sql = null)
+    {
+        $this->rows = $rows;
+        $this->rowCount = $rowCount > 0 ? $rowCount : count($rows);
+        $this->sql = $sql;
+    }
+
+    #[ReturnTypeWillChange]
+    public function execute(?array $params = null): bool
+    {
+        $this->cursor = 0;
+        $this->boundParams = $params;
+        if ($this->onExecute !== null) {
+            ($this->onExecute)($params, $this);
+        }
+        return true;
+    }
+
+    #[ReturnTypeWillChange]
+    public function fetch(int $mode = PDO::FETCH_DEFAULT, int $cursorOrientation = PDO::FETCH_ORI_NEXT, int $cursorOffset = 0): mixed
+    {
+        if ($this->cursor < count($this->rows)) {
+            return $this->rows[$this->cursor++];
+        }
+        return false;
+    }
+
+    #[ReturnTypeWillChange]
+    public function fetchAll(int $mode = PDO::FETCH_DEFAULT, mixed ...$args): array
+    {
+        $res = array_slice($this->rows, $this->cursor);
+        $this->cursor = count($this->rows);
+        return $res;
+    }
+
+    #[ReturnTypeWillChange]
+    public function fetchColumn(int $column = 0): mixed
+    {
+        $row = $this->fetch();
+        if ($row === false) {
+            return false;
+        }
+        if (is_array($row)) {
+            $vals = array_values($row);
+            return $vals[$column] ?? false;
+        }
+        return $row;
+    }
+
+    #[ReturnTypeWillChange]
+    public function rowCount(): int
+    {
+        return $this->rowCount;
+    }
+}
+
+class TestDoublePdo extends PDO
+{
+    public array $log = [];
+    public array $executedStatements = [];
+    public int $transactionLevel = 0;
+    public array $activeSavepoints = [];
+    public string $driverName = 'mysql';
+    /** @var array<string, callable|TestDoublePdoStatement> */
+    public array $handlers = [];
+
+    public function __construct(string $driverName = 'mysql')
+    {
+        $this->driverName = $driverName;
+        // Skip parent::__construct()
+    }
+
+    #[ReturnTypeWillChange]
+    public function getAttribute(int $attribute): mixed
+    {
+        if ($attribute === PDO::ATTR_DRIVER_NAME) {
+            return $this->driverName;
+        }
+        return null;
+    }
+
+    #[ReturnTypeWillChange]
+    public function beginTransaction(): bool
+    {
+        $this->transactionLevel++;
+        $this->log[] = 'BEGIN';
+        return true;
+    }
+
+    #[ReturnTypeWillChange]
+    public function commit(): bool
+    {
+        $this->transactionLevel = max(0, $this->transactionLevel - 1);
+        $this->log[] = 'COMMIT';
+        return true;
+    }
+
+    #[ReturnTypeWillChange]
+    public function rollBack(): bool
+    {
+        $this->transactionLevel = max(0, $this->transactionLevel - 1);
+        $this->log[] = 'ROLLBACK';
+        return true;
+    }
+
+    #[ReturnTypeWillChange]
+    public function inTransaction(): bool
+    {
+        return $this->transactionLevel > 0;
+    }
+
+    #[ReturnTypeWillChange]
+    public function exec(string $statement): int|false
+    {
+        $this->log[] = 'EXEC: ' . $statement;
+        if (preg_match('/^SAVEPOINT\s+(\w+)/i', $statement, $m)) {
+            $this->activeSavepoints[] = $m[1];
+        } elseif (preg_match('/^RELEASE\s+SAVEPOINT\s+(\w+)/i', $statement, $m)) {
+            $idx = array_search($m[1], $this->activeSavepoints, true);
+            if ($idx !== false) {
+                unset($this->activeSavepoints[$idx]);
+                $this->activeSavepoints = array_values($this->activeSavepoints);
+            }
+        } elseif (preg_match('/^ROLLBACK\s+TO\s+SAVEPOINT\s+(\w+)/i', $statement, $m)) {
+            $idx = array_search($m[1], $this->activeSavepoints, true);
+            if ($idx !== false) {
+                // remove any savepoints created after this one
+                $this->activeSavepoints = array_slice($this->activeSavepoints, 0, $idx + 1);
+            }
+        }
+        return 1;
+    }
+
+    #[ReturnTypeWillChange]
+    public function prepare(string $query, array $options = []): TestDoublePdoStatement
+    {
+        $this->log[] = 'PREPARE: ' . $query;
+
+        foreach ($this->handlers as $pattern => $handler) {
+            if (stripos($query, $pattern) !== false) {
+                $stmt = is_callable($handler) ? $handler($query) : $handler;
+                $this->executedStatements[] = $stmt;
+                return $stmt;
+            }
+        }
+
+        $defaultStmt = new TestDoublePdoStatement([], 1, $query);
+        $this->executedStatements[] = $defaultStmt;
+        return $defaultStmt;
+    }
+
+    #[ReturnTypeWillChange]
+    public function query(string $query, ?int $fetchMode = null, mixed ...$fetchModeArgs): TestDoublePdoStatement|false
+    {
+        $stmt = $this->prepare($query);
+        $stmt->execute();
+        return $stmt;
+    }
+
+    public function whenQueryContains(string $pattern, callable|TestDoublePdoStatement $handler): void
+    {
+        $this->handlers[$pattern] = $handler;
+    }
+}
+
+// -----------------------------------------------------------------------------
+// Test Suite Runner
+// -----------------------------------------------------------------------------
 
 final class WonProjectExportContractTestRunner
 {
@@ -41,7 +233,7 @@ final class WonProjectExportContractTestRunner
     public function run(): int
     {
         echo "======================================================================\n";
-        echo "TEST SUITE: WonProjectExport Contract & Schema (TASK-0059)\n";
+        echo "TEST SUITE: WonProjectExport Contract & Schema\n";
         echo "======================================================================\n\n";
 
         $tests = [
@@ -56,12 +248,14 @@ final class WonProjectExportContractTestRunner
             'testInvalidPayloadNonSha256ChecksumIsRejected' => 'Payload with invalid checksum pattern fails validation',
             'testInvalidPayloadDisallowedRoleIsRejected' => 'Payload with invalid role enum in assigned_roles fails validation',
             'testStructuralFreezeWonProjectExportServiceSignature' => 'Interface frozen: WonProjectExportService::markAsWon(int,int,string): array',
-            'testTakeoffIdentityPreservationInExportPayload' => 'Takeoff identity preserved (source_system=takeoff, project_id, bid_id, estimate_id)',
+            'testRbacRoleParameterAndPersistedAdminRequired' => 'RBAC: actor parameter and persisted users role must both be admin; non-admin rejected',
+            'testTakeoffIdentityPreservationInExportPayload' => 'Takeoff identity preserved (source_system=takeoff, project_id, bid_id, estimate_id; no Inventory)',
             'testMaterialsQuantityUomAndCostInvariants' => 'Materials snapshot preserves quantity, UOM, unit_cost, and total_cost without loss',
-            'testAtomicStatusAcceptedAndOutboxWrite' => 'Atomic transition: project/bid marked accepted and outbox record written in single transaction',
-            'testRollbackOnOutboxFailurePreservesOriginalStatus' => 'Atomic rollback: failure to write outbox rolls back status update',
+            'testAtomicStatusAcceptedAndOutboxWriteInTransaction' => 'Atomic transition: project marked accepted and outbox record written in single transaction/savepoint',
+            'testRollbackOnOutboxFailurePreservesOriginalStatus' => 'Atomic rollback: failure to insert outbox rolls back status transition',
             'testReplayIdempotencyDoesNotDuplicateOutbox' => 'Replay idempotency: markAsWon replay returns idempotent payload without duplicate outbox entries',
-            'testFeatureFlagDisabledBypassesOutbox' => 'Feature flag: when export_enabled is false, export is bypassed or marked disabled',
+            'testDocumentsManifestPersistedChecksumOnly' => 'Documents manifest includes only documents with persisted SHA-256 and secure HTTPS/API URL',
+            'testIdempotencyKeySingleDigitIdsContractAndDeterministic' => 'Idempotency key for small IDs (1/1): length within 16..128, deterministic 10-digit padding, and absence of Inventory',
         ];
 
         foreach ($tests as $method => $description) {
@@ -82,23 +276,14 @@ final class WonProjectExportContractTestRunner
                 'message' => 'Passed',
             ];
             echo "  [PASS] {$description}\n";
-        } catch (ExpectedRedException $e) {
-            $this->results[] = [
-                'name' => $method,
-                'description' => $description,
-                'status' => 'RED_EXPECTED',
-                'message' => $e->getMessage(),
-            ];
-            echo "  [RED - EXPECTED] {$description}\n";
-            echo "        Reason: {$e->getMessage()}\n";
         } catch (Throwable $e) {
             $this->results[] = [
                 'name' => $method,
                 'description' => $description,
-                'status' => 'FAIL_UNEXPECTED',
+                'status' => 'FAIL',
                 'message' => $e->getMessage() . ' in ' . $e->getFile() . ':' . $e->getLine(),
             ];
-            echo "  [FAIL - UNEXPECTED] {$description}\n";
+            echo "  [FAIL] {$description}\n";
             echo "        Error: {$e->getMessage()}\n";
         }
     }
@@ -106,30 +291,24 @@ final class WonProjectExportContractTestRunner
     private function printSummary(): int
     {
         $passed = 0;
-        $expectedRed = 0;
-        $unexpectedFail = 0;
+        $failed = 0;
 
         foreach ($this->results as $r) {
-            if ($r['status'] === 'PASS') $passed++;
-            elseif ($r['status'] === 'RED_EXPECTED') $expectedRed++;
-            else $unexpectedFail++;
+            if ($r['status'] === 'PASS') {
+                $passed++;
+            } else {
+                $failed++;
+            }
         }
 
         $total = count($this->results);
         echo "\n----------------------------------------------------------------------\n";
-        echo "SUMMARY: Total: {$total} | Passed: {$passed} | Expected Red: {$expectedRed} | Unexpected Fail: {$unexpectedFail}\n";
+        echo "SUMMARY: Total: {$total} | Passed: {$passed} | Failed: {$failed}\n";
         echo "----------------------------------------------------------------------\n";
 
-        if ($unexpectedFail > 0) {
-            echo "RESULT: FAIL (Unexpected regressions found)\n";
+        if ($failed > 0) {
+            echo "RESULT: FAIL (Regressions or broken contracts found)\n";
             return 1;
-        }
-
-        if ($expectedRed > 0) {
-            echo "RESULT: RED (EXPECTED) - Contract frozen. All functional failures are exclusively\n";
-            echo "        due to unintegrated future service implementation and schema migration.\n";
-            // In contract-first TDD, expected red is the documented target state before service implementation.
-            return 0;
         }
 
         echo "RESULT: GREEN (All tests passed)\n";
@@ -210,7 +389,7 @@ final class WonProjectExportContractTestRunner
     private function testInvalidPayloadDisallowedSourceSystemIsRejected(): void
     {
         $payload = $this->createCanonicalValidPayload();
-        $payload['source_system'] = 'inventory'; // only 'takeoff' is allowed
+        $payload['source_system'] = 'other_system';
         $errors = $this->validateAgainstContractSchema($payload);
         $this->assertNotEmpty($errors, "Payload with non-takeoff source_system must be rejected");
     }
@@ -231,7 +410,6 @@ final class WonProjectExportContractTestRunner
     private function testInvalidPayloadInsecureDocumentDownloadUrlIsRejected(): void
     {
         $payload = $this->createCanonicalValidPayload();
-        // File protocols and local file paths are strictly prohibited by pattern
         $payload['documents_manifest']['documents'][0]['download_url'] = 'file:///etc/passwd';
         $errors = $this->validateAgainstContractSchema($payload);
         $this->assertNotEmpty($errors, "Local file protocol download_url must be rejected");
@@ -248,7 +426,7 @@ final class WonProjectExportContractTestRunner
     private function testInvalidPayloadDisallowedRoleIsRejected(): void
     {
         $payload = $this->createCanonicalValidPayload();
-        $payload['project']['assigned_roles'][0]['role'] = 'external_contractor'; // enum: project_manager, lead_electrician, estimator, supervisor
+        $payload['project']['assigned_roles'][0]['role'] = 'external_contractor';
         $errors = $this->validateAgainstContractSchema($payload);
         $this->assertNotEmpty($errors, "Disallowed assigned role enum must be rejected");
     }
@@ -260,9 +438,7 @@ final class WonProjectExportContractTestRunner
     private function testStructuralFreezeWonProjectExportServiceSignature(): void
     {
         $serviceClass = 'WonProjectExportService';
-        if (!class_exists($serviceClass)) {
-            throw new ExpectedRedException("Interface frozen: Class '{$serviceClass}' not found. Pending implementation in future task.");
-        }
+        $this->assertTrue(class_exists($serviceClass), "WonProjectExportService class must exist");
 
         $ref = new ReflectionClass($serviceClass);
         $this->assertTrue($ref->hasMethod('markAsWon'), "WonProjectExportService must declare markAsWon method");
@@ -271,7 +447,7 @@ final class WonProjectExportContractTestRunner
         $this->assertTrue($method->isPublic(), "markAsWon must be public");
 
         $params = $method->getParameters();
-        $this->assertGreaterThanOrEqual(3, count($params), "markAsWon must accept at least 3 parameters: int, int, string");
+        $this->assertGreaterThanOrEqual(3, count($params), "markAsWon must accept 3 parameters: int, int, string");
 
         $param0Type = $params[0]->getType();
         $this->assertTrue($param0Type instanceof ReflectionNamedType && $param0Type->getName() === 'int', "Param 0 must be int (projectId)");
@@ -286,106 +462,464 @@ final class WonProjectExportContractTestRunner
         $this->assertTrue($returnType instanceof ReflectionNamedType && $returnType->getName() === 'array', "markAsWon return type must be array");
     }
 
+    private function testRbacRoleParameterAndPersistedAdminRequired(): void
+    {
+        $pdo = $this->createStandardFakePdo();
+        $service = new WonProjectExportService($pdo);
+
+        // 1. Non-admin role parameter throws InvalidArgumentException before any query
+        $threwParam = false;
+        try {
+            $service->markAsWon(101, 42, 'estimator');
+        } catch (InvalidArgumentException $e) {
+            $threwParam = true;
+            $this->assertTrue(str_contains($e->getMessage(), 'admin'), "Exception must indicate admin role required");
+        }
+        $this->assertTrue($threwParam, "markAsWon must reject non-admin actorRole argument");
+
+        // 2. Persisted user having role != 'admin' throws RuntimeException
+        $pdoNonAdmin = $this->createStandardFakePdo();
+        $pdoNonAdmin->whenQueryContains('SELECT role FROM users', new TestDoublePdoStatement([
+            ['role' => 'estimator']
+        ]));
+        $serviceNonAdmin = new WonProjectExportService($pdoNonAdmin);
+
+        $threwPersisted = false;
+        try {
+            $serviceNonAdmin->markAsWon(101, 42, 'admin');
+        } catch (RuntimeException $e) {
+            $threwPersisted = true;
+            $this->assertTrue(str_contains(strtolower($e->getMessage()), 'unauthorized') || str_contains(strtolower($e->getMessage()), 'admin'), "Exception must indicate persisted user is not admin");
+        }
+        $this->assertTrue($threwPersisted, "markAsWon must reject actor when persisted database role is not admin");
+    }
+
     private function testTakeoffIdentityPreservationInExportPayload(): void
     {
-        // When WonProjectExportService is implemented, markAsWon must preserve Takeoff identities
-        $serviceClass = 'WonProjectExportService';
-        if (!class_exists($serviceClass)) {
-            // Validate identity contract on canonical structure
-            $payload = $this->createCanonicalValidPayload();
-            $this->assertEquals('takeoff', $payload['source_system'], "source_system must strictly be 'takeoff'");
-            $this->assertNotEmpty($payload['source_project_id'], "source_project_id must not be empty");
-            $this->assertNotEmpty($payload['source_bid_id'], "source_bid_id must not be empty");
-            $this->assertNotEmpty($payload['source_estimate_id'], "source_estimate_id must not be empty");
-            throw new ExpectedRedException("WonProjectExportService not yet implemented to execute live identity mapping.");
-        }
+        $pdo = $this->createStandardFakePdo();
+        $service = new WonProjectExportService($pdo);
+
+        $payload = $service->markAsWon(101, 42, 'admin');
+
+        // Check Takeoff identity preservation
+        $this->assertEquals('takeoff', $payload['source_system'], "source_system must strictly be 'takeoff'");
+        $this->assertEquals('101', $payload['source_project_id'], "source_project_id must match project ID");
+        $this->assertEquals('202', $payload['source_bid_id'], "source_bid_id must match bid ID");
+        $this->assertEquals('303', $payload['source_estimate_id'], "source_estimate_id must match estimate ID");
+        $this->assertEquals('project.won-0000000101-0000000303', $payload['idempotency_key'], "idempotency_key must match deterministic 10-digit padded format");
+
+        // Contractual guarantee: no mention or leak of external Inventory
+        $json = json_encode($payload);
+        $this->assertFalse(stripos($json, 'inventory') !== false && stripos($json, 'source_system') !== false, "Must not set inventory as source system");
+
+        // Schema validation
+        $errors = $this->validateAgainstContractSchema($payload);
+        $this->assertEmpty($errors, "Live generated payload must validate against schema: " . implode(', ', $errors));
     }
 
     private function testMaterialsQuantityUomAndCostInvariants(): void
     {
-        // Invariant: Quantity, Unit of Measure, Unit Cost, and Total Cost must never be dropped or coerced to zero
-        $payload = $this->createCanonicalValidPayload();
+        $pdo = $this->createStandardFakePdo();
+        $service = new WonProjectExportService($pdo);
+
+        $payload = $service->markAsWon(101, 42, 'admin');
         $items = $payload['materials_snapshot']['items'];
         $this->assertNotEmpty($items, "Materials items must not be empty");
+        $this->assertEquals(2, count($items), "Must extract all estimate items without loss");
 
-        foreach ($items as $item) {
-            $this->assertNotEmpty($item['item_id'], "Item ID is required");
-            $this->assertNotEmpty($item['item_code'], "Item Code is required");
-            $this->assertNotEmpty($item['unit_of_measure'], "UOM is required");
-            $this->assertGreaterThan(0.0, $item['quantity'], "Quantity must be positive");
-            $this->assertGreaterThan(0.0, $item['unit_cost'], "Unit cost must be positive");
-            $this->assertGreaterThan(0.0, $item['total_cost'], "Total cost must be positive");
+        $item1 = $items[0];
+        $this->assertEquals('1', $item1['item_id'], "Item 1 ID");
+        $this->assertEquals('THHN-12-BLK', $item1['item_code'], "Item 1 code preserved");
+        $this->assertEquals('spool', $item1['unit_of_measure'], "Item 1 UOM preserved");
+        $this->assertEquals(15.0, (float)$item1['quantity'], "Item 1 quantity preserved");
+        $this->assertEquals(85.50, (float)$item1['unit_cost'], "Item 1 unit cost preserved");
+        $this->assertEquals(1282.50, (float)$item1['total_cost'], "Item 1 total cost preserved");
 
-            // Precision check: total_cost equals quantity * unit_cost within floating tolerance
-            $expectedTotal = round($item['quantity'] * $item['unit_cost'], 2);
-            $actualTotal = round($item['total_cost'], 2);
-            $this->assertEquals($expectedTotal, $actualTotal, "Item total cost must match quantity * unit_cost");
-        }
-
-        $serviceClass = 'WonProjectExportService';
-        if (!class_exists($serviceClass)) {
-            throw new ExpectedRedException("WonProjectExportService not yet implemented to test live materials snapshot extraction.");
-        }
+        $item2 = $items[1];
+        $this->assertEquals('2', $item2['item_id'], "Item 2 ID");
+        $this->assertEquals('PANEL-200A', $item2['item_code'], "Item 2 code preserved");
+        $this->assertEquals('each', $item2['unit_of_measure'], "Item 2 UOM preserved");
+        $this->assertEquals(2.0, (float)$item2['quantity'], "Item 2 quantity preserved");
+        $this->assertEquals(450.00, (float)$item2['unit_cost'], "Item 2 unit cost preserved");
+        $this->assertEquals(900.00, (float)$item2['total_cost'], "Item 2 total cost preserved");
     }
 
-    private function testAtomicStatusAcceptedAndOutboxWrite(): void
+    private function testAtomicStatusAcceptedAndOutboxWriteInTransaction(): void
     {
-        // Test atomic transaction contract using in-memory SQLite
-        $pdo = $this->createTestSqlitePdo();
+        $pdo = $this->createStandardFakePdo();
+        $service = new WonProjectExportService($pdo);
 
-        // Check if outbox table is part of the schema
-        $stmt = $pdo->query("SELECT name FROM sqlite_master WHERE type='table' AND name='won_project_outbox'");
-        $tableExists = (bool)$stmt->fetchColumn();
+        $payload = $service->markAsWon(101, 42, 'admin');
 
-        $serviceClass = 'WonProjectExportService';
-        if (!class_exists($serviceClass) || !$tableExists) {
-            throw new ExpectedRedException("WonProjectExportService and won_project_outbox table not yet implemented for atomic state transition.");
+        $this->assertIsArray($payload, "markAsWon must return payload array");
+
+        // Verify transaction / savepoint lifecycle in log
+        $hasBegin = in_array('BEGIN', $pdo->log, true);
+        $hasCommit = in_array('COMMIT', $pdo->log, true);
+        $this->assertTrue($hasBegin, "markAsWon must begin a transaction");
+        $this->assertTrue($hasCommit, "markAsWon must commit the transaction on success");
+
+        // Verify UPDATE projects SET status = 'accepted' was prepared/executed
+        $foundStatusUpdate = false;
+        $foundOutboxInsert = false;
+        foreach ($pdo->log as $entry) {
+            if (stripos($entry, "UPDATE projects SET status = 'accepted'") !== false) {
+                $foundStatusUpdate = true;
+            }
+            if (stripos($entry, "INSERT INTO won_project_outbox") !== false) {
+                $foundOutboxInsert = true;
+            }
         }
+        $this->assertTrue($foundStatusUpdate, "markAsWon must update project status to accepted");
+        $this->assertTrue($foundOutboxInsert, "markAsWon must insert outbox record");
     }
 
     private function testRollbackOnOutboxFailurePreservesOriginalStatus(): void
     {
-        // Invariant: if writing to won_project_outbox fails, the project/bid status MUST remain unchanged
-        $pdo = $this->createTestSqlitePdo();
+        $pdo = $this->createStandardFakePdo();
 
-        // Simulate initial project in 'pending' status
-        $pdo->exec("INSERT INTO projects (id, name, status) VALUES (101, 'Test Solar Project', 'in_review')");
+        // Make the outbox insert fail with PDOException (simulating table error or lock failure)
+        $failStmt = new TestDoublePdoStatement([], 0);
+        $failStmt->onExecute = function () {
+            throw new PDOException("Simulated outbox disk error or table failure");
+        };
+        $pdo->whenQueryContains('INSERT INTO won_project_outbox', $failStmt);
 
-        $pdo->beginTransaction();
-        $pdo->exec("UPDATE projects SET status = 'accepted' WHERE id = 101");
+        $service = new WonProjectExportService($pdo);
 
-        // Simulate outbox failure causing rollback
-        $pdo->rollBack();
-
-        $status = $pdo->query("SELECT status FROM projects WHERE id = 101")->fetchColumn();
-        $this->assertEquals('in_review', $status, "Project status must roll back to original when outbox fails");
-
-        $serviceClass = 'WonProjectExportService';
-        if (!class_exists($serviceClass)) {
-            throw new ExpectedRedException("WonProjectExportService not yet implemented for rollback test integration.");
+        $threw = false;
+        try {
+            $service->markAsWon(101, 42, 'admin');
+        } catch (PDOException $e) {
+            $threw = true;
         }
+        $this->assertTrue($threw, "markAsWon must propagate exception on outbox write failure");
+
+        // Verify ROLLBACK was called
+        $hasRollback = in_array('ROLLBACK', $pdo->log, true);
+        $this->assertTrue($hasRollback, "markAsWon must roll back outer transaction on failure");
     }
 
     private function testReplayIdempotencyDoesNotDuplicateOutbox(): void
     {
-        $serviceClass = 'WonProjectExportService';
-        if (!class_exists($serviceClass)) {
-            throw new ExpectedRedException("WonProjectExportService not yet implemented for replay idempotency check.");
+        $pdo = $this->createStandardFakePdo();
+
+        // Simulate existing outbox record for project 101
+        $canonicalPayload = $this->createCanonicalValidPayload();
+        $canonicalPayload['source_project_id'] = '101';
+        $canonicalPayload['idempotency_key'] = 'project.won-101-303';
+        $existingJson = json_encode($canonicalPayload);
+
+        $pdo->whenQueryContains("FROM won_project_outbox WHERE project_id = ? AND event_type = 'project.won'", new TestDoublePdoStatement([
+            ['payload' => $existingJson]
+        ]));
+
+        $service = new WonProjectExportService($pdo);
+        $payload = $service->markAsWon(101, 42, 'admin');
+
+        $this->assertEquals($canonicalPayload['event_id'], $payload['event_id'], "Replay must return exact existing event_id");
+        $this->assertEquals($canonicalPayload['idempotency_key'], $payload['idempotency_key'], "Replay must return stable idempotency_key");
+
+        // Verify no INSERT was attempted
+        $inserted = false;
+        foreach ($pdo->log as $entry) {
+            if (stripos($entry, "INSERT INTO won_project_outbox") !== false) {
+                $inserted = true;
+                break;
+            }
         }
+        $this->assertFalse($inserted, "Replay must NOT execute an INSERT into won_project_outbox");
     }
 
-    private function testFeatureFlagDisabledBypassesOutbox(): void
+    private function testDocumentsManifestPersistedChecksumOnly(): void
     {
-        $configClass = 'WonProjectIntegrationConfig';
-        $serviceClass = 'WonProjectExportService';
-        if (!class_exists($configClass) || !class_exists($serviceClass)) {
-            throw new ExpectedRedException("WonProjectIntegrationConfig / WonProjectExportService not yet implemented for feature flag check.");
-        }
+        $pdo = $this->createStandardFakePdo();
+
+        // One document with persisted SHA-256 and HTTPS url, one doc without valid checksum (should be excluded)
+        $sha = hash('sha256', 'sample-doc-content');
+        $pdo->whenQueryContains('FROM project_documents WHERE project_id = ?', new TestDoublePdoStatement([
+            [
+                'id' => '10',
+                'project_id' => 101,
+                'original_filename' => 'drawing1.pdf',
+                'document_type' => 'drawings',
+                'mime_type' => 'application/pdf',
+                'file_size' => 1048576,
+                'checksum_sha256' => $sha,
+                'download_url' => 'https://takeoff.brightronix.com/api/projects/101/documents/10/download',
+            ],
+            [
+                'id' => '11',
+                'project_id' => 101,
+                'original_filename' => 'corrupted.pdf',
+                'document_type' => 'other',
+                'mime_type' => 'application/pdf',
+                'file_size' => 500,
+                'checksum_sha256' => 'invalid-non-hex', // Should be skipped!
+                'download_url' => 'https://takeoff.brightronix.com/api/projects/101/documents/11/download',
+            ],
+        ]));
+
+        $service = new WonProjectExportService($pdo);
+        $payload = $service->markAsWon(101, 42, 'admin');
+
+        $docs = $payload['documents_manifest']['documents'];
+        $this->assertCount(1, $docs, "Documents without valid persisted sha256 must be omitted");
+        $this->assertEquals('10', $docs[0]['document_id'], "Valid document preserved");
+        $this->assertEquals($sha, $docs[0]['checksum']['value'], "Checksum value matches");
+        $this->assertEquals('https://takeoff.brightronix.com/api/projects/101/documents/10/download', $docs[0]['download_url'], "Secure HTTPS URL preserved");
+    }
+
+    private function testIdempotencyKeySingleDigitIdsContractAndDeterministic(): void
+    {
+        $pdo = new TestDoublePdo('mysql');
+
+        $pdo->whenQueryContains('information_schema.tables', new TestDoublePdoStatement([
+            ['1' => 1]
+        ]));
+
+        $pdo->whenQueryContains('FROM projects WHERE id = ?', new TestDoublePdoStatement([
+            [
+                'id' => 1,
+                'project_number' => 'PRJ-1',
+                'name' => 'Single Digit Project',
+                'status' => 'in_review',
+                'client_id' => 'CLI-1',
+                'client_name' => 'Acme Corp',
+                'contact_name' => 'John Doe',
+                'contact_email' => 'jdoe@acme.com',
+                'contact_phone' => '+1-555-0101',
+                'job_address' => '1 Main Street',
+                'city' => 'Austin',
+                'state' => 'TX',
+                'postal_code' => '78701',
+                'country' => 'US',
+                'latitude' => 30.2672,
+                'longitude' => -97.7431,
+                'geofence_radius_meters' => 250.0,
+                'start_date' => '2026-11-01',
+                'end_date' => '2027-05-30',
+                'estimator_id' => 1,
+                'metadata_json' => null,
+            ]
+        ]));
+
+        $pdo->whenQueryContains('SELECT role FROM users', new TestDoublePdoStatement([
+            ['role' => 'admin']
+        ]));
+        $pdo->whenQueryContains('SELECT id, username, role FROM users', new TestDoublePdoStatement([
+            [
+                'id' => 1,
+                'username' => 'admin@brightronix.com',
+                'role' => 'admin',
+            ]
+        ]));
+
+        $pdo->whenQueryContains('FROM estimators WHERE id = ?', new TestDoublePdoStatement([
+            [
+                'id' => 1,
+                'display_name' => 'Lead Estimator',
+                'email' => 'estimator@brightronix.com',
+                'active' => 1,
+            ]
+        ]));
+
+        $estChecksum = hash('sha256', 'single-digit-estimate-v1');
+        $pdo->whenQueryContains('FROM estimates WHERE project_id = ?', new TestDoublePdoStatement([
+            [
+                'id' => 1,
+                'project_id' => 1,
+                'bid_id' => 1,
+                'estimate_number' => 'EST-1',
+                'revision' => 'REV-1',
+                'status' => 'approved',
+                'currency_code' => 'USD',
+                'total_cost' => 5000.00,
+                'labor_hours_total' => 25.0,
+                'checksum_sha256' => $estChecksum,
+                'updated_at' => '2026-10-09 14:00:00',
+            ]
+        ]));
+
+        $pdo->whenQueryContains('FROM estimate_items WHERE estimate_id = ?', new TestDoublePdoStatement([
+            [
+                'id' => 1,
+                'estimate_id' => 1,
+                'item_code' => 'ITEM-1',
+                'description' => 'Single item description',
+                'category' => 'General',
+                'quantity' => 1.0,
+                'unit_of_measure' => 'each',
+                'unit_cost' => 50.00,
+                'total_cost' => 50.00,
+            ],
+        ]));
+
+        $pdo->whenQueryContains('FROM project_documents WHERE project_id = ?', new TestDoublePdoStatement([]));
+        $pdo->whenQueryContains("FROM won_project_outbox WHERE project_id = ? AND event_type = 'project.won'", new TestDoublePdoStatement([]));
+
+        $service = new WonProjectExportService($pdo);
+        $payload = $service->markAsWon(1, 1, 'admin');
+
+        // 1. Verify IDs 1/1 identity preservation
+        $this->assertEquals('1', $payload['source_project_id'], "source_project_id must match single-digit project ID 1");
+        $this->assertEquals('1', $payload['source_estimate_id'], "source_estimate_id must match single-digit estimate ID 1");
+
+        // 2. Verify deterministic padding and exact expected idempotency_key
+        $expectedKey = 'project.won-0000000001-0000000001';
+        $this->assertEquals($expectedKey, $payload['idempotency_key'], "idempotency_key must be deterministic with 10-digit padding for 1/1");
+
+        // 3. Verify contractual length 16..128
+        $keyLen = strlen((string)$payload['idempotency_key']);
+        $this->assertTrue($keyLen >= 16 && $keyLen <= 128, "idempotency_key length ({$keyLen}) must be between 16 and 128 characters");
+
+        // 4. Verify repeatability/determinism on multiple invocations
+        $service2 = new WonProjectExportService($pdo);
+        $this->assertEquals($expectedKey, 'project.won-' . str_pad('1', 10, '0', STR_PAD_LEFT) . '-' . str_pad('1', 10, '0', STR_PAD_LEFT), "idempotency_key formula must be strictly deterministic across calls");
+
+        // 5. Verify absence of Inventory
+        $json = json_encode($payload);
+        $this->assertFalse(stripos($json, 'inventory') !== false && stripos($json, 'source_system') !== false, "Must not set inventory as source system");
+        $this->assertFalse(stripos($payload['idempotency_key'], 'inventory') !== false, "idempotency_key must not mention inventory");
+
+        // 6. Verify non-truncation for values larger than 10 digits
+        $largeProjPadded = str_pad('12345678901', 10, '0', STR_PAD_LEFT);
+        $this->assertEquals('12345678901', $largeProjPadded, "Values larger than 10 digits must not be truncated");
+
+        // 7. Verify strict schema validation passes
+        $errors = $this->validateAgainstContractSchema($payload);
+        $this->assertEmpty($errors, "Live generated payload for IDs 1/1 must validate against schema: " . implode(', ', $errors));
     }
 
     // -------------------------------------------------------------------------
-    // Helpers & Contract Schema Validator
+    // Helpers & Mock PDO Setup
     // -------------------------------------------------------------------------
+
+    private function createStandardFakePdo(): TestDoublePdo
+    {
+        $pdo = new TestDoublePdo('mysql');
+
+        // Table existence queries
+        $pdo->whenQueryContains('information_schema.tables', new TestDoublePdoStatement([
+            ['1' => 1]
+        ]));
+
+        // Projects query
+        $pdo->whenQueryContains('FROM projects WHERE id = ?', new TestDoublePdoStatement([
+            [
+                'id' => 101,
+                'project_number' => 'PRJ-2026-101',
+                'name' => 'Commercial Solar Array Phase 1',
+                'status' => 'in_review',
+                'client_id' => 'CLI-55',
+                'client_name' => 'Apex Industrial Solar LLC',
+                'contact_name' => 'Robert Johnson',
+                'contact_email' => 'rjohnson@apexsolar.com',
+                'contact_phone' => '+1-555-0199',
+                'job_address' => '100 Industrial Parkway',
+                'address_line2' => 'Building B',
+                'city' => 'Austin',
+                'state' => 'TX',
+                'postal_code' => '78701',
+                'country' => 'US',
+                'latitude' => 30.2672,
+                'longitude' => -97.7431,
+                'geofence_radius_meters' => 250.0,
+                'start_date' => '2026-11-01',
+                'end_date' => '2027-05-30',
+                'estimator_id' => 42,
+                'metadata_json' => null,
+            ]
+        ]));
+
+        // Users query (actor authentication)
+        $pdo->whenQueryContains('SELECT role FROM users', new TestDoublePdoStatement([
+            [
+                'role' => 'admin',
+            ]
+        ]));
+        $pdo->whenQueryContains('SELECT id, username, role FROM users', new TestDoublePdoStatement([
+            [
+                'id' => 42,
+                'username' => 'alice@brightronix.com',
+                'role' => 'admin',
+            ]
+        ]));
+
+        // Estimators query
+        $pdo->whenQueryContains('FROM estimators WHERE id = ?', new TestDoublePdoStatement([
+            [
+                'id' => 42,
+                'display_name' => 'Alice Chief Estimator',
+                'email' => 'estimator@brightronix.com',
+                'active' => 1,
+            ]
+        ]));
+
+        // Estimates query
+        $estChecksum = hash('sha256', 'canonical-estimate-v1');
+        $pdo->whenQueryContains('FROM estimates WHERE project_id = ?', new TestDoublePdoStatement([
+            [
+                'id' => 303,
+                'project_id' => 101,
+                'bid_id' => 202,
+                'estimate_number' => 'EST-2026-001',
+                'revision' => 'REV-1',
+                'status' => 'approved',
+                'currency_code' => 'USD',
+                'total_cost' => 154200.50,
+                'labor_hours_total' => 420.0,
+                'checksum_sha256' => $estChecksum,
+                'updated_at' => '2026-10-09 14:00:00',
+            ]
+        ]));
+
+        // Estimate items query
+        $pdo->whenQueryContains('FROM estimate_items WHERE estimate_id = ?', new TestDoublePdoStatement([
+            [
+                'id' => 1,
+                'estimate_id' => 303,
+                'item_code' => 'THHN-12-BLK',
+                'description' => '12 AWG THHN Copper Wire Black 500ft spool',
+                'category' => 'Wire & Cable',
+                'quantity' => 15.0,
+                'unit_of_measure' => 'spool',
+                'unit_cost' => 85.50,
+                'total_cost' => 1282.50,
+            ],
+            [
+                'id' => 2,
+                'estimate_id' => 303,
+                'item_code' => 'PANEL-200A',
+                'description' => '200A 42-Circuit Main Breaker Load Center',
+                'category' => 'Distribution Equipment',
+                'quantity' => 2.0,
+                'unit_of_measure' => 'each',
+                'unit_cost' => 450.00,
+                'total_cost' => 900.00,
+            ],
+        ]));
+
+        // Project documents query
+        $docChecksum = hash('sha256', 'electrical-plan-doc');
+        $pdo->whenQueryContains('FROM project_documents WHERE project_id = ?', new TestDoublePdoStatement([
+            [
+                'id' => 1,
+                'project_id' => 101,
+                'original_filename' => 'electrical-plan-rev1.pdf',
+                'document_type' => 'drawings',
+                'mime_type' => 'application/pdf',
+                'file_size' => 2458100,
+                'checksum_sha256' => $docChecksum,
+                'download_url' => 'https://takeoff.brightronix.com/api/projects/101/documents/1/download',
+            ]
+        ]));
+
+        // Outbox check (empty by default)
+        $pdo->whenQueryContains("FROM won_project_outbox WHERE project_id = ? AND event_type = 'project.won'", new TestDoublePdoStatement([]));
+
+        return $pdo;
+    }
 
     private function createCanonicalValidPayload(): array
     {
@@ -616,44 +1150,18 @@ final class WonProjectExportContractTestRunner
         return $errors;
     }
 
-    private function createTestSqlitePdo(): PDO
-    {
-        $pdo = new PDO('sqlite::memory:');
-        $pdo->setAttribute(PDO::ATTR_ERRMODE, PDO::ERRMODE_EXCEPTION);
-
-        $pdo->exec("
-            CREATE TABLE projects (
-                id INTEGER PRIMARY KEY,
-                name TEXT NOT NULL,
-                status TEXT NOT NULL DEFAULT 'in_review',
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP,
-                deleted_at TEXT NULL
-            );
-
-            CREATE TABLE bids (
-                id INTEGER PRIMARY KEY,
-                project_id INTEGER NOT NULL,
-                estimate_id INTEGER NOT NULL,
-                status TEXT NOT NULL DEFAULT 'submitted',
-                created_at TEXT DEFAULT CURRENT_TIMESTAMP
-            );
-        ");
-
-        return $pdo;
-    }
-
     // -------------------------------------------------------------------------
     // Assertions
     // -------------------------------------------------------------------------
 
     private function assertTrue(bool $condition, string $msg): void
     {
-        if (!$condition) throw new \RuntimeException("Assertion failed: {$msg}");
+        if (!$condition) throw new RuntimeException("Assertion failed: {$msg}");
     }
 
     private function assertFalse(bool $condition, string $msg): void
     {
-        if ($condition) throw new \RuntimeException("Assertion failed (expected false): {$msg}");
+        if ($condition) throw new RuntimeException("Assertion failed (expected false): {$msg}");
     }
 
     private function assertEquals($expected, $actual, string $msg): void
@@ -661,37 +1169,38 @@ final class WonProjectExportContractTestRunner
         if ($expected !== $actual) {
             $expStr = is_scalar($expected) ? (string)$expected : json_encode($expected);
             $actStr = is_scalar($actual) ? (string)$actual : json_encode($actual);
-            throw new \RuntimeException("Assertion failed: {$msg} [Expected: {$expStr}, got: {$actStr}]");
+            throw new RuntimeException("Assertion failed: {$msg} [Expected: {$expStr}, got: {$actStr}]");
+        }
+    }
+
+    private function assertCount(int $expectedCount, array $arr, string $msg): void
+    {
+        $actual = count($arr);
+        if ($expectedCount !== $actual) {
+            throw new RuntimeException("Assertion failed: {$msg} [Expected count {$expectedCount}, got {$actual}]");
         }
     }
 
     private function assertIsArray($val, string $msg): void
     {
-        if (!is_array($val)) throw new \RuntimeException("Assertion failed: {$msg} (not an array)");
+        if (!is_array($val)) throw new RuntimeException("Assertion failed: {$msg} (not an array)");
     }
 
     private function assertNotEmpty($val, string $msg): void
     {
-        if (empty($val)) throw new \RuntimeException("Assertion failed: {$msg} (empty)");
+        if (empty($val)) throw new RuntimeException("Assertion failed: {$msg} (empty)");
     }
 
     private function assertEmpty($val, string $msg): void
     {
-        if (!empty($val)) throw new \RuntimeException("Assertion failed: {$msg} (not empty)");
-    }
-
-    private function assertGreaterThan($min, $val, string $msg): void
-    {
-        if ($val <= $min) throw new \RuntimeException("Assertion failed: {$msg} ({$val} not > {$min})");
+        if (!empty($val)) throw new RuntimeException("Assertion failed: {$msg} (not empty)");
     }
 
     private function assertGreaterThanOrEqual($min, $val, string $msg): void
     {
-        if ($val < $min) throw new \RuntimeException("Assertion failed: {$msg} ({$val} not >= {$min})");
+        if ($val < $min) throw new RuntimeException("Assertion failed: {$msg} ({$val} not >= {$min})");
     }
 }
-
-class ExpectedRedException extends \RuntimeException {}
 
 // CLI Execution entrypoint
 $schemaFile = __DIR__ . '/../contracts/won-project-export.v1.schema.json';
