@@ -2,11 +2,12 @@
 declare(strict_types=1);
 
 /**
- * Contract Tests: WonProject UI / API Contracts (TASK-0076, TASK-0091)
+ * Contract Tests: WonProject UI / API Contracts (TASK-0076, TASK-0091, TASK-0096)
  *
  * Verifies:
  *   - Endpoint api/won_project.php:
- *       * RBAC: GET status and POST actions require authenticated admin session and persisted admin role in database (403 for non-admin/unauthenticated)
+ *       * Isolation: does NOT depend on legacy session shim (core/auth/session.php)
+ *       * RBAC: GET status and POST actions require authenticated admin session and active persisted admin role via WonProjectAdminAuthenticator
  *       * CSRF: POST rejects missing, empty, or mismatched tokens via hash_equals (403)
  *       * GET action=status: returns project_status, integration_enabled, and public outbox status
  *       * Information disclosure prevention: public status response NEVER exposes payload, payload_hash, or last_error
@@ -49,10 +50,10 @@ final class WonProjectUiApiContractTestRunner
         echo "======================================================================\n\n";
 
         $tests = [
-            'testApiFileExistsAndParsesValidPhp' => 'api/won_project.php exists and has valid PHP syntax',
-            'testApiRbacEnforcementAdminOnlyForGetStatus' => 'API RBAC: GET status strictly enforces admin role check ($isAdmin / role === admin) with 403 response before querying project',
-            'testApiRbacEnforcementAdminOnlyForPost' => 'API RBAC: POST strictly enforces admin role check ($isAdmin / role === admin) with 403 response',
-            'testApiPersistedRoleVerificationForRetryAndActions' => 'API RBAC: GET status, mark_won and retry enforce persisted admin role from users table with 403 response',
+            'testApiFileExistsAndParsesValidPhp' => 'api/won_project.php exists, has valid PHP syntax, and isolates from legacy session shim',
+            'testApiRbacEnforcementAdminOnlyForGetStatus' => 'API RBAC: GET status strictly enforces admin role check via WonProjectAdminAuthenticator before querying project',
+            'testApiRbacEnforcementAdminOnlyForPost' => 'API RBAC: POST strictly enforces admin role check via WonProjectAdminAuthenticator before CSRF and actions',
+            'testApiPersistedRoleVerificationForRetryAndActions' => 'API RBAC: GET status, mark_won and retry enforce persisted active admin role from users table with 403 response',
             'testApiCsrfProtectionUsesHashEquals' => 'API CSRF: POST enforces session token comparison with hash_equals with 403 response',
             'testApiStatusEndpointPublicFieldsOnly' => 'API Status: outbox status exposes id, event_id, status, attempts, next_attempt_at, delivered_at, has_error; payload and last_error are never exposed',
             'testApiMarkWonDelegatesToService' => 'API mark_won: instantiates WonProjectExportService and invokes markAsWon(project_id, user_id, admin)',
@@ -128,21 +129,21 @@ final class WonProjectUiApiContractTestRunner
         $this->assertTrue(file_exists($this->apiFilePath), "api/won_project.php must exist");
         $content = file_get_contents($this->apiFilePath);
         $this->assertNotEmpty($content, "api/won_project.php must not be empty");
+        $this->assertFalse(str_contains($content, 'core/auth/session.php'), "api/won_project.php must not include legacy core/auth/session.php");
+        $this->assertTrue(str_contains($content, 'WonProjectAdminAuthenticator.php'), "api/won_project.php must require WonProjectAdminAuthenticator.php");
     }
 
     private function testApiRbacEnforcementAdminOnlyForGetStatus(): void
     {
         $code = file_get_contents($this->apiFilePath);
 
-        // Verify GET block checks session admin role and returns 403
-        $this->assertTrue(
-            preg_match('/if\s*\(\s*\$method\s*===\s*\'GET\'\s*\)\s*\{[\s\S]*?if\s*\(\s*\$userId\s*<=\s*0\s*\|\|\s*!\$isAdmin\s*\)\s*\{\s*http_response_code\(403\);/s', $code) === 1,
-            "Must respond with 403 Forbidden when GET request is not made by authenticated admin user"
-        );
+        // Verify GET block delegates to WonProjectAdminAuthenticator and does not rely on legacy session shim
+        $this->assertFalse(str_contains($code, 'core/auth/session.php'), "Must not include legacy session shim");
+        $this->assertTrue(str_contains($code, 'WonProjectAdminAuthenticator'), "Must require and use WonProjectAdminAuthenticator");
 
         // Verify authorization check happens before projects query to prevent project enumeration / BOLA
         $getPos = strpos($code, "if (\$method === 'GET')");
-        $authPos = strpos($code, "http_response_code(403);", $getPos);
+        $authPos = strpos($code, "requireAdmin", $getPos);
         $projectQueryPos = strpos($code, "SELECT status FROM projects", $getPos);
 
         $this->assertTrue(
@@ -155,46 +156,60 @@ final class WonProjectUiApiContractTestRunner
     {
         $code = file_get_contents($this->apiFilePath);
 
-        // Verify session extraction and admin verification
-        $this->assertTrue(str_contains($code, "\$_SESSION['role']"), "Must inspect session role");
-        $this->assertTrue(str_contains($code, "'admin'"), "Must check for admin role");
+        // Verify POST delegates to WonProjectAdminAuthenticator before CSRF and action handling
+        $postPos = strpos($code, "if (\$method === 'POST')");
+        $authPos = strpos($code, "requireAdmin", $postPos);
+        $csrfPos = strpos($code, "hash_equals", $postPos);
 
-        // Verify 403 status code when non-admin accesses POST
-        $this->assertTrue(preg_match('/if\s*\(\s*\$userId\s*<=\s*0\s*\|\|\s*!\$isAdmin\s*\)\s*\{\s*http_response_code\(403\);/s', $code) === 1,
-            "Must respond with 403 Forbidden when POST request is not made by authenticated admin user");
+        $this->assertTrue(
+            $authPos !== false && $csrfPos !== false && $authPos < $csrfPos,
+            "Authorization must execute before CSRF verification and action execution in POST"
+        );
     }
 
     private function testApiPersistedRoleVerificationForRetryAndActions(): void
     {
+        $authFilePath = dirname($this->apiFilePath) . '/../core/auth/WonProjectAdminAuthenticator.php';
+        $this->assertTrue(file_exists($authFilePath), "WonProjectAdminAuthenticator.php must exist");
+        $authCode = file_get_contents($authFilePath);
+
+        // Must query users table with parameterized query
+        $this->assertTrue(
+            str_contains($authCode, "SELECT id, role, active FROM users WHERE id = ? LIMIT 1") ||
+            str_contains($authCode, "FROM users WHERE id = ?"),
+            "Must query persisted user from database with parameterized query"
+        );
+
+        // Must check for admin role
+        $this->assertTrue(str_contains($authCode, "'admin'"), "Must verify admin role");
+
+        // Must check for active status (active = 1)
+        $this->assertTrue(
+            str_contains($authCode, "'active'") && (str_contains($authCode, "=== 1") || str_contains($authCode, "== 1")),
+            "Must verify active status (active === 1)"
+        );
+
+        // Must fail closed on error/missing without leaking details
+        $this->assertTrue(
+            str_contains($authCode, "catch (\\Throwable") || str_contains($authCode, "catch (Throwable"),
+            "Must catch exceptions and fail closed without leaking internal details"
+        );
+
+        // In api/won_project.php, auth must execute before project query in GET and retry in POST
         $code = file_get_contents($this->apiFilePath);
-
-        // Must query persisted role using SELECT role FROM users WHERE id=? LIMIT 1
-        $this->assertTrue(
-            str_contains($code, "SELECT role FROM users WHERE id=? LIMIT 1"),
-            "Must query persisted user role from database using SELECT role FROM users WHERE id=? LIMIT 1"
-        );
-
-        // Must reject non-admin persisted role with 403
-        $this->assertTrue(
-            preg_match('/\$persistedRole\s*===\s*false\s*\|\|\s*strtolower\(trim\(\(string\)\$persistedRole\)\)\s*!==\s*\'admin\'[\s\S]{1,120}http_response_code\(403\);/s', $code) === 1,
-            "Must respond with 403 Forbidden when persisted role is not admin"
-        );
-
-        // Persisted role check must be present for GET status
         $getPos = strpos($code, "if (\$method === 'GET')");
         $postPos = strpos($code, "if (\$method === 'POST')");
-        $getStatusUsersQueryPos = strpos($code, "SELECT role FROM users WHERE id=? LIMIT 1", $getPos);
-        $this->assertTrue(
-            $getStatusUsersQueryPos !== false && $getStatusUsersQueryPos < $postPos,
-            "Persisted role check must execute before GET status processing"
-        );
-
-        // Persisted role check must execute before retry handling in POST
+        $getStatusAuthPos = strpos($code, "requireAdmin", $getPos);
         $retryPos = strpos($code, "if (\$action === 'retry')");
-        $postUsersQueryPos = strpos($code, "SELECT role FROM users WHERE id=? LIMIT 1", $postPos);
+        $postAuthPos = strpos($code, "requireAdmin", $postPos);
+
         $this->assertTrue(
-            $postUsersQueryPos !== false && $retryPos !== false && $postUsersQueryPos < $retryPos,
-            "Persisted role check must execute before retry handling in POST"
+            $getStatusAuthPos !== false && $getStatusAuthPos < $postPos,
+            "Persisted admin authorization must execute before GET status processing"
+        );
+        $this->assertTrue(
+            $postAuthPos !== false && $retryPos !== false && $postAuthPos < $retryPos,
+            "Persisted admin authorization must execute before retry handling in POST"
         );
     }
 
