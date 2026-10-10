@@ -3,11 +3,15 @@ declare(strict_types=1);
 
 header('Content-Type: application/json; charset=utf-8');
 
-require_once __DIR__ . '/../core/auth/session.php';
+require_once __DIR__ . '/../core/auth/WonProjectAdminAuthenticator.php';
 require_once __DIR__ . '/../core/db/connection.php';
 require_once __DIR__ . '/../core/services/WonProjectExportService.php';
 require_once __DIR__ . '/../core/services/WonProjectOutboxDispatcher.php';
 require_once __DIR__ . '/../core/config/WonProjectIntegrationConfig.php';
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
 
 if (!isset($pdo) || !($pdo instanceof PDO)) {
     http_response_code(500);
@@ -30,38 +34,11 @@ try {
     $integrationEnabled = false;
 }
 
-$userId = (int)($_SESSION['user_id'] ?? 0);
-$userRole = strtolower(trim((string)($_SESSION['role'] ?? '')));
-$isAdmin = ($userRole === 'admin');
+$authenticator = new WonProjectAdminAuthenticator($pdo);
 
 if ($method === 'GET') {
-    if ($userId <= 0 || !$isAdmin) {
-        http_response_code(403);
-        echo json_encode([
-            'status' => 'error',
-            'code' => 'forbidden',
-            'message' => 'Admin role and active session required to perform this action.'
-        ], JSON_UNESCAPED_SLASHES);
-        exit;
-    }
-
-    try {
-        $uStmt = $pdo->prepare("SELECT role FROM users WHERE id=? LIMIT 1");
-        $uStmt->execute([$userId]);
-        $persistedRole = $uStmt->fetchColumn();
-    } catch (Throwable) {
-        $persistedRole = false;
-    }
-
-    if ($persistedRole === false || strtolower(trim((string)$persistedRole)) !== 'admin') {
-        http_response_code(403);
-        echo json_encode([
-            'status' => 'error',
-            'code' => 'forbidden',
-            'message' => 'Admin role and active session required to perform this action.'
-        ], JSON_UNESCAPED_SLASHES);
-        exit;
-    }
+    $authUser = $authenticator->requireAdmin($_SESSION ?? []);
+    $userId = $authUser['id'];
 
     $action = trim((string)($_GET['action'] ?? 'status'));
     if ($action !== 'status') {
@@ -164,33 +141,8 @@ if ($method === 'GET') {
 }
 
 if ($method === 'POST') {
-    if ($userId <= 0 || !$isAdmin) {
-        http_response_code(403);
-        echo json_encode([
-            'status' => 'error',
-            'code' => 'forbidden',
-            'message' => 'Admin role and active session required to perform this action.'
-        ], JSON_UNESCAPED_SLASHES);
-        exit;
-    }
-
-    try {
-        $uStmt = $pdo->prepare("SELECT role FROM users WHERE id=? LIMIT 1");
-        $uStmt->execute([$userId]);
-        $persistedRole = $uStmt->fetchColumn();
-    } catch (Throwable) {
-        $persistedRole = false;
-    }
-
-    if ($persistedRole === false || strtolower(trim((string)$persistedRole)) !== 'admin') {
-        http_response_code(403);
-        echo json_encode([
-            'status' => 'error',
-            'code' => 'forbidden',
-            'message' => 'Admin role and active session required to perform this action.'
-        ], JSON_UNESCAPED_SLASHES);
-        exit;
-    }
+    $authUser = $authenticator->requireAdmin($_SESSION ?? []);
+    $userId = $authUser['id'];
 
     $rawInput = file_get_contents('php://input');
     $jsonData = [];
