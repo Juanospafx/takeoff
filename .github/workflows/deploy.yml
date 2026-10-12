@@ -53,6 +53,31 @@ jobs:
           test -d "$ARTIFACT_DIR/assets"
           test -f "$ARTIFACT_DIR/bin/dispatch-won-project-outbox.php"
 
+          # Generate deterministic SHA256SUMS for runtime files avoiding recursive autochecksum
+          # Sorting with LC_ALL=C ensures byte-order deterministic output across environments
+          (
+            cd "$ARTIFACT_DIR"
+            find . -type f ! -name 'SHA256SUMS' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > SHA256SUMS
+          )
+          test -s "$ARTIFACT_DIR/SHA256SUMS"
+
+          # Generate deployment manifest JSON with revision and run metadata
+          # Excludes branch, actor, environment, secrets and private configuration
+          jq -n \
+            --arg format_version "1.0" \
+            --arg repository "${{ github.repository }}" \
+            --arg commit_sha "${{ github.sha }}" \
+            --arg generated_at_utc "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            --arg workflow_run_id "${{ github.run_id }}" \
+            '{
+              format_version: $format_version,
+              repository: $repository,
+              commit_sha: $commit_sha,
+              generated_at_utc: $generated_at_utc,
+              workflow_run_id: $workflow_run_id
+            }' > "$ARTIFACT_DIR/deployment-manifest.json"
+          test -s "$ARTIFACT_DIR/deployment-manifest.json"
+
           echo "Deployment artifact generated successfully."
 
       # Security Note:
