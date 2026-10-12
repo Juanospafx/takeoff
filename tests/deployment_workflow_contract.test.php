@@ -29,6 +29,7 @@ function runDeploymentWorkflowContractTests(): void
         throw new RuntimeException("FAIL: .github/workflows/deploy.yml does not exist.");
     }
     $deployYml = file_get_contents($deployYmlPath);
+    $deployYml = str_replace(["\r\n", "\r"], "\n", $deployYml);
 
     // 2. Acceptance criteria: Deploy automático sólo ocurre en push a main; workflow_dispatch existe y no habilita deploy automático de ramas.
     if (!preg_match('/on:\s+push:\s+branches:\s*\[\s*"main"\s*\]/m', $deployYml) &&
@@ -142,6 +143,7 @@ function runDeploymentWorkflowContractTests(): void
         throw new RuntimeException("FAIL: .gitignore does not exist.");
     }
     $gitignore = file_get_contents($gitignorePath);
+    $gitignore = str_replace(["\r\n", "\r"], "\n", $gitignore);
     $requiredGitignorePatterns = [
         '.env',
         'logs',
