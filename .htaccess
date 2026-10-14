@@ -31,9 +31,9 @@
     RewriteCond %{REQUEST_URI} ^/$
     RewriteRule ^$ /pages/takeoff.php [L]
 
-    # The old pages directory/login entry must open Takeoff now.
+    # The old pages directory and index entry open Takeoff.
     RewriteRule ^pages/?$ /pages/takeoff.php [L]
-    RewriteRule ^pages/(login|logout|index)\.php$ /pages/takeoff.php [L]
+    RewriteRule ^pages/index\.php$ /pages/takeoff.php [L]
 
     # Keep existing PHP pages, APIs, assets and uploads reachable.
     RewriteCond %{REQUEST_URI} ^/(pages|api|assets|uploads|views|core|funciones|docs)/ [NC]
