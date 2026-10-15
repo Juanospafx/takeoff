@@ -106,6 +106,7 @@ try {
         $_SESSION['role'],
         $_SESSION['auth_source'],
         $_SESSION['sso_provider'],
+        $_SESSION['sso_sub'],
         $_SESSION['sso_hub_user_id'],
         $_SESSION['sso_authenticated_at'],
         $_SESSION['federation']

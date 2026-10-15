@@ -24,9 +24,11 @@ declare(strict_types=1);
 
 require_once dirname(__DIR__) . '/core/auth/FederatedIdentityRepository.php';
 require_once dirname(__DIR__) . '/core/auth/SsoSession.php';
+require_once dirname(__DIR__) . '/core/auth/SsoFlow.php';
 
 use Takeoff\Core\Auth\FederatedIdentityRepository;
 use Takeoff\Core\Auth\SsoSession;
+use Takeoff\Core\Auth\SsoFlow;
 
 $passedCount = 0;
 $failedCount = 0;
@@ -360,6 +362,7 @@ assertCondition($resolved['role'] === 'viewer', 'Resolved role matches local use
 assertCondition($resolved['active'] === true, 'Resolved identity asserts active=true');
 assertCondition($resolved['provider'] === 'hub', 'Resolved provider matches query provider');
 assertCondition($resolved['hub_user_id'] === 'hub_user_david', 'Resolved hub_user_id matches central user identifier');
+assertCondition($resolved['sub'] === 'hub_user_david', 'Resolved sub matches central user identifier without translation');
 
 // -----------------------------------------------------------------------------
 // 8. Strict Anti-Auto-Linking and No Default Role Test
@@ -443,10 +446,12 @@ assertCondition($testSession['role'] === 'viewer', 'Local session role set to re
 assertCondition($testSession['auth_source'] === 'sso', 'Non-sensitive federation metadata: auth_source is sso');
 assertCondition($testSession['sso_provider'] === 'hub', 'Non-sensitive federation metadata: sso_provider is hub');
 assertCondition($testSession['sso_hub_user_id'] === 'hub_user_david', 'Non-sensitive federation metadata: sso_hub_user_id is hub_user_david');
+assertCondition($testSession['sso_sub'] === 'hub_user_david', 'Non-sensitive federation metadata: sso_sub is hub_user_david');
 assertCondition(isset($testSession['sso_authenticated_at']) && is_int($testSession['sso_authenticated_at']), 'Non-sensitive federation metadata: timestamp recorded');
 assertCondition(isset($testSession['federation']) && is_array($testSession['federation']), 'Non-sensitive federation metadata: federation array populated');
 assertCondition($testSession['federation']['provider'] === 'hub', 'Federation metadata array: provider is hub');
 assertCondition($testSession['federation']['hub_user_id'] === 'hub_user_david', 'Federation metadata array: hub_user_id is hub_user_david');
+assertCondition($testSession['federation']['sub'] === 'hub_user_david', 'Federation metadata array: sub is hub_user_david');
 
 // Negative assertions for transient-key cleanup and secret storage
 assertCondition(!array_key_exists('sso_state', $testSession), 'Negative assertion: transient sso_state cleaned up from session');
@@ -480,7 +485,7 @@ assertCondition($emptyCaught, 'Rejects empty identity array with InvalidArgument
 // Rejects missing user_id
 $missingUserCaught = false;
 try {
-    $ssoSession->establish(['username' => 'test', 'role' => 'viewer', 'provider' => 'hub', 'hub_user_id' => 'hub_1'], $testSession);
+    $ssoSession->establish(['username' => 'test', 'role' => 'viewer', 'provider' => 'hub', 'sub' => 'hub_1', 'hub_user_id' => 'hub_1'], $testSession);
 } catch (InvalidArgumentException $e) {
     $missingUserCaught = true;
 }
@@ -489,7 +494,7 @@ assertCondition($missingUserCaught, 'Rejects identity missing user_id with Inval
 // Rejects missing role without fallback
 $missingRoleCaught = false;
 try {
-    $ssoSession->establish(['user_id' => 10, 'username' => 'test', 'provider' => 'hub', 'hub_user_id' => 'hub_1'], $testSession);
+    $ssoSession->establish(['user_id' => 10, 'username' => 'test', 'provider' => 'hub', 'sub' => 'hub_1', 'hub_user_id' => 'hub_1'], $testSession);
 } catch (InvalidArgumentException $e) {
     $missingRoleCaught = true;
 }
@@ -498,7 +503,7 @@ assertCondition($missingRoleCaught, 'Rejects identity missing role without assig
 // Rejects inactive user
 $inactiveUserCaught = false;
 try {
-    $ssoSession->establish(['user_id' => 10, 'username' => 'test', 'role' => 'viewer', 'active' => false, 'provider' => 'hub', 'hub_user_id' => 'hub_1'], $testSession);
+    $ssoSession->establish(['user_id' => 10, 'username' => 'test', 'role' => 'viewer', 'active' => false, 'provider' => 'hub', 'sub' => 'hub_1', 'hub_user_id' => 'hub_1'], $testSession);
 } catch (InvalidArgumentException $e) {
     $inactiveUserCaught = true;
 }
@@ -507,7 +512,7 @@ assertCondition($inactiveUserCaught, 'Rejects identity with active=false with In
 // Rejects inactive user via user_active
 $inactiveUserActiveCaught = false;
 try {
-    $ssoSession->establish(['user_id' => 10, 'username' => 'test', 'role' => 'viewer', 'user_active' => 0, 'provider' => 'hub', 'hub_user_id' => 'hub_1'], $testSession);
+    $ssoSession->establish(['user_id' => 10, 'username' => 'test', 'role' => 'viewer', 'user_active' => 0, 'provider' => 'hub', 'sub' => 'hub_1', 'hub_user_id' => 'hub_1'], $testSession);
 } catch (InvalidArgumentException $e) {
     $inactiveUserActiveCaught = true;
 }
@@ -516,7 +521,7 @@ assertCondition($inactiveUserActiveCaught, 'Rejects identity with user_active=0 
 // Rejects inactive federated link
 $inactiveLinkCaught = false;
 try {
-    $ssoSession->establish(['user_id' => 10, 'username' => 'test', 'role' => 'viewer', 'link_active' => false, 'provider' => 'hub', 'hub_user_id' => 'hub_1'], $testSession);
+    $ssoSession->establish(['user_id' => 10, 'username' => 'test', 'role' => 'viewer', 'link_active' => false, 'provider' => 'hub', 'sub' => 'hub_1', 'hub_user_id' => 'hub_1'], $testSession);
 } catch (InvalidArgumentException $e) {
     $inactiveLinkCaught = true;
 }
@@ -525,7 +530,7 @@ assertCondition($inactiveLinkCaught, 'Rejects identity with link_active=false wi
 // Negative assertion: rejects missing provider (no default fallback)
 $missingProviderCaught = false;
 try {
-    $ssoSession->establish(['user_id' => 10, 'username' => 'test', 'role' => 'viewer', 'hub_user_id' => 'hub_1'], $testSession);
+    $ssoSession->establish(['user_id' => 10, 'username' => 'test', 'role' => 'viewer', 'sub' => 'hub_1', 'hub_user_id' => 'hub_1'], $testSession);
 } catch (InvalidArgumentException $e) {
     $missingProviderCaught = true;
 }
@@ -534,29 +539,100 @@ assertCondition($missingProviderCaught, 'Negative assertion: rejects identity mi
 // Negative assertion: rejects empty provider
 $emptyProviderCaught = false;
 try {
-    $ssoSession->establish(['user_id' => 10, 'username' => 'test', 'role' => 'viewer', 'provider' => '   ', 'hub_user_id' => 'hub_1'], $testSession);
+    $ssoSession->establish(['user_id' => 10, 'username' => 'test', 'role' => 'viewer', 'provider' => '   ', 'sub' => 'hub_1', 'hub_user_id' => 'hub_1'], $testSession);
 } catch (InvalidArgumentException $e) {
     $emptyProviderCaught = true;
 }
 assertCondition($emptyProviderCaught, 'Negative assertion: rejects identity with empty/whitespace provider');
 
-// Negative assertion: rejects missing hub_user_id (no default fallback)
-$missingHubUserIdCaught = false;
+// Negative assertion: rejects missing sub
+$missingSubCaught = false;
 try {
     $ssoSession->establish(['user_id' => 10, 'username' => 'test', 'role' => 'viewer', 'provider' => 'hub'], $testSession);
 } catch (InvalidArgumentException $e) {
-    $missingHubUserIdCaught = true;
+    $missingSubCaught = true;
 }
-assertCondition($missingHubUserIdCaught, 'Negative assertion: rejects identity missing hub_user_id without defaulting to empty');
+assertCondition($missingSubCaught, 'Negative assertion: rejects identity missing sub without defaulting to empty');
 
-// Negative assertion: rejects empty hub_user_id
-$emptyHubUserIdCaught = false;
+// Negative assertion: rejects missing sub even when hub_user_id is present (never accept hub_user_id as fallback)
+$missingSubWithHubUserIdCaught = false;
 try {
-    $ssoSession->establish(['user_id' => 10, 'username' => 'test', 'role' => 'viewer', 'provider' => 'hub', 'hub_user_id' => '   '], $testSession);
+    $ssoSession->establish(['user_id' => 10, 'username' => 'test', 'role' => 'viewer', 'provider' => 'hub', 'hub_user_id' => 'hub_valid_123'], $testSession);
 } catch (InvalidArgumentException $e) {
-    $emptyHubUserIdCaught = true;
+    $missingSubWithHubUserIdCaught = true;
 }
-assertCondition($emptyHubUserIdCaught, 'Negative assertion: rejects identity with empty/whitespace hub_user_id');
+assertCondition($missingSubWithHubUserIdCaught, 'Negative assertion: rejects identity missing sub even when hub_user_id is present');
+
+// Negative assertion: rejects empty sub
+$emptySubCaught = false;
+try {
+    $ssoSession->establish(['user_id' => 10, 'username' => 'test', 'role' => 'viewer', 'provider' => 'hub', 'sub' => '   '], $testSession);
+} catch (InvalidArgumentException $e) {
+    $emptySubCaught = true;
+}
+assertCondition($emptySubCaught, 'Negative assertion: rejects identity with empty/whitespace sub');
+
+// Negative assertion: rejects empty sub even when hub_user_id is present
+$emptySubWithHubUserIdCaught = false;
+try {
+    $ssoSession->establish(['user_id' => 10, 'username' => 'test', 'role' => 'viewer', 'provider' => 'hub', 'sub' => '   ', 'hub_user_id' => 'hub_valid_123'], $testSession);
+} catch (InvalidArgumentException $e) {
+    $emptySubWithHubUserIdCaught = true;
+}
+assertCondition($emptySubWithHubUserIdCaught, 'Negative assertion: rejects identity with empty/whitespace sub even when hub_user_id is present');
+
+// Assertion: canonical sub is established and recorded in session and federation array without translation
+$subSession = [];
+$ssoSession->establish(['user_id' => 10, 'username' => 'test_sub_user', 'role' => 'viewer', 'provider' => 'hub', 'sub' => 'hub_sub_opaque_123'], $subSession);
+assertCondition($subSession['sso_sub'] === 'hub_sub_opaque_123', 'SsoSession populates sso_sub with canonical opaque sub value');
+assertCondition($subSession['sso_hub_user_id'] === 'hub_sub_opaque_123', 'SsoSession populates sso_hub_user_id with canonical opaque sub value');
+assertCondition($subSession['federation']['sub'] === 'hub_sub_opaque_123', 'SsoSession populates federation.sub with canonical opaque sub value');
+
+// -----------------------------------------------------------------------------
+// 12. SsoFlow Claims Contract Canonical sub Requirement (No hub_user_id Fallback)
+// -----------------------------------------------------------------------------
+echo "\n12. Testing SsoFlow claims contract canonical sub requirement...\n";
+
+$ssoFlow = new SsoFlow();
+
+// Missing sub with hub_user_id present is rejected
+$flowMissingSubCaught = false;
+try {
+    $ssoFlow->validateIdentityClaimsContract([
+        'provider' => 'hub',
+        'hub_user_id' => 'hub_user_test',
+        'active' => true,
+        'roles' => ['viewer'],
+    ]);
+} catch (InvalidArgumentException $e) {
+    $flowMissingSubCaught = true;
+}
+assertCondition($flowMissingSubCaught, 'SsoFlow rejects identity contract missing sub even when hub_user_id is present');
+
+// Empty sub with hub_user_id present is rejected
+$flowEmptySubCaught = false;
+try {
+    $ssoFlow->validateIdentityClaimsContract([
+        'provider' => 'hub',
+        'sub' => '   ',
+        'hub_user_id' => 'hub_user_test',
+        'active' => true,
+        'roles' => ['viewer'],
+    ]);
+} catch (InvalidArgumentException $e) {
+    $flowEmptySubCaught = true;
+}
+assertCondition($flowEmptySubCaught, 'SsoFlow rejects identity contract with empty sub even when hub_user_id is present');
+
+// Valid sub is accepted and populates canonical sub and compatibility hub_user_id
+$flowValid = $ssoFlow->validateIdentityClaimsContract([
+    'provider' => 'hub',
+    'sub' => 'hub_canonical_sub_123',
+    'active' => true,
+    'roles' => ['viewer'],
+]);
+assertCondition($flowValid['sub'] === 'hub_canonical_sub_123', 'SsoFlow populates canonical sub from validated sub');
+assertCondition($flowValid['hub_user_id'] === 'hub_canonical_sub_123', 'SsoFlow mirrors canonical sub into compatibility hub_user_id');
 
 // -----------------------------------------------------------------------------
 // Final Report

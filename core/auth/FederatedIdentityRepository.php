@@ -115,6 +115,7 @@ class FederatedIdentityRepository
             'active' => true,
             'provider' => (string)$row['provider'],
             'hub_user_id' => (string)$row['hub_user_id'],
+            'sub' => (string)$row['hub_user_id'],
             'link_id' => (int)$row['link_id'],
             'link_active' => true,
         ];
@@ -164,7 +165,7 @@ class FederatedIdentityRepository
             return null;
         }
 
-        return $this->findActiveUser($profile->getProvider(), $profile->getHubUserId());
+        return $this->findActiveUser($profile->getProvider(), $profile->getSub());
     }
 
     /**

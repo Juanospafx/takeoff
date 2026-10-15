@@ -175,11 +175,11 @@ if (!class_exists('League\OAuth2\Client\Provider\GenericProvider', false)) {
                 }
 
                 return [
-                    "provider" => "hub",
-                    "hub_user_id" => "hub_alice_001",
+                    "sub" => "hub_alice_001",
                     "username" => "alice_admin",
+                    "display_name" => "Alice Admin",
+                    "email" => "alice@example.com",
                     "active" => true,
-                    "roles" => ["admin"],
                 ];
             }
 
@@ -651,11 +651,12 @@ $realToken = $realOAuthClient->exchangeCode('test_auth_code_789', 'verifier_real
 assertCondition(str_starts_with($realToken, 'mock_access_token_'), 'Real client + double: exchanges code for token without vendor or network');
 
 $realClaims = $realOAuthClient->getUserInfo($realToken);
-assertCondition(isset($realClaims['hub_user_id']) && $realClaims['hub_user_id'] === 'hub_alice_001', 'Real client + double: retrieves userinfo claims without vendor or network');
+assertCondition(isset($realClaims['sub']) && $realClaims['sub'] === 'hub_alice_001', 'Real client + double: retrieves userinfo claims without vendor or network');
 
 $realProfile = $realOAuthClient->authenticate('test_auth_code_789', 'verifier_real_test_1234567890123456789012345678901234567890');
 assertCondition($realProfile instanceof IdentityProfile, 'Real client + double: authenticate returns IdentityProfile');
-assertCondition($realProfile->getHubUserId() === 'hub_alice_001', 'Real client + double: profile has expected hub_user_id');
+assertCondition($realProfile->getSub() === 'hub_alice_001', 'Real client + double: profile has expected sub');
+assertCondition($realProfile->getHubUserId() === 'hub_alice_001', 'Real client + double: profile preserves hub_user_id alias');
 assertCondition($realProfile->isActive() === true, 'Real client + double: profile is active');
 
 // Verify error handling with IdentityProviderException on token failure
@@ -727,6 +728,21 @@ assertCondition($lastRedirect === '/pages/login.php?error=sso_failed', 'Callback
 assertCondition(!isset($_SESSION['sso_state']), 'Callback: server error response eliminates state');
 assertCondition(!isset($_SESSION['user_id']), 'Callback: server error response creates no partial session');
 
+// Test 4.7: Userinfo payload missing sub (provides only hub_user_id alias or missing sub) fails closed
+$lastRedirect = null;
+$_SESSION = [
+    'sso_state' => 'valid_state_missing_sub',
+    'sso_state_expires_at' => time() + 300,
+    'sso_code_verifier' => 'verifier_12345678901234567890123456789012345678901234',
+];
+$_GET = ['code' => 'auth_code_missing_sub', 'state' => 'valid_state_missing_sub'];
+$mockOAuthClient->setMockException(new \InvalidArgumentException('Identity profile requires a valid non-empty sub.'));
+include dirname(__DIR__) . '/pages/sso-callback.php';
+assertCondition($lastRedirect === '/pages/login.php?error=sso_failed', 'Callback: missing sub redirects to login with sanitized sso_failed error');
+assertCondition(!isset($_SESSION['user_id']), 'Callback: missing sub creates no partial session');
+assertCondition(!isset($_SESSION['sso_state']), 'Callback: missing sub eliminates transient state');
+$mockOAuthClient->setMockException(null);
+
 // -----------------------------------------------------------------------------
 // Section 5: Callback Success, Federated Link Resolution & SsoSession
 // -----------------------------------------------------------------------------
@@ -762,7 +778,13 @@ $_SESSION = [
 $_GET = ['code' => 'auth_code_success', 'state' => $testState];
 
 $mockOAuthClient->setMockException(null);
-$mockOAuthClient->setMockProfile(new IdentityProfile('hub', 'hub_alice_001', true, ['viewer']));
+$mockOAuthClient->setMockProfile(IdentityProfile::fromArray([
+    'sub' => 'hub_alice_001',
+    'username' => 'alice_admin',
+    'display_name' => 'Alice Admin',
+    'email' => 'alice@example.com',
+    'active' => true,
+]));
 
 $lastRedirect = null;
 include dirname(__DIR__) . '/pages/sso-callback.php';
@@ -774,6 +796,8 @@ assertCondition($_SESSION['role'] === 'admin', 'SSO Callback: preserves local ro
 assertCondition($_SESSION['auth_source'] === 'sso', 'SSO Callback: auth_source is sso');
 assertCondition($_SESSION['sso_provider'] === 'hub', 'SSO Callback: federation provider is hub');
 assertCondition($_SESSION['sso_hub_user_id'] === 'hub_alice_001', 'SSO Callback: federation hub_user_id is hub_alice_001');
+assertCondition($_SESSION['sso_sub'] === 'hub_alice_001', 'SSO Callback: federation sso_sub is hub_alice_001');
+assertCondition($_SESSION['federation']['sub'] === 'hub_alice_001', 'SSO Callback: federation array sub is hub_alice_001');
 assertCondition(isset($_SESSION['sso_authenticated_at']), 'SSO Callback: federation timestamp recorded');
 assertCondition(!isset($_SESSION['sso_state']), 'SSO Callback: transient sso_state eliminated');
 assertCondition(!isset($_SESSION['sso_code_verifier']), 'SSO Callback: transient sso_code_verifier eliminated');
@@ -881,6 +905,8 @@ assertCondition(str_contains($loginFallbackHtml, 'credenciales locales'), 'Fallb
 assertCondition(!str_contains($loginFallbackHtml, 'client_secret'), 'Sanitization: no client_secret in error output');
 assertCondition(!str_contains($loginFallbackHtml, 'https://hub'), 'Sanitization: no Hub URLs in error output');
 assertCondition(!str_contains($loginFallbackHtml, 'C:\\') && !str_contains($loginFallbackHtml, '/var/www'), 'Sanitization: no file paths in error output');
+assertCondition(!str_contains($loginFallbackHtml, 'hub_user_id'), 'Sanitization: no internal payload keys in fallback error output');
+assertCondition(!str_contains($loginFallbackHtml, 'sub='), 'Sanitization: no claim parameter names in fallback error output');
 
 // -----------------------------------------------------------------------------
 // Section 7: Local Logout Flow (Destroys App Session & Cookie, No Network Request)

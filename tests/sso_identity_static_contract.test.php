@@ -56,6 +56,10 @@ $requiredPatterns = [
         'pattern' => '/(app[_\s]?unauthorized|unauthorized)/i',
         'description' => 'Rechazo por falta de autorización en la aplicación (app unauthorized)',
     ],
+    'sub' => [
+        'pattern' => '/[\'"]sub[\'"]/',
+        'description' => 'Referencia a identificador canónico sub',
+    ],
 ];
 
 foreach ($requiredPatterns as $key => $check) {
@@ -77,6 +81,18 @@ $forbiddenAdminPatterns = [
 foreach ($forbiddenAdminPatterns as $desc => $pattern) {
     if (preg_match($pattern, $content)) {
         $errors[] = "Violación de seguridad: existe asignación literal de 'admin' como default o fallback ({$desc})";
+    }
+}
+
+// Criterio 4: Prohíbe expresiones de fallback de sub a hub_user_id
+$forbiddenSubFallbackPatterns = [
+    'Fallback con ?? hacia hub_user_id' => '/\?\?\s*[^;]*hub_user_id/i',
+    'Fallback ternario ?: hacia hub_user_id' => '/\?:\s*[^;]*hub_user_id/i',
+];
+
+foreach ($forbiddenSubFallbackPatterns as $desc => $pattern) {
+    if (preg_match($pattern, $content)) {
+        $errors[] = "Violación de seguridad: existe fallback de sub a hub_user_id ({$desc})";
     }
 }
 
