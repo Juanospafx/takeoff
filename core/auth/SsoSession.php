@@ -166,18 +166,20 @@ class SsoSession
         }
         $provider = trim($identity['provider']);
 
-        // hub_user_id: reject missing, non-string/non-int, or empty; never supply default
-        if (!isset($identity['hub_user_id']) || (!is_string($identity['hub_user_id']) && !is_int($identity['hub_user_id'])) || trim((string)$identity['hub_user_id']) === '') {
-            throw new InvalidArgumentException('Resolved identity must contain a non-empty hub_user_id.');
+        // sub: reject missing, non-string/non-int, or empty; never accept hub_user_id as fallback
+        $rawSub = $identity['sub'] ?? null;
+        if ($rawSub === null || (!is_string($rawSub) && !is_int($rawSub)) || trim((string)$rawSub) === '') {
+            throw new InvalidArgumentException('Resolved identity must contain a non-empty sub.');
         }
-        $hubUserId = trim((string)$identity['hub_user_id']);
+        $sub = trim((string)$rawSub);
 
         return [
             'user_id' => $userId,
             'username' => trim($username),
             'role' => trim($role),
             'provider' => $provider,
-            'hub_user_id' => $hubUserId,
+            'sub' => $sub,
+            'hub_user_id' => $sub,
         ];
     }
 
@@ -295,10 +297,12 @@ class SsoSession
         $session['auth_source'] = 'sso';
         $session['sso_provider'] = $validated['provider'];
         $session['sso_hub_user_id'] = $validated['hub_user_id'];
+        $session['sso_sub'] = $validated['sub'];
         $session['sso_authenticated_at'] = $now;
         $session['federation'] = [
             'provider' => $validated['provider'],
             'hub_user_id' => $validated['hub_user_id'],
+            'sub' => $validated['sub'],
             'authenticated_at' => $now,
         ];
     }

@@ -324,10 +324,10 @@ assertCondition(str_contains($inactiveMessage, 'central user account is inactive
 assertCondition($ssoAuth->isAuthorized($inactiveProfile) === false, 'isAuthorized returns false for inactive central identity');
 assertCondition($ssoAuth->tryAuthorize($inactiveProfile) === null, 'tryAuthorize returns null for inactive central identity');
 
-// Inactive raw claims array (active => false)
+// Inactive raw claims array (active => false) with canonical sub
 $inactiveClaims = [
     'provider' => 'hub',
-    'hub_user_id' => 'hub_user_alice',
+    'sub' => 'hub_user_alice',
     'active' => false,
     'roles' => ['admin'],
 ];
@@ -342,7 +342,7 @@ assertCondition($inactiveClaimsCaught, 'Inactive raw claims array (active=false)
 // Missing active flag in claims array defaults to false in IdentityProfile
 $missingActiveClaims = [
     'provider' => 'hub',
-    'hub_user_id' => 'hub_user_alice',
+    'sub' => 'hub_user_alice',
     'roles' => ['admin'],
 ];
 $missingActiveCaught = false;
@@ -352,6 +352,43 @@ try {
     $missingActiveCaught = true;
 }
 assertCondition($missingActiveCaught, 'Claims array missing active flag defaults to inactive and throws RuntimeException');
+
+// Negative executable case: payload providing only hub_user_id alias and missing sub is rejected
+$onlyHubUserIdClaims = [
+    'provider' => 'hub',
+    'hub_user_id' => 'hub_user_alice',
+    'active' => true,
+    'roles' => ['admin'],
+];
+$onlyHubUserIdCaught = false;
+$onlyHubUserIdMsg = '';
+try {
+    $ssoAuth->authorize($onlyHubUserIdClaims);
+} catch (\InvalidArgumentException $e) {
+    $onlyHubUserIdCaught = true;
+    $onlyHubUserIdMsg = $e->getMessage();
+}
+assertCondition($onlyHubUserIdCaught, 'Payload providing only hub_user_id without sub is rejected at boundary with InvalidArgumentException');
+assertCondition(str_contains($onlyHubUserIdMsg, 'sub'), 'Rejection error message explicitly identifies sub requirement');
+
+// Sanitized error verification for missing sub rejection
+$sanitizedSubError = SsoAuthorization::sanitizeError($onlyHubUserIdMsg);
+assertCondition(!str_contains($sanitizedSubError, 'client_secret') && !str_contains($sanitizedSubError, 'password'), 'Missing sub rejection error is properly sanitized');
+
+// Negative executable case: empty sub is rejected
+$emptySubClaims = [
+    'provider' => 'hub',
+    'sub' => '   ',
+    'active' => true,
+    'roles' => ['admin'],
+];
+$emptySubCaught = false;
+try {
+    $ssoAuth->authorize($emptySubClaims);
+} catch (\InvalidArgumentException $e) {
+    $emptySubCaught = true;
+}
+assertCondition($emptySubCaught, 'Payload with empty/whitespace sub is rejected with InvalidArgumentException');
 
 // -----------------------------------------------------------------------------
 // 4. Disabled / Inactive Local Users and Unmapped Links
@@ -468,6 +505,48 @@ try {
 }
 assertCondition($linkActiveCaught, 'Repository link_active=0 triggers fail-closed exception');
 
+// Explicit missing sub in repository return even when hub_user_id is present
+$stubRepo->setStubResult([
+    'user_id' => 10,
+    'username' => 'test_user',
+    'role' => 'admin',
+    'active' => true,
+    'provider' => 'hub',
+    'hub_user_id' => 'hub_10',
+    'link_id' => 100,
+    'link_active' => true,
+]);
+$missingSubRepoCaught = false;
+$missingSubRepoMsg = '';
+try {
+    $stubAuth->authorize(new IdentityProfile('hub', 'hub_10', true));
+} catch (RuntimeException $e) {
+    $missingSubRepoCaught = true;
+    $missingSubRepoMsg = $e->getMessage();
+}
+assertCondition($missingSubRepoCaught, 'Repository output missing sub even when hub_user_id is present is rejected fail-closed');
+assertCondition(str_contains($missingSubRepoMsg, 'sub'), 'Repository missing sub rejection explicitly identifies sub requirement');
+
+// Explicit empty/whitespace sub in repository return even when hub_user_id is present
+$stubRepo->setStubResult([
+    'user_id' => 10,
+    'username' => 'test_user',
+    'role' => 'admin',
+    'active' => true,
+    'provider' => 'hub',
+    'sub' => '   ',
+    'hub_user_id' => 'hub_10',
+    'link_id' => 100,
+    'link_active' => true,
+]);
+$emptySubRepoCaught = false;
+try {
+    $stubAuth->authorize(new IdentityProfile('hub', 'hub_10', true));
+} catch (RuntimeException $e) {
+    $emptySubRepoCaught = true;
+}
+assertCondition($emptySubRepoCaught, 'Repository output with whitespace sub even when hub_user_id is present is rejected fail-closed');
+
 // -----------------------------------------------------------------------------
 // 5. Exact Persisted-Role Mapping (admin, technician, viewer)
 // -----------------------------------------------------------------------------
@@ -492,6 +571,7 @@ assertCondition($authAdmin['role'] === 'admin', 'Admin: persisted role strictly 
 assertCondition($authAdmin['active'] === true, 'Admin: active flag is true');
 assertCondition($authAdmin['provider'] === 'hub', 'Admin: provider preserved');
 assertCondition($authAdmin['hub_user_id'] === 'hub_id_admin', 'Admin: hub_user_id preserved');
+assertCondition($authAdmin['sub'] === 'hub_id_admin', 'Admin: sub preserved without translation');
 assertCondition($authAdmin['link_active'] === true, 'Admin: link_active is true');
 
 // Test technician mapping
@@ -732,6 +812,7 @@ $runtimeExceptionMessages = [
     'SSO authorization failed: local role is unauthorized, unknown, or misspelled.',
     'SSO authorization failed: invalid local user identifier.',
     'SSO authorization failed: invalid local username.',
+    'SSO authorization failed: resolved identity missing valid sub.',
 ];
 
 foreach ($runtimeExceptionMessages as $msg) {

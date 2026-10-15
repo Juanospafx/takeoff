@@ -112,7 +112,7 @@ class SsoAuthorization
         }
 
         // Invariant 2: Exact active link and active local user resolved via FederatedIdentityRepository
-        $resolvedUser = $repo->findActiveUser($identityProfile->getProvider(), $identityProfile->getHubUserId());
+        $resolvedUser = $repo->findActiveUser($identityProfile->getProvider(), $identityProfile->getSub());
         if ($resolvedUser === null) {
             throw new RuntimeException('SSO authorization failed: unmapped or inactive federated identity link.');
         }
@@ -153,8 +153,13 @@ class SsoAuthorization
             throw new RuntimeException('SSO authorization failed: invalid local username.');
         }
 
+        $rawSub = $resolvedUser['sub'] ?? null;
+        if ($rawSub === null || (!is_string($rawSub) && !is_int($rawSub)) || trim((string)$rawSub) === '') {
+            throw new RuntimeException('SSO authorization failed: resolved identity missing valid sub.');
+        }
+
         $provider = (string)$resolvedUser['provider'];
-        $hubUserId = (string)$resolvedUser['hub_user_id'];
+        $sub = trim((string)$rawSub);
         $linkId = (int)($resolvedUser['link_id'] ?? 0);
 
         return [
@@ -164,7 +169,8 @@ class SsoAuthorization
             'role' => $localRole,
             'active' => true,
             'provider' => $provider,
-            'hub_user_id' => $hubUserId,
+            'hub_user_id' => $sub,
+            'sub' => $sub,
             'link_id' => $linkId,
             'link_active' => true,
         ];

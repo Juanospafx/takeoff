@@ -300,9 +300,11 @@ class SsoFlow
             throw new \InvalidArgumentException('Identity contract violation: missing or invalid provider.');
         }
 
-        if (empty($identity['hub_user_id']) || (!is_string($identity['hub_user_id']) && !is_int($identity['hub_user_id']))) {
-            throw new \InvalidArgumentException('Identity contract violation: missing or invalid hub_user_id.');
+        $rawSub = $identity['sub'] ?? null;
+        if ($rawSub === null || (!is_string($rawSub) && !is_int($rawSub)) || trim((string)$rawSub) === '') {
+            throw new \InvalidArgumentException('Identity contract violation: missing or invalid sub.');
         }
+        $sub = trim((string)$rawSub);
 
         // Validate active status: reject central disabled users
         $isActive = isset($identity['active']) && $identity['active'] === true;
@@ -318,9 +320,11 @@ class SsoFlow
 
         // Downstream tasks will resolve the local user mapping from hub_user_id and explicit roles.
         // No default or fallback role assignment is performed.
+        $subValue = $sub;
         return [
             'provider' => (string)$identity['provider'],
-            'hub_user_id' => (string)$identity['hub_user_id'],
+            'sub' => $subValue,
+            'hub_user_id' => $subValue,
             'active' => true,
             'roles' => array_values($roles),
             'local_user_mapping_required' => true,
