@@ -909,32 +909,134 @@ assertCondition(!str_contains($loginFallbackHtml, 'hub_user_id'), 'Sanitization:
 assertCondition(!str_contains($loginFallbackHtml, 'sub='), 'Sanitization: no claim parameter names in fallback error output');
 
 // -----------------------------------------------------------------------------
-// Section 7: Local Logout Flow (Destroys App Session & Cookie, No Network Request)
+// Section 7: Local Logout Flow (POST Only, CSRF Validation, Zero Network Request)
 // -----------------------------------------------------------------------------
-echo "\n7. Testing local logout flow: destroys session & cookie, makes zero network requests...\n";
+echo "\n7. Testing local logout flow: POST-only, CSRF validation, destroys session & cookie, makes zero network requests...\n";
 
-// Populate session as active logged-in user
+// Test 7.1: GET request cannot terminate a local or federated session
 $_SESSION = [
     'user_id' => 1,
     'username' => 'alice_admin',
     'role' => 'admin',
     'auth_source' => 'sso',
     'sso_provider' => 'hub',
+    'csrf_token' => 'active_session_csrf_token_123',
 ];
-
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$_GET = [];
+$_POST = [];
 $lastRedirect = null;
+ob_start();
 include dirname(__DIR__) . '/pages/logout.php';
+$getLogoutOut = ob_get_clean();
 
-assertCondition(empty($_SESSION), 'Logout: empties application session array');
-assertCondition($lastRedirect === '/pages/login.php?logged_out=1', 'Logout: redirects to login page with logged_out=1');
+assertCondition(isset($_SESSION['user_id']) && $_SESSION['user_id'] === 1, 'GET logout: cannot terminate local or federated session ($_SESSION preserved)');
+assertCondition($lastRedirect === null, 'GET logout: does not redirect to logged-out confirmation');
+assertCondition(str_contains($getLogoutOut, 'POST'), 'GET logout: fails closed informing POST is required');
 
-// Verify login page displays logout confirmation
+// Test 7.2: POST with missing CSRF fails closed with sanitized response
+$_SESSION = [
+    'user_id' => 1,
+    'username' => 'alice_admin',
+    'role' => 'admin',
+    'auth_source' => 'sso',
+    'sso_provider' => 'hub',
+    'csrf_token' => 'active_session_csrf_token_123',
+];
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_POST = []; // No csrf_token
+$lastRedirect = null;
+ob_start();
+include dirname(__DIR__) . '/pages/logout.php';
+$missingCsrfOut = ob_get_clean();
+
+assertCondition(isset($_SESSION['user_id']) && $_SESSION['user_id'] === 1, 'POST logout without CSRF: fails closed without terminating session');
+assertCondition($lastRedirect === null, 'POST logout without CSRF: does not redirect to logged-out confirmation');
+assertCondition(str_contains($missingCsrfOut, 'CSRF'), 'POST logout without CSRF: outputs sanitized CSRF validation error');
+assertCondition(!str_contains($missingCsrfOut, 'alice_admin') && !str_contains($missingCsrfOut, 'active_session_csrf_token_123'), 'POST logout without CSRF: exposes no session data');
+
+// Test 7.3: POST with invalid/mismatched CSRF fails closed with sanitized response
+$_SESSION = [
+    'user_id' => 1,
+    'username' => 'alice_admin',
+    'role' => 'admin',
+    'auth_source' => 'sso',
+    'sso_provider' => 'hub',
+    'csrf_token' => 'active_session_csrf_token_123',
+];
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_POST = ['csrf_token' => 'tampered_invalid_csrf_token'];
+$lastRedirect = null;
+ob_start();
+include dirname(__DIR__) . '/pages/logout.php';
+$invalidCsrfOut = ob_get_clean();
+
+assertCondition(isset($_SESSION['user_id']) && $_SESSION['user_id'] === 1, 'POST logout with invalid CSRF: fails closed without terminating session');
+assertCondition($lastRedirect === null, 'POST logout with invalid CSRF: does not redirect to logged-out confirmation');
+assertCondition(str_contains($invalidCsrfOut, 'CSRF'), 'POST logout with invalid CSRF: outputs sanitized CSRF validation error');
+assertCondition(!str_contains($invalidCsrfOut, 'alice_admin'), 'POST logout with invalid CSRF: exposes no session data');
+
+// Test 7.4: POST with valid session-bound CSRF token destroys session and cookie
+$_SESSION = [
+    'user_id' => 1,
+    'username' => 'alice_admin',
+    'role' => 'admin',
+    'auth_source' => 'sso',
+    'sso_provider' => 'hub',
+    'csrf_token' => 'active_session_csrf_token_123',
+];
+$_SERVER['REQUEST_METHOD'] = 'POST';
+$_POST = ['csrf_token' => 'active_session_csrf_token_123'];
+$lastRedirect = null;
+ob_start();
+include dirname(__DIR__) . '/pages/logout.php';
+$validLogoutOut = ob_get_clean();
+
+assertCondition(empty($_SESSION), 'POST logout with valid CSRF: empties application session array');
+assertCondition($lastRedirect === '/pages/login.php?logged_out=1', 'POST logout with valid CSRF: redirects to login page with logged_out=1');
+
+// Test 7.5: Verify login page displays logout confirmation
 $_SERVER['REQUEST_METHOD'] = 'GET';
 $_GET = ['logged_out' => '1'];
 ob_start();
 include dirname(__DIR__) . '/pages/login.php';
 $logoutConfirmHtml = ob_get_clean();
 assertCondition(str_contains($logoutConfirmHtml, 'cerrado sesión correctamente'), 'Logout confirmation displayed on login page');
+
+// Test 7.6: Verify visible logout control in global_tools_header.php submits POST form without exposing session data
+$_SESSION = [
+    'user_id' => 1,
+    'username' => 'alice_admin',
+    'role' => 'admin',
+    'auth_source' => 'sso',
+    'sso_provider' => 'hub',
+    'csrf_token' => 'visible_control_csrf_token_456',
+];
+$_SERVER['REQUEST_URI'] = '/pages/bid_board.php';
+ob_start();
+include dirname(__DIR__) . '/views/global_tools_header.php';
+$headerHtml = ob_get_clean();
+
+assertCondition(preg_match('/<form[^>]+method=[\'"]POST[\'"][^>]+action=[\'"][^\'"]*logout\.php[\'"]/i', $headerHtml) === 1, 'Header: visible logout control contains POST form targeting logout.php');
+assertCondition(preg_match('/<input[^>]+type=[\'"]hidden[\'"][^>]+name=[\'"]csrf_token[\'"][^>]+value=[\'"]visible_control_csrf_token_456[\'"]/i', $headerHtml) === 1, 'Header: logout form contains session-bound CSRF token');
+assertCondition(str_contains($headerHtml, 'Sign out'), 'Header: logout form contains visible Sign out control');
+assertCondition(!str_contains($headerHtml, 'alice_admin'), 'Header: logout control does not expose user session data');
+
+// Test 7.7: Disabling SSO immediately restores existing traditional login and does not force Hub redirect
+$GLOBALS['__TAKEOFF_TEST_SSO_CONFIG__'] = new SsoConfig(['TAKEOFF_SSO_ENABLED' => false]);
+$_SESSION = [];
+$_SERVER['REQUEST_METHOD'] = 'GET';
+$_GET = [];
+$lastRedirect = null;
+ob_start();
+include dirname(__DIR__) . '/pages/login.php';
+$disabledLoginHtml = ob_get_clean();
+
+assertCondition($lastRedirect === null, 'SSO disabled: login page does not force any redirect');
+assertCondition(str_contains($disabledLoginHtml, 'name="username"'), 'SSO disabled: traditional username field present');
+assertCondition(str_contains($disabledLoginHtml, 'name="password"'), 'SSO disabled: traditional password field present');
+assertCondition(!str_contains($disabledLoginHtml, 'btn-sso') && !str_contains($disabledLoginHtml, 'Single Sign-On'), 'SSO disabled: SSO Hub button not rendered');
+assertCondition(!str_contains($disabledLoginHtml, 'hub.example.com'), 'SSO disabled: Hub URL not rendered');
 
 // -----------------------------------------------------------------------------
 // Section 8: Absence of OIDC / openid / id_token / nonce Behavior

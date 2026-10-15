@@ -1,4 +1,16 @@
 <?php
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    if (PHP_SAPI !== 'cli' || !isset($_SESSION)) {
+        @session_start();
+    }
+}
+if (!isset($_SESSION) || !is_array($_SESSION)) {
+    $_SESSION = [];
+}
+if (empty($_SESSION['csrf_token']) || !is_string($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
 require_once __DIR__ . '/company_tools_data.php';
 $companyToolsCategories = company_tools_existing_categories();
 $favoriteTools = array_slice(company_tools_favorites(), 0, 5);
@@ -240,10 +252,13 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
                     <span>Settings</span>
                 </a>
                 <div style="height: 1px; background: rgba(0,0,0,0.08); margin: 4px 0;"></div>
-                <a href="../logout.php">
-                    <i class="fas fa-sign-out-alt"></i>
-                    <span>Sign out</span>
-                </a>
+                <form method="POST" action="/pages/logout.php" class="bt-logout-form" style="margin: 0; padding: 0;">
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES, 'UTF-8') ?>">
+                    <button type="submit" class="bt-menu-action bt-logout-button">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>Sign out</span>
+                    </button>
+                </form>
             </div>
         </div>
         <button class="bt-header-collapse-btn" id="btHeaderCollapseBtn" type="button" title="Hide Header"
@@ -711,4 +726,4 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
     })();
 </script>
 <link rel="stylesheet" href="../assets/global_datetime_picker.css?v=20260924-3">
-<script src="../assets/global_datetime_picker.js?v=20260924-3"></script>
+<script src="../assets/global_datetime_picker.js?v=20260924-3"></script>

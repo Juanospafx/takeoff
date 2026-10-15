@@ -38,6 +38,32 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     }
 }
 
+if (!isset($_SESSION) || !is_array($_SESSION)) {
+    $_SESSION = [];
+}
+
+// Ensure logout state changes accept POST only: GET requests cannot terminate session
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') !== 'POST') {
+    if (!headers_sent()) {
+        http_response_code(405);
+        header('Allow: POST');
+    }
+    echo 'Método no permitido. El cierre de sesión requiere una solicitud POST.';
+    return;
+}
+
+// Validate session-bound CSRF token: invalid or missing CSRF fails closed
+$submittedCsrf = $_POST['csrf_token'] ?? null;
+$sessionCsrf = $_SESSION['csrf_token'] ?? '';
+
+if (!is_string($submittedCsrf) || !is_string($sessionCsrf) || $sessionCsrf === '' || !hash_equals($sessionCsrf, $submittedCsrf)) {
+    if (!headers_sent()) {
+        http_response_code(403);
+    }
+    echo 'Error de validación de seguridad (CSRF). Solicitud de cierre de sesión rechazada.';
+    return;
+}
+
 // Clear all session attributes
 $_SESSION = [];
 
