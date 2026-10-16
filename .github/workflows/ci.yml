@@ -6,7 +6,7 @@ on:
   pull_request:
 
 jobs:
-  php_lint:
+  ci:
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -15,6 +15,13 @@ jobs:
         uses: shivammathur/setup-php@v2
         with:
           php-version: "8.2"
+          tools: composer:v2
+
+      - name: Composer validate
+        run: composer validate --strict
+
+      - name: Install dependencies from lock
+        run: composer install --prefer-dist --no-interaction
 
       - name: PHP syntax check
         run: |
@@ -26,3 +33,9 @@ jobs:
           fi
           for f in $files; do php -l "$f" > /dev/null; done
           echo "PHP lint OK"
+
+      - name: Execute Takeoff SSO test suites
+        run: |
+          set -e
+          php tests/sso_client_contract.test.php
+          php tests/sso_composer_pipeline_contract.test.php

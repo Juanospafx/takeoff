@@ -2,6 +2,7 @@
     "name": "takeoff/takeoff",
     "description": "Takeoff application with SSO integration",
     "type": "project",
+    "license": "proprietary",
     "require": {
         "php": "~8.2.0",
         "league/oauth2-client": "^2.9"
@@ -16,5 +17,9 @@
             "config/",
             "core/"
         ]
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
     }
 }

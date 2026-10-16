@@ -219,6 +219,7 @@ if (!interface_exists('GuzzleHttp\ClientInterface', false)) {
 
         interface ClientInterface
         {
+            public const MAJOR_VERSION = 7;
         }
     ');
 }
