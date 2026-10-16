@@ -16,6 +16,15 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          tools: composer:v2
+
+      - name: Install optimized production dependencies
+        run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+
       - name: Build deployment artifact
         run: |
           set -e
@@ -33,6 +42,8 @@ jobs:
             --exclude 'docs' \
             --exclude 'harness' \
             --exclude 'db' \
+            --exclude 'migrations' \
+            --exclude 'migration' \
             --exclude '*.sql' \
             --exclude 'graphify-out' \
             --exclude '.swarm' \
@@ -44,14 +55,23 @@ jobs:
             --exclude 'tmp' \
             --exclude 'temp' \
             --exclude 'cache' \
+            --exclude '.cache' \
             --exclude 'coverage' \
             --exclude "$ARTIFACT_DIR"
 
-          # Verify critical runtime paths are present in artifact
+          # Verify critical runtime paths are present in artifact including vendor
           test -d "$ARTIFACT_DIR/api"
           test -d "$ARTIFACT_DIR/core"
           test -d "$ARTIFACT_DIR/assets"
+          test -d "$ARTIFACT_DIR/vendor"
           test -f "$ARTIFACT_DIR/bin/dispatch-won-project-outbox.php"
+
+          # Verify excluded items are strictly absent from artifact
+          test ! -d "$ARTIFACT_DIR/tests"
+          test ! -d "$ARTIFACT_DIR/docs"
+          test ! -d "$ARTIFACT_DIR/db"
+          test ! -d "$ARTIFACT_DIR/migrations"
+          test ! -d "$ARTIFACT_DIR/cache"
 
           # Generate deterministic SHA256SUMS for runtime files avoiding recursive autochecksum
           # Sorting with LC_ALL=C ensures byte-order deterministic output across environments

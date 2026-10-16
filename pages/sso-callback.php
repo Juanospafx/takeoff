@@ -33,7 +33,6 @@ if (!function_exists('takeoff_redirect')) {
 require_once dirname(__DIR__) . '/config/SsoConfig.php';
 require_once dirname(__DIR__) . '/core/auth/IdentityProviderClient.php';
 require_once dirname(__DIR__) . '/core/auth/SsoFlow.php';
-require_once dirname(__DIR__) . '/core/auth/OAuthIdentityProviderClient.php';
 require_once dirname(__DIR__) . '/core/auth/FederatedIdentityRepository.php';
 require_once dirname(__DIR__) . '/core/auth/SsoAuthorization.php';
 require_once dirname(__DIR__) . '/core/auth/SsoSession.php';
@@ -68,6 +67,18 @@ if (!$ssoConfig->isEnabled()) {
     takeoff_redirect('/pages/login.php?error=sso_disabled');
     return;
 }
+
+// When SSO is enabled, load Composer autoloader or fail closed with sanitized error
+$vendorAutoload = dirname(__DIR__) . '/vendor/autoload.php';
+if (file_exists($vendorAutoload)) {
+    require_once $vendorAutoload;
+} elseif (!isset($GLOBALS['__TAKEOFF_TEST_OAUTH_CLIENT__'])) {
+    $flow->clearFlowSession($_SESSION);
+    takeoff_redirect('/pages/login.php?error=sso_failed');
+    return;
+}
+
+require_once dirname(__DIR__) . '/core/auth/OAuthIdentityProviderClient.php';
 
 try {
     // Step 1: Validate state parameter and consume PKCE code verifier from session
