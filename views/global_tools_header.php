@@ -706,8 +706,49 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
                 opts.force = true;
                 opts.showDontShow = false;
                 showAnnouncement(opts);
+            },
+            confirm: function (options) {
+                options = options || {};
+                var title = options.title || 'Confirm Action';
+                var message = options.message || 'Are you sure you want to proceed?';
+                var confirmText = options.confirmText || 'Confirm';
+                var cancelText = options.cancelText || 'Cancel';
+                var type = options.type || (options.primaryDanger ? 'error' : 'warning');
+                var badge = options.badge || (options.primaryDanger ? 'WARNING' : 'CONFIRMATION');
+                var icon = options.icon || (options.primaryDanger ? 'fas fa-trash' : 'fas fa-triangle-exclamation');
+                var primaryDanger = options.primaryDanger !== undefined ? options.primaryDanger : (type === 'error');
+
+                return new Promise(function (resolve) {
+                    var resolved = false;
+                    showAnnouncement({
+                        force: true,
+                        type: type,
+                        title: title,
+                        badge: badge,
+                        icon: icon,
+                        message: message,
+                        primaryText: confirmText,
+                        primaryDanger: primaryDanger,
+                        cancelText: cancelText,
+                        showDontShow: false,
+                        onPrimary: function () {
+                            if (!resolved) {
+                                resolved = true;
+                                resolve(true);
+                            }
+                        },
+                        onCancel: function () {
+                            if (!resolved) {
+                                resolved = true;
+                                resolve(false);
+                            }
+                        }
+                    });
+                });
             }
         };
+
+        window.showConfirmDialog = window.TakeoffAnnouncement.confirm;
     })();
 </script>
 <link rel="stylesheet" href="../assets/global_datetime_picker.css?v=20260924-3">

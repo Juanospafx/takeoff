@@ -167,7 +167,11 @@
             favs.splice(index, 1);
         } else {
             if (favs.length >= MAX_COMPANY_FAVORITES) {
-                alert('Has alcanzado el límite máximo de ' + MAX_COMPANY_FAVORITES + ' favoritos. Desmarca uno para agregar este.');
+                if (window.TakeoffAnnouncement && typeof window.TakeoffAnnouncement.warning === 'function') {
+                    window.TakeoffAnnouncement.warning('Límite de Favoritos', 'Has alcanzado el límite máximo de ' + MAX_COMPANY_FAVORITES + ' favoritos. Desmarca uno para agregar este.');
+                } else {
+                    alert('Has alcanzado el límite máximo de ' + MAX_COMPANY_FAVORITES + ' favoritos. Desmarca uno para agregar este.');
+                }
                 return;
             }
             favs.push(tool);
@@ -183,7 +187,11 @@
             favs.splice(index, 1);
         } else {
             if (favs.length >= MAX_APP_FAVORITES) {
-                alert('Has alcanzado el límite máximo de ' + MAX_APP_FAVORITES + ' herramientas favoritas. Desmarca una para agregar esta.');
+                if (window.TakeoffAnnouncement && typeof window.TakeoffAnnouncement.warning === 'function') {
+                    window.TakeoffAnnouncement.warning('Límite de Favoritos', 'Has alcanzado el límite máximo de ' + MAX_APP_FAVORITES + ' herramientas favoritas. Desmarca una para agregar esta.');
+                } else {
+                    alert('Has alcanzado el límite máximo de ' + MAX_APP_FAVORITES + ' herramientas favoritas. Desmarca una para agregar esta.');
+                }
                 return;
             }
             favs.push(tool);
@@ -328,4 +336,268 @@
             window.visualViewport.addEventListener('resize', handleResize);
         }
     });
+
+    /* ==========================================================
+       UNIFIED PRO CUSTOM SELECT ENGINE
+       Transforms native <select> elements into pro custom dropdowns
+       ========================================================== */
+    function esc(s) {
+        return String(s || '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+    }
+
+    function enhanceSelect(selectEl) {
+        if (!selectEl || selectEl.dataset.customEnhanced === 'true') {
+            if (selectEl && typeof selectEl._syncCustom === 'function') {
+                selectEl._syncCustom();
+            }
+            return;
+        }
+
+        // Exclusions:
+        // 1. Visually hidden / screen-reader only elements with their own custom UI (e.g. bbSortBy, ccSortBy)
+        // 2. Elements with explicit opt-out
+        // 3. Raw selects or editor toolbar format selects
+        if (selectEl.classList.contains('bb-visually-hidden') ||
+            selectEl.hasAttribute('data-no-custom-select') ||
+            selectEl.classList.contains('native-raw-select') ||
+            selectEl.hasAttribute('data-editor-format')) {
+            return;
+        }
+
+        // Special hidden control exclusions
+        if (selectEl.id === 'bbProjectStage' || selectEl.id === 'bbSortBy' || selectEl.id === 'ccSortBy') {
+            return;
+        }
+
+        selectEl.dataset.customEnhanced = 'true';
+
+        // Keep native select accessible for form submissions and native events while hidden
+        selectEl.style.cssText = 'position: absolute !important; opacity: 0 !important; pointer-events: none !important; width: 0 !important; height: 0 !important; margin: 0 !important; padding: 0 !important; border: none !important;';
+
+        const wrap = document.createElement('div');
+        wrap.className = 'pro-custom-dropdown cc-custom-select pro-custom-select';
+        if (selectEl.id) wrap.setAttribute('data-for-select', selectEl.id);
+
+        if (selectEl.style.flex) {
+            wrap.style.flex = selectEl.style.flex;
+        }
+
+        const trigger = document.createElement('button');
+        trigger.type = 'button';
+        trigger.className = 'pro-custom-dropdown-trigger';
+        trigger.setAttribute('aria-haspopup', 'listbox');
+        trigger.setAttribute('aria-expanded', 'false');
+
+        const textSpan = document.createElement('span');
+        textSpan.className = 'pcd-trigger-text';
+
+        const caretSpan = document.createElement('span');
+        caretSpan.className = 'pcd-caret';
+
+        trigger.appendChild(textSpan);
+        trigger.appendChild(caretSpan);
+
+        const menu = document.createElement('div');
+        menu.className = 'pro-custom-dropdown-menu pcd-select-menu';
+        menu.setAttribute('role', 'listbox');
+
+        wrap.appendChild(trigger);
+        wrap.appendChild(menu);
+
+        const parentBox = selectEl.closest('.pro-create-control-box');
+        const parentWithActions = selectEl.closest('.pd-input-with-actions');
+        const parentPricing = selectEl.closest('.pd-pricing-wrap');
+
+        if (parentBox) {
+            const oldCaret = parentBox.querySelector('.pd-field-caret');
+            if (oldCaret) oldCaret.style.display = 'none';
+            parentBox.style.border = 'none';
+            parentBox.style.background = 'transparent';
+            parentBox.style.padding = '0';
+            parentBox.appendChild(wrap);
+        } else {
+            if (parentWithActions) {
+                const oldCaret = parentWithActions.querySelector('.pd-field-caret');
+                if (oldCaret) oldCaret.style.display = 'none';
+            }
+            if (parentPricing) {
+                const oldCaret = parentPricing.querySelector('.pd-field-caret');
+                if (oldCaret) oldCaret.style.display = 'none';
+            }
+            selectEl.parentNode.insertBefore(wrap, selectEl.nextSibling);
+        }
+
+        function renderOptions() {
+            if (selectEl.disabled) {
+                trigger.disabled = true;
+                wrap.classList.add('is-disabled');
+            } else {
+                trigger.disabled = false;
+                wrap.classList.remove('is-disabled');
+            }
+
+            const options = Array.from(selectEl.options);
+            const selectedOpt = selectEl.options[selectEl.selectedIndex] || options.find(o => String(o.value) === String(selectEl.value)) || options[0];
+            textSpan.textContent = selectedOpt ? selectedOpt.text : '';
+
+            let lastGroup = null;
+            let menuHtml = '';
+            for (const opt of options) {
+                const parent = opt.parentElement;
+                if (parent && parent.tagName === 'OPTGROUP' && parent.label && parent.label !== lastGroup) {
+                    lastGroup = parent.label;
+                    menuHtml += `<div class="pcd-select-group-header" style="font-size:10px;font-weight:700;text-transform:uppercase;letter-spacing:0.5px;color:#94a3b8;padding:6px 10px 2px 10px;user-select:none;">${esc(lastGroup)}</div>`;
+                }
+                const isSel = String(opt.value) === String(selectEl.value);
+                const isDis = opt.disabled;
+                menuHtml += `
+                    <div class="pcd-select-item ${isSel ? 'is-selected' : ''} ${isDis ? 'is-disabled' : ''}" data-val="${esc(opt.value)}" role="option" aria-selected="${isSel}" ${isDis ? 'style="opacity:0.5;pointer-events:none;"' : ''}>
+                        <span class="pcd-select-text">${esc(opt.text)}</span>
+                        ${isSel ? '<i class="fas fa-check pcd-check" aria-hidden="true"></i>' : ''}
+                    </div>
+                `;
+            }
+            menu.innerHTML = menuHtml;
+
+            menu.querySelectorAll('.pcd-select-item:not(.is-disabled)').forEach(itemEl => {
+                itemEl.addEventListener('click', (e) => {
+                    e.stopPropagation();
+                    const val = itemEl.dataset.val;
+                    if (selectEl.value !== val) {
+                        selectEl.value = val;
+                        selectEl.dispatchEvent(new Event('change', { bubbles: true }));
+                        selectEl.dispatchEvent(new Event('input', { bubbles: true }));
+                    }
+                    renderOptions();
+                    wrap.classList.remove('is-open');
+                    trigger.setAttribute('aria-expanded', 'false');
+                    trigger.focus();
+                });
+            });
+        }
+
+        selectEl._syncCustom = renderOptions;
+
+        // Shadow prototype setters so programmatic select.value = 'x' automatically updates custom UI
+        try {
+            const protoValDesc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'value');
+            if (protoValDesc && protoValDesc.set) {
+                Object.defineProperty(selectEl, 'value', {
+                    get() {
+                        return protoValDesc.get.call(this);
+                    },
+                    set(v) {
+                        protoValDesc.set.call(this, v);
+                        renderOptions();
+                    },
+                    configurable: true
+                });
+            }
+            const protoIdxDesc = Object.getOwnPropertyDescriptor(HTMLSelectElement.prototype, 'selectedIndex');
+            if (protoIdxDesc && protoIdxDesc.set) {
+                Object.defineProperty(selectEl, 'selectedIndex', {
+                    get() {
+                        return protoIdxDesc.get.call(this);
+                    },
+                    set(i) {
+                        protoIdxDesc.set.call(this, i);
+                        renderOptions();
+                    },
+                    configurable: true
+                });
+            }
+        } catch (e) {
+            // Fallback silently if restricted
+        }
+
+        trigger.addEventListener('click', (e) => {
+            e.stopPropagation();
+            if (selectEl.disabled) return;
+            const wasOpen = wrap.classList.contains('is-open');
+            document.querySelectorAll('.pro-custom-dropdown.is-open').forEach(d => {
+                d.classList.remove('is-open');
+                const tr = d.querySelector('.pro-custom-dropdown-trigger');
+                if (tr) tr.setAttribute('aria-expanded', 'false');
+            });
+            if (!wasOpen) {
+                renderOptions();
+                wrap.classList.add('is-open');
+                trigger.setAttribute('aria-expanded', 'true');
+            }
+        });
+
+        selectEl.addEventListener('change', renderOptions);
+
+        const observer = new MutationObserver(() => {
+            renderOptions();
+        });
+        observer.observe(selectEl, { childList: true, subtree: true, attributes: true, attributeFilter: ['disabled'] });
+
+        renderOptions();
+        return wrap;
+    }
+
+    function initCustomSelects(root = document) {
+        const scope = (typeof root === 'string') ? document.querySelector(root) : root;
+        if (!scope) return;
+        const selects = scope.querySelectorAll('select:not([data-custom-enhanced="true"])');
+        selects.forEach(enhanceSelect);
+    }
+
+    window.enhanceSelect = enhanceSelect;
+    window.initCustomSelects = initCustomSelects;
+
+    // Global click-outside & Escape listeners for all custom dropdowns
+    document.addEventListener('click', (event) => {
+        if (!event.target.closest('.pro-custom-dropdown')) {
+            document.querySelectorAll('.pro-custom-dropdown.is-open').forEach(d => {
+                d.classList.remove('is-open');
+                const tr = d.querySelector('.pro-custom-dropdown-trigger');
+                if (tr) tr.setAttribute('aria-expanded', 'false');
+            });
+        }
+    });
+
+    document.addEventListener('keydown', (event) => {
+        if (event.key === 'Escape') {
+            document.querySelectorAll('.pro-custom-dropdown.is-open').forEach(d => {
+                d.classList.remove('is-open');
+                const tr = d.querySelector('.pro-custom-dropdown-trigger');
+                if (tr) tr.setAttribute('aria-expanded', 'false');
+            });
+        }
+    });
+
+    // Auto-init on load
+    if (document.readyState === 'loading') {
+        document.addEventListener('DOMContentLoaded', () => initCustomSelects());
+    } else {
+        initCustomSelects();
+    }
+
+    // Auto-detect dynamically inserted selects (e.g. modals, ajax panels)
+    if (window.MutationObserver) {
+        const globalSelectObserver = new MutationObserver((mutations) => {
+            for (const m of mutations) {
+                if (m.addedNodes && m.addedNodes.length) {
+                    m.addedNodes.forEach(node => {
+                        if (node.nodeType === 1) {
+                            if (node.tagName === 'SELECT') {
+                                enhanceSelect(node);
+                            } else if (typeof node.querySelectorAll === 'function') {
+                                node.querySelectorAll('select:not([data-custom-enhanced="true"])').forEach(enhanceSelect);
+                            }
+                        }
+                    });
+                }
+            }
+        });
+        if (document.body) {
+            globalSelectObserver.observe(document.body, { childList: true, subtree: true });
+        } else {
+            document.addEventListener('DOMContentLoaded', () => {
+                if (document.body) globalSelectObserver.observe(document.body, { childList: true, subtree: true });
+            });
+        }
+    }
 })();

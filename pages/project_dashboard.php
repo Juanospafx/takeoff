@@ -521,7 +521,7 @@ $state = [
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="../assets/global_tools.css?v=view-trans-20260929-1">
+    <link rel="stylesheet" href="../assets/global_tools.css?v=<?= time() ?>">
     <script>
         (function () {
             try {
@@ -839,10 +839,10 @@ $state = [
             }
         }
     </style>
-    <link rel="stylesheet" href="../assets/project_overview.css?v=btn-blue-tabs-20261005-3">
-    <link rel="stylesheet" href="../assets/project_takeoff.css?v=scale-stage-pill-dark-20261005-40">
-    <link rel="stylesheet" href="../assets/project_estimating.css?v=unified-hierarchy-20260930-1">
-    <link rel="stylesheet" href="../assets/project_proposal.css?v=unified-hierarchy-20260930-1">
+    <link rel="stylesheet" href="../assets/project_overview.css?v=<?= time() ?>">
+    <link rel="stylesheet" href="../assets/project_takeoff.css?v=<?= time() ?>">
+    <link rel="stylesheet" href="../assets/project_estimating.css?v=<?= time() ?>">
+    <link rel="stylesheet" href="../assets/project_proposal.css?v=<?= time() ?>">
 </head>
 
 <body>
@@ -1104,7 +1104,38 @@ $state = [
                                 <div id="takeoffPresetWrap">
                                     <label for="takeoffScalePreset">Scale preset</label>
                                     <select id="takeoffScalePreset">
-                                        <option value="">Loading scales...</option>
+                                        <option value="">Choose a scale preset...</option>
+                                        <optgroup label="Architectural">
+                                            <option value="0">1/128&quot; = 1'</option>
+                                            <option value="1">1/64&quot; = 1'</option>
+                                            <option value="2">1/32&quot; = 1'</option>
+                                            <option value="3">1/16&quot; = 1'</option>
+                                            <option value="4">3/32&quot; = 1'</option>
+                                            <option value="5">1/8&quot; = 1'</option>
+                                            <option value="6">3/16&quot; = 1'</option>
+                                            <option value="7">1/4&quot; = 1'</option>
+                                            <option value="8">3/8&quot; = 1'</option>
+                                            <option value="9">1/2&quot; = 1'</option>
+                                            <option value="10">3/4&quot; = 1'</option>
+                                            <option value="11">1&quot; = 1'</option>
+                                            <option value="12">1 1/2&quot; = 1'</option>
+                                            <option value="13">3&quot; = 1'</option>
+                                        </optgroup>
+                                        <optgroup label="Civil">
+                                            <option value="14">1&quot; = 10'</option>
+                                            <option value="15">1&quot; = 20'</option>
+                                            <option value="16">1&quot; = 30'</option>
+                                            <option value="17">1&quot; = 40'</option>
+                                            <option value="18">1&quot; = 50'</option>
+                                            <option value="19">1&quot; = 60'</option>
+                                            <option value="20">1&quot; = 70'</option>
+                                            <option value="21">1&quot; = 80'</option>
+                                            <option value="22">1&quot; = 90'</option>
+                                            <option value="23">1&quot; = 100'</option>
+                                            <option value="24">1&quot; = 300'</option>
+                                            <option value="25">1&quot; = 500'</option>
+                                            <option value="26">1&quot; = 1000'</option>
+                                        </optgroup>
                                     </select>
                                 </div>
                                 <div id="takeoffManualWrap" class="pro-scale-manual" hidden>
@@ -2479,7 +2510,7 @@ $state = [
     <script src="../assets/project_estimating.js?v=estimating-all-modals-20260929-5"></script>
     <script src="../assets/catalog_update_ui.js?v=catalog-update-ui-20260827-1"></script>
     <script src="../assets/project_proposal.js?v=quantity-context-format-20260831-1"></script>
-    <script src="../assets/global_tools.js"></script>
+    <script src="../assets/global_tools.js?v=<?= time() ?>"></script>
 </body>
 
 </html>

@@ -327,9 +327,9 @@
 .est-markup-input:focus,
 .est-tax-input:focus,
 .est-global-input:focus {
-    outline: none;
-    border-color: var(--est-primary);
-    box-shadow: 0 0 0 3px var(--est-primary-soft);
+    outline: none !important;
+    border-color: var(--est-primary) !important;
+    box-shadow: none !important;
 }
 
 .est-cell-input:disabled,
@@ -922,8 +922,9 @@
 }
 
 .est-rich-editor:focus {
-    border-color: var(--est-primary);
-    box-shadow: 0 0 0 3px var(--est-primary-soft);
+    border-color: var(--est-primary) !important;
+    box-shadow: none !important;
+    outline: none !important;
 }
 
 .est-note-list {
@@ -2665,7 +2666,7 @@ body.theme-dark .est-pill-item-check {
 .est-dialog header button { width: 36px; height: 36px; display: grid; place-items: center; border: 1px solid var(--est-line); border-radius: 8px; background: var(--est-surface-2); color: var(--est-text); font-size: 1.4rem; line-height: 1; cursor: pointer; }
 .est-dialog > label { display: grid; gap: 7px; margin: 18px 0; color: var(--est-text-soft); font-size: .86rem; font-weight: 700; }
 .est-dialog input[type="text"], .est-dialog #copyEstimateName { width: 100%; min-height: 42px; box-sizing: border-box; border: 1px solid var(--est-line); border-radius: 8px; padding: 0 12px; background: var(--est-surface-2); color: var(--est-text); font: inherit; font-weight: 500; outline: none; }
-.est-dialog input[type="text"]:focus, .est-dialog #copyEstimateName:focus { border-color: var(--est-primary); box-shadow: 0 0 0 3px color-mix(in srgb, var(--est-primary) 20%, transparent); }
+.est-dialog input[type="text"]:focus, .est-dialog #copyEstimateName:focus { border-color: var(--est-primary) !important; box-shadow: none !important; outline: none !important; }
 .est-dialog fieldset { display: grid; gap: 6px; margin: 0 0 20px; padding: 12px; border: 1px solid var(--est-line); border-radius: 10px; background: var(--est-surface-2); }
 .est-dialog legend { padding: 0 7px; color: var(--est-text); font-size: .9rem; font-weight: 750; }
 .est-dialog fieldset label { display: flex; align-items: center; gap: 10px; min-height: 38px; margin: 0; padding: 0 10px; border-radius: 7px; color: var(--est-text-soft); cursor: pointer; }
