@@ -8,3 +8,12 @@ ruvector.db
 .claude-flow/data/
 .claude-flow/daemon.pid
 .claude-flow/daemon-state.json
+
+# Composer dependencies
+vendor/
+
+# Scratch & temporary diagnostic files
+scratch/*
+!scratch/seed_cost_catalogs.php
+!scratch/seed_sample_projects.php
+

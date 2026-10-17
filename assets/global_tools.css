@@ -2073,4 +2073,353 @@ body.header-is-collapsed .bb-pipeline-tabs-wrapper {
 ::view-transition-new(root) {
     animation-duration: 0.22s;
     animation-timing-function: cubic-bezier(0.4, 0, 0.2, 1);
-}
+}
+
+/* ==========================================================
+   UNIVERSAL SINGLE CLEAN FOCUS BORDER (System-wide)
+   Prevents double orange borders (ring + border) in Light & Dark
+   ========================================================== */
+input:focus,
+select:focus,
+textarea:focus,
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+button:focus,
+button:focus-visible,
+.form-control:focus,
+.form-select:focus,
+.overview-field input:focus,
+.overview-field select:focus,
+.overview-field textarea:focus,
+.pro-create-control-box:focus-within,
+[tabindex]:focus {
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+/* ==========================================================
+   GLOBAL MODERN SELECT & PICKER CONTROLS
+   Replaces default browser selects with Project Dashboard style
+   ========================================================== */
+select:not(.native-raw-select),
+.form-select,
+.pd-modal-body .cc-field select,
+.overview-field select {
+    appearance: none !important;
+    -webkit-appearance: none !important;
+    -moz-appearance: none !important;
+    background-color: var(--bg-input, #ffffff) !important;
+    color: var(--text-main, #0f172a) !important;
+    border: 1px solid var(--border, #cbd5e1) !important;
+    border-radius: 5px !important;
+    height: 32px !important;
+    min-height: 32px !important;
+    padding: 0 28px 0 10px !important;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
+    font-size: 12.5px !important;
+    font-weight: 500 !important;
+    cursor: pointer !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='none' stroke='%2364748b' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round' d='M1.5 2l4.5 4 4.5-4'/%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 10px center !important;
+    background-size: 10px 7px !important;
+    outline: none !important;
+    box-shadow: none !important;
+    transition: border-color 0.15s ease, background-color 0.15s ease !important;
+    box-sizing: border-box !important;
+}
+
+select:not(.native-raw-select):hover,
+.form-select:hover,
+.pd-modal-body .cc-field select:hover,
+.overview-field select:hover {
+    border-color: #94a3b8 !important;
+}
+
+select:not(.native-raw-select):focus,
+.form-select:focus,
+.pd-modal-body .cc-field select:focus,
+.overview-field select:focus {
+    border-color: #fb5a3a !important;
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+[data-theme="dark"] select:not(.native-raw-select),
+[data-theme="dark"] .form-select,
+[data-theme="dark"] .pd-modal-body .cc-field select,
+[data-theme="dark"] .overview-field select,
+body.theme-dark select:not(.native-raw-select),
+body.theme-dark .form-select,
+body.theme-dark .pd-modal-body .cc-field select,
+body.theme-dark .overview-field select {
+    background-color: #1e2432 !important;
+    color: #f8fafc !important;
+    border-color: #2f384a !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='none' stroke='%2394a3b8' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round' d='M1.5 2l4.5 4 4.5-4'/%3E%3C/svg%3E") !important;
+    background-repeat: no-repeat !important;
+    background-position: right 10px center !important;
+    background-size: 10px 7px !important;
+}
+
+[data-theme="dark"] select:not(.native-raw-select):hover,
+[data-theme="dark"] .form-select:hover,
+[data-theme="dark"] .pd-modal-body .cc-field select:hover,
+[data-theme="dark"] .overview-field select:hover,
+body.theme-dark select:not(.native-raw-select):hover,
+body.theme-dark .form-select:hover,
+body.theme-dark .pd-modal-body .cc-field select:hover,
+body.theme-dark .overview-field select:hover {
+    border-color: #475569 !important;
+}
+
+[data-theme="dark"] select:not(.native-raw-select):focus,
+[data-theme="dark"] .form-select:focus,
+[data-theme="dark"] .pd-modal-body .cc-field select:focus,
+[data-theme="dark"] .overview-field select:focus,
+body.theme-dark select:not(.native-raw-select):focus,
+body.theme-dark .form-select:focus,
+body.theme-dark .pd-modal-body .cc-field select:focus,
+body.theme-dark .overview-field select:focus {
+    border-color: #fb5a3a !important;
+    outline: none !important;
+    box-shadow: none !important;
+}
+
+/* Explicit exclusion for selects inside control box wrappers with separate caret elements */
+.pro-create-control-box select,
+[data-theme="dark"] .pro-create-control-box select,
+body.theme-dark .pro-create-control-box select {
+    border: none !important;
+    background-image: none !important;
+    background: transparent !important;
+    height: 100% !important;
+    min-height: 100% !important;
+    padding: 0 24px 0 10px !important;
+}
+
+[data-theme="dark"] select option,
+body.theme-dark select option {
+    background-color: #242a38 !important;
+    color: #f8fafc !important;
+}
+
+/* ==========================================================
+   UNIFIED PRO CUSTOM DROPDOWN / SELECT SYSTEM
+   Applied across Bid Board, Project Dashboard & Cost Catalog
+   ========================================================== */
+.pro-custom-dropdown.cc-custom-select,
+.pro-custom-dropdown.pro-custom-select {
+    position: relative;
+    width: 100%;
+    box-sizing: border-box;
+    display: block;
+}
+
+.pro-custom-dropdown.cc-custom-select .pro-custom-dropdown-trigger,
+.pro-custom-dropdown.pro-custom-select .pro-custom-dropdown-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    background: var(--bg-panel, #ffffff);
+    color: var(--text-main, #0f172a);
+    border: 1px solid var(--border, #cbd5e1);
+    border-radius: 6px;
+    cursor: pointer;
+    box-sizing: border-box;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-size: 12.5px;
+    font-weight: 500;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+    user-select: none;
+    text-align: left;
+}
+
+.pro-custom-dropdown.cc-custom-select .pro-custom-dropdown-trigger:hover,
+.pro-custom-dropdown.pro-custom-select .pro-custom-dropdown-trigger:hover {
+    border-color: #94a3b8;
+}
+
+.pro-custom-dropdown.cc-custom-select.is-open .pro-custom-dropdown-trigger,
+.pro-custom-dropdown.pro-custom-select.is-open .pro-custom-dropdown-trigger,
+.pro-custom-dropdown.cc-custom-select .pro-custom-dropdown-trigger:focus,
+.pro-custom-dropdown.pro-custom-select .pro-custom-dropdown-trigger:focus {
+    border-color: #fb5a3a !important;
+    outline: none !important;
+    box-shadow: 0 0 0 3px rgba(251, 90, 58, 0.15) !important;
+}
+
+.pro-custom-dropdown .pcd-trigger-text {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-right: 6px;
+}
+
+.pro-custom-dropdown .pcd-caret {
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #64748b;
+    border-bottom: none;
+    transition: transform 0.15s ease;
+    flex-shrink: 0;
+}
+
+.pro-custom-dropdown.is-open .pcd-caret {
+    border-top: none;
+    border-bottom: 5px solid #fb5a3a;
+}
+
+.pro-custom-dropdown-menu.pcd-select-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    width: 100%;
+    min-width: 140px;
+    max-height: 250px;
+    overflow-y: auto;
+    background: var(--bg-panel, #ffffff);
+    border: 1px solid var(--border, #cbd5e1);
+    border-radius: 6px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    z-index: 9999;
+    padding: 4px;
+    display: none;
+    box-sizing: border-box;
+}
+
+.pro-custom-dropdown.is-open .pro-custom-dropdown-menu.pcd-select-menu {
+    display: block;
+}
+
+.pcd-select-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12.5px;
+    color: var(--text-main, #0f172a);
+    transition: background-color 0.12s ease, color 0.12s ease;
+    user-select: none;
+}
+
+.pcd-select-item:hover {
+    background: #f1f5f9;
+}
+
+.pcd-select-item.is-selected {
+    background: #fff1ee !important;
+    color: #fb5a3a !important;
+    font-weight: 600;
+}
+
+.pcd-select-item .pcd-check {
+    color: #fb5a3a;
+    font-size: 11px;
+}
+
+.pro-custom-dropdown.is-disabled .pro-custom-dropdown-trigger {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background: var(--bg-disabled, #f1f5f9) !important;
+}
+
+/* Contextual overrides across modules */
+.bb-input-icon-wrap .cc-custom-select .pro-custom-dropdown-trigger {
+    height: 42px;
+    padding-left: 36px;
+}
+.bb-input-icon-wrap .bb-input-icon {
+    z-index: 2;
+}
+
+.pd-pricing-wrap .cc-custom-select .pro-custom-dropdown-trigger {
+    padding-left: 28px;
+}
+.pd-pricing-status-icon {
+    z-index: 2;
+    pointer-events: none;
+}
+
+.pro-scale-panel .cc-custom-select .pro-custom-dropdown-trigger {
+    height: 28px;
+    min-height: 28px;
+    font-size: 0.76rem;
+    padding: 0 8px;
+}
+.pro-scale-panel .cc-custom-select {
+    margin-bottom: 6px;
+}
+
+.pd-input-with-actions .pd-field-caret,
+.pd-pricing-wrap .pd-field-caret,
+.pro-create-control-box .pd-field-caret {
+    display: none !important;
+}
+
+/* Dark mode theme styles */
+[data-theme="dark"] .cc-custom-select .pro-custom-dropdown-trigger,
+[data-theme="dark"] .pro-custom-select .pro-custom-dropdown-trigger,
+body.theme-dark .cc-custom-select .pro-custom-dropdown-trigger,
+body.theme-dark .pro-custom-select .pro-custom-dropdown-trigger {
+    background: #1e293b;
+    color: #f1f5f9;
+    border-color: #334155;
+}
+
+[data-theme="dark"] .cc-custom-select .pro-custom-dropdown-trigger:hover,
+[data-theme="dark"] .pro-custom-select .pro-custom-dropdown-trigger:hover,
+body.theme-dark .cc-custom-select .pro-custom-dropdown-trigger:hover,
+body.theme-dark .pro-custom-select .pro-custom-dropdown-trigger:hover {
+    border-color: #64748b;
+}
+
+[data-theme="dark"] .pro-custom-dropdown .pcd-caret,
+body.theme-dark .pro-custom-dropdown .pcd-caret {
+    border-top-color: #94a3b8;
+}
+
+[data-theme="dark"] .pro-custom-dropdown.is-open .pcd-caret,
+body.theme-dark .pro-custom-dropdown.is-open .pcd-caret {
+    border-bottom-color: #fb5a3a;
+}
+
+[data-theme="dark"] .pro-custom-dropdown-menu.pcd-select-menu,
+body.theme-dark .pro-custom-dropdown-menu.pcd-select-menu {
+    background: #1e293b;
+    border-color: #334155;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .pcd-select-item,
+body.theme-dark .pcd-select-item {
+    color: #f1f5f9;
+}
+
+[data-theme="dark"] .pcd-select-item:hover,
+body.theme-dark .pcd-select-item:hover {
+    background: #334155;
+}
+
+[data-theme="dark"] .pcd-select-item.is-selected,
+body.theme-dark .pcd-select-item.is-selected {
+    background: rgba(251, 90, 58, 0.2) !important;
+    color: #fb5a3a !important;
+}
+
+[data-theme="dark"] .pro-custom-dropdown.is-disabled .pro-custom-dropdown-trigger,
+body.theme-dark .pro-custom-dropdown.is-disabled .pro-custom-dropdown-trigger {
+    background: #0f172a !important;
+}
+
+
+
