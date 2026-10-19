@@ -566,7 +566,7 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
             }
 
             if (primBtn) {
-                primBtn.textContent = options.primaryText || (type === 'error' ? 'Close' : 'Got It');
+                primBtn.textContent = options.confirmText || options.primaryText || (type === 'error' ? 'Close' : 'Got It');
                 if (options.primaryDanger || (type === 'error' && options.cancelText)) {
                     primBtn.style.background = '#ef4444';
                     primBtn.style.boxShadow = '0 2px 6px rgba(239, 68, 68, 0.35)';
@@ -616,6 +616,11 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
         }
 
         function closeAnnouncement() {
+            var cb = cancelCallback;
+            primaryCallback = null;
+            secondaryCallback = null;
+            cancelCallback = null;
+            if (cb) cb();
             if (dontShowCheck && dontShowCheck.checked) {
                 markDismissed(currentAnnouncementId);
             }
@@ -625,11 +630,6 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
         }
 
         function handleCancelDismiss() {
-            var cb = cancelCallback;
-            primaryCallback = null;
-            secondaryCallback = null;
-            cancelCallback = null;
-            if (cb) cb();
             closeAnnouncement();
         }
 
@@ -694,6 +694,38 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
             close: closeAnnouncement,
             isDismissed: isDismissed,
             markDismissed: markDismissed,
+            confirm: function (titleOrOpts, message) {
+                return new Promise(function (resolve) {
+                    var opts = {};
+                    if (typeof titleOrOpts === 'object' && titleOrOpts !== null) {
+                        opts = Object.assign({}, titleOrOpts);
+                    } else if (typeof titleOrOpts === 'string') {
+                        if (typeof message === 'string') {
+                            opts = { title: titleOrOpts, message: message };
+                        } else {
+                            opts = { message: titleOrOpts };
+                        }
+                    }
+                    opts.force = true;
+                    opts.showDontShow = false;
+                    opts.type = opts.type || 'warning';
+                    if (!opts.cancelText) opts.cancelText = 'Cancel';
+                    if (!opts.confirmText && !opts.primaryText) opts.confirmText = 'Confirm';
+
+                    var settled = false;
+                    function finish(value) {
+                        if (settled) return;
+                        settled = true;
+                        resolve(Boolean(value));
+                    }
+
+                    opts.onPrimary = function () { finish(true); };
+                    opts.onCancel = function () { finish(false); };
+                    opts.onSecondary = function () { finish(false); };
+
+                    showAnnouncement(opts);
+                });
+            },
             success: function (titleOrOpts, message) {
                 var opts = typeof titleOrOpts === 'object' ? titleOrOpts : { title: titleOrOpts, message: message };
                 opts.type = 'success';
