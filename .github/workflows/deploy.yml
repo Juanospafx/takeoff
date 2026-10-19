@@ -40,11 +40,11 @@ jobs:
             --exclude '.env.*' \
             --exclude 'tests' \
             --exclude 'docs' \
-            --exclude 'templates' \
+            --exclude '/templates/' \
             --exclude 'harness' \
-            --exclude 'db' \
-            --exclude 'migrations' \
-            --exclude 'migration' \
+            --exclude '/db/' \
+            --exclude '/migrations/' \
+            --exclude '/migration/' \
             --exclude '*.sql' \
             --exclude 'graphify-out' \
             --exclude '.swarm' \
@@ -63,6 +63,7 @@ jobs:
           # Verify critical runtime paths are present in artifact including vendor
           test -d "$ARTIFACT_DIR/api"
           test -d "$ARTIFACT_DIR/core"
+          test -f "$ARTIFACT_DIR/core/db/connection.php"
           test -d "$ARTIFACT_DIR/assets"
           test -d "$ARTIFACT_DIR/vendor"
           test -f "$ARTIFACT_DIR/bin/dispatch-won-project-outbox.php"
