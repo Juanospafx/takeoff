@@ -80,12 +80,11 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
                     <button class="bb-control-btn cc-btn-head" id="ccMoreActionsBtn" type="button" title="More options (Excel Import / Export / Templates)" aria-label="More options" aria-expanded="false" style="padding: 0 10px;">
                         <i class="fas fa-ellipsis-vertical"></i>
                     </button>
-                    <div class="cc-row-item-floating-menu" id="ccHeaderMoreMenu" hidden style="position: absolute; right: 0; top: calc(100% + 4px); z-index: 1000; min-width: 220px; box-shadow: 0 4px 16px rgba(0,0,0,0.15);">
-                        <button type="button" id="ccMenuExportCatalog"><i class="fas fa-file-export"></i> Export to Excel</button>
-                        <button type="button" id="ccMenuImportCatalog"><i class="fas fa-file-import"></i> Import from Excel</button>
+                    <div class="cc-row-item-floating-menu" id="ccHeaderMoreMenu" hidden style="position: absolute; right: 0; top: calc(100% + 4px); z-index: 1000; min-width: 200px; box-shadow: 0 4px 16px rgba(0,0,0,0.15);">
+                        <button type="button" id="ccMenuExportCatalog">Export Master Catalog</button>
+                        <button type="button" id="ccMenuImportCatalog">Import Master Catalog</button>
                         <div class="cc-menu-divider" style="height: 1px; background: var(--border-soft); margin: 4px 0;"></div>
-                        <button type="button" id="ccMenuDownloadItemsTemplate"><i class="fas fa-file-arrow-down"></i> Blank Items Template</button>
-                        <button type="button" id="ccMenuDownloadAssembliesTemplate"><i class="fas fa-file-arrow-down"></i> Blank Assemblies Template</button>
+                        <button type="button" id="ccMenuDownloadMasterTemplate">Download Master Template</button>
                     </div>
                 </div>
             </div>
@@ -859,11 +858,14 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
     </div>
 </div>
 
-<!-- Modal: Import / Export Excel -->
-<div class="cc-modal-backdrop pd-modal-backdrop" id="ccIoModal" style="display:none;">
-    <div class="cc-modal pd-modal" style="max-width: 520px;">
+<!-- Modal: Unified Master Excel Import / Export -->
+<div class="cc-modal-backdrop pd-modal-backdrop" id="ccIoModal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="ccIoModalTitle">
+    <div class="cc-modal pd-modal" style="max-width: 540px;">
         <div class="pd-modal-head cc-modal-head">
-            <h3 id="ccIoModalTitle"><i class="fas fa-file-excel" style="color: #107c41;"></i> Export / Import Catalog</h3>
+            <h3 id="ccIoModalTitle" style="display: flex; align-items: center; gap: 8px;">
+                <i class="fas fa-file-excel" style="color: #10b981;"></i>
+                <span id="ccIoModalHeading">Master Catalog Excel (Parts & Assemblies)</span>
+            </h3>
             <button class="pd-modal-head-close" type="button" id="ccCloseIoModal" aria-label="Close">
                 <i class="fas fa-times"></i>
             </button>
@@ -872,10 +874,10 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
             <!-- Mode Tabs (Export / Import) -->
             <div style="display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border-soft); padding-bottom: 10px;">
                 <button type="button" class="bb-control-btn is-active" id="ccIoTabExport" style="flex: 1; justify-content: center; font-weight: 700;">
-                    <i class="fas fa-file-export"></i> Export to Excel
+                    <i class="fas fa-file-export"></i> Export Master Excel
                 </button>
                 <button type="button" class="bb-control-btn" id="ccIoTabImport" style="flex: 1; justify-content: center; font-weight: 700;">
-                    <i class="fas fa-file-import"></i> Import from Excel
+                    <i class="fas fa-file-import"></i> Import Master Excel
                 </button>
             </div>
 
@@ -892,7 +894,7 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
             </div>
 
             <div class="cc-field full">
-                <label for="ccIoGroupSelect">Group</label>
+                <label for="ccIoGroupSelect">Filter by Group</label>
                 <div class="pro-create-control-box">
                     <select id="ccIoGroupSelect">
                         <option value="all">All Groups (Whole Catalog)</option>
@@ -904,69 +906,55 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
             <!-- EXPORT TAB CONTENT -->
             <div id="ccIoExportSection">
                 <div class="cc-field full">
-                    <label>Content to Export <span class="req">*</span></label>
+                    <label>Export Format</label>
                     <div class="bb-studio-mode-stack" style="display: flex; flex-direction: column; gap: 9px; margin-top: 6px;">
-                        <label class="bb-mode-card bb-studio-card active" data-export-card="both">
-                            <input type="radio" name="ccIoExportScope" value="both" checked class="bb-mode-radio">
+                        <div class="bb-mode-card bb-studio-card active" style="cursor: default; border-color: #10b981; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.12);">
                             <div class="bb-mode-card-header">
-                                <div class="bb-mode-icon-wrap"><i class="fas fa-layer-group"></i></div>
-                                <span class="bb-mode-badge">Recommended</span>
+                                <div class="bb-mode-icon-wrap" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">
+                                    <i class="fas fa-layer-group"></i>
+                                </div>
+                                <span class="bb-mode-badge" style="background: rgba(16, 185, 129, 0.18); color: #059669; border: 1px solid rgba(16, 185, 129, 0.3);">
+                                    Synchronized Master
+                                </span>
                             </div>
-                            <div class="bb-mode-title">Both Files (Items & Assemblies)</div>
-                            <p class="bb-mode-desc">Downloads two separate spreadsheets: one for parts/materials and one for assemblies with component breakdowns.</p>
-                        </label>
-
-                        <label class="bb-mode-card bb-studio-card" data-export-card="items">
-                            <input type="radio" name="ccIoExportScope" value="items" class="bb-mode-radio">
-                            <div class="bb-mode-card-header">
-                                <div class="bb-mode-icon-wrap"><i class="fas fa-cubes"></i></div>
-                            </div>
-                            <div class="bb-mode-title">Normal Items Only</div>
-                            <p class="bb-mode-desc">Exports all non-assembly catalog items (materials, conduit, fittings, wires, labor rates).</p>
-                        </label>
-
-                        <label class="bb-mode-card bb-studio-card" data-export-card="assemblies">
-                            <input type="radio" name="ccIoExportScope" value="assemblies" class="bb-mode-radio">
-                            <div class="bb-mode-card-header">
-                                <div class="bb-mode-icon-wrap"><i class="fas fa-sitemap"></i></div>
-                            </div>
-                            <div class="bb-mode-title">Assemblies Only</div>
-                            <p class="bb-mode-desc">Exports all assemblies along with each linked component part, quantities, and ratio types.</p>
-                        </label>
+                            <div class="bb-mode-title" style="font-size: 14px;">Master Excel Workbook (Parts &amp; Assemblies)</div>
+                            <p class="bb-mode-desc">Exports a unified <code>.xlsx</code> workbook with two synchronized tabs: <strong>'Parts'</strong> (all catalog items, materials, conduit, wire, labor) and <strong>'Assemblies'</strong> (all assemblies with nested component items, quantities, and ratios).</p>
+                        </div>
                     </div>
                 </div>
 
-                <div style="margin-top: 14px; padding: 12px; background: var(--bg-input); border: 1px solid var(--border-soft); border-radius: 6px; font-size: 12px; color: var(--text-muted); line-height: 1.4;">
-                    <i class="fas fa-circle-info" style="color: var(--procore-blue); margin-right: 4px;"></i>
-                    Generates clean, fully populated <code>.xlsx</code> spreadsheets based on the selected catalog and group filter.
+                <div style="margin-top: 12px; padding: 12px; background: rgba(16, 185, 129, 0.07); border: 1px solid rgba(16, 185, 129, 0.22); border-radius: 6px; font-size: 12px; color: var(--text-muted); line-height: 1.45;">
+                    <i class="fas fa-circle-check" style="color: #10b981; margin-right: 5px;"></i>
+                    Both sheets export together so that unit costs, labor times, and assembly component links remain 100% consistent.
                 </div>
             </div>
 
             <!-- IMPORT TAB CONTENT -->
             <div id="ccIoImportSection" style="display:none;">
                 <div class="cc-field full">
-                    <label for="ccIoImportType">Import Type <span class="req">*</span></label>
-                    <div class="pro-create-control-box">
-                        <select id="ccIoImportType">
-                            <option value="auto">Auto-detect from Excel file headers</option>
-                            <option value="items">Normal Items (Parts, Material, Labor)</option>
-                            <option value="assemblies">Assemblies (with Component Parts)</option>
-                        </select>
-                        <span class="pd-field-caret"><i class="fas fa-chevron-down"></i></span>
+                    <label for="ccIoFileInput">Upload Master Excel File (.xlsx) <span class="req">*</span></label>
+                    <input type="file" id="ccIoFileInput" accept=".xlsx" style="font-size: 12.5px; padding: 12px; background: var(--bg-input); border: 1px dashed var(--border); border-radius: 8px; width: 100%; cursor: pointer;">
+                </div>
+
+                <div style="margin-top: 10px; padding: 12px 14px; background: var(--bg-input); border: 1px solid var(--border-soft); border-radius: 8px; font-size: 12px; color: var(--text-muted); line-height: 1.45;">
+                    <div style="display: flex; gap: 8px; align-items: flex-start;">
+                        <i class="fas fa-bolt" style="color: #f59e0b; margin-top: 2px;"></i>
+                        <div>
+                            <strong style="color: var(--text-main);">Two-Pass Atomic Loading:</strong><br>
+                            1. Reads and updates all catalog items from the <code>Parts</code> sheet.<br>
+                            2. Immediately resolves and links each component in the <code>Assemblies</code> sheet, automatically calculating costs and labor times with zero missing items.
+                        </div>
                     </div>
                 </div>
 
-                <div class="cc-field full">
-                    <label for="ccIoFileInput">Upload Excel File (.xlsx) <span class="req">*</span></label>
-                    <input type="file" id="ccIoFileInput" accept=".xlsx" style="font-size: 12.5px; padding: 10px; background: var(--bg-input); border: 1px dashed var(--border); border-radius: 6px; width: 100%; cursor: pointer;">
-                </div>
-
-                <div style="margin-top: 10px; font-size: 12px; color: var(--text-muted);">
-                    Need blank templates to fill in?
-                    <div style="display: flex; gap: 12px; margin-top: 4px;">
-                        <a href="../api/catalog_io.php?action=template&type=items" target="_blank" style="color: var(--procore-blue); text-decoration: underline; font-weight: 600;"><i class="fas fa-file-arrow-down"></i> Blank Items Template</a>
-                        <a href="../api/catalog_io.php?action=template&type=assemblies" target="_blank" style="color: var(--procore-blue); text-decoration: underline; font-weight: 600;"><i class="fas fa-file-arrow-down"></i> Blank Assemblies Template</a>
+                <div style="margin-top: 14px; padding: 12px 14px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                    <div style="font-size: 12px;">
+                        <strong style="color: var(--text-main);"><i class="fas fa-file-excel" style="color: #10b981; margin-right: 5px;"></i> Need the blank template?</strong><br>
+                        <span style="color: var(--text-muted);">Download the official Master Template with both sheets ('Parts' and 'Assemblies') and format guides.</span>
                     </div>
+                    <a href="../api/catalog_io.php?action=template&type=both" target="_blank" class="bb-btn-procore-primary" style="padding: 7px 14px; font-size: 12px; text-decoration: none; white-space: nowrap; background: #10b981; border-color: #059669; font-weight: 600;">
+                        <i class="fas fa-file-arrow-down"></i> Download Master Template
+                    </a>
                 </div>
             </div>
         </div>
@@ -974,7 +962,7 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
         <div class="pd-modal-foot cc-modal-foot">
             <button class="btn-ghost" type="button" id="ccIoCancelBtn">Cancel</button>
             <button class="bb-btn-procore-primary" type="button" id="ccIoSubmitBtn">
-                <i class="fas fa-file-export" id="ccIoSubmitIcon"></i> <span id="ccIoSubmitText">Export Excel</span>
+                <i class="fas fa-file-export" id="ccIoSubmitIcon"></i> <span id="ccIoSubmitText">Export Master Excel</span>
             </button>
         </div>
     </div>

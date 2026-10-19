@@ -427,6 +427,10 @@ final class CatalogAdminService
                 $this->pdo->prepare('DELETE ap FROM assembly_parts ap JOIN catalog_items ci ON ci.id=ap.assembly_catalog_item_id WHERE ci.catalog_id=?')->execute([$id]);
                 $this->pdo->prepare('DELETE ap FROM assembly_parts ap JOIN catalog_items ci ON ci.id=ap.part_catalog_item_id WHERE ci.catalog_id=?')->execute([$id]);
             }
+            if (catalog_ra_table_exists($this->pdo, 'assembly_items')) {
+                $this->pdo->prepare('DELETE ai FROM assembly_items ai JOIN catalog_items ci ON ci.id=ai.assembly_id WHERE ci.catalog_id=?')->execute([$id]);
+                $this->pdo->prepare('DELETE ai FROM assembly_items ai JOIN catalog_items ci ON ci.id=ai.catalog_item_id WHERE ci.catalog_id=?')->execute([$id]);
+            }
             $this->pdo->prepare('DELETE FROM catalog_items WHERE catalog_id=?')->execute([$id]);
             $this->pdo->prepare('DELETE FROM catalog_groups WHERE catalog_id=?')->execute([$id]);
             $this->pdo->prepare('DELETE FROM cost_catalogs WHERE catalog_id=?')->execute([$id]);
@@ -461,6 +465,10 @@ final class CatalogAdminService
                 $this->pdo->prepare("DELETE ap FROM assembly_parts ap JOIN catalog_items ci ON ci.id=ap.assembly_catalog_item_id WHERE ci.catalog_group_id IN ($inMarks)")->execute($groupIds);
                 $this->pdo->prepare("DELETE ap FROM assembly_parts ap JOIN catalog_items ci ON ci.id=ap.part_catalog_item_id WHERE ci.catalog_group_id IN ($inMarks)")->execute($groupIds);
             }
+            if (catalog_ra_table_exists($this->pdo, 'assembly_items')) {
+                $this->pdo->prepare("DELETE ai FROM assembly_items ai JOIN catalog_items ci ON ci.id=ai.assembly_id WHERE ci.catalog_group_id IN ($inMarks)")->execute($groupIds);
+                $this->pdo->prepare("DELETE ai FROM assembly_items ai JOIN catalog_items ci ON ci.id=ai.catalog_item_id WHERE ci.catalog_group_id IN ($inMarks)")->execute($groupIds);
+            }
             // Permanently delete all items belonging to this group and its sub-groups (whether active or archived)
             $this->pdo->prepare("DELETE FROM catalog_items WHERE catalog_group_id IN ($inMarks)")->execute($groupIds);
             $this->pdo->prepare("DELETE FROM catalog_groups WHERE id IN ($inMarks)")->execute($groupIds);
@@ -480,7 +488,12 @@ final class CatalogAdminService
             if (catalog_ra_table_exists($this->pdo, 'catalog_item_attachments')) {
                 $this->pdo->prepare('DELETE FROM catalog_item_attachments WHERE catalog_item_id=?')->execute([$id]);
             }
-            $this->pdo->prepare('DELETE FROM assembly_parts WHERE assembly_catalog_item_id=? OR part_catalog_item_id=?')->execute([$id, $id]);
+            if (catalog_ra_table_exists($this->pdo, 'assembly_parts')) {
+                $this->pdo->prepare('DELETE FROM assembly_parts WHERE assembly_catalog_item_id=? OR part_catalog_item_id=?')->execute([$id, $id]);
+            }
+            if (catalog_ra_table_exists($this->pdo, 'assembly_items')) {
+                $this->pdo->prepare('DELETE FROM assembly_items WHERE assembly_id=? OR catalog_item_id=?')->execute([$id, $id]);
+            }
             $this->pdo->prepare('DELETE FROM catalog_items WHERE id=?')->execute([$id]);
             return ['id'=>$id,'purged'=>true];
         });
