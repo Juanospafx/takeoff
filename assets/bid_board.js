@@ -504,8 +504,19 @@
         render();
     }
 
-    function resetPhasesToDefault() {
-        if (window.confirm('Reset all phase names and colors to default?')) {
+    async function resetPhasesToDefault() {
+        const ok = typeof window.showConfirmDialog === 'function'
+            ? await window.showConfirmDialog({
+                title: 'Reset Pipeline Phases',
+                message: 'Reset all phase names and colors to default configuration?',
+                confirmText: 'Reset Defaults',
+                cancelText: 'Cancel',
+                type: 'warning',
+                badge: 'RESET',
+                icon: 'fas fa-rotate-left'
+            })
+            : window.confirm('Reset all phase names and colors to default?');
+        if (ok) {
             localStorage.removeItem('takeoff.pipelineConfig');
             openPhaseConfig();
             render();
@@ -1129,11 +1140,25 @@
         });
     }
 
-    function runProjectAction(action, projectId) {
+    async function runProjectAction(action, projectId) {
         openMenuId = null;
-        if (action === 'delete' && !window.confirm('Delete this project from the Bid Board?')) {
-            renderTable();
-            return;
+        if (action === 'delete') {
+            const ok = typeof window.showConfirmDialog === 'function'
+                ? await window.showConfirmDialog({
+                    title: 'Delete Project',
+                    message: 'Delete this project from the Bid Board? This will move it to the deleted archive.',
+                    confirmText: 'Delete Project',
+                    cancelText: 'Cancel',
+                    type: 'error',
+                    badge: 'DELETE',
+                    icon: 'fas fa-trash',
+                    primaryDanger: true
+                })
+                : window.confirm('Delete this project from the Bid Board?');
+            if (!ok) {
+                renderTable();
+                return;
+            }
         }
         const apiAction = action === 'duplicate' ? 'copy' : action;
         postProjectAction(apiAction, { id: Number(projectId) }).catch(err => showError(err.message));

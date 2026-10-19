@@ -61,10 +61,11 @@ assertContract(str_contains($require['php'] ?? '', '8.2'), 'composer.json php re
 assertContract(isset($require['league/oauth2-client']), 'composer.json requires league/oauth2-client');
 assertContract(str_contains($require['league/oauth2-client'] ?? '', '2.'), 'composer.json uses league/oauth2-client v2.x');
 
-// Confirm no extraneous runtime packages in require
-$allowedPackages = ['php', 'league/oauth2-client'];
+// Confirm only reviewed runtime packages are present.
+$allowedPackages = ['php', 'league/oauth2-client', 'phpoffice/phpspreadsheet'];
 $extraPackages = array_diff(array_keys($require), $allowedPackages);
-assertContract(empty($extraPackages), 'composer.json contains only required OAuth2 dependencies actually used: ' . implode(', ', $extraPackages));
+assertContract(isset($require['phpoffice/phpspreadsheet']), 'composer.json requires phpoffice/phpspreadsheet for authenticated catalog Excel I/O');
+assertContract(empty($extraPackages), 'composer.json contains only reviewed runtime dependencies: ' . implode(', ', $extraPackages));
 
 // -----------------------------------------------------------------------------
 // Criterion 2: composer.lock Structural Contract & TLS Verification

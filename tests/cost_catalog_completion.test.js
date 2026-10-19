@@ -48,9 +48,9 @@ test('catalog UI has complete fields, archive restore, filters and no fake actio
   assert.match(client, /restore_item/);
 });
 
-test('category archive is transactional and moves items before archiving the tree', () => {
+test('group archive is transactional and moves items before archiving the tree', () => {
   assert.match(admin, /function archiveCategory[\s\S]*UPDATE catalog_items SET catalog_group_id/);
   assert.match(admin, /CATEGORY_HAS_CHILDREN/);
-  assert.match(client, /ccArchiveCategoryImpact/);
+  assert.match(client, /ccArchiveGroupImpact/);
   assert.match(client, /archive_tree/);
 });
