@@ -179,7 +179,9 @@ function cc_payload(PDO $pdo, string $view = 'all', int $catalogId = 0, int $gro
         LEFT JOIN catalog_groups g ON g.id=ci.catalog_group_id
         LEFT JOIN cost_catalogs cc ON cc.id=ci.cost_catalog_id";
     $where = [];
-    if (!$includeDeleted) $where[] = 'ci.deleted_at IS NULL';
+    if (!$includeDeleted) {
+        $where[] = 'ci.deleted_at IS NULL AND c.deleted_at IS NULL AND (ci.catalog_group_id IS NULL OR g.deleted_at IS NULL)';
+    }
     if ($availability !== 'admin') {
         $joins .= ' LEFT JOIN group_availability ga ON ga.id=ci.catalog_group_id';
         $where[] = 'ci.active=1';
@@ -194,10 +196,10 @@ function cc_payload(PDO $pdo, string $view = 'all', int $catalogId = 0, int $gro
             AND (cc.effective_to IS NULL OR cc.effective_to>=CURRENT_DATE)
         ))";
     }
-    $itemSql = $cte . "SELECT ci.*,c.name AS catalog_name,g.name AS group_name
+    $itemSql = $cte . "SELECT ci.*,c.name AS catalog_name,c.deleted_at AS catalog_deleted_at,g.name AS group_name,g.deleted_at AS group_deleted_at
         FROM catalog_items ci $joins"
         . ($where ? ' WHERE '.implode(' AND ',$where) : '')
-        . ' ORDER BY c.name,g.name,ci.name LIMIT 1000';
+        . ' ORDER BY c.name,g.name,ci.name';
     $allItems = $pdo->query($itemSql)->fetchAll(PDO::FETCH_ASSOC);
 
     $pdfAttachments = [];
@@ -268,13 +270,22 @@ function cc_payload(PDO $pdo, string $view = 'all', int $catalogId = 0, int $gro
         if ($view==='group' && $groupId>0) return (int)$row['catalog_group_id']===$groupId;
         return true;
     }));
-    if ($view==='recent') usort($items,static fn($a,$b)=>strcmp((string)$b['updated_at'],(string)$a['updated_at']));
-    $items=array_slice($items,0,250);
+    if ($view === 'recent') {
+        usort($items, static fn($a, $b) => strcmp((string)$b['updated_at'], (string)$a['updated_at']));
+        $items = array_slice($items, 0, 100);
+    }
+
+    $archivedCatalogs = [];
+    $archivedGroups = [];
+    if ($availability === 'admin') {
+        $archivedCatalogs = $pdo->query('SELECT c.*, (SELECT COUNT(*) FROM catalog_items ci WHERE ci.catalog_id=c.id) AS item_count FROM catalogs c WHERE c.deleted_at IS NOT NULL ORDER BY c.name')->fetchAll(PDO::FETCH_ASSOC);
+        $archivedGroups = $pdo->query('SELECT g.*, c.name AS catalog_name, (SELECT COUNT(*) FROM catalog_items ci WHERE ci.catalog_group_id=g.id) AS item_count FROM catalog_groups g JOIN catalogs c ON c.id=g.catalog_id WHERE g.deleted_at IS NOT NULL OR c.deleted_at IS NOT NULL ORDER BY c.name, g.name')->fetchAll(PDO::FETCH_ASSOC);
+    }
 
     $revisioning = isset(catalog_ra_columns($pdo,'catalog_items')['revision']);
     $capabilities = ['availabilityFiltering'=>true,'revisioning'=>$revisioning,'itemPdfAttachments'=>$pdfAttachmentCapable,
         'availabilityModes'=>['admin','active','project'],'projectAssemblies'=>'exclude_blocked'];
-    return compact('catalogs','groups','items','allItems','assemblyParts','blockedAssemblies','capabilities','availability');
+    return compact('catalogs','groups','items','allItems','assemblyParts','blockedAssemblies','capabilities','availability','archivedCatalogs','archivedGroups');
 }
 try {
     // Schema is deployment-owned. Apply db/migrations before serving this endpoint;
@@ -284,9 +295,9 @@ try {
     // response payload, while every mutation is executed by the same domain
     // service used by api/catalog_admin.php.
     $legacyCommands = [
-        'copy_catalog'=>'catalog.copy','delete_catalog'=>'catalog.archive','restore_catalog'=>'catalog.restore','toggle_catalog'=>'catalog.toggle','reorder_catalogs'=>'catalog.reorder',
-        'copy_group'=>'category.copy','delete_group'=>'category.archive','restore_group'=>'category.restore','toggle_group'=>'category.toggle','reorder_groups'=>'category.reorder',
-        'duplicate_item'=>'item.duplicate','delete_item'=>'item.archive','restore_item'=>'item.restore','move_item'=>'item.move',
+        'copy_catalog'=>'catalog.copy','delete_catalog'=>'catalog.archive','restore_catalog'=>'catalog.restore','purge_catalog'=>'catalog.purge','toggle_catalog'=>'catalog.toggle','reorder_catalogs'=>'catalog.reorder',
+        'copy_group'=>'category.copy','delete_group'=>'category.archive','restore_group'=>'category.restore','purge_group'=>'category.purge','toggle_group'=>'category.toggle','reorder_groups'=>'category.reorder',
+        'duplicate_item'=>'item.duplicate','delete_item'=>'item.archive','restore_item'=>'item.restore','purge_item'=>'item.purge','move_item'=>'item.move',
         'convert_item_assembly'=>'item.convert_assembly','add_assembly_part'=>'assembly_component.add',
         'update_assembly_part'=>'assembly_component.update',
         'reorder_assembly_parts'=>'assembly_component.reorder',
@@ -302,6 +313,12 @@ try {
             $view = (string)($input['view'] ?? 'all');
             $catalogId = cc_int($input['catalog_id'] ?? ($result['entity']['catalog_id'] ?? 0));
             $groupId = cc_int($input['group_id'] ?? $input['catalog_group_id'] ?? ($result['entity']['catalog_group_id'] ?? 0));
+            if (in_array($action, ['purge_catalog', 'delete_catalog'], true) || in_array($legacyCommands[$action] ?? '', ['catalog.purge', 'catalog.archive'], true)) {
+                $catalogId = 0;
+                $groupId = 0;
+            } elseif (in_array($action, ['purge_group', 'delete_group'], true) || in_array($legacyCommands[$action] ?? '', ['category.purge', 'category.archive'], true)) {
+                $groupId = 0;
+            }
             cc_json(['status'=>'success','id'=>$resultId,'revision'=>$result['entity']['revision'] ?? ($result['assembly']['revision'] ?? null),'merged'=>$result['merged']??false,
                 'affected_items'=>$result['affected_items']??null,'affected_categories'=>$result['affected_categories']??null,
                 'data'=>cc_payload($pdo, $view, $catalogId, $groupId)]);
@@ -310,6 +327,101 @@ try {
         } catch (CatalogAdminException $e) {
             cc_json(['status'=>'error','code'=>strtolower($e->errorCode),'msg'=>$e->getMessage(),'details'=>$e->details],$e->httpStatus);
         }
+    }
+
+    if (in_array($action, ['batch_archive', 'batch_restore', 'batch_purge', 'batch_move', 'batch_toggle', 'batch_copy'], true)) {
+        $rawIds = is_array($input['ids'] ?? null) ? $input['ids'] : (is_array($input['item_ids'] ?? null) ? $input['item_ids'] : []);
+        $ids = array_values(array_filter(array_map('intval', $rawIds), fn($v) => $v > 0));
+        $view = (string)($input['view'] ?? 'all');
+        $catalogId = cc_int($input['catalog_id'] ?? 0);
+        $groupId = cc_int($input['group_id'] ?? 0);
+
+        if (!empty($ids)) {
+            $inClause = implode(',', array_fill(0, count($ids), '?'));
+            $now = date('Y-m-d H:i:s');
+            if ($action === 'batch_archive') {
+                $stmt = $pdo->prepare("UPDATE catalog_items SET deleted_at=? WHERE id IN ($inClause)");
+                $stmt->execute(array_merge([$now], $ids));
+            } elseif ($action === 'batch_restore') {
+                $stmt = $pdo->prepare("UPDATE catalog_items SET deleted_at=NULL WHERE id IN ($inClause)");
+                $stmt->execute($ids);
+            } elseif ($action === 'batch_purge') {
+                if (catalog_ra_table_exists($pdo, 'assembly_parts')) {
+                    $pdo->prepare("DELETE FROM assembly_parts WHERE part_catalog_item_id IN ($inClause) OR assembly_catalog_item_id IN ($inClause)")
+                        ->execute(array_merge($ids, $ids));
+                }
+                if (catalog_ra_table_exists($pdo, 'catalog_item_attachments')) {
+                    $pdo->prepare("DELETE FROM catalog_item_attachments WHERE catalog_item_id IN ($inClause)")->execute($ids);
+                }
+                if (catalog_ra_table_exists($pdo, 'catalog_item_attributes')) {
+                    $pdo->prepare("DELETE FROM catalog_item_attributes WHERE catalog_item_id IN ($inClause)")->execute($ids);
+                }
+                $pdo->prepare("DELETE FROM catalog_items WHERE id IN ($inClause)")->execute($ids);
+            } elseif ($action === 'batch_move') {
+                $targetCatId = cc_int($input['target_catalog_id'] ?? ($input['catalog_id'] ?? 0));
+                $targetGrpId = cc_int($input['target_group_id'] ?? ($input['catalog_group_id'] ?? 0));
+                if ($targetCatId > 0) {
+                    $grpParam = $targetGrpId > 0 ? $targetGrpId : null;
+                    $stmt = $pdo->prepare("UPDATE catalog_items SET catalog_id=?, catalog_group_id=? WHERE id IN ($inClause)");
+                    $stmt->execute(array_merge([$targetCatId, $grpParam], $ids));
+                }
+            } elseif ($action === 'batch_copy') {
+                $targetCatId = cc_int($input['target_catalog_id'] ?? ($input['catalog_id'] ?? 0));
+                $targetGrpId = cc_int($input['target_group_id'] ?? ($input['catalog_group_id'] ?? 0));
+                if ($targetCatId > 0) {
+                    $grpParam = $targetGrpId > 0 ? $targetGrpId : null;
+                    $stmtFetch = $pdo->prepare("SELECT * FROM catalog_items WHERE id IN ($inClause)");
+                    $stmtFetch->execute($ids);
+                    $sourceRows = $stmtFetch->fetchAll(PDO::FETCH_ASSOC);
+                    foreach ($sourceRows as $r) {
+                        $sourceId = (int)$r['id'];
+                        $oldCatId = (int)$r['catalog_id'];
+                        $oldGrpId = (int)($r['catalog_group_id'] ?? 0);
+                        foreach (['id', 'revision', 'created_at', 'updated_at', 'deleted_at'] as $k) {
+                            unset($r[$k]);
+                        }
+                        if ($targetCatId === $oldCatId && $grpParam === ($oldGrpId ?: null)) {
+                            $r['name'] .= ' Copy';
+                        }
+                        $r['catalog_id'] = $targetCatId;
+                        $r['catalog_group_id'] = $grpParam;
+                        $r['created_at'] = $now;
+                        $r['updated_at'] = $now;
+                        $r['deleted_at'] = null;
+                        $cols = array_keys($r);
+                        $colList = implode(',', $cols);
+                        $placeholders = implode(',', array_fill(0, count($cols), '?'));
+                        $insertStmt = $pdo->prepare("INSERT INTO catalog_items ($colList) VALUES ($placeholders)");
+                        $insertStmt->execute(array_values($r));
+                        $newId = (int)$pdo->lastInsertId();
+
+                        if (strtolower((string)($r['item_type'] ?? '')) === 'assembly' && catalog_ra_table_exists($pdo, 'assembly_parts')) {
+                            $partStmt = $pdo->prepare('SELECT * FROM assembly_parts WHERE assembly_catalog_item_id=? AND deleted_at IS NULL ORDER BY sort_order, id');
+                            $partStmt->execute([$sourceId]);
+                            foreach ($partStmt->fetchAll(PDO::FETCH_ASSOC) as $part) {
+                                foreach (['id', 'revision', 'created_at', 'updated_at', 'deleted_at'] as $pk) unset($part[$pk]);
+                                $part['assembly_catalog_item_id'] = $newId;
+                                $part['created_at'] = $now;
+                                $part['updated_at'] = $now;
+                                $pCols = array_keys($part);
+                                $pdo->prepare("INSERT INTO assembly_parts (" . implode(',', $pCols) . ") VALUES (" . implode(',', array_fill(0, count($pCols), '?')) . ")")
+                                    ->execute(array_values($part));
+                            }
+                        }
+                    }
+                }
+            } elseif ($action === 'batch_toggle') {
+                $newStatus = !empty($input['status']) ? 1 : 0;
+                $stmt = $pdo->prepare("UPDATE catalog_items SET active=? WHERE id IN ($inClause)");
+                $stmt->execute(array_merge([$newStatus], $ids));
+            }
+        }
+
+        cc_json([
+            'status' => 'success',
+            'affected_count' => count($ids),
+            'data' => cc_payload($pdo, $view, $catalogId, $groupId)
+        ]);
     }
 
     switch ($action) {

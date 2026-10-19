@@ -8,11 +8,11 @@ const page = fs.readFileSync(path.join(root, 'pages/cost_catalog.php'), 'utf8');
 const client = fs.readFileSync(path.join(root, 'assets/cost_catalog.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'assets/cost_catalog.css'), 'utf8');
 
-test('phase 1 exposes catalog/category breadcrumb and type filtering', () => {
+test('phase 1 exposes catalog/group breadcrumb and type filtering', () => {
     assert.match(page, /id="ccBreadcrumb"[^>]*aria-label="Catalog breadcrumb"/);
     assert.match(page, /id="ccTypeFilter"/);
     assert.match(client, /role="treeitem"/);
-    assert.match(client, /aria-label="Category:/);
+    assert.match(client, /aria-label="Group:/);
     assert.match(client, /function renderBreadcrumb/);
     assert.match(client, /itemTypeFilter/);
 });
@@ -26,8 +26,8 @@ test('CatalogItemRow uses canonical display metrics without pricing formulas', (
 });
 
 test('phase 1 meets touch, responsive, dark and reduced motion contracts', () => {
-    assert.match(css, /min-height:44px/);
-    assert.match(css, /@media\(max-width:400px\)/);
+    assert.match(css, /min-height:\s*44px/);
+    assert.match(css, /@media\s*\(max-width:\s*400px\)/);
     assert.match(css, /\[data-theme="dark"\] \.cc-breadcrumb/);
-    assert.match(css, /prefers-reduced-motion:reduce/);
+    assert.match(css, /prefers-reduced-motion:\s*reduce/);
 });
