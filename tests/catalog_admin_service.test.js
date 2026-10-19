@@ -65,3 +65,19 @@ test('purge methods safely delete legacy assembly_items dependencies before pare
     const grpDeleteCatalogItemsPos = php.indexOf('DELETE FROM catalog_items WHERE catalog_group_id IN', purgeCategoryPos);
     assert.ok(grpDeleteAssemblyItemsPos > 0 && grpDeleteAssemblyItemsPos < grpDeleteCatalogItemsPos, 'purgeCategory cleans assembly_items before catalog_items');
 });
+
+test('CatalogAdminService handles schemas without sort_order safely across catalogs and groups', () => {
+    // Assert createCatalog filters values with catalog_ra_columns
+    assert.match(php, /public\s+function\s+createCatalog[\s\S]*?catalog_ra_columns\(\$this->pdo,\s*['"]catalogs['"]\)/);
+    // Assert createCategory filters values with catalog_ra_columns
+    assert.match(php, /public\s+function\s+createCategory[\s\S]*?catalog_ra_columns\(\$this->pdo,\s*['"]catalog_groups['"]\)/);
+    // Assert updateCatalog and updateCategory filter values
+    assert.match(php, /public\s+function\s+updateCatalog[\s\S]*?array_intersect_key/);
+    assert.match(php, /public\s+function\s+updateCategory[\s\S]*?array_intersect_key/);
+    // Assert reorder queries fall back to id when sort_order is absent
+    assert.match(php, /reorderCatalogs[\s\S]*?ORDER BY id/);
+    assert.match(php, /reorderCategories[\s\S]*?ORDER BY id/);
+    // Assert capability-safe return structure
+    assert.match(php, /reorderCatalogs[\s\S]*?'supported'\s*=>/);
+    assert.match(php, /reorderCategories[\s\S]*?'supported'\s*=>/);
+});
