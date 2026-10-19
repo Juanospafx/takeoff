@@ -22,6 +22,6 @@ $check(str_contains($api, '5 * 1024 * 1024'), 'limits upload to 5 MB');
 $check(str_contains($api, '$highestRow > 5001'), 'limits imports to 5,000 data rows');
 $check(str_contains($api, '$pdo->beginTransaction()') && str_contains($api, '$pdo->commit()') && str_contains($api, '$pdo->rollBack()'), 'wraps import writes in a transaction');
 $check(!str_contains($api, '$e->getMessage()'), 'does not disclose exception details');
-$check(str_contains($deploy, "--exclude 'templates'") && str_contains($deploy, 'test ! -d "$ARTIFACT_DIR/templates"'), 'excludes source XLSX templates from public deployment artifact');
+$check(str_contains($deploy, "--exclude '/templates/'") && str_contains($deploy, 'test ! -d "$ARTIFACT_DIR/templates"'), 'excludes source XLSX templates from public deployment artifact');
 
 exit($failures === [] ? 0 : 1);
