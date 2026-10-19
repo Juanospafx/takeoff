@@ -70,6 +70,38 @@ function normalizeKey(string $str): string {
     return strtolower($str);
 }
 
+// Helper to discover actual columns for a database table
+function catalog_io_columns(PDO $pdo, string $table): array {
+    static $cache = [];
+    $key = spl_object_hash($pdo) . ':' . $table;
+    if (isset($cache[$key])) {
+        return $cache[$key];
+    }
+    $columns = [];
+    try {
+        $driver = (string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        if ($driver === 'sqlite') {
+            $stmt = $pdo->query("PRAGMA table_info(`$table`)");
+            if ($stmt) {
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $col) {
+                    if (!empty($col['name'])) {
+                        $columns[] = (string)$col['name'];
+                    }
+                }
+            }
+        } else {
+            $stmt = $pdo->query("SHOW COLUMNS FROM `$table`");
+            if ($stmt) {
+                $columns = $stmt->fetchAll(PDO::FETCH_COLUMN);
+            }
+        }
+    } catch (\Throwable) {
+        $columns = [];
+    }
+    $cache[$key] = $columns;
+    return $cache[$key];
+}
+
 // Helper to extract header mapping from a worksheet
 function getSheetHeaderMap(Worksheet $sheet): array {
     $headerMap = [];
@@ -376,7 +408,7 @@ function populateAssembliesExport(Worksheet $sheet, PDO $pdo, int $catalogId, ?i
         LEFT JOIN assembly_parts p ON p.assembly_catalog_item_id = i.id AND p.deleted_at IS NULL
         LEFT JOIN catalog_items child ON child.id = p.part_catalog_item_id
         WHERE i.catalog_id = ? AND i.item_type = 'assembly' AND i.deleted_at IS NULL $whereGroup
-        ORDER BY g.name ASC, i.name ASC, p.sort_order ASC, p.id ASC
+        ORDER BY g.name ASC, i.name ASC, " . (in_array('sort_order', catalog_io_columns($pdo, 'assembly_parts'), true) ? 'p.sort_order ASC, p.id ASC' : 'p.id ASC') . "
     ";
     $stmt = $pdo->prepare($query);
     $stmt->execute([$catalogId]);
@@ -834,7 +866,15 @@ if ($action === 'import') {
                     $totalCost = 0.0;
                     $totalLabor = 0.0;
                     $partSort = 0;
-                    $partIns = $pdo->prepare("INSERT INTO assembly_parts (assembly_catalog_item_id, part_catalog_item_id, quantity, ratio_type, unit_cost_snapshot, unit_labor_time_snapshot, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)");
+
+                    $partCols = catalog_io_columns($pdo, 'assembly_parts');
+                    $hasSortOrder = in_array('sort_order', $partCols, true);
+                    $insertCols = ['assembly_catalog_item_id', 'part_catalog_item_id', 'quantity', 'ratio_type', 'unit_cost_snapshot', 'unit_labor_time_snapshot'];
+                    if ($hasSortOrder) {
+                        $insertCols[] = 'sort_order';
+                    }
+                    $placeholders = implode(', ', array_fill(0, count($insertCols), '?'));
+                    $partIns = $pdo->prepare("INSERT INTO assembly_parts (" . implode(', ', $insertCols) . ") VALUES ($placeholders)");
 
                     foreach ($asm['components'] as $comp) {
                         $compNorm = normalizeKey($comp['component_name']);
@@ -853,15 +893,18 @@ if ($action === 'import') {
                         if ($childItem) {
                             $childCost = (float)$childItem['unit_cost'];
                             $childLabor = (float)$childItem['labor_hours'];
-                            $partIns->execute([
+                            $params = [
                                 $assemblyId,
                                 (int)$childItem['id'],
                                 (float)$comp['quantity'],
                                 $comp['ratio_type'],
                                 $childCost,
-                                $childLabor,
-                                $partSort++
-                            ]);
+                                $childLabor
+                            ];
+                            if ($hasSortOrder) {
+                                $params[] = $partSort++;
+                            }
+                            $partIns->execute($params);
                             $componentsLinked++;
                             $totalCost += ($comp['quantity'] * $childCost);
                             $totalLabor += ($comp['quantity'] * $childLabor);
