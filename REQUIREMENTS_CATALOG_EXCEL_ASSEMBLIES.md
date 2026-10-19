@@ -38,13 +38,15 @@ Esto instalará:
 
 ## 3. Nuevos Componentes del Sistema
 
-### A. API de Importación, Exportación y Plantillas
+### A. API de Importación, Exportación y Plantillas (Arquitectura Unificada de 2 Hojas)
 - **Archivo**: `api/catalog_io.php`
 - **Funcionalidades**:
-  - `GET ?action=template&type=items`: Genera y descarga la plantilla Excel vacía con las columnas requeridas para ítems regulares.
-  - `GET ?action=template&type=assemblies`: Genera y descarga la plantilla Excel para assemblies (incluye columnas para piezas hijas, cantidades y tipo de cálculo).
-  - `GET ?action=export&catalog_id={id}&type={items|assemblies}&group_id={all|id}`: Exporta los datos actuales del catálogo en archivos `.xlsx` estilizados y auto-ajustados.
-  - `POST ?action=import`: Procesa archivos `.xlsx` cargados por el usuario, detecta encabezados e inserta/actualiza ítems y relaciones de assemblies.
+  - `GET ?action=template&type=both`: Genera y descarga el libro maestro Excel con **2 pestañas sincronizadas** (`Parts` y `Assemblies`) con ejemplos y estructura de cálculo.
+  - `GET ?action=template&type=items|assemblies`: Descarga la plantilla individual de partes o assemblies si se desea por separado.
+  - `GET ?action=export&catalog_id={id}&type=both&group_id={all|id}`: Exporta el catálogo completo en **un único archivo Excel con 2 pestañas** (`Parts` y `Assemblies`) auto-ajustado y estilizado.
+  - `POST ?action=import`: Motor de importación inteligente en 2 fases atómicas (*Two-Pass Execution*):
+    - **Fase 1**: Lee la pestaña de partes e inserta/actualiza materiales, precios y mano de obra.
+    - **Fase 2**: Lee la pestaña de assemblies, enlaza instantáneamente con las partes recién cargadas, almacena snapshots de costo y calcula totales. Admite libros con 2 pestañas o con 1 sola pestaña.
 
 ### B. Script de Inicialización de Assemblies 2027
 - **Archivo**: `db/seed_assemblies_2027.php`

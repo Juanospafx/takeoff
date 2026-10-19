@@ -3499,14 +3499,9 @@
                 toggleMoreMenu();
             });
 
-            document.getElementById('ccMenuDownloadItemsTemplate')?.addEventListener('click', () => {
+            document.getElementById('ccMenuDownloadMasterTemplate')?.addEventListener('click', () => {
                 toggleMoreMenu(false);
-                triggerDownload(`${ioApiUrl}?action=template&type=items`);
-            });
-
-            document.getElementById('ccMenuDownloadAssembliesTemplate')?.addEventListener('click', () => {
-                toggleMoreMenu(false);
-                triggerDownload(`${ioApiUrl}?action=template&type=assemblies`);
+                triggerDownload(`${ioApiUrl}?action=template&type=both`);
             });
 
             document.getElementById('ccMenuExportCatalog')?.addEventListener('click', () => {
@@ -3547,20 +3542,23 @@
                 currentIoMode = mode;
                 if (errEl) errEl.style.display = 'none';
                 if (succEl) succEl.style.display = 'none';
+                const headingEl = document.getElementById('ccIoModalHeading');
                 if (mode === 'export') {
+                    if (headingEl) headingEl.textContent = 'Export Master Catalog (.xlsx)';
                     tabExport?.classList.add('is-active');
                     tabImport?.classList.remove('is-active');
                     if (sectionExport) sectionExport.style.display = 'block';
                     if (sectionImport) sectionImport.style.display = 'none';
                     if (submitIcon) submitIcon.className = 'fas fa-file-export';
-                    if (submitText) submitText.textContent = 'Export Excel';
+                    if (submitText) submitText.textContent = 'Export Master Excel';
                 } else {
+                    if (headingEl) headingEl.textContent = 'Import Master Catalog (.xlsx)';
                     tabImport?.classList.add('is-active');
                     tabExport?.classList.remove('is-active');
                     if (sectionImport) sectionImport.style.display = 'block';
                     if (sectionExport) sectionExport.style.display = 'none';
                     if (submitIcon) submitIcon.className = 'fas fa-file-import';
-                    if (submitText) submitText.textContent = 'Import Excel';
+                    if (submitText) submitText.textContent = 'Import Master Excel';
                 }
             }
 
@@ -3635,20 +3633,10 @@
                 }
 
                 if (currentIoMode === 'export') {
-                    const scope = document.querySelector('input[name="ccIoExportScope"]:checked')?.value || 'both';
-                    
-                    if (scope === 'items') {
-                        triggerDownload(`${ioApiUrl}?action=export&catalog_id=${encodeURIComponent(catId)}&group_id=${encodeURIComponent(grpId)}&type=items`);
-                    } else if (scope === 'assemblies') {
-                        triggerDownload(`${ioApiUrl}?action=export&catalog_id=${encodeURIComponent(catId)}&group_id=${encodeURIComponent(grpId)}&type=assemblies`);
-                    } else {
-                        triggerDownload(`${ioApiUrl}?action=export&catalog_id=${encodeURIComponent(catId)}&group_id=${encodeURIComponent(grpId)}&type=items`);
-                        setTimeout(() => {
-                            triggerDownload(`${ioApiUrl}?action=export&catalog_id=${encodeURIComponent(catId)}&group_id=${encodeURIComponent(grpId)}&type=assemblies`);
-                        }, 500);
-                    }
+                    // Export Master Excel Workbook (Parts & Assemblies en Conjunto)
+                    triggerDownload(`${ioApiUrl}?action=export&catalog_id=${encodeURIComponent(catId)}&group_id=${encodeURIComponent(grpId)}&type=both`);
                     if (succEl) {
-                        succEl.textContent = 'Export started! Your Excel spreadsheet(s) will download shortly.';
+                        succEl.textContent = 'Export started! Your Master Excel workbook (Parts & Assemblies) will download shortly.';
                         succEl.style.display = 'block';
                     }
                     setTimeout(closeIoModal, 1500);
@@ -3656,22 +3644,21 @@
                     const file = fileInput.files?.[0];
                     if (!file) {
                         if (errEl) {
-                            errEl.textContent = 'Please select an Excel (.xlsx) file to upload.';
+                            errEl.textContent = 'Please select a Master Excel (.xlsx) file to upload.';
                             errEl.style.display = 'block';
                         }
                         return;
                     }
 
-                    const importType = document.getElementById('ccIoImportType')?.value || 'auto';
                     const formData = new FormData();
                     formData.append('file', file);
                     formData.append('catalog_id', catId);
                     formData.append('group_id', grpId);
-                    formData.append('import_type', importType);
+                    formData.append('import_type', 'auto');
 
                     submitBtn.disabled = true;
                     if (submitIcon) submitIcon.className = 'fas fa-spinner fa-spin';
-                    if (submitText) submitText.textContent = 'Importing...';
+                    if (submitText) submitText.textContent = 'Importing Master Excel...';
 
                     try {
                         const res = await fetch(`${ioApiUrl}?action=import`, {
@@ -3683,12 +3670,19 @@
                             throw new Error(data.error || 'Import failed.');
                         }
 
-                        let msg = `Import completed successfully! Created: ${data.created}, Updated: ${data.updated}`;
-                        if (data.parts_linked) {
-                            msg += `, Parts linked: ${data.parts_linked}`;
+                        let msgParts = [];
+                        if (data.parts_created || data.parts_updated) {
+                            msgParts.push(`Parts: ${data.parts_created} created, ${data.parts_updated} updated`);
                         }
-                        if (data.total_errors) {
-                            msg += ` (${data.total_errors} item(s) had warnings)`;
+                        if (data.assemblies_created || data.assemblies_updated) {
+                            msgParts.push(`Assemblies: ${data.assemblies_created} created, ${data.assemblies_updated} updated`);
+                        }
+                        if (data.components_linked) {
+                            msgParts.push(`${data.components_linked} parts linked`);
+                        }
+                        let msg = 'Import completed! ' + (msgParts.join(' | ') || 'All records processed successfully.');
+                        if (data.total_warnings) {
+                            msg += ` (${data.total_warnings} item(s) had warnings)`;
                         }
 
                         if (succEl) {
@@ -3712,7 +3706,7 @@
                     } finally {
                         submitBtn.disabled = false;
                         if (submitIcon) submitIcon.className = 'fas fa-file-import';
-                        if (submitText) submitText.textContent = 'Import Excel';
+                        if (submitText) submitText.textContent = 'Import Master Excel';
                     }
                 }
             });
