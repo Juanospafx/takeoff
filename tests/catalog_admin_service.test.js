@@ -19,7 +19,6 @@ test('CatalogAdminService exposes every phase 3 command through one transaction 
     assert.match(php, /ASSEMBLY_SELF_REFERENCE/);
     assert.match(php, /array_key_exists\('active', \$p\)[\s\S]*:\s*1/, 'new items remain active when legacy callers omit active');
 });
-
 test('new API normalizes command success, validation and revision conflict responses', () => {
     assert.match(api, /new CatalogAdminService\(\$pdo\)/);
     assert.match(api, /REVISION_CONFLICT/);
@@ -44,4 +43,25 @@ test('browser admin client is separate from read-only CatalogService and preserv
     }});
     assert.equal(sent.command, 'item.update'); assert.equal(sent.expectedRevision, 4); assert.equal(result.id, 3);
     assert.doesNotMatch(js, /CatalogService\s*=/);
+});
+
+test('purge methods safely delete legacy assembly_items dependencies before parent deletions inside transaction', () => {
+    // purgeItem cleans up assembly_items references
+    assert.match(php, /DELETE FROM assembly_items WHERE assembly_id=\? OR catalog_item_id=\?/);
+    const purgeItemPos = php.indexOf('function purgeItem');
+    const deleteAssemblyItemsPos = php.indexOf('DELETE FROM assembly_items WHERE assembly_id=?', purgeItemPos);
+    const deleteCatalogItemsPos = php.indexOf('DELETE FROM catalog_items WHERE id=?', purgeItemPos);
+    assert.ok(deleteAssemblyItemsPos > 0 && deleteAssemblyItemsPos < deleteCatalogItemsPos, 'purgeItem cleans assembly_items before catalog_items');
+
+    // purgeCatalog cleans up assembly_items references
+    const purgeCatalogPos = php.indexOf('function purgeCatalog');
+    const catDeleteAssemblyItemsPos = php.indexOf('DELETE ai FROM assembly_items ai JOIN catalog_items ci ON ci.id=ai.assembly_id WHERE ci.catalog_id=?', purgeCatalogPos);
+    const catDeleteCatalogItemsPos = php.indexOf('DELETE FROM catalog_items WHERE catalog_id=?', purgeCatalogPos);
+    assert.ok(catDeleteAssemblyItemsPos > 0 && catDeleteAssemblyItemsPos < catDeleteCatalogItemsPos, 'purgeCatalog cleans assembly_items before catalog_items');
+
+    // purgeCategory cleans up assembly_items references
+    const purgeCategoryPos = php.indexOf('function purgeCategory');
+    const grpDeleteAssemblyItemsPos = php.indexOf('DELETE ai FROM assembly_items ai JOIN catalog_items ci ON ci.id=ai.assembly_id WHERE ci.catalog_group_id IN', purgeCategoryPos);
+    const grpDeleteCatalogItemsPos = php.indexOf('DELETE FROM catalog_items WHERE catalog_group_id IN', purgeCategoryPos);
+    assert.ok(grpDeleteAssemblyItemsPos > 0 && grpDeleteAssemblyItemsPos < grpDeleteCatalogItemsPos, 'purgeCategory cleans assembly_items before catalog_items');
 });
