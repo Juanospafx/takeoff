@@ -20,6 +20,7 @@ $check(str_contains($seed, 'SELECT id FROM catalog_items') && str_contains($seed
 $check(str_contains($seed, 'Restore the pre-run database backup'), 'seed documents rollback after commit');
 
 $deploy = (string) file_get_contents($root . '/.github/workflows/deploy.yml');
-$check(str_contains($deploy, "--exclude 'db'"), 'deployment excludes executable seed directory');
+$check(str_contains($deploy, "--exclude '/db/'"), 'deployment excludes executable seed directory without excluding core/db runtime');
+$check(str_contains($deploy, 'test -f "$ARTIFACT_DIR/core/db/connection.php"'), 'deployment requires the database runtime entrypoint');
 
 exit($failures === [] ? 0 : 1);

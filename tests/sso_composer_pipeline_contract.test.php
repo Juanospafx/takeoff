@@ -253,7 +253,7 @@ assertContract(str_contains($deployContent, "--exclude 'tests'"), 'Deploy exclud
 assertContract(str_contains($deployContent, "--exclude 'docs'"), 'Deploy excludes docs directory');
 assertContract(str_contains($deployContent, "--exclude '.env'"), 'Deploy excludes .env files');
 assertContract(str_contains($deployContent, "--exclude 'cache'"), 'Deploy excludes cache directories');
-assertContract(str_contains($deployContent, "--exclude 'migrations'") || str_contains($deployContent, "--exclude 'db'"), 'Deploy excludes migrations and db');
+assertContract(str_contains($deployContent, "--exclude '/migrations/'") || str_contains($deployContent, "--exclude '/db/'"), 'Deploy excludes root migrations and db');
 
 // -----------------------------------------------------------------------------
 // Criterion 8: Vendor Not Versioned and No FTP Action Executed
