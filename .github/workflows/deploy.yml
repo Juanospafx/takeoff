@@ -40,6 +40,7 @@ jobs:
             --exclude '.env.*' \
             --exclude 'tests' \
             --exclude 'docs' \
+            --exclude 'templates' \
             --exclude 'harness' \
             --exclude 'db' \
             --exclude 'migrations' \
@@ -69,6 +70,7 @@ jobs:
           # Verify excluded items are strictly absent from artifact
           test ! -d "$ARTIFACT_DIR/tests"
           test ! -d "$ARTIFACT_DIR/docs"
+          test ! -d "$ARTIFACT_DIR/templates"
           test ! -d "$ARTIFACT_DIR/db"
           test ! -d "$ARTIFACT_DIR/migrations"
           test ! -d "$ARTIFACT_DIR/cache"

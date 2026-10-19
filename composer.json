@@ -5,7 +5,8 @@
     "license": "proprietary",
     "require": {
         "php": "~8.2.0",
-        "league/oauth2-client": "^2.9"
+        "league/oauth2-client": "^2.9",
+        "phpoffice/phpspreadsheet": "^5.10"
     },
     "autoload": {
         "psr-4": {

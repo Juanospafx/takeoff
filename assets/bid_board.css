@@ -1848,6 +1848,20 @@ body.theme-dark .bb-tooltip.bb-tooltip-rich {
     width: min(780px, 96vw);
 }
 
+.bb-phase-modal .bb-modal-foot {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 14px 20px;
+}
+
+.bb-phase-modal .bb-modal-foot-actions {
+    display: flex;
+    align-items: center;
+    gap: 10px;
+    margin-left: auto;
+}
+
 .bb-modal-title-wrap {
     display: flex;
     align-items: center;
