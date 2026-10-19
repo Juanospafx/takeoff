@@ -1129,11 +1129,20 @@
         const menu = $(`${prefix}ColorMenu`);
         if (!dropdown || !trigger || !menu) return;
 
-        menu.innerHTML = TAKEOFF_RICH_COLORS.map(color => `
-            <div class="pcd-color-item" data-color="${color}">
-                <span class="pcd-color-circle" style="background:${color};"></span>
+        menu.innerHTML = `
+            <div class="pcd-color-vertical-list">
+                ${TAKEOFF_RICH_COLORS.map(color => `
+                    <div class="pcd-color-item" data-color="${color}" title="${color}">
+                        <span class="pcd-color-circle" style="background:${color};"></span>
+                    </div>
+                `).join('')}
             </div>
-        `).join('');
+            <div class="pcd-color-custom-footer">
+                <button type="button" class="pcd-add-custom-color-btn" data-color-custom-btn="${prefix}" title="Choose custom color">
+                    <i class="fas fa-plus"></i>
+                </button>
+            </div>
+        `;
 
         trigger.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -1154,6 +1163,15 @@
                 closeAllProCustomDropdowns();
             });
         });
+
+        const customBtn = menu.querySelector(`[data-color-custom-btn="${prefix}"]`);
+        if (customBtn && customPickerEl) {
+            customBtn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                closeAllProCustomDropdowns();
+                customPickerEl.click();
+            });
+        }
     }
 
     function updateColorDropdownTrigger(prefix, hex) {
@@ -2674,7 +2692,7 @@
                     <div class="pro-create-layer-field" style="display:none;">
                         <label for="createLayerGroup">Target Group</label>
                         <div class="pro-create-control-box" style="width:100%;">
-                            <select id="createLayerGroup" style="width:100%;font:inherit;font-size:12px;font-weight:600;padding:6px 10px;border:1px solid var(--tk-border, #e2e8f0);border-radius:6px;background:var(--tk-bg-surface, #fff);color:var(--tk-text-main, #0f172a);">
+                            <select id="createLayerGroup" class="form-select">
                             </select>
                         </div>
                     </div>
@@ -2905,6 +2923,7 @@
         setCreateLayerColor('#00d2ff');
         updateCreateLayerSubmitState();
 
+        closeAllProCustomDropdowns();
         modal.hidden = false;
         setTimeout(() => $('createLayerCatalogName')?.focus(), 40);
     }
@@ -5829,12 +5848,16 @@
     function syncScalePresets() {
         const source = editorDocument()?.getElementById('cal-preset');
         const target = $('takeoffScalePreset');
-        if (!source || !target) return false;
-        if (target.dataset.loaded === '1' && target.dataset.optionCount === String(source.options.length)) return true;
-        target.innerHTML = source.innerHTML || '<option value="">No presets available</option>';
-        target.value = source.value || '';
-        target.dataset.loaded = '1';
-        target.dataset.optionCount = String(source.options.length);
+        if (!target) return false;
+        if (source && source.options && source.options.length > 1) {
+            if (target.dataset.loaded === '1' && target.dataset.optionCount === String(source.options.length)) return true;
+            target.innerHTML = source.innerHTML;
+            target.value = source.value || '';
+            target.dataset.loaded = '1';
+            target.dataset.optionCount = String(source.options.length);
+            target._syncCustom?.();
+            return true;
+        }
         return true;
     }
 

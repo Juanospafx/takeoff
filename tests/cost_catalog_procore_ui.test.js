@@ -12,9 +12,9 @@ test('Cost Catalog uses the same global shell and hierarchy as Bid Board', () =>
     assert.match(page, /global_tools\.css/);
     assert.match(page, /global_tools_header\.php/);
     assert.doesNotMatch(page, /class="cc-app-nav"/);
-    assert.match(page, /class="cc-module-icon"/);
-    assert.match(page, /class="cc-table-controls"/);
-    assert.match(page, /procore-catalog-20260824-1/);
+    assert.match(page, /class="project-header cc-project-header"/);
+    assert.match(page, /class="[^"]*cc-table-controls[^"]*"/);
+    assert.match(page, /assets\/cost_catalog\.css/);
 });
 
 test('Cost Catalog exposes compact searchable sortable table controls', () => {
@@ -29,10 +29,11 @@ test('Cost Catalog exposes compact searchable sortable table controls', () => {
 test('row actions use an accessible overflow menu without losing commands', () => {
     assert.match(client, /data-item-menu=/);
     assert.match(client, /aria-expanded="false"/);
-    ['edit', 'duplicate', 'move', 'assembly', 'delete', 'restore'].forEach(action => {
-        assert.match(client, new RegExp(`data-item-action="${action}"`));
+    ['edit', 'duplicate', 'move', 'assembly', 'delete'].forEach(action => {
+        assert.match(client, new RegExp(`data-floating-item-action="${action}"`));
     });
-    assert.doesNotMatch(client, /data-item-action="(?:takeoff|history)"/);
+    assert.match(client, /batch_restore/);
+    assert.doesNotMatch(client, /data-floating-item-action="(?:takeoff|history)"/);
     assert.match(client, /event\.key === 'Escape'/);
     assert.match(css, /:focus-visible/);
     assert.match(css, /prefers-reduced-motion/);

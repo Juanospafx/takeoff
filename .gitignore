@@ -1,4 +1,5 @@
 graphify-out/
+vendor/
 
 # Ruflo runtime state (project configuration remains versioned)
 ruvector.db

@@ -14,7 +14,7 @@
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap"
         rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="../assets/global_tools.css?v=brightronix-responsive-v3">
+    <link rel="stylesheet" href="../assets/global_tools.css?v=<?= time() ?>">
     <script>
         (function () {
             try {
@@ -404,9 +404,13 @@
                 <div class="bb-phase-list" id="bbPhaseList"></div>
             </div>
             <div class="bb-modal-foot">
-                <button class="bb-btn secondary" id="bbPhaseResetBtn" type="button">Reset Defaults</button>
-                <button class="bb-btn secondary" type="button" data-close-modal>Cancel</button>
-                <button class="bb-btn-procore-primary" id="bbPhaseSaveBtn" type="button">Save Changes</button>
+                <button class="bb-btn-procore-secondary" id="bbPhaseResetBtn" type="button">
+                    <i class="fas fa-rotate-left"></i> Reset Defaults
+                </button>
+                <div class="bb-modal-foot-actions">
+                    <button class="bb-btn-procore-secondary" id="bbPhaseCancelBtn" type="button" data-close-modal>Cancel</button>
+                    <button class="bb-btn-procore-primary" id="bbPhaseSaveBtn" type="button">Save Changes</button>
+                </div>
             </div>
         </div>
     </div>
@@ -418,7 +422,7 @@
         <button type="button" class="danger" id="bbActionDelete"><i class="fas fa-trash-can"></i> Delete</button>
     </div>
 
-    <script src="../assets/global_tools.js?v=brightronix-responsive-v3"></script>
+    <script src="../assets/global_tools.js?v=<?= time() ?>"></script>
     <script src="../assets/bid_board.js?v=brightronix-boundary-v5"></script>
 </body>
 
