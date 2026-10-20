@@ -1,11 +1,11 @@
 <?php
 /**
  * Catalog Import / Export and Templates API
- * 
+ *
  * Supports Unified Single-Workbook 2-Tab Architecture:
  * - Tab 1: Parts (Materials, Labor, Equipment, Items)
  * - Tab 2: Assemblies (Assemblies with component breakdown)
- * 
+ *
  * Actions:
  * - GET  ?action=template&type=both|items|assemblies
  * - GET  ?action=export&catalog_id=X&group_id=Y&type=both|items|assemblies
@@ -16,7 +16,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../vendor/autoload.php';
 require_once __DIR__ . '/../core/db/connection.php';
-require_once __DIR__ . '/../core/auth/session.php';
+require_once __DIR__ . '/../core/auth/WonProjectAdminAuthenticator.php';
 
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -25,7 +25,28 @@ use PhpOffice\PhpSpreadsheet\Style\Alignment;
 use PhpOffice\PhpSpreadsheet\Style\Fill;
 use PhpOffice\PhpSpreadsheet\Worksheet\Worksheet;
 
-$action = $_GET['action'] ?? $_POST['action'] ?? '';
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+
+if (!isset($pdo) || !($pdo instanceof PDO)) {
+    http_response_code(503);
+    echo json_encode(['error' => 'Catalog service is unavailable.']);
+    exit;
+}
+
+$authenticator = new WonProjectAdminAuthenticator($pdo);
+$authenticator->requireAdmin($_SESSION ?? []);
+
+$action = strtolower(trim((string)($_GET['action'] ?? $_POST['action'] ?? '')));
+$method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
+$allowedMethods = ['template' => 'GET', 'export' => 'GET', 'import' => 'POST'];
+if (!isset($allowedMethods[$action]) || $allowedMethods[$action] !== $method) {
+    http_response_code(405);
+    header('Content-Type: application/json; charset=utf-8');
+    echo json_encode(['error' => 'Method not allowed.']);
+    exit;
+}
 
 // Helper to style header row
 function applyHeaderStyle(Worksheet $sheet, string $lastCol): void {
@@ -34,7 +55,7 @@ function applyHeaderStyle(Worksheet $sheet, string $lastCol): void {
     $sheet->getStyle($range)->getFill()->setFillType(Fill::FILL_SOLID)->getStartColor()->setRGB('F1F5F9');
     $sheet->getStyle($range)->getAlignment()->setVertical(Alignment::VERTICAL_CENTER);
     $sheet->getRowDimension(1)->setRowHeight(26);
-    
+
     // Auto-fit column widths
     foreach (range('A', $lastCol) as $col) {
         $sheet->getColumnDimension($col)->setAutoSize(true);
@@ -47,6 +68,38 @@ function normalizeKey(string $str): string {
     $str = str_replace(['‘', '’', '′'], "'", $str);
     $str = preg_replace('/\s+/', ' ', trim($str));
     return strtolower($str);
+}
+
+// Helper to discover actual columns for a database table
+function catalog_io_columns(PDO $pdo, string $table): array {
+    static $cache = [];
+    $key = spl_object_hash($pdo) . ':' . $table;
+    if (isset($cache[$key])) {
+        return $cache[$key];
+    }
+    $columns = [];
+    try {
+        $driver = (string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        if ($driver === 'sqlite') {
+            $stmt = $pdo->query("PRAGMA table_info(`$table`)");
+            if ($stmt) {
+                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $col) {
+                    if (!empty($col['name'])) {
+                        $columns[] = (string)$col['name'];
+                    }
+                }
+            }
+        } else {
+            $stmt = $pdo->query("SHOW COLUMNS FROM `$table`");
+            if ($stmt) {
+                $columns = $stmt->fetchAll(PDO::FETCH_COLUMN);
+            }
+        }
+    } catch (\Throwable) {
+        $columns = [];
+    }
+    $cache[$key] = $columns;
+    return $cache[$key];
 }
 
 // Helper to extract header mapping from a worksheet
@@ -260,7 +313,7 @@ function populatePartsExport(Worksheet $sheet, PDO $pdo, int $catalogId, ?int $g
 
     $whereGroup = $groupId ? "AND i.catalog_group_id = $groupId" : "";
     $query = "
-        SELECT 
+        SELECT
             c.name as catalog_name,
             g.name as group_name,
             i.item_type,
@@ -332,15 +385,19 @@ function populateAssembliesExport(Worksheet $sheet, PDO $pdo, int $catalogId, ?i
     applyHeaderStyle($sheet, 'N');
 
     $whereGroup = $groupId ? "AND i.catalog_group_id = $groupId" : "";
+    $measTypeSelect = in_array('measurement_type', catalog_io_columns($pdo, 'catalog_items'), true)
+        ? 'i.measurement_type as assembly_type,'
+        : "'count' as assembly_type,";
+
     $query = "
-        SELECT 
+        SELECT
             c.name as catalog_name,
             g.name as group_name,
             i.id as assembly_id,
             i.name as assembly_name,
             i.description as assembly_desc,
             i.unit_of_measure as assembly_uom,
-            i.measurement_type as assembly_type,
+            $measTypeSelect
             i.unit_cost as assembly_cost,
             i.labor_hours as assembly_labor,
             child.name as child_name,
@@ -355,7 +412,7 @@ function populateAssembliesExport(Worksheet $sheet, PDO $pdo, int $catalogId, ?i
         LEFT JOIN assembly_parts p ON p.assembly_catalog_item_id = i.id AND p.deleted_at IS NULL
         LEFT JOIN catalog_items child ON child.id = p.part_catalog_item_id
         WHERE i.catalog_id = ? AND i.item_type = 'assembly' AND i.deleted_at IS NULL $whereGroup
-        ORDER BY g.name ASC, i.name ASC, p.sort_order ASC, p.id ASC
+        ORDER BY g.name ASC, i.name ASC, " . (in_array('sort_order', catalog_io_columns($pdo, 'assembly_parts'), true) ? 'p.sort_order ASC, p.id ASC' : 'p.id ASC') . "
     ";
     $stmt = $pdo->prepare($query);
     $stmt->execute([$catalogId]);
@@ -415,7 +472,7 @@ if ($action === 'template') {
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
     header('Cache-Control: max-age=0');
-    
+
     $writer = new Xlsx($spreadsheet);
     $writer->save('php://output');
     exit;
@@ -466,7 +523,7 @@ if ($action === 'export') {
     header('Content-Type: application/vnd.openxmlformats-officedocument.spreadsheetml.sheet');
     header('Content-Disposition: attachment; filename="' . $filename . '"');
     header('Cache-Control: max-age=0');
-    
+
     $writer = new Xlsx($spreadsheet);
     $writer->save('php://output');
     exit;
@@ -478,8 +535,25 @@ if ($action === 'export') {
 if ($action === 'import') {
     header('Content-Type: application/json; charset=utf-8');
 
+    $csrfToken = trim((string)($_POST['csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? ''));
+    $sessionCsrf = (string)($_SESSION['catalog_io_csrf_token'] ?? '');
+    if ($csrfToken === '' || $sessionCsrf === '' || !hash_equals($sessionCsrf, $csrfToken)) {
+        http_response_code(403);
+        echo json_encode(['success' => false, 'error' => 'Invalid or missing CSRF token.']);
+        exit;
+    }
+
     if (empty($_FILES['file']['tmp_name']) || !is_uploaded_file($_FILES['file']['tmp_name'])) {
+        http_response_code(422);
         echo json_encode(['success' => false, 'error' => 'No Excel file was uploaded.']);
+        exit;
+    }
+
+    $uploadSize = (int)($_FILES['file']['size'] ?? 0);
+    $uploadName = (string)($_FILES['file']['name'] ?? '');
+    if ($uploadSize <= 0 || $uploadSize > 5 * 1024 * 1024 || strtolower(pathinfo($uploadName, PATHINFO_EXTENSION)) !== 'xlsx') {
+        http_response_code(422);
+        echo json_encode(['success' => false, 'error' => 'Upload must be a non-empty .xlsx file no larger than 5 MB.']);
         exit;
     }
 
@@ -497,6 +571,24 @@ if ($action === 'import') {
         $reader = IOFactory::createReaderForFile($uploadedFile);
         $reader->setReadDataOnly(true);
         $spreadsheet = $reader->load($uploadedFile);
+        $highestRow = 0;
+        foreach ($spreadsheet->getAllSheets() as $ws) {
+            $r = $ws->getHighestRow();
+            if ($r > $highestRow) {
+                $highestRow = $r;
+            }
+        }
+
+        if ($highestRow < 2) {
+            http_response_code(422);
+            echo json_encode(['success' => false, 'error' => 'The uploaded spreadsheet contains no data rows.']);
+            exit;
+        }
+        if ($highestRow > 5001) {
+            http_response_code(422);
+            echo json_encode(['success' => false, 'error' => 'The spreadsheet exceeds the 5,000-row import limit.']);
+            exit;
+        }
 
         // Preload Groups in this catalog
         $groupMap = [];
@@ -575,6 +667,11 @@ if ($action === 'import') {
         $componentsLinked = 0;
         $warnings = [];
 
+        // Discover catalog_items schema capabilities
+        $catalogItemCols = catalog_io_columns($pdo, 'catalog_items');
+        $hasItemRevision = in_array('revision', $catalogItemCols, true);
+        $hasItemMeasurementType = in_array('measurement_type', $catalogItemCols, true);
+
         // Fast Lookup Table for Parts: normalized_name => [id, unit_cost, labor_hours]
         $partLookup = [];
         $rawExistingParts = $pdo->query("SELECT id, name, unit_cost, labor_hours FROM catalog_items WHERE catalog_id = $catalogId AND item_type != 'assembly' AND deleted_at IS NULL")->fetchAll(PDO::FETCH_ASSOC);
@@ -593,6 +690,22 @@ if ($action === 'import') {
         if ($partsSheet) {
             $highestRow = $partsSheet->getHighestRow();
             $headerMap = getSheetHeaderMap($partsSheet);
+
+            $itemInsertCols = [
+                'catalog_id', 'cost_catalog_id', 'catalog_group_id', 'name', 'item_type', 'cost_type',
+                'description', 'unit_of_measure', 'unit_cost', 'labor_hours', 'catalog_number',
+                'manufacturer', 'supplier', 'cost_code', 'epd_url', 'taxable', 'active'
+            ];
+            if ($hasItemRevision) {
+                $itemInsertCols[] = 'revision';
+            }
+            $itemInsertCols[] = 'created_at';
+            $itemInsertCols[] = 'updated_at';
+
+            $itemPlaceholders = array_fill(0, count($itemInsertCols) - 2, '?');
+            $itemPlaceholders[] = 'NOW()';
+            $itemPlaceholders[] = 'NOW()';
+            $itemInsertStmt = $pdo->prepare("INSERT INTO catalog_items (" . implode(', ', $itemInsertCols) . ") VALUES (" . implode(', ', $itemPlaceholders) . ")");
 
             for ($r = 2; $r <= $highestRow; $r++) {
                 $nameCol = $headerMap['name'] ?? 4;
@@ -649,9 +762,9 @@ if ($action === 'import') {
                 if ($existingId) {
                     $partId = (int)$existingId;
                     $upd = $pdo->prepare("
-                        UPDATE catalog_items SET 
-                            item_type = ?, description = ?, unit_of_measure = ?, unit_cost = ?, 
-                            labor_hours = ?, catalog_number = ?, manufacturer = ?, supplier = ?, 
+                        UPDATE catalog_items SET
+                            item_type = ?, description = ?, unit_of_measure = ?, unit_cost = ?,
+                            labor_hours = ?, catalog_number = ?, manufacturer = ?, supplier = ?,
                             cost_code = ?, epd_url = ?, taxable = ?, active = 1, updated_at = NOW()
                         WHERE id = ?
                     ");
@@ -662,22 +775,15 @@ if ($action === 'import') {
                     ]);
                     $partsUpdated++;
                 } else {
-                    $ins = $pdo->prepare("
-                        INSERT INTO catalog_items (
-                            catalog_id, cost_catalog_id, catalog_group_id, name, item_type, cost_type,
-                            description, unit_of_measure, unit_cost, labor_hours, catalog_number,
-                            manufacturer, supplier, cost_code, epd_url, taxable, active, revision, created_at, updated_at
-                        ) VALUES (
-                            ?, ?, ?, ?, ?, 'Material',
-                            ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?, ?, 1, 1, NOW(), NOW()
-                        )
-                    ");
-                    $ins->execute([
-                        $catalogId, $catalogId, $groupId, $name, $itemType,
+                    $itemInsertParams = [
+                        $catalogId, $catalogId, $groupId, $name, $itemType, 'Material',
                         $desc, $uom, $unitCost, $laborHours, $catNum,
-                        $mfg, $sup, $costCode, $epdUrl, $taxable
-                    ]);
+                        $mfg, $sup, $costCode, $epdUrl, $taxable, 1
+                    ];
+                    if ($hasItemRevision) {
+                        $itemInsertParams[] = 1;
+                    }
+                    $itemInsertStmt->execute($itemInsertParams);
                     $partId = (int)$pdo->lastInsertId();
                     $partsCreated++;
                 }
@@ -750,21 +856,68 @@ if ($action === 'import') {
                 }
             }
 
+            $assemblyUpdateSets = ['description = ?', 'unit_of_measure = ?'];
+            if ($hasItemMeasurementType) {
+                $assemblyUpdateSets[] = 'measurement_type = ?';
+            }
+            $assemblyUpdateSets[] = "item_type = 'assembly'";
+            $assemblyUpdateSets[] = 'active = 1';
+            $assemblyUpdateSets[] = 'updated_at = NOW()';
+            $assemblyUpdateStmt = $pdo->prepare("UPDATE catalog_items SET " . implode(', ', $assemblyUpdateSets) . " WHERE id = ?");
+
+            $assemblyInsertCols = [
+                'catalog_id', 'cost_catalog_id', 'catalog_group_id', 'name', 'description',
+                'item_type', 'cost_type', 'unit_of_measure'
+            ];
+            if ($hasItemMeasurementType) {
+                $assemblyInsertCols[] = 'measurement_type';
+            }
+            $assemblyInsertCols[] = 'unit_cost';
+            $assemblyInsertCols[] = 'labor_hours';
+            $assemblyInsertCols[] = 'active';
+            if ($hasItemRevision) {
+                $assemblyInsertCols[] = 'revision';
+            }
+            $assemblyInsertCols[] = 'created_at';
+            $assemblyInsertCols[] = 'updated_at';
+
+            $assemblyPlaceholders = array_fill(0, count($assemblyInsertCols) - 2, '?');
+            $assemblyPlaceholders[] = 'NOW()';
+            $assemblyPlaceholders[] = 'NOW()';
+            $assemblyInsertStmt = $pdo->prepare("INSERT INTO catalog_items (" . implode(', ', $assemblyInsertCols) . ") VALUES (" . implode(', ', $assemblyPlaceholders) . ")");
+
             foreach ($assembliesData as $asm) {
                 $groupId = $getOrCreateGroup($asm['group']);
 
+                // Check if assembly already exists
                 $findStmt = $pdo->prepare("SELECT id FROM catalog_items WHERE catalog_id = ? AND (catalog_group_id = ? OR ? IS NULL) AND name = ? AND deleted_at IS NULL LIMIT 1");
                 $findStmt->execute([$catalogId, $groupId, $groupId, $asm['name']]);
                 $existingId = $findStmt->fetchColumn();
 
                 if ($existingId) {
                     $assemblyId = (int)$existingId;
-                    $upd = $pdo->prepare("UPDATE catalog_items SET description = ?, unit_of_measure = ?, measurement_type = ?, item_type = 'assembly', active = 1, updated_at = NOW() WHERE id = ?");
-                    $upd->execute([$asm['description'], $asm['uom'], $asm['measurement_type'], $assemblyId]);
+                    $updParams = [$asm['description'], $asm['uom']];
+                    if ($hasItemMeasurementType) {
+                        $updParams[] = $asm['measurement_type'];
+                    }
+                    $updParams[] = $assemblyId;
+                    $assemblyUpdateStmt->execute($updParams);
                     $assembliesUpdated++;
                 } else {
-                    $ins = $pdo->prepare("INSERT INTO catalog_items (catalog_id, cost_catalog_id, catalog_group_id, name, description, item_type, cost_type, unit_of_measure, measurement_type, unit_cost, labor_hours, active, revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'assembly', 'Material', ?, ?, 0.00, 0.00, 1, 1, NOW(), NOW())");
-                    $ins->execute([$catalogId, $catalogId, $groupId, $asm['name'], $asm['description'], $asm['uom'], $asm['measurement_type']]);
+                    $insParams = [
+                        $catalogId, $catalogId, $groupId, $asm['name'], $asm['description'],
+                        'assembly', 'Material', $asm['uom']
+                    ];
+                    if ($hasItemMeasurementType) {
+                        $insParams[] = $asm['measurement_type'];
+                    }
+                    $insParams[] = 0.00;
+                    $insParams[] = 0.00;
+                    $insParams[] = 1;
+                    if ($hasItemRevision) {
+                        $insParams[] = 1;
+                    }
+                    $assemblyInsertStmt->execute($insParams);
                     $assemblyId = (int)$pdo->lastInsertId();
                     $assembliesCreated++;
                 }
@@ -776,7 +929,15 @@ if ($action === 'import') {
                     $totalCost = 0.0;
                     $totalLabor = 0.0;
                     $partSort = 0;
-                    $partIns = $pdo->prepare("INSERT INTO assembly_parts (assembly_catalog_item_id, part_catalog_item_id, quantity, ratio_type, unit_cost_snapshot, unit_labor_time_snapshot, sort_order) VALUES (?, ?, ?, ?, ?, ?, ?)");
+
+                    $partCols = catalog_io_columns($pdo, 'assembly_parts');
+                    $hasSortOrder = in_array('sort_order', $partCols, true);
+                    $insertCols = ['assembly_catalog_item_id', 'part_catalog_item_id', 'quantity', 'ratio_type', 'unit_cost_snapshot', 'unit_labor_time_snapshot'];
+                    if ($hasSortOrder) {
+                        $insertCols[] = 'sort_order';
+                    }
+                    $placeholders = implode(', ', array_fill(0, count($insertCols), '?'));
+                    $partIns = $pdo->prepare("INSERT INTO assembly_parts (" . implode(', ', $insertCols) . ") VALUES ($placeholders)");
 
                     foreach ($asm['components'] as $comp) {
                         $compNorm = normalizeKey($comp['component_name']);
@@ -795,15 +956,18 @@ if ($action === 'import') {
                         if ($childItem) {
                             $childCost = (float)$childItem['unit_cost'];
                             $childLabor = (float)$childItem['labor_hours'];
-                            $partIns->execute([
+                            $params = [
                                 $assemblyId,
                                 (int)$childItem['id'],
                                 (float)$comp['quantity'],
                                 $comp['ratio_type'],
                                 $childCost,
-                                $childLabor,
-                                $partSort++
-                            ]);
+                                $childLabor
+                            ];
+                            if ($hasSortOrder) {
+                                $params[] = $partSort++;
+                            }
+                            $partIns->execute($params);
                             $componentsLinked++;
                             $totalCost += ($comp['quantity'] * $childCost);
                             $totalLabor += ($comp['quantity'] * $childLabor);
@@ -834,14 +998,18 @@ if ($action === 'import') {
         ]);
         exit;
 
-    } catch (\Throwable $e) {
+    } catch (\Throwable) {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
-        echo json_encode(['success' => false, 'error' => 'Import failed: ' . $e->getMessage()]);
+        $incidentId = bin2hex(random_bytes(16));
+        error_log("Catalog import failure: {$incidentId}");
+        http_response_code(422);
+        echo json_encode(['success' => false, 'error' => 'Import failed. No catalog changes were saved.', 'incident_id' => $incidentId]);
         exit;
     }
 }
+
 
 http_response_code(400);
 echo json_encode(['error' => 'Invalid action specified.']);

@@ -347,79 +347,70 @@ function project_deep_clone(PDO $pdo, int $sourceId, int $newId): void
         if (!$inTransaction && $pdo->inTransaction()) {
             $pdo->rollBack();
         }
-        error_log('Project deep clone warning: ' . $e->getMessage());
+        error_log('Project deep clone warning');
     }
 }
 
-function project_ensure_schema(PDO $pdo): void
+function project_validate_schema(PDO $pdo): void
 {
-    $pdo->exec("CREATE TABLE IF NOT EXISTS project_templates (
-        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-        name VARCHAR(191) NOT NULL,
-        description TEXT NULL,
-        trade VARCHAR(100) NULL,
-        settings_json JSON NULL,
-        active TINYINT(1) NOT NULL DEFAULT 1,
-        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        deleted_at TIMESTAMP NULL DEFAULT NULL,
-        PRIMARY KEY (id),
-        KEY idx_project_templates_active_deleted (active, deleted_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-    $pdo->exec("CREATE TABLE IF NOT EXISTS projects (
-        id BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
-        project_template_id BIGINT UNSIGNED NULL,
-        estimator_id BIGINT UNSIGNED NULL,
-        project_number VARCHAR(100) NULL,
-        name VARCHAR(191) NOT NULL,
-        description TEXT NULL,
-        status VARCHAR(50) NOT NULL DEFAULT 'draft',
-        client_name VARCHAR(191) NULL,
-        job_address VARCHAR(255) NULL,
-        city VARCHAR(100) NULL,
-        state VARCHAR(100) NULL,
-        postal_code VARCHAR(30) NULL,
-        country VARCHAR(100) NULL,
-        bid_due_at DATETIME NULL,
-        start_date DATE NULL,
-        end_date DATE NULL,
-        metadata_json JSON NULL,
-        created_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
-        updated_at TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
-        deleted_at TIMESTAMP NULL DEFAULT NULL,
-        PRIMARY KEY (id),
-        KEY idx_projects_template (project_template_id),
-        KEY idx_projects_status_deleted (status, deleted_at),
-        KEY idx_projects_bid_due (bid_due_at)
-    ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci");
-
-    $columns = $pdo->query("SHOW COLUMNS FROM projects")->fetchAll(PDO::FETCH_COLUMN);
-    $add = [
-        'project_template_id' => "ALTER TABLE projects ADD COLUMN project_template_id BIGINT UNSIGNED NULL AFTER id",
-        'estimator_id' => "ALTER TABLE projects ADD COLUMN estimator_id BIGINT UNSIGNED NULL AFTER project_template_id",
-        'project_number' => "ALTER TABLE projects ADD COLUMN project_number VARCHAR(100) NULL AFTER estimator_id",
-        'client_name' => "ALTER TABLE projects ADD COLUMN client_name VARCHAR(191) NULL AFTER status",
-        'job_address' => "ALTER TABLE projects ADD COLUMN job_address VARCHAR(255) NULL AFTER client_name",
-        'city' => "ALTER TABLE projects ADD COLUMN city VARCHAR(100) NULL AFTER job_address",
-        'state' => "ALTER TABLE projects ADD COLUMN state VARCHAR(100) NULL AFTER city",
-        'postal_code' => "ALTER TABLE projects ADD COLUMN postal_code VARCHAR(30) NULL AFTER state",
-        'country' => "ALTER TABLE projects ADD COLUMN country VARCHAR(100) NULL AFTER postal_code",
-        'bid_due_at' => "ALTER TABLE projects ADD COLUMN bid_due_at DATETIME NULL AFTER country",
-        'start_date' => "ALTER TABLE projects ADD COLUMN start_date DATE NULL AFTER bid_due_at",
-        'end_date' => "ALTER TABLE projects ADD COLUMN end_date DATE NULL AFTER start_date",
-        'metadata_json' => "ALTER TABLE projects ADD COLUMN metadata_json JSON NULL AFTER end_date",
-        'deleted_at' => "ALTER TABLE projects ADD COLUMN deleted_at TIMESTAMP NULL DEFAULT NULL AFTER updated_at",
-    ];
-    foreach ($add as $column => $sql) {
-        if (!in_array($column, $columns, true)) $pdo->exec($sql);
+    $requiredTables = ['projects', 'project_templates'];
+    foreach ($requiredTables as $table) {
+        if (!project_table_exists($pdo, $table)) {
+            project_json(['status' => 'error', 'msg' => 'Database schema is incomplete'], 503);
+        }
     }
 
-    $stmt = $pdo->prepare("INSERT INTO project_templates (name, description, trade, settings_json, active) VALUES (?, ?, ?, ?, 1)");
-    $count = (int)$pdo->query("SELECT COUNT(*) FROM project_templates WHERE deleted_at IS NULL")->fetchColumn();
-    if ($count === 0) {
-        $stmt->execute(['Electrical Bid Template', 'Basic electrical estimating project template', 'Electrical', project_json_value(['default_status' => 'draft'])]);
-        $stmt->execute(['Commercial Shell Template', 'Commercial shell bidding template', 'Commercial', project_json_value(['default_status' => 'draft'])]);
+    $requiredSchema = [
+        'projects' => [
+            'id',
+            'project_template_id',
+            'estimator_id',
+            'project_number',
+            'name',
+            'status',
+            'client_name',
+            'job_address',
+            'bid_due_at',
+            'metadata_json',
+            'updated_at',
+            'deleted_at',
+        ],
+        'project_templates' => [
+            'id',
+            'name',
+            'description',
+            'active',
+            'deleted_at',
+        ],
+    ];
+
+    try {
+        $driver = '';
+        try {
+            $driver = (string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+        } catch (Throwable $e) {}
+
+        foreach ($requiredSchema as $table => $requiredColumns) {
+            $columns = [];
+            if ($driver === 'sqlite') {
+                $stmt = $pdo->query("PRAGMA table_info({$table})");
+                if ($stmt) {
+                    $rows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+                    $columns = array_column($rows, 'name');
+                }
+            } else {
+                $stmt = $pdo->query("SHOW COLUMNS FROM {$table}");
+                $columns = $stmt ? $stmt->fetchAll(PDO::FETCH_COLUMN) : [];
+            }
+
+            foreach ($requiredColumns as $col) {
+                if (!in_array($col, $columns, true)) {
+                    project_json(['status' => 'error', 'msg' => 'Database schema is incomplete'], 503);
+                }
+            }
+        }
+    } catch (Throwable $e) {
+        project_json(['status' => 'error', 'msg' => 'Database schema is incomplete'], 503);
     }
 }
 
@@ -471,7 +462,7 @@ function project_input_data(array $input): array
 }
 
 try {
-    project_ensure_schema($pdo);
+    project_validate_schema($pdo);
 
     switch ($action) {
         case 'list':
@@ -607,5 +598,6 @@ try {
     }
 } catch (Throwable $e) {
     if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
-    project_json(['status' => 'error', 'msg' => $e->getMessage()], 500);
+    error_log('Project module error');
+    project_json(['status' => 'error', 'msg' => 'Server error occurred while processing the request'], 500);
 }

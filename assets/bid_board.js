@@ -1,4 +1,5 @@
 (function () {
+    const PROJECT_CREATION_TIMEOUT_MS = 10000;
     const projectApiUrl = '../api/project_module.php';
     const pipelineStatuses = [
         'Invitations',
@@ -140,10 +141,20 @@
     const statusSlug = (status) => String(status || 'To Do').toLowerCase().replace(/[^a-z0-9]+/g, '-');
 
     function load() {
-        return fetch(`${projectApiUrl}?action=list`)
-            .then(r => r.json())
-            .then(data => {
-                if (data.status !== 'success') throw new Error(data.msg || 'Project list could not load');
+        return fetch(`${projectApiUrl}?action=${encodeURIComponent('list')}`)
+            .then(async r => {
+                let data = null;
+                try {
+                    data = await r.json();
+                } catch (e) {}
+                if (!r.ok || !data || data.status !== 'success') {
+                    const msg = data?.msg || (r.status === 503 ? 'Database schema is incomplete' : 'Server request failed');
+                    const err = new Error(msg);
+                    err.status = r.status;
+                    err.data = data;
+                    throw err;
+                }
+
                 state = data.data;
                 applyUrlInitialFilter();
                 render();
@@ -235,15 +246,28 @@
         }, 150);
     }
 
-    function postProjectAction(action, payload) {
+    function postProjectAction(action, payload, options = {}) {
+        const bodyData = { ...payload };
+        delete bodyData.signal;
         return fetch(`${projectApiUrl}?action=${encodeURIComponent(action)}`, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify({ action, ...payload })
+            body: JSON.stringify({ action, ...bodyData }),
+            signal: options.signal
         })
-            .then(r => r.json())
-            .then(data => {
-                if (data.status !== 'success') throw new Error(data.msg || 'Request failed');
+            .then(async r => {
+                let data = null;
+                try {
+                    data = await r.json();
+                } catch (e) {}
+                if (!r.ok || !data || data.status !== 'success') {
+                    const msg = data?.msg || (r.status === 503 ? 'Database schema is incomplete' : 'Server request failed');
+                    const err = new Error(msg);
+                    err.status = r.status;
+                    err.data = data;
+                    throw err;
+                }
+
                 if (data.data) {
                     state = data.data;
                     render();
@@ -798,12 +822,12 @@
                     <div class="bb-status-menu-eyebrow">Change Stage</div>
                     <div class="bb-status-menu-list">
                         ${pipelineStatuses.map(status => {
-            const phase = getPhase(status);
-            const isCurrent = status === project.statusLabel;
-            const itemBg = hexToRgba(phase.color, bgAlpha);
-            const itemBorder = hexToRgba(phase.color, borderAlpha);
-            const itemText = isDark ? '#ffffff' : getDarkerShade(phase.color);
-            return `
+                            const phase = getPhase(status);
+                            const isCurrent = status === project.statusLabel;
+                            const itemBg = hexToRgba(phase.color, bgAlpha);
+                            const itemBorder = hexToRgba(phase.color, borderAlpha);
+                            const itemText = isDark ? '#ffffff' : getDarkerShade(phase.color);
+                            return `
                                 <button type="button" class="bb-status-menu-option ${isCurrent ? 'selected' : ''}" data-set-status="${esc(status)}" data-project-id="${esc(project.id)}">
                                     <span class="bb-status-option-pill" style="background-color: ${itemBg}; border: 1px solid ${itemBorder}; color: ${itemText};">
                                         <span class="bb-status-dot-sm" style="background-color: ${phase.color};"></span>
@@ -812,7 +836,7 @@
                                     ${isCurrent ? `<i class="fas fa-check bb-status-option-check" style="color: ${phase.color};"></i>` : ''}
                                 </button>
                             `;
-        }).join('')}
+                        }).join('')}
                     </div>
                 </div>
             </div>
@@ -1347,21 +1371,14 @@
         const statusCode = statusCodes[selectedStage] || 'to_do';
 
         const submitBtn = event.target.querySelector('button[type="submit"]');
+        const originalButtonHtml = submitBtn ? submitBtn.innerHTML : '<i class="fas fa-plus"></i> Create Project';
         if (submitBtn) {
             submitBtn.disabled = true;
             submitBtn.textContent = 'Creating...';
         }
-        const draft = {
-            mode,
-            project_template_id: templateId,
-            template_name: template?.name || '',
-            name: projectName,
-            status: statusCode,
-            measurement_system: 'US',
-            estimate_pricing: 'Unlocked',
-            created_at: new Date().toISOString()
-        };
-        localStorage.setItem('takeoff.projectDraft', JSON.stringify(draft));
+        const timeoutMs = (typeof window !== 'undefined' && window.PROJECT_CREATION_TIMEOUT_MS) || PROJECT_CREATION_TIMEOUT_MS;
+        const controller = new AbortController();
+        const timeoutId = setTimeout(() => controller.abort(), timeoutMs);
         try {
             const res = await postProjectAction('save', {
                 name: projectName,
@@ -1374,16 +1391,55 @@
                     notes: [],
                     tasks: []
                 })
-            });
-            if (res && res.id) {
-                localStorage.removeItem('takeoff.projectDraft');
-                window.location.href = `project_dashboard.php?id=${encodeURIComponent(res.id)}&tab=overview`;
+            }, { signal: controller.signal });
+            clearTimeout(timeoutId);
+            if (res && (res.id || res.project_id)) {
+                try {
+                    localStorage.removeItem('takeoff.projectDraft');
+                } catch (ignore) {}
+                const newId = res.id || res.project_id;
+                window.location.href = `project_dashboard.php?id=${encodeURIComponent(newId)}&tab=overview`;
                 return;
             }
+            throw new Error('Server returned an invalid project response.');
         } catch (e) {
-            console.warn('Direct project creation fallback to draft', e);
+            clearTimeout(timeoutId);
+            try {
+                localStorage.removeItem('takeoff.projectDraft');
+            } catch (ignore) {}
+
+            const isTimeout = Boolean(
+                controller.signal.aborted ||
+                e?.name === 'AbortError' ||
+                String(e?.message || '').toLowerCase().includes('abort') ||
+                String(e?.message || '').toLowerCase().includes('timeout')
+            );
+
+            let errorMessage = 'Server error occurred while creating project.';
+            if (isTimeout) {
+                errorMessage = 'Project creation timed out. The outcome is unknown and the project may have been created. Please reload or check the project list before trying again.';
+                if (submitBtn) {
+                    submitBtn.disabled = true;
+                }
+            } else {
+                if (e instanceof TypeError || String(e?.message || '').toLowerCase().includes('fetch') || String(e?.message || '').toLowerCase().includes('network')) {
+                    errorMessage = 'Network error while creating project. Please check your connection and try again.';
+                } else if (e?.message && (e.message.includes('Database schema is incomplete') || e.message.includes('temporarily unavailable'))) {
+                    errorMessage = e.message;
+                } else if (e?.status === 503) {
+                    errorMessage = 'Database schema is incomplete. Please contact your administrator.';
+                } else if (e instanceof SyntaxError || String(e?.message || '').toLowerCase().includes('json')) {
+                    errorMessage = 'Server returned an invalid response. Please try again.';
+                }
+
+                if (submitBtn) {
+                    submitBtn.disabled = false;
+                    submitBtn.innerHTML = originalButtonHtml;
+                }
+            }
+
+            showError(errorMessage);
         }
-        window.location.href = `project_dashboard.php?draft=1${templateId ? `&template_id=${encodeURIComponent(templateId)}` : ''}&name=${encodeURIComponent(projectName)}&status=${encodeURIComponent(statusCode)}`;
     }
 
     function closeModals() {

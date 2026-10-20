@@ -1,4 +1,16 @@
 <?php
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    if (PHP_SAPI !== 'cli' || !isset($_SESSION)) {
+        @session_start();
+    }
+}
+if (!isset($_SESSION) || !is_array($_SESSION)) {
+    $_SESSION = [];
+}
+if (empty($_SESSION['csrf_token']) || !is_string($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+
 require_once __DIR__ . '/company_tools_data.php';
 $companyToolsCategories = company_tools_existing_categories();
 $favoriteTools = array_slice(company_tools_favorites(), 0, 5);
@@ -240,10 +252,13 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
                     <span>Settings</span>
                 </a>
                 <div style="height: 1px; background: rgba(0,0,0,0.08); margin: 4px 0;"></div>
-                <a href="../logout.php">
-                    <i class="fas fa-sign-out-alt"></i>
-                    <span>Sign out</span>
-                </a>
+                <form method="POST" action="/pages/logout.php" class="bt-logout-form" style="margin: 0; padding: 0;">
+                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES, 'UTF-8') ?>">
+                    <button type="submit" class="bt-menu-action bt-logout-button">
+                        <i class="fas fa-sign-out-alt"></i>
+                        <span>Sign out</span>
+                    </button>
+                </form>
             </div>
         </div>
         <button class="bt-header-collapse-btn" id="btHeaderCollapseBtn" type="button" title="Hide Header"
@@ -551,7 +566,7 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
             }
 
             if (primBtn) {
-                primBtn.textContent = options.primaryText || (type === 'error' ? 'Close' : 'Got It');
+                primBtn.textContent = options.confirmText || options.primaryText || (type === 'error' ? 'Close' : 'Got It');
                 if (options.primaryDanger || (type === 'error' && options.cancelText)) {
                     primBtn.style.background = '#ef4444';
                     primBtn.style.boxShadow = '0 2px 6px rgba(239, 68, 68, 0.35)';
@@ -601,6 +616,11 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
         }
 
         function closeAnnouncement() {
+            var cb = cancelCallback;
+            primaryCallback = null;
+            secondaryCallback = null;
+            cancelCallback = null;
+            if (cb) cb();
             if (dontShowCheck && dontShowCheck.checked) {
                 markDismissed(currentAnnouncementId);
             }
@@ -610,11 +630,6 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
         }
 
         function handleCancelDismiss() {
-            var cb = cancelCallback;
-            primaryCallback = null;
-            secondaryCallback = null;
-            cancelCallback = null;
-            if (cb) cb();
             closeAnnouncement();
         }
 
@@ -679,6 +694,38 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
             close: closeAnnouncement,
             isDismissed: isDismissed,
             markDismissed: markDismissed,
+            confirm: function (titleOrOpts, message) {
+                return new Promise(function (resolve) {
+                    var opts = {};
+                    if (typeof titleOrOpts === 'object' && titleOrOpts !== null) {
+                        opts = Object.assign({}, titleOrOpts);
+                    } else if (typeof titleOrOpts === 'string') {
+                        if (typeof message === 'string') {
+                            opts = { title: titleOrOpts, message: message };
+                        } else {
+                            opts = { message: titleOrOpts };
+                        }
+                    }
+                    opts.force = true;
+                    opts.showDontShow = false;
+                    opts.type = opts.type || 'warning';
+                    if (!opts.cancelText) opts.cancelText = 'Cancel';
+                    if (!opts.confirmText && !opts.primaryText) opts.confirmText = 'Confirm';
+
+                    var settled = false;
+                    function finish(value) {
+                        if (settled) return;
+                        settled = true;
+                        resolve(Boolean(value));
+                    }
+
+                    opts.onPrimary = function () { finish(true); };
+                    opts.onCancel = function () { finish(false); };
+                    opts.onSecondary = function () { finish(false); };
+
+                    showAnnouncement(opts);
+                });
+            },
             success: function (titleOrOpts, message) {
                 var opts = typeof titleOrOpts === 'object' ? titleOrOpts : { title: titleOrOpts, message: message };
                 opts.type = 'success';
@@ -706,50 +753,10 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
                 opts.force = true;
                 opts.showDontShow = false;
                 showAnnouncement(opts);
-            },
-            confirm: function (options) {
-                options = options || {};
-                var title = options.title || 'Confirm Action';
-                var message = options.message || 'Are you sure you want to proceed?';
-                var confirmText = options.confirmText || 'Confirm';
-                var cancelText = options.cancelText || 'Cancel';
-                var type = options.type || (options.primaryDanger ? 'error' : 'warning');
-                var badge = options.badge || (options.primaryDanger ? 'WARNING' : 'CONFIRMATION');
-                var icon = options.icon || (options.primaryDanger ? 'fas fa-trash' : 'fas fa-triangle-exclamation');
-                var primaryDanger = options.primaryDanger !== undefined ? options.primaryDanger : (type === 'error');
-
-                return new Promise(function (resolve) {
-                    var resolved = false;
-                    showAnnouncement({
-                        force: true,
-                        type: type,
-                        title: title,
-                        badge: badge,
-                        icon: icon,
-                        message: message,
-                        primaryText: confirmText,
-                        primaryDanger: primaryDanger,
-                        cancelText: cancelText,
-                        showDontShow: false,
-                        onPrimary: function () {
-                            if (!resolved) {
-                                resolved = true;
-                                resolve(true);
-                            }
-                        },
-                        onCancel: function () {
-                            if (!resolved) {
-                                resolved = true;
-                                resolve(false);
-                            }
-                        }
-                    });
-                });
             }
         };
-
         window.showConfirmDialog = window.TakeoffAnnouncement.confirm;
     })();
 </script>
 <link rel="stylesheet" href="../assets/global_datetime_picker.css?v=20260924-3">
-<script src="../assets/global_datetime_picker.js?v=20260924-3"></script>
+<script src="../assets/global_datetime_picker.js?v=20260924-3"></script>

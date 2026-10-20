@@ -1,9 +1,14 @@
 <?php
 /**
  * Database Seed: Assemblies 2027 Brightronix Cost Catalog
- * 
- * Usage: php db/seed_assemblies_2027.php
- * 
+ *
+ * Preflight: php db/seed_assemblies_2027.php --check
+ * Apply:     php db/seed_assemblies_2027.php --apply
+ *
+ * Rollback: all writes are enclosed in one transaction and are rolled back on
+ * abnormal termination. Restore the pre-run database backup to reverse a
+ * successfully committed seed.
+ *
  * Creates or updates all assemblies across:
  * - Assemblies EMT (Group 36)
  * - Assemblies PVC (Group 37)
@@ -14,6 +19,17 @@
 
 declare(strict_types=1);
 
+if (PHP_SAPI !== 'cli') {
+    http_response_code(404);
+    exit;
+}
+
+$mode = $argv[1] ?? '';
+if (!in_array($mode, ['--check', '--apply'], true)) {
+    fwrite(STDERR, "Usage: php db/seed_assemblies_2027.php --check|--apply\n");
+    exit(2);
+}
+
 require_once __DIR__ . '/../core/db/connection.php';
 
 echo "========================================================\n";
@@ -21,8 +37,9 @@ echo " SEEDING ASSEMBLIES FOR 2027 BRIGHTRONIX COST CATALOG\n";
 echo "========================================================\n\n";
 
 // 1. Locate Target Catalog
-$stmt = $pdo->prepare("SELECT id, name FROM catalogs WHERE (name LIKE '%2027 Brightronix%' OR id = 1) AND deleted_at IS NULL LIMIT 1");
-$stmt->execute();
+$targetCatalogName = '2027 Brightronix Cost Catalog';
+$stmt = $pdo->prepare("SELECT id, name FROM catalogs WHERE name = ? AND deleted_at IS NULL");
+$stmt->execute([$targetCatalogName]);
 $catalog = $stmt->fetch(PDO::FETCH_ASSOC);
 
 if (!$catalog) {
@@ -31,6 +48,28 @@ if (!$catalog) {
 }
 $catalogId = (int)$catalog['id'];
 echo "Target Catalog: '{$catalog['name']}' (ID: $catalogId)\n\n";
+
+if ($stmt->fetch(PDO::FETCH_ASSOC)) {
+    fwrite(STDERR, "Error: More than one active target catalog has the exact canonical name.\n");
+    exit(1);
+}
+
+if ($mode === '--check') {
+    $groupCount = $pdo->prepare("SELECT COUNT(*) FROM catalog_groups WHERE catalog_id = ? AND deleted_at IS NULL");
+    $groupCount->execute([$catalogId]);
+    $itemCount = $pdo->prepare("SELECT COUNT(*) FROM catalog_items WHERE catalog_id = ? AND deleted_at IS NULL");
+    $itemCount->execute([$catalogId]);
+    echo "CHECK_ONLY: target exists; current groups=" . (int)$groupCount->fetchColumn()
+        . ", current items=" . (int)$itemCount->fetchColumn() . ". No writes performed.\n";
+    exit(0);
+}
+
+$pdo->beginTransaction();
+register_shutdown_function(static function () use ($pdo): void {
+    if ($pdo->inTransaction()) {
+        $pdo->rollBack();
+    }
+});
 
 // 2. Ensure / Retrieve Groups
 $targetGroups = [
@@ -74,7 +113,7 @@ foreach ($rawItems as $it) {
 function getItem(string $search, array &$itemIndex, array &$rawItems): ?array {
     $norm = strtolower(preg_replace('/\s+/', ' ', trim($search)));
     if (isset($itemIndex[$norm])) return $itemIndex[$norm];
-    
+
     // Fallback: match without case / substring
     foreach ($rawItems as $it) {
         $candidate = strtolower(preg_replace('/\s+/', ' ', trim($it['name'])));
@@ -720,3 +759,5 @@ echo " Assemblies Updated:       {$stats['updated']}\n";
 echo " Components Linked:        {$stats['parts_linked']}\n";
 echo " Total Active Assemblies:  " . ($stats['created'] + $stats['updated']) . "\n";
 echo "========================================================\n";
+
+$pdo->commit();

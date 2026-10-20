@@ -190,19 +190,34 @@ final class CatalogAdminService
     }
     private function insert(string $table, array $values): int
     {
-        $columns=array_keys($values); $sql="INSERT INTO `$table` (`".implode('`,`',$columns)."`) VALUES (".implode(',',array_fill(0,count($columns),'?')).')';
+        $tableCols = catalog_ra_columns($this->pdo, $table);
+        $values = array_intersect_key($values, $tableCols);
+        $columns = array_keys($values);
+        $sql = "INSERT INTO `$table` (`" . implode('`,`', $columns) . "`) VALUES (" . implode(',', array_fill(0, count($columns), '?')) . ')';
         $this->pdo->prepare($sql)->execute(array_values($values)); return (int)$this->pdo->lastInsertId();
     }
 
     public function createCatalog(array $p): array { return $this->transaction(function() use($p) {
         $name=$this->text($p['name']??null); if(!$name) throw new CatalogAdminException('VALIDATION_ERROR','Catalog name is required.');
-        $id=$this->insert('catalogs',['name'=>$name,'description'=>$this->text($p['description']??null),'trade'=>$this->text($p['trade']??null),'active'=>!empty($p['active'])?1:0,'locked'=>!empty($p['locked'])?1:0,'enabled_for_projects'=>!empty($p['enabled_for_projects'])?1:0,'sort_order'=>(int)($p['sort_order']??0)]);
+        $columns = catalog_ra_columns($this->pdo, 'catalogs');
+        $values = [
+            'name' => $name,
+            'description' => $this->text($p['description'] ?? null),
+            'trade' => $this->text($p['trade'] ?? null),
+            'active' => !empty($p['active']) ? 1 : 0,
+            'locked' => !empty($p['locked']) ? 1 : 0,
+            'enabled_for_projects' => !empty($p['enabled_for_projects']) ? 1 : 0,
+            'sort_order' => (int)($p['sort_order'] ?? 0)
+        ];
+        $id = $this->insert('catalogs', array_intersect_key($values, $columns));
         $bookId=$this->insert('cost_catalogs',['catalog_id'=>$id,'name'=>$name.' Cost Book','currency_code'=>'USD','active'=>1]);
         catalog_ra_created($this->pdo,'catalogs','catalog',$id,'catalog.created',$p,$id); catalog_ra_created($this->pdo,'cost_catalogs','cost_catalog',$bookId,'cost_catalog.created',$p,$id);
         return ['id'=>$id,'entity'=>catalog_ra_row($this->pdo,'catalogs',$id)]; }); }
     public function updateCatalog(array $p): array { return $this->transaction(function() use($p) { $id=$this->requiredId($p); $this->assertUnlocked($id);
         $old=$this->catalog($id); $values=[]; foreach(['name','description','trade','active','locked','enabled_for_projects','sort_order'] as $k) if(array_key_exists($k,$p)) $values[$k]=in_array($k,['active','locked','enabled_for_projects'],true)?(!empty($p[$k])?1:0):($k==='sort_order'?(int)$p[$k]:$this->text($p[$k]));
         if(isset($values['name'])&&!$values['name']) throw new CatalogAdminException('VALIDATION_ERROR','Catalog name is required.');
+        $columns = catalog_ra_columns($this->pdo, 'catalogs');
+        $values = array_intersect_key($values, $columns);
         return ['id'=>$id,'entity'=>catalog_ra_update($this->pdo,'catalogs','catalog',$id,$values,'catalog.updated',$p,$id)]; }); }
     public function toggleCatalog(array $p): array { return $this->transaction(function() use($p){$id=$this->requiredId($p);$row=$this->assertUnlocked($id);$newVal=empty($row['active'])?1:0;return ['id'=>$id,'entity'=>catalog_ra_update($this->pdo,'catalogs','catalog',$id,['active'=>$newVal,'enabled_for_projects'=>$newVal],'catalog.toggled',$p,$id)];});}
     public function archiveCatalog(array $p): array { return $this->transaction(function() use($p){
@@ -218,9 +233,60 @@ final class CatalogAdminService
         $this->pdo->prepare('UPDATE catalog_items SET deleted_at=NULL WHERE catalog_id=? AND deleted_at IS NOT NULL')->execute([$id]);
         return ['id'=>$id,'entity'=>catalog_ra_update($this->pdo,'catalogs','catalog',$id,['deleted_at'=>null],'catalog.restored',$p,$id)];
     });}
-    public function copyCatalog(array $p): array { return $this->transaction(function() use($p){$source=$this->catalog($this->requiredId($p));$this->assertUnlocked((int)$source['id']);$id=$this->insert('catalogs',['name'=>$source['name'].' Copy','description'=>$source['description'],'trade'=>$source['trade'],'active'=>$source['active'],'locked'=>0,'enabled_for_projects'=>$source['enabled_for_projects'],'metadata_json'=>$source['metadata_json']]);catalog_ra_created($this->pdo,'catalogs','catalog',$id,'catalog.copied',$p,$id);
-        $stmt=$this->pdo->prepare('SELECT * FROM catalog_groups WHERE catalog_id=? AND deleted_at IS NULL ORDER BY parent_group_id IS NOT NULL,id');$stmt->execute([(int)$source['id']]);$map=[];foreach($stmt->fetchAll(PDO::FETCH_ASSOC) as $g){$gid=$this->insert('catalog_groups',['catalog_id'=>$id,'parent_group_id'=>$g['parent_group_id']?($map[(int)$g['parent_group_id']]??null):null,'name'=>$g['name'],'description'=>$g['description'],'sort_order'=>$g['sort_order'],'active'=>$g['active'],'enabled_for_projects'=>$g['enabled_for_projects'],'metadata_json'=>$g['metadata_json']]);$map[(int)$g['id']]=$gid;catalog_ra_created($this->pdo,'catalog_groups','category',$gid,'category.copied',$p,$id);}return ['id'=>$id,'entity'=>catalog_ra_row($this->pdo,'catalogs',$id)];});}
-    public function reorderCatalogs(array $p):array{return $this->transaction(function()use($p){$ids=array_values(array_unique(array_map('intval',is_array($p['ordered_ids']??null)?$p['ordered_ids']:[])));$actual=array_map('intval',$this->pdo->query('SELECT id FROM catalogs WHERE deleted_at IS NULL ORDER BY sort_order,id FOR UPDATE')->fetchAll(PDO::FETCH_COLUMN));$a=$actual;$b=$ids;sort($a);sort($b);if($a!==$b)throw new CatalogAdminException('VALIDATION_ERROR','Catalog reorder must include every active catalog once.',422);foreach($ids as$order=>$id){$row=$this->catalog($id);if(!empty($row['locked']))throw new CatalogAdminException('CATALOG_LOCKED','Locked catalogs cannot be reordered.',409);catalog_ra_update($this->pdo,'catalogs','catalog',$id,['sort_order'=>$order],'catalog.reordered',array_merge($p,['expected_revision'=>null]),$id);}return['ordered_ids'=>$ids];});}
+    public function copyCatalog(array $p): array { return $this->transaction(function() use($p){
+        $source = $this->catalog($this->requiredId($p));
+        $this->assertUnlocked((int)$source['id']);
+        $catCols = catalog_ra_columns($this->pdo, 'catalogs');
+        $catValues = [
+            'name' => $source['name'] . ' Copy',
+            'description' => $source['description'] ?? null,
+            'trade' => $source['trade'] ?? null,
+            'active' => $source['active'] ?? 1,
+            'locked' => 0,
+            'enabled_for_projects' => $source['enabled_for_projects'] ?? 1,
+            'sort_order' => (int)($source['sort_order'] ?? 0),
+            'metadata_json' => $source['metadata_json'] ?? null
+        ];
+        $id = $this->insert('catalogs', array_intersect_key($catValues, $catCols));
+        catalog_ra_created($this->pdo, 'catalogs', 'catalog', $id, 'catalog.copied', $p, $id);
+        $grpCols = catalog_ra_columns($this->pdo, 'catalog_groups');
+        $grpOrder = isset($grpCols['sort_order']) ? 'sort_order,id' : 'id';
+        $stmt = $this->pdo->prepare("SELECT * FROM catalog_groups WHERE catalog_id=? AND deleted_at IS NULL ORDER BY parent_group_id IS NOT NULL,$grpOrder");
+        $stmt->execute([(int)$source['id']]);
+        $map = [];
+        foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) as $g) {
+            $gValues = [
+                'catalog_id' => $id,
+                'parent_group_id' => $g['parent_group_id'] ? ($map[(int)$g['parent_group_id']] ?? null) : null,
+                'name' => $g['name'],
+                'description' => $g['description'] ?? null,
+                'sort_order' => (int)($g['sort_order'] ?? 0),
+                'active' => $g['active'] ?? 1,
+                'enabled_for_projects' => $g['enabled_for_projects'] ?? 1,
+                'metadata_json' => $g['metadata_json'] ?? null
+            ];
+            $gid = $this->insert('catalog_groups', array_intersect_key($gValues, $grpCols));
+            $map[(int)$g['id']] = $gid;
+            catalog_ra_created($this->pdo, 'catalog_groups', 'category', $gid, 'category.copied', $p, $id);
+        }
+        return ['id' => $id, 'entity' => catalog_ra_row($this->pdo, 'catalogs', $id)];
+    }); }
+    public function reorderCatalogs(array $p): array { return $this->transaction(function() use($p) {
+        $hasSort = isset(catalog_ra_columns($this->pdo, 'catalogs')['sort_order']);
+        $orderClause = $hasSort ? 'ORDER BY sort_order,id' : 'ORDER BY id';
+        $ids = array_values(array_unique(array_map('intval', is_array($p['ordered_ids'] ?? null) ? $p['ordered_ids'] : [])));
+        $actual = array_map('intval', $this->pdo->query("SELECT id FROM catalogs WHERE deleted_at IS NULL $orderClause FOR UPDATE")->fetchAll(PDO::FETCH_COLUMN));
+        $a = $actual; $b = $ids; sort($a); sort($b);
+        if ($a !== $b) throw new CatalogAdminException('VALIDATION_ERROR', 'Catalog reorder must include every active catalog once.', 422);
+        foreach ($ids as $order => $id) {
+            $row = $this->catalog($id);
+            if (!empty($row['locked'])) throw new CatalogAdminException('CATALOG_LOCKED', 'Locked catalogs cannot be reordered.', 409);
+            if ($hasSort) {
+                catalog_ra_update($this->pdo, 'catalogs', 'catalog', $id, ['sort_order' => $order], 'catalog.reordered', array_merge($p, ['expected_revision' => null]), $id);
+            }
+        }
+        return ['ordered_ids' => $ids, 'supported' => $hasSort, 'reordered' => $hasSort];
+    }); }
 
     public function createCategory(array $p): array { return $this->transaction(function() use($p){
         $cid=$this->requiredId($p,'catalog_id');
@@ -239,7 +305,17 @@ final class CatalogAdminService
         $name=$this->text($p['name']??null);
         if(!$name) throw new CatalogAdminException('VALIDATION_ERROR','Category name is required.');
         $this->assertUniqueCategoryName($cid,$parent,$name);
-        $id=$this->insert('catalog_groups',['catalog_id'=>$cid,'parent_group_id'=>$parent,'name'=>$name,'description'=>$this->text($p['description']??null),'sort_order'=>(int)($p['sort_order']??0),'active'=>array_key_exists('active',$p)?(!empty($p['active'])?1:0):1,'enabled_for_projects'=>array_key_exists('enabled_for_projects',$p)?(!empty($p['enabled_for_projects'])?1:0):1]);
+        $columns = catalog_ra_columns($this->pdo, 'catalog_groups');
+        $values = [
+            'catalog_id' => $cid,
+            'parent_group_id' => $parent,
+            'name' => $name,
+            'description' => $this->text($p['description'] ?? null),
+            'sort_order' => (int)($p['sort_order'] ?? 0),
+            'active' => array_key_exists('active', $p) ? (!empty($p['active']) ? 1 : 0) : 1,
+            'enabled_for_projects' => array_key_exists('enabled_for_projects', $p) ? (!empty($p['enabled_for_projects']) ? 1 : 0) : 1
+        ];
+        $id = $this->insert('catalog_groups', array_intersect_key($values, $columns));
         catalog_ra_created($this->pdo,'catalog_groups','category',$id,'category.created',$p,$cid);
         return ['id'=>$id,'entity'=>catalog_ra_row($this->pdo,'catalog_groups',$id)];
     });}
@@ -271,8 +347,10 @@ final class CatalogAdminService
         $this->assertUniqueCategoryName($cid,$parent,$name,$id);
         $values=[];
         foreach(['catalog_id','parent_group_id','name','description','sort_order','active','enabled_for_projects'] as $k) {
-            if(array_key_exists($k,$p)) $values[$k]=in_array($k,['active','enabled_for_projects'],true)?(!empty($p[$k])?1:0):($k==='parent_group_id'?$parent:($k==='name'?$name:$p[$k]));
+            if(array_key_exists($k,$p)) $values[$k]=in_array($k,['active','enabled_for_projects'],true)?(!empty($p[$k])?1:0):($k==='parent_group_id'?$parent:($k==='name'?$name:($k==='sort_order'?(int)$p[$k]:$this->text($p[$k]))));
         }
+        $columns = catalog_ra_columns($this->pdo, 'catalog_groups');
+        $values = array_intersect_key($values, $columns);
         $action=((int)$old['catalog_id']!==$cid||(string)($old['parent_group_id']??'')!==(string)($parent??''))?'category.moved':'category.updated';
         return ['id'=>$id,'entity'=>catalog_ra_update($this->pdo,'catalog_groups','category',$id,$values,$action,$p,$cid)];
     });}
@@ -322,8 +400,58 @@ final class CatalogAdminService
         $this->pdo->prepare("UPDATE catalog_items SET deleted_at=NULL WHERE catalog_group_id IN ($inGroups) AND deleted_at IS NOT NULL")->execute($ids);
         return ['id'=>$id,'entity'=>catalog_ra_update($this->pdo,'catalog_groups','category',$id,['deleted_at'=>null],'category.restored',$p,(int)$r['catalog_id'])];
     });}
-    public function copyCategory(array $p): array {$r=$this->tableRow('catalog_groups',$this->requiredId($p));$this->assertUnlocked((int)$r['catalog_id']);$base=$r['name'].' Copy';$name=$base;$suffix=2;while(true){try{$this->assertUniqueCategoryName((int)$r['catalog_id'],$r['parent_group_id']?(int)$r['parent_group_id']:null,$name);break;}catch(CatalogAdminException $e){if($e->errorCode!=='DUPLICATE_CATEGORY')throw$e;$name=$base.' '.$suffix++;}}$id=$this->insert('catalog_groups',['catalog_id'=>$r['catalog_id'],'parent_group_id'=>$r['parent_group_id'],'name'=>$name,'description'=>$r['description'],'sort_order'=>$r['sort_order'],'active'=>$r['active'],'enabled_for_projects'=>$r['enabled_for_projects'],'metadata_json'=>$r['metadata_json']]);catalog_ra_created($this->pdo,'catalog_groups','category',$id,'category.copied',$p,(int)$r['catalog_id']);return ['id'=>$id,'entity'=>catalog_ra_row($this->pdo,'catalog_groups',$id)];}
-    public function reorderCategories(array $p):array{return $this->transaction(function()use($p){$catalogId=$this->requiredId($p,'catalog_id');$parent=(int)($p['parent_group_id']??0)?:null;$this->assertUnlocked($catalogId);$sql='SELECT id FROM catalog_groups WHERE catalog_id=? AND '.($parent?'parent_group_id=?':'parent_group_id IS NULL').' AND deleted_at IS NULL ORDER BY sort_order,id FOR UPDATE';$args=[$catalogId];if($parent)$args[]=$parent;$stmt=$this->pdo->prepare($sql);$stmt->execute($args);$actual=array_map('intval',$stmt->fetchAll(PDO::FETCH_COLUMN));$ids=array_values(array_unique(array_map('intval',is_array($p['ordered_ids']??null)?$p['ordered_ids']:[])));$a=$actual;$b=$ids;sort($a);sort($b);if($a!==$b)throw new CatalogAdminException('VALIDATION_ERROR','Category reorder must include every sibling once.',422);foreach($ids as$order=>$id)catalog_ra_update($this->pdo,'catalog_groups','category',$id,['sort_order'=>$order],'category.reordered',array_merge($p,['expected_revision'=>null]),$catalogId);return['ordered_ids'=>$ids];});}
+    public function copyCategory(array $p): array {
+        $r = $this->tableRow('catalog_groups', $this->requiredId($p));
+        $this->assertUnlocked((int)$r['catalog_id']);
+        $base = $r['name'] . ' Copy';
+        $name = $base;
+        $suffix = 2;
+        while (true) {
+            try {
+                $this->assertUniqueCategoryName((int)$r['catalog_id'], $r['parent_group_id'] ? (int)$r['parent_group_id'] : null, $name);
+                break;
+            } catch (CatalogAdminException $e) {
+                if ($e->errorCode !== 'DUPLICATE_CATEGORY') throw $e;
+                $name = $base . ' ' . $suffix++;
+            }
+        }
+        $columns = catalog_ra_columns($this->pdo, 'catalog_groups');
+        $values = [
+            'catalog_id' => $r['catalog_id'],
+            'parent_group_id' => $r['parent_group_id'] ?? null,
+            'name' => $name,
+            'description' => $r['description'] ?? null,
+            'sort_order' => (int)($r['sort_order'] ?? 0),
+            'active' => $r['active'] ?? 1,
+            'enabled_for_projects' => $r['enabled_for_projects'] ?? 1,
+            'metadata_json' => $r['metadata_json'] ?? null
+        ];
+        $id = $this->insert('catalog_groups', array_intersect_key($values, $columns));
+        catalog_ra_created($this->pdo, 'catalog_groups', 'category', $id, 'category.copied', $p, (int)$r['catalog_id']);
+        return ['id' => $id, 'entity' => catalog_ra_row($this->pdo, 'catalog_groups', $id)];
+    }
+    public function reorderCategories(array $p): array { return $this->transaction(function() use($p) {
+        $catalogId = $this->requiredId($p, 'catalog_id');
+        $parent = (int)($p['parent_group_id'] ?? 0) ?: null;
+        $this->assertUnlocked($catalogId);
+        $hasSort = isset(catalog_ra_columns($this->pdo, 'catalog_groups')['sort_order']);
+        $orderClause = $hasSort ? 'ORDER BY sort_order,id' : 'ORDER BY id';
+        $sql = 'SELECT id FROM catalog_groups WHERE catalog_id=? AND ' . ($parent ? 'parent_group_id=?' : 'parent_group_id IS NULL') . " AND deleted_at IS NULL $orderClause FOR UPDATE";
+        $args = [$catalogId];
+        if ($parent) $args[] = $parent;
+        $stmt = $this->pdo->prepare($sql);
+        $stmt->execute($args);
+        $actual = array_map('intval', $stmt->fetchAll(PDO::FETCH_COLUMN));
+        $ids = array_values(array_unique(array_map('intval', is_array($p['ordered_ids'] ?? null) ? $p['ordered_ids'] : [])));
+        $a = $actual; $b = $ids; sort($a); sort($b);
+        if ($a !== $b) throw new CatalogAdminException('VALIDATION_ERROR', 'Category reorder must include every sibling once.', 422);
+        if ($hasSort) {
+            foreach ($ids as $order => $id) {
+                catalog_ra_update($this->pdo, 'catalog_groups', 'category', $id, ['sort_order' => $order], 'category.reordered', array_merge($p, ['expected_revision' => null]), $catalogId);
+            }
+        }
+        return ['ordered_ids' => $ids, 'supported' => $hasSort, 'reordered' => $hasSort];
+    }); }
 
     public function createItem(array $p): array {return $this->transaction(function()use($p){$v=$this->itemValues($p);$id=$this->insert('catalog_items',$v);catalog_ra_created($this->pdo,'catalog_items','item',$id,'item.created',$p,(int)$v['catalog_id']);$components=$p['components']??$p['assembly_components']??null;if(is_string($components))$components=json_decode($components,true)?:[];if(strtolower((string)$v['item_type'])==='assembly'&&is_array($components)){$this->syncAssemblyComponents($id,(int)$v['catalog_id'],$components,$p);}return ['id'=>$id,'entity'=>catalog_ra_row($this->pdo,'catalog_items',$id)];});}
     public function updateItem(array $p): array {return $this->transaction(function()use($p){$id=$this->requiredId($p);$old=$this->tableRow('catalog_items',$id);$merged=array_merge($old,$p);$v=$this->itemValues($merged);$entity=catalog_ra_update($this->pdo,'catalog_items','item',$id,$v,'item.updated',$p,(int)$v['catalog_id']);$components=$p['components']??$p['assembly_components']??null;if(is_string($components))$components=json_decode($components,true)?:[];if((strtolower((string)$v['item_type'])==='assembly'||strtolower((string)($old['item_type']??''))==='assembly')&&is_array($components)){$this->syncAssemblyComponents($id,(int)$v['catalog_id'],$components,$p);$entity=catalog_ra_row($this->pdo,'catalog_items',$id);}return ['id'=>$id,'entity'=>$entity];});}
@@ -400,7 +528,18 @@ final class CatalogAdminService
     public function archiveItem(array $p): array {$id=$this->requiredId($p);$r=$this->tableRow('catalog_items',$id);$this->assertUnlocked((int)$r['catalog_id']);return ['id'=>$id,'entity'=>catalog_ra_update($this->pdo,'catalog_items','item',$id,['deleted_at'=>date('Y-m-d H:i:s')],'item.archived',$p,(int)$r['catalog_id'])];}
     public function restoreItem(array $p): array {$id=$this->requiredId($p);$r=$this->tableRow('catalog_items',$id,false);$this->assertUnlocked((int)$r['catalog_id'],false);return ['id'=>$id,'entity'=>catalog_ra_update($this->pdo,'catalog_items','item',$id,['deleted_at'=>null],'item.restored',$p,(int)$r['catalog_id'])];}
     public function moveItem(array $p): array {$id=$this->requiredId($p);$old=$this->tableRow('catalog_items',$id);$cid=$this->requiredId($p,'catalog_id');$this->assertUnlocked((int)$old['catalog_id']);$this->assertUnlocked($cid);$gid=(int)($p['catalog_group_id']??0)?:null;$this->categoryForCatalog($gid,$cid);return ['id'=>$id,'entity'=>catalog_ra_update($this->pdo,'catalog_items','item',$id,['catalog_id'=>$cid,'catalog_group_id'=>$gid],'item.moved',$p,$cid)];}
-    public function duplicateItem(array $p): array {return $this->transaction(function()use($p){$sourceId=$this->requiredId($p);$r=$this->tableRow('catalog_items',$sourceId);$this->assertUnlocked((int)$r['catalog_id']);foreach(['id','revision','created_at','updated_at','deleted_at'] as $k)unset($r[$k]);$r['name'].=' Copy';$id=$this->insert('catalog_items',$r);catalog_ra_created($this->pdo,'catalog_items','item',$id,'item.copied',$p,(int)$r['catalog_id']);if(strtolower((string)$r['item_type'])==='assembly'){$stmt=$this->pdo->prepare('SELECT * FROM assembly_parts WHERE assembly_catalog_item_id=? AND deleted_at IS NULL ORDER BY sort_order,id');$stmt->execute([$sourceId]);foreach($stmt->fetchAll(PDO::FETCH_ASSOC)as$component){foreach(['id','revision','created_at','updated_at','deleted_at']as$k)unset($component[$k]);$component['assembly_catalog_item_id']=$id;$componentId=$this->insert('assembly_parts',$component);catalog_ra_created($this->pdo,'assembly_parts','assembly_component',$componentId,'assembly_component.copied',$p,(int)$r['catalog_id']);}}return ['id'=>$id,'entity'=>catalog_ra_row($this->pdo,'catalog_items',$id)];});}
+    public function duplicateItem(array $p): array {return $this->transaction(function()use($p){$sourceId=$this->requiredId($p);$r=$this->tableRow('catalog_items',$sourceId);$this->assertUnlocked((int)$r['catalog_id']);foreach(['id','revision','created_at','updated_at','deleted_at'] as $k)unset($r[$k]);$r['name'].=' Copy';$id=$this->insert('catalog_items',$r);catalog_ra_created($this->pdo,'catalog_items','item',$id,'item.copied',$p,(int)$r['catalog_id']);if(strtolower((string)$r['item_type'])==='assembly'){
+            $apCols = catalog_ra_columns($this->pdo, 'assembly_parts');
+            $apOrder = isset($apCols['sort_order']) ? 'ORDER BY sort_order,id' : 'ORDER BY id';
+            $stmt = $this->pdo->prepare("SELECT * FROM assembly_parts WHERE assembly_catalog_item_id=? AND deleted_at IS NULL $apOrder");
+            $stmt->execute([$sourceId]);
+            foreach($stmt->fetchAll(PDO::FETCH_ASSOC) as $component){
+                foreach(['id','revision','created_at','updated_at','deleted_at'] as $k) unset($component[$k]);
+                $component['assembly_catalog_item_id']=$id;
+                $componentId=$this->insert('assembly_parts', array_intersect_key($component, $apCols));
+                catalog_ra_created($this->pdo,'assembly_parts','assembly_component',$componentId,'assembly_component.copied',$p,(int)$r['catalog_id']);
+            }
+        }return ['id'=>$id,'entity'=>catalog_ra_row($this->pdo,'catalog_items',$id)];});}
     public function convertItemAssembly(array $p): array {$id=$this->requiredId($p);$r=$this->tableRow('catalog_items',$id);$this->assertUnlocked((int)$r['catalog_id']);return ['id'=>$id,'entity'=>catalog_ra_update($this->pdo,'catalog_items','item',$id,['item_type'=>'assembly'],'item.converted_to_assembly',$p,(int)$r['catalog_id'])];}
 
     private function assertNoAssemblyCycle(int $assemblyId,int $childId):void
@@ -413,6 +552,7 @@ final class CatalogAdminService
         $values+=['assembly_catalog_item_id'=>$aid,'part_catalog_item_id'=>$cid,'unit_cost_snapshot'=>(float)$c['unit_cost'],'unit_labor_time_snapshot'=>(float)$c['labor_hours']];$id=$this->insert('assembly_parts',$values);catalog_ra_created($this->pdo,'assembly_parts','assembly_component',$id,'assembly_component.created',$p,(int)$a['catalog_id']);$parent=$this->recalculateAssembly($aid,$p,'assembly.component_added');return ['id'=>$id,'entity'=>catalog_ra_row($this->pdo,'assembly_parts',$id),'assembly'=>$parent,'merged'=>false];});}
     public function updateAssemblyComponent(array $p): array {return $this->transaction(function()use($p){$id=$this->requiredId($p);$part=$this->tableRow('assembly_parts',$id);$aid=(int)$part['assembly_catalog_item_id'];$a=catalog_ra_assert_expected($this->pdo,'catalog_items',$aid,$p);$this->assertUnlocked((int)$a['catalog_id']);$componentInput=$p;unset($componentInput['expected_revision']);$entity=catalog_ra_update($this->pdo,'assembly_parts','assembly_component',$id,$this->componentValues($p,$part),'assembly_component.updated',$componentInput,(int)$a['catalog_id']);$parent=$this->recalculateAssembly($aid,$p,'assembly.component_updated');return ['id'=>$id,'entity'=>$entity,'assembly'=>$parent];});}
     public function removeAssemblyComponent(array $p): array {return $this->transaction(function()use($p){$id=$this->requiredId($p);$part=$this->tableRow('assembly_parts',$id);$aid=(int)$part['assembly_catalog_item_id'];$a=catalog_ra_assert_expected($this->pdo,'catalog_items',$aid,$p);$this->assertUnlocked((int)$a['catalog_id']);$componentInput=$p;unset($componentInput['expected_revision']);$entity=catalog_ra_update($this->pdo,'assembly_parts','assembly_component',$id,['deleted_at'=>date('Y-m-d H:i:s')],'assembly_component.archived',$componentInput,(int)$a['catalog_id']);$parent=$this->recalculateAssembly($aid,$p,'assembly.component_removed');return ['id'=>$id,'entity'=>$entity,'assembly'=>$parent];});}
+    public function reorderAssemblyComponents(array $p): array {return $this->transaction(function()use($p){$aid=$this->requiredId($p,'assembly_catalog_item_id');$assembly=catalog_ra_assert_expected($this->pdo,'catalog_items',$aid,$p);$this->assertUnlocked((int)$assembly['catalog_id']);$hasSort=isset(catalog_ra_columns($this->pdo,'assembly_parts')['sort_order']);$orderClause=$hasSort?'ORDER BY sort_order,id':'ORDER BY id';$ids=array_values(array_unique(array_map('intval',is_array($p['ordered_ids']??null)?$p['ordered_ids']:[])));$stmt=$this->pdo->prepare("SELECT id FROM assembly_parts WHERE assembly_catalog_item_id=? AND deleted_at IS NULL $orderClause FOR UPDATE");$stmt->execute([$aid]);$actual=array_map('intval',$stmt->fetchAll(PDO::FETCH_COLUMN));$expected=$actual;$provided=$ids;sort($expected);sort($provided);if($expected!==$provided)throw new CatalogAdminException('VALIDATION_ERROR','Reorder must contain every active component exactly once.',422);if($hasSort){$update=$this->pdo->prepare('UPDATE assembly_parts SET sort_order=? WHERE id=? AND assembly_catalog_item_id=?');foreach($ids as$order=>$id)$update->execute([$order,$id,$aid]);}$parent=catalog_ra_update($this->pdo,'catalog_items','item',$aid,[],'assembly.components_reordered',$p,(int)$assembly['catalog_id'],true);return['id'=>$aid,'assembly'=>$parent,'ordered_ids'=>$ids,'supported'=>$hasSort,'reordered'=>$hasSort];});}
     public function purgeCatalog(array $p): array {
         return $this->transaction(function() use($p){
             $id=$this->requiredId($p);
@@ -425,6 +565,10 @@ final class CatalogAdminService
             if (catalog_ra_table_exists($this->pdo, 'assembly_parts')) {
                 $this->pdo->prepare('DELETE ap FROM assembly_parts ap JOIN catalog_items ci ON ci.id=ap.assembly_catalog_item_id WHERE ci.catalog_id=?')->execute([$id]);
                 $this->pdo->prepare('DELETE ap FROM assembly_parts ap JOIN catalog_items ci ON ci.id=ap.part_catalog_item_id WHERE ci.catalog_id=?')->execute([$id]);
+            }
+            if (catalog_ra_table_exists($this->pdo, 'assembly_items')) {
+                $this->pdo->prepare('DELETE ai FROM assembly_items ai JOIN catalog_items ci ON ci.id=ai.assembly_id WHERE ci.catalog_id=?')->execute([$id]);
+                $this->pdo->prepare('DELETE ai FROM assembly_items ai JOIN catalog_items ci ON ci.id=ai.catalog_item_id WHERE ci.catalog_id=?')->execute([$id]);
             }
             $this->pdo->prepare('DELETE FROM catalog_items WHERE catalog_id=?')->execute([$id]);
             $this->pdo->prepare('DELETE FROM catalog_groups WHERE catalog_id=?')->execute([$id]);
@@ -460,6 +604,10 @@ final class CatalogAdminService
                 $this->pdo->prepare("DELETE ap FROM assembly_parts ap JOIN catalog_items ci ON ci.id=ap.assembly_catalog_item_id WHERE ci.catalog_group_id IN ($inMarks)")->execute($groupIds);
                 $this->pdo->prepare("DELETE ap FROM assembly_parts ap JOIN catalog_items ci ON ci.id=ap.part_catalog_item_id WHERE ci.catalog_group_id IN ($inMarks)")->execute($groupIds);
             }
+            if (catalog_ra_table_exists($this->pdo, 'assembly_items')) {
+                $this->pdo->prepare("DELETE ai FROM assembly_items ai JOIN catalog_items ci ON ci.id=ai.assembly_id WHERE ci.catalog_group_id IN ($inMarks)")->execute($groupIds);
+                $this->pdo->prepare("DELETE ai FROM assembly_items ai JOIN catalog_items ci ON ci.id=ai.catalog_item_id WHERE ci.catalog_group_id IN ($inMarks)")->execute($groupIds);
+            }
             // Permanently delete all items belonging to this group and its sub-groups (whether active or archived)
             $this->pdo->prepare("DELETE FROM catalog_items WHERE catalog_group_id IN ($inMarks)")->execute($groupIds);
             $this->pdo->prepare("DELETE FROM catalog_groups WHERE id IN ($inMarks)")->execute($groupIds);
@@ -479,10 +627,14 @@ final class CatalogAdminService
             if (catalog_ra_table_exists($this->pdo, 'catalog_item_attachments')) {
                 $this->pdo->prepare('DELETE FROM catalog_item_attachments WHERE catalog_item_id=?')->execute([$id]);
             }
-            $this->pdo->prepare('DELETE FROM assembly_parts WHERE assembly_catalog_item_id=? OR part_catalog_item_id=?')->execute([$id, $id]);
+            if (catalog_ra_table_exists($this->pdo, 'assembly_parts')) {
+                $this->pdo->prepare('DELETE FROM assembly_parts WHERE assembly_catalog_item_id=? OR part_catalog_item_id=?')->execute([$id, $id]);
+            }
+            if (catalog_ra_table_exists($this->pdo, 'assembly_items')) {
+                $this->pdo->prepare('DELETE FROM assembly_items WHERE assembly_id=? OR catalog_item_id=?')->execute([$id, $id]);
+            }
             $this->pdo->prepare('DELETE FROM catalog_items WHERE id=?')->execute([$id]);
             return ['id'=>$id,'purged'=>true];
         });
     }
 }
-

@@ -159,6 +159,15 @@ function setupTestEnvironment(initialState = createFixture()) {
     };
 }
 
+function openExistingAssemblyEditor(dom) {
+    const menuButton = dom.window.document.querySelector('[data-item-menu="200"]');
+    assert.ok(menuButton, 'assembly row actions menu is available');
+    menuButton.click();
+    const editButton = dom.window.document.querySelector('[data-floating-item-action="edit"][data-id="200"]');
+    assert.ok(editButton, 'assembly edit action is available');
+    editButton.click();
+}
+
 test('Cost Catalog Assembly Editor - Complete 21 Scenarios', async (t) => {
     let env = null;
 
@@ -328,7 +337,7 @@ test('Cost Catalog Assembly Editor - Complete 21 Scenarios', async (t) => {
         const compRow = dom.window.document.querySelector('#ccAssemblyPartsBody [data-part-row="101"]');
         assert.ok(compRow);
         assert.equal(compRow.querySelector('[data-part-quantity]').value, '1');
-        assert.match(compRow.children[2].textContent, /ft/);
+        assert.match(compRow.children[3].textContent, /ft/);
     });
 
     await t.test('10. Remove selected component via button also unchecks in available items list', () => {
@@ -358,13 +367,13 @@ test('Cost Catalog Assembly Editor - Complete 21 Scenarios', async (t) => {
         dom.window.document.querySelector('[data-assembly-select="101"]').click(); // $2.50, 0.05 hr
         const qtyInput = dom.window.document.querySelector('[data-part-quantity="101"]');
         assert.equal(qtyInput.value, '1');
-        assert.equal(dom.window.document.getElementById('ccItemUnitCost').value, '2.5');
+        assert.equal(dom.window.document.getElementById('ccItemUnitCost').value, '2.50');
 
         qtyInput.value = '4';
         qtyInput.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
 
-        assert.equal(dom.window.document.getElementById('ccItemUnitCost').value, '10');
-        assert.equal(dom.window.document.getElementById('ccItemLaborHours').value, '0.2');
+        assert.equal(dom.window.document.getElementById('ccItemUnitCost').value, '10.00');
+        assert.equal(dom.window.document.getElementById('ccItemLaborHours').value, '0.20');
         assert.match(dom.window.document.getElementById('ccAssemblyTotals').textContent, /\$10\.00/);
     });
 
@@ -410,11 +419,7 @@ test('Cost Catalog Assembly Editor - Complete 21 Scenarios', async (t) => {
         const existing = db.items.find(i => i.id === 200);
         assert.ok(existing);
 
-        const editBtn = dom.window.document.querySelector('[data-item-action="edit"][data-id="200"]');
-        if (editBtn) editBtn.click();
-        else {
-            dom.window.document.querySelector('[data-id="200"]').click();
-        }
+        openExistingAssemblyEditor(dom);
 
         assert.equal(dom.window.document.getElementById('ccItemName').value, 'Existing Assembly');
         assert.equal(dom.window.document.getElementById('ccSelectedComponentsCount').textContent, '3');
@@ -432,8 +437,7 @@ test('Cost Catalog Assembly Editor - Complete 21 Scenarios', async (t) => {
 
     await t.test('15. Change ratio and save in edit mode', async () => {
         const { dom, db, getLastSavePayload } = env;
-        const editBtn = dom.window.document.querySelector('[data-item-action="edit"][data-id="200"]');
-        if (editBtn) editBtn.click();
+        openExistingAssemblyEditor(dom);
 
         const wireQty = dom.window.document.querySelector('[data-part-quantity="104"]');
         wireQty.value = '5.0';
@@ -450,8 +454,7 @@ test('Cost Catalog Assembly Editor - Complete 21 Scenarios', async (t) => {
 
     await t.test('16. Add another component in edit mode and save', async () => {
         const { dom, getLastSavePayload } = env;
-        const editBtn = dom.window.document.querySelector('[data-item-action="edit"][data-id="200"]');
-        if (editBtn) editBtn.click();
+        openExistingAssemblyEditor(dom);
 
         assert.equal(dom.window.document.getElementById('ccSelectedComponentsCount').textContent, '3');
         // Add Coupling (103)
@@ -468,8 +471,7 @@ test('Cost Catalog Assembly Editor - Complete 21 Scenarios', async (t) => {
 
     await t.test('17. Remove existing component in edit mode and save', async () => {
         const { dom, getLastSavePayload } = env;
-        const editBtn = dom.window.document.querySelector('[data-item-action="edit"][data-id="200"]');
-        if (editBtn) editBtn.click();
+        openExistingAssemblyEditor(dom);
 
         assert.equal(dom.window.document.getElementById('ccSelectedComponentsCount').textContent, '3');
         // Remove Strap (102)
@@ -501,8 +503,7 @@ test('Cost Catalog Assembly Editor - Complete 21 Scenarios', async (t) => {
 
     await t.test('19. Prevent self-reference in assembly', () => {
         const { dom } = env;
-        const editBtn = dom.window.document.querySelector('[data-item-action="edit"][data-id="200"]');
-        if (editBtn) editBtn.click();
+        openExistingAssemblyEditor(dom);
 
         // The assembly itself (id 200) should never appear in available items
         assert.equal(dom.window.document.querySelectorAll('[data-assembly-select="200"]').length, 0);
@@ -510,8 +511,7 @@ test('Cost Catalog Assembly Editor - Complete 21 Scenarios', async (t) => {
 
     await t.test('20. Cancel without saving discards unsaved state', () => {
         const { dom, db } = env;
-        const editBtn = dom.window.document.querySelector('[data-item-action="edit"][data-id="200"]');
-        if (editBtn) editBtn.click();
+        openExistingAssemblyEditor(dom);
 
         // Add 103 in UI
         dom.window.document.querySelector('[data-assembly-select="103"]').click();

@@ -29,8 +29,8 @@ test('drawer uses canonical display values and safe external links', () => {
 
 test('drawer is desktop aside and mobile modal with responsive dark styling', () => {
     assert.match(css, /\.cc-details-drawer/);
-    assert.match(css, /@media\(min-width:761px\)/);
-    assert.match(css, /@media\(max-width:760px\)/);
+    assert.match(css, /\.cc-details-drawer\s*\{/);
+    assert.match(css, /@media\s*\(max-width:\s*900px\)/);
     assert.match(css, /\[data-theme="dark"\] \.cc-details-drawer/);
     assert.match(js, /setAttribute\('role', 'dialog'\)/);
     assert.match(js, /setAttribute\('aria-modal', 'true'\)/);
