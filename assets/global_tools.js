@@ -369,6 +369,15 @@
             return;
         }
 
+        // Do not enhance selects that are already inside a custom dropdown or custom modal selector
+        if (selectEl.closest('.pro-custom-dropdown') ||
+            selectEl.closest('.pro-create-layer-modal') ||
+            selectEl.closest('.pro-layer-modal') ||
+            selectEl.closest('.pro-create-selectors-row') ||
+            selectEl.closest('.pro-edit-selectors-row')) {
+            return;
+        }
+
         selectEl.dataset.customEnhanced = 'true';
 
         // Keep native select accessible for form submissions and native events while hidden

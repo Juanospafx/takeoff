@@ -7603,6 +7603,7 @@ body.theme-dark .pro-btn-browse-select:disabled {
     border: 1px solid rgba(0, 0, 0, 0.15);
     flex-shrink: 0;
     display: inline-block;
+    pointer-events: none;
 }
 
 .pro-custom-dropdown.is-open .pro-custom-dropdown-trigger {
@@ -8207,6 +8208,16 @@ body.theme-dark .pcd-add-custom-color-btn:hover {
 .pro-edit-selectors-row .col-color .pro-custom-dropdown-menu {
     left: auto;
     right: 0;
+}
+
+/* Safeguard: Prevent generic dropdown wrappers from duplicating inside custom selector rows */
+.pro-create-selectors-row .pro-custom-dropdown.cc-custom-select,
+.pro-create-selectors-row .pro-custom-dropdown.pro-custom-select,
+.pro-create-selectors-row .pro-custom-dropdown .pro-custom-dropdown,
+.pro-edit-selectors-row .pro-custom-dropdown.cc-custom-select,
+.pro-edit-selectors-row .pro-custom-dropdown.pro-custom-select,
+.pro-edit-selectors-row .pro-custom-dropdown .pro-custom-dropdown {
+    display: none !important;
 }
 
 /* Compact trigger text sizing for UoM */

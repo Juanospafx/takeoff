@@ -2436,7 +2436,7 @@
                                 <span class="pcd-caret"></span>
                             </button>
                             <div class="pro-custom-dropdown-menu pcd-type-menu" id="editLayerTypeMenu"></div>
-                            <select id="layerTypeInput" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                            <select id="layerTypeInput" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                 ${TAKEOFF_TYPES.map(type => `<option value="${type}">${type}</option>`).join('')}
                             </select>
                         </div>
@@ -2446,7 +2446,7 @@
                             <label for="layerStrokeInput">Line width</label>
                             <div class="pro-custom-select-wrap">
                                 <span class="pro-stroke-preview" id="layerStrokePreview"></span>
-                                <select id="layerStrokeInput">
+                                <select id="layerStrokeInput" data-no-custom-select="true" class="native-raw-select">
                                     <option value="1">1 px</option>
                                     <option value="1.5">1.5 px</option>
                                     <option value="2">2 px</option>
@@ -2463,7 +2463,7 @@
                                     <span class="pcd-caret"></span>
                                 </button>
                                 <div class="pro-custom-dropdown-menu pcd-uom-menu" id="editLayerUomMenu"></div>
-                                <select id="layerUomInput" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                <select id="layerUomInput" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                     ${TAKEOFF_UOMS.map(uom => `<option value="${uom}">${uom}</option>`).join('')}
                                 </select>
                             </div>
@@ -2476,7 +2476,7 @@
                                     <span class="pcd-caret"></span>
                                 </button>
                                 <div class="pro-custom-dropdown-menu pcd-symbol-menu" id="editLayerSymbolMenu"></div>
-                                <select id="layerSymbolInput" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                <select id="layerSymbolInput" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                     ${TAKEOFF_SYMBOLS.map(symbol => `<option value="${symbol}">${symbol}</option>`).join('')}
                                 </select>
                             </div>
@@ -2489,7 +2489,7 @@
                                     <span class="pcd-caret"></span>
                                 </button>
                                 <div class="pro-custom-dropdown-menu pcd-size-menu" id="editLayerSizeMenu"></div>
-                                <select id="layerSizeInput" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                <select id="layerSizeInput" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                     ${TAKEOFF_SIZES.map(size => `<option value="${size}">${size}</option>`).join('')}
                                 </select>
                             </div>
@@ -2502,7 +2502,7 @@
                                     <span class="pcd-caret"></span>
                                 </button>
                                 <div class="pro-custom-dropdown-menu pcd-color-menu" id="editLayerColorMenu"></div>
-                                <select id="layerColorInput" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                <select id="layerColorInput" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                     ${TAKEOFF_RICH_COLORS.map(c => `<option value="${c}">${c}</option>`).join('')}
                                     <option value="__custom__">Custom color...</option>
                                 </select>
@@ -2660,12 +2660,6 @@
                 updateLayerColorSwatch();
             }
         });
-        $('layerColorSwatch')?.addEventListener('click', () => {
-            $('layerCustomColorPicker')?.click();
-        });
-        $('editLayerColorSwatch')?.addEventListener('click', () => {
-            $('layerCustomColorPicker')?.click();
-        });
         $('layerCustomColorPicker')?.addEventListener('input', event => {
             setLayerColor(event.target.value);
         });
@@ -2722,7 +2716,7 @@
                                         <span class="pcd-caret"></span>
                                     </button>
                                     <div class="pro-custom-dropdown-menu pcd-type-menu" id="createLayerTypeMenu"></div>
-                                    <select id="createLayerType" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                    <select id="createLayerType" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                         <option value="Count">Count</option>
                                         <option value="Linear">Linear</option>
                                         <option value="Linear with drop">Linear with drop</option>
@@ -2740,7 +2734,7 @@
                                         <span class="pcd-caret"></span>
                                     </button>
                                     <div class="pro-custom-dropdown-menu pcd-uom-menu" id="createLayerUomMenu"></div>
-                                    <select id="createLayerUom" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                    <select id="createLayerUom" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                         ${TAKEOFF_UOMS.map(uom => `<option value="${uom}">${uom}</option>`).join('')}
                                     </select>
                                 </div>
@@ -2753,7 +2747,7 @@
                                         <span class="pcd-caret"></span>
                                     </button>
                                     <div class="pro-custom-dropdown-menu pcd-symbol-menu" id="createLayerSymbolMenu"></div>
-                                    <select id="createLayerSymbol" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                    <select id="createLayerSymbol" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                         ${TAKEOFF_SYMBOLS.map(symbol => `<option value="${symbol}">${symbol}</option>`).join('')}
                                     </select>
                                 </div>
@@ -2766,7 +2760,7 @@
                                         <span class="pcd-caret"></span>
                                     </button>
                                     <div class="pro-custom-dropdown-menu pcd-size-menu" id="createLayerSizeMenu"></div>
-                                    <select id="createLayerSize" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                    <select id="createLayerSize" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                         ${TAKEOFF_SIZES.map(size => `<option value="${size}">${size}</option>`).join('')}
                                     </select>
                                 </div>
@@ -2779,7 +2773,7 @@
                                         <span class="pcd-caret"></span>
                                     </button>
                                     <div class="pro-custom-dropdown-menu pcd-color-menu" id="createLayerColorMenu"></div>
-                                    <select id="createLayerColor" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                    <select id="createLayerColor" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                         ${TAKEOFF_RICH_COLORS.map(c => `<option value="${c}">${c}</option>`).join('')}
                                         <option value="__custom__">Custom...</option>
                                     </select>
@@ -2848,10 +2842,6 @@
             } else {
                 setCreateLayerColor(e.target.value);
             }
-        });
-
-        $('createLayerColorSwatch')?.addEventListener('click', () => {
-            $('createLayerCustomColorPicker')?.click();
         });
 
         $('createLayerCustomColorPicker')?.addEventListener('input', (e) => {
