@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../helpers.php';
+require_once __DIR__ . '/../../../core/auth/session.php';
 
 class DirectoryController
 {
@@ -16,7 +17,20 @@ class DirectoryController
     {
         try {
             $stmt = $this->pdo->query(
-                "SELECT\n                    p.id AS project_id,\n                    p.name AS project_name,\n                    p.description AS project_description,\n                    p.status AS project_status,\n                    p.assigned_user_id AS primary_user_id,\n                    u.id AS user_id,\n                    u.username AS username,\n                    u.role AS user_role\n                 FROM projects p\n                 LEFT JOIN directory d ON d.project_id = p.id\n                 LEFT JOIN users u ON u.id = d.user_id\n                 WHERE p.deleted_at IS NULL\n                 ORDER BY p.created_at DESC, u.username ASC"
+                "SELECT
+                    p.id AS project_id,
+                    p.name AS project_name,
+                    p.description AS project_description,
+                    p.status AS project_status,
+                    p.assigned_user_id AS primary_user_id,
+                    u.id AS user_id,
+                    u.username AS username,
+                    u.role AS user_role
+                 FROM projects p
+                 LEFT JOIN directory d ON d.project_id = p.id
+                 LEFT JOIN users u ON u.id = d.user_id
+                 WHERE p.deleted_at IS NULL
+                 ORDER BY p.created_at DESC, u.username ASC"
             );
             $rows = $stmt->fetchAll(PDO::FETCH_ASSOC);
             ok_response($rows);
@@ -27,7 +41,13 @@ class DirectoryController
 
     public function assign(array $params): void
     {
-        require_client_role('admin');
+        $user = SessionGuard::getAuthenticatedUser();
+        if ($user === null) {
+            error_response('UNAUTHORIZED', 'Authentication required', null, 401);
+        }
+        if ($user['role'] !== SessionGuard::ROLE_ADMIN) {
+            error_response('FORBIDDEN', 'Insufficient privileges', null, 403);
+        }
 
         $projectId = require_int($params['id'] ?? null);
         if (!$projectId) {

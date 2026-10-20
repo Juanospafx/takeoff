@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../helpers.php';
 require_once __DIR__ . '/../../funciones/file_names.php';
+require_once __DIR__ . '/../../../core/auth/session.php';
 
 class FilesController
 {
@@ -20,6 +21,14 @@ class FilesController
 
     public function store(): void
     {
+        $user = SessionGuard::getAuthenticatedUser();
+        if ($user === null) {
+            error_response('UNAUTHORIZED', 'Authentication required', null, 401);
+        }
+        if ($user['role'] !== SessionGuard::ROLE_ADMIN) {
+            error_response('FORBIDDEN', 'Insufficient privileges', null, 403);
+        }
+
         if (!isset($_FILES['file'])) {
             error_response('VALIDATION_ERROR', 'No file uploaded', ['field' => 'file'], 422);
         }
@@ -46,7 +55,8 @@ class FilesController
             error_response('VALIDATION_ERROR', 'Invalid file type', null, 422);
         }
 
-        $sqlCheck = "SELECT id, version_group_id, version_number FROM files\n                     WHERE project_id = ? AND filename = ? AND deleted_at IS NULL";
+        $sqlCheck = "SELECT id, version_group_id, version_number FROM files
+                     WHERE project_id = ? AND filename = ? AND deleted_at IS NULL";
         $params = [$projectId, $origName];
 
         if ($folderId) {
@@ -99,10 +109,12 @@ class FilesController
             $publicPath = 'uploads/' . $fileName;
 
             $stmt = $this->pdo->prepare(
-                "INSERT INTO files\n                 (project_id, folder_id, sub_folder_id, filename, filepath, file_type, uploaded_by, version_group_id, version_number)\n                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
+                "INSERT INTO files
+                 (project_id, folder_id, sub_folder_id, filename, filepath, file_type, uploaded_by, version_group_id, version_number)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)"
             );
 
-            $uploadedBy = null;
+            $uploadedBy = (int)$user['user_id'];
             $stmt->execute([
                 $projectId,
                 $folderId,
