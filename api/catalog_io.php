@@ -385,6 +385,10 @@ function populateAssembliesExport(Worksheet $sheet, PDO $pdo, int $catalogId, ?i
     applyHeaderStyle($sheet, 'N');
 
     $whereGroup = $groupId ? "AND i.catalog_group_id = $groupId" : "";
+    $measTypeSelect = in_array('measurement_type', catalog_io_columns($pdo, 'catalog_items'), true)
+        ? 'i.measurement_type as assembly_type,'
+        : "'count' as assembly_type,";
+
     $query = "
         SELECT
             c.name as catalog_name,
@@ -393,7 +397,7 @@ function populateAssembliesExport(Worksheet $sheet, PDO $pdo, int $catalogId, ?i
             i.name as assembly_name,
             i.description as assembly_desc,
             i.unit_of_measure as assembly_uom,
-            i.measurement_type as assembly_type,
+            $measTypeSelect
             i.unit_cost as assembly_cost,
             i.labor_hours as assembly_labor,
             child.name as child_name,
@@ -586,7 +590,6 @@ if ($action === 'import') {
             exit;
         }
 
-
         // Preload Groups in this catalog
         $groupMap = [];
         $grpStmt = $pdo->prepare("SELECT id, name FROM catalog_groups WHERE catalog_id = ? AND deleted_at IS NULL");
@@ -664,6 +667,11 @@ if ($action === 'import') {
         $componentsLinked = 0;
         $warnings = [];
 
+        // Discover catalog_items schema capabilities
+        $catalogItemCols = catalog_io_columns($pdo, 'catalog_items');
+        $hasItemRevision = in_array('revision', $catalogItemCols, true);
+        $hasItemMeasurementType = in_array('measurement_type', $catalogItemCols, true);
+
         // Fast Lookup Table for Parts: normalized_name => [id, unit_cost, labor_hours]
         $partLookup = [];
         $rawExistingParts = $pdo->query("SELECT id, name, unit_cost, labor_hours FROM catalog_items WHERE catalog_id = $catalogId AND item_type != 'assembly' AND deleted_at IS NULL")->fetchAll(PDO::FETCH_ASSOC);
@@ -682,6 +690,22 @@ if ($action === 'import') {
         if ($partsSheet) {
             $highestRow = $partsSheet->getHighestRow();
             $headerMap = getSheetHeaderMap($partsSheet);
+
+            $itemInsertCols = [
+                'catalog_id', 'cost_catalog_id', 'catalog_group_id', 'name', 'item_type', 'cost_type',
+                'description', 'unit_of_measure', 'unit_cost', 'labor_hours', 'catalog_number',
+                'manufacturer', 'supplier', 'cost_code', 'epd_url', 'taxable', 'active'
+            ];
+            if ($hasItemRevision) {
+                $itemInsertCols[] = 'revision';
+            }
+            $itemInsertCols[] = 'created_at';
+            $itemInsertCols[] = 'updated_at';
+
+            $itemPlaceholders = array_fill(0, count($itemInsertCols) - 2, '?');
+            $itemPlaceholders[] = 'NOW()';
+            $itemPlaceholders[] = 'NOW()';
+            $itemInsertStmt = $pdo->prepare("INSERT INTO catalog_items (" . implode(', ', $itemInsertCols) . ") VALUES (" . implode(', ', $itemPlaceholders) . ")");
 
             for ($r = 2; $r <= $highestRow; $r++) {
                 $nameCol = $headerMap['name'] ?? 4;
@@ -751,22 +775,15 @@ if ($action === 'import') {
                     ]);
                     $partsUpdated++;
                 } else {
-                    $ins = $pdo->prepare("
-                        INSERT INTO catalog_items (
-                            catalog_id, cost_catalog_id, catalog_group_id, name, item_type, cost_type,
-                            description, unit_of_measure, unit_cost, labor_hours, catalog_number,
-                            manufacturer, supplier, cost_code, epd_url, taxable, active, revision, created_at, updated_at
-                        ) VALUES (
-                            ?, ?, ?, ?, ?, 'Material',
-                            ?, ?, ?, ?, ?,
-                            ?, ?, ?, ?, ?, 1, 1, NOW(), NOW()
-                        )
-                    ");
-                    $ins->execute([
-                        $catalogId, $catalogId, $groupId, $name, $itemType,
+                    $itemInsertParams = [
+                        $catalogId, $catalogId, $groupId, $name, $itemType, 'Material',
                         $desc, $uom, $unitCost, $laborHours, $catNum,
-                        $mfg, $sup, $costCode, $epdUrl, $taxable
-                    ]);
+                        $mfg, $sup, $costCode, $epdUrl, $taxable, 1
+                    ];
+                    if ($hasItemRevision) {
+                        $itemInsertParams[] = 1;
+                    }
+                    $itemInsertStmt->execute($itemInsertParams);
                     $partId = (int)$pdo->lastInsertId();
                     $partsCreated++;
                 }
@@ -839,6 +856,36 @@ if ($action === 'import') {
                 }
             }
 
+            $assemblyUpdateSets = ['description = ?', 'unit_of_measure = ?'];
+            if ($hasItemMeasurementType) {
+                $assemblyUpdateSets[] = 'measurement_type = ?';
+            }
+            $assemblyUpdateSets[] = "item_type = 'assembly'";
+            $assemblyUpdateSets[] = 'active = 1';
+            $assemblyUpdateSets[] = 'updated_at = NOW()';
+            $assemblyUpdateStmt = $pdo->prepare("UPDATE catalog_items SET " . implode(', ', $assemblyUpdateSets) . " WHERE id = ?");
+
+            $assemblyInsertCols = [
+                'catalog_id', 'cost_catalog_id', 'catalog_group_id', 'name', 'description',
+                'item_type', 'cost_type', 'unit_of_measure'
+            ];
+            if ($hasItemMeasurementType) {
+                $assemblyInsertCols[] = 'measurement_type';
+            }
+            $assemblyInsertCols[] = 'unit_cost';
+            $assemblyInsertCols[] = 'labor_hours';
+            $assemblyInsertCols[] = 'active';
+            if ($hasItemRevision) {
+                $assemblyInsertCols[] = 'revision';
+            }
+            $assemblyInsertCols[] = 'created_at';
+            $assemblyInsertCols[] = 'updated_at';
+
+            $assemblyPlaceholders = array_fill(0, count($assemblyInsertCols) - 2, '?');
+            $assemblyPlaceholders[] = 'NOW()';
+            $assemblyPlaceholders[] = 'NOW()';
+            $assemblyInsertStmt = $pdo->prepare("INSERT INTO catalog_items (" . implode(', ', $assemblyInsertCols) . ") VALUES (" . implode(', ', $assemblyPlaceholders) . ")");
+
             foreach ($assembliesData as $asm) {
                 $groupId = $getOrCreateGroup($asm['group']);
 
@@ -849,12 +896,28 @@ if ($action === 'import') {
 
                 if ($existingId) {
                     $assemblyId = (int)$existingId;
-                    $upd = $pdo->prepare("UPDATE catalog_items SET description = ?, unit_of_measure = ?, measurement_type = ?, item_type = 'assembly', active = 1, updated_at = NOW() WHERE id = ?");
-                    $upd->execute([$asm['description'], $asm['uom'], $asm['measurement_type'], $assemblyId]);
+                    $updParams = [$asm['description'], $asm['uom']];
+                    if ($hasItemMeasurementType) {
+                        $updParams[] = $asm['measurement_type'];
+                    }
+                    $updParams[] = $assemblyId;
+                    $assemblyUpdateStmt->execute($updParams);
                     $assembliesUpdated++;
                 } else {
-                    $ins = $pdo->prepare("INSERT INTO catalog_items (catalog_id, cost_catalog_id, catalog_group_id, name, description, item_type, cost_type, unit_of_measure, measurement_type, unit_cost, labor_hours, active, revision, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 'assembly', 'Material', ?, ?, 0.00, 0.00, 1, 1, NOW(), NOW())");
-                    $ins->execute([$catalogId, $catalogId, $groupId, $asm['name'], $asm['description'], $asm['uom'], $asm['measurement_type']]);
+                    $insParams = [
+                        $catalogId, $catalogId, $groupId, $asm['name'], $asm['description'],
+                        'assembly', 'Material', $asm['uom']
+                    ];
+                    if ($hasItemMeasurementType) {
+                        $insParams[] = $asm['measurement_type'];
+                    }
+                    $insParams[] = 0.00;
+                    $insParams[] = 0.00;
+                    $insParams[] = 1;
+                    if ($hasItemRevision) {
+                        $insParams[] = 1;
+                    }
+                    $assemblyInsertStmt->execute($insParams);
                     $assemblyId = (int)$pdo->lastInsertId();
                     $assembliesCreated++;
                 }
@@ -939,8 +1002,10 @@ if ($action === 'import') {
         if ($pdo->inTransaction()) {
             $pdo->rollBack();
         }
+        $incidentId = bin2hex(random_bytes(16));
+        error_log("Catalog import failure: {$incidentId}");
         http_response_code(422);
-        echo json_encode(['success' => false, 'error' => 'Import failed. No catalog changes were saved.']);
+        echo json_encode(['success' => false, 'error' => 'Import failed. No catalog changes were saved.', 'incident_id' => $incidentId]);
         exit;
     }
 }
