@@ -1,11 +1,27 @@
 <?php
-require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/session.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
 $input = json_decode(file_get_contents('php://input'), true);
 if (!is_array($input)) $input = array();
-$action = isset($_GET['action']) ? $_GET['action'] : (isset($_POST['action']) ? $_POST['action'] : (isset($input['action']) ? $input['action'] : 'list'));
+$readActions = array('list');
+$mutationActions = array(
+    'save_layer',
+    'duplicate_layer',
+    'delete_layer',
+    'update_layer',
+    'sync_layer_estimate',
+    'save_estimate_item',
+    'delete_estimate_item',
+);
+$action = (string)(isset($_GET['action']) ? $_GET['action'] : (isset($_POST['action']) ? $_POST['action'] : (isset($input['action']) ? $input['action'] : '')));
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'list');
+$userId = (int)$user['user_id'];
+if ($action === '') {
+    $action = 'list';
+}
+require_once __DIR__ . '/../core/db/connection.php';
 $requestedProjectId = tl_int(isset($_GET['project_id']) ? $_GET['project_id'] : (isset($_POST['project_id']) ? $_POST['project_id'] : (isset($input['project_id']) ? $input['project_id'] : 0)));
 
 function tl_json($payload, $status = 200)
