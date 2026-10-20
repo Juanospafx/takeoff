@@ -14,9 +14,7 @@
 
 declare(strict_types=1);
 
-require_once __DIR__ . '/../vendor/autoload.php';
-require_once __DIR__ . '/../core/db/connection.php';
-require_once __DIR__ . '/../core/auth/WonProjectAdminAuthenticator.php';
+require_once __DIR__ . '/../core/auth/session.php';
 
 use PhpOffice\PhpSpreadsheet\Spreadsheet;
 use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
@@ -29,16 +27,21 @@ if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
 
+$readActions = ['template', 'export'];
+$mutationActions = ['import'];
+
+$action = strtolower(trim((string)($_GET['action'] ?? $_POST['action'] ?? '')));
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions);
+
+require_once __DIR__ . '/../vendor/autoload.php';
+require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/WonProjectAdminAuthenticator.php';
+
 if (!isset($pdo) || !($pdo instanceof PDO)) {
     http_response_code(503);
     echo json_encode(['error' => 'Catalog service is unavailable.']);
     exit;
 }
-
-$authenticator = new WonProjectAdminAuthenticator($pdo);
-$authenticator->requireAdmin($_SESSION ?? []);
-
-$action = strtolower(trim((string)($_GET['action'] ?? $_POST['action'] ?? '')));
 $method = strtoupper((string)($_SERVER['REQUEST_METHOD'] ?? 'GET'));
 $allowedMethods = ['template' => 'GET', 'export' => 'GET', 'import' => 'POST'];
 if (!isset($allowedMethods[$action]) || $allowedMethods[$action] !== $method) {
@@ -533,6 +536,7 @@ if ($action === 'export') {
 // ACTION: IMPORT FROM EXCEL (TWO-PASS UNIFIED WORKBOOK ENGINE)
 // =========================================================================
 if ($action === 'import') {
+    (new WonProjectAdminAuthenticator($pdo))->requireAdmin($_SESSION ?? []);
     header('Content-Type: application/json; charset=utf-8');
 
     $csrfToken = trim((string)($_POST['csrf_token'] ?? $_SERVER['HTTP_X_CSRF_TOKEN'] ?? ''));

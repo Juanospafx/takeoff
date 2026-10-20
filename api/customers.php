@@ -1,13 +1,21 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../core/db/connection.php';
+
+require_once __DIR__ . '/../core/auth/session.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
 $input = json_decode(file_get_contents('php://input'), true);
 if (!is_array($input)) $input = [];
-$action = $_GET['action'] ?? $_POST['action'] ?? $input['action'] ?? ($_SERVER['REQUEST_METHOD'] === 'POST' ? 'save' : 'list');
+$action = (string)($_GET['action'] ?? $_POST['action'] ?? $input['action'] ?? ($_SERVER['REQUEST_METHOD'] === 'POST' ? 'save' : 'list'));
+
+$readActions = ['list'];
+$mutationActions = ['save'];
+
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions);
+
+require_once __DIR__ . '/../core/db/connection.php';
 
 function customer_json(array $payload, int $status = 200): void
 {

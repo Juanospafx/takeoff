@@ -1,17 +1,33 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../core/db/connection.php';
+
 require_once __DIR__ . '/../core/auth/session.php';
-require_once __DIR__ . '/../core/services/CatalogAdminService.php';
+
 
 header('Content-Type: application/json; charset=utf-8');
 
 $input = json_decode(file_get_contents('php://input'), true);
 if (!is_array($input)) $input = [];
+$action = $_GET['action'] ?? $_POST['action'] ?? $input['action'] ?? null;
+
+$readActions = ['list'];
+$mutationActions = [
+    'save_catalog', 'copy_catalog', 'delete_catalog', 'restore_catalog', 'purge_catalog', 'toggle_catalog', 'reorder_catalogs',
+    'save_group', 'copy_group', 'delete_group', 'restore_group', 'purge_group', 'toggle_group', 'reorder_groups',
+    'save_item', 'duplicate_item', 'delete_item', 'restore_item', 'purge_item', 'move_item',
+    'convert_item_assembly', 'add_assembly_part', 'update_assembly_part', 'reorder_assembly_parts', 'delete_assembly_part',
+    'batch_archive', 'batch_restore', 'batch_purge', 'batch_move', 'batch_toggle', 'batch_copy',
+];
+
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'list');
+
+require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/services/CatalogAdminService.php';
+
 $input['request_id'] = catalog_ra_request_id($input);
-$input['actor_user_id'] = !empty($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : null;
-$action = $_GET['action'] ?? $_POST['action'] ?? $input['action'] ?? 'list';
+$input['actor_user_id'] = (int)$user['user_id'];
+
 
 function cc_json(array $payload, int $status = 200): void
 {
