@@ -1,0 +1,75 @@
+/* SSO RBAC: Dedicated Viewer Read-Only Styles */
+
+.bt-readonly-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 3px 10px;
+    height: 28px;
+    border-radius: 9999px;
+    background: rgba(245, 158, 11, 0.12);
+    border: 1px solid rgba(245, 158, 11, 0.35);
+    color: #b45309;
+    font-size: 11.5px;
+    font-weight: 600;
+    letter-spacing: 0.02em;
+    user-select: none;
+    white-space: nowrap;
+    box-sizing: border-box;
+    flex-shrink: 0;
+}
+
+.bt-readonly-badge i {
+    font-size: 11px;
+    color: #b45309;
+}
+
+[data-theme="dark"] .bt-readonly-badge,
+body.theme-dark .bt-readonly-badge {
+    background: rgba(245, 158, 11, 0.18);
+    border-color: rgba(245, 158, 11, 0.45);
+    color: #fbbf24;
+}
+
+[data-theme="dark"] .bt-readonly-badge i,
+body.theme-dark .bt-readonly-badge i {
+    color: #fbbf24;
+}
+
+.viewer-control-disabled {
+    opacity: 0.55 !important;
+    cursor: not-allowed !important;
+    pointer-events: none !important;
+    user-select: none !important;
+}
+
+.bb-status-pill-wrap.is-readonly {
+    cursor: default !important;
+    pointer-events: auto;
+    user-select: none;
+}
+
+.bb-status-pill-wrap.is-readonly:hover,
+.bb-status-pill-wrap.is-readonly:active,
+.bb-status-pill-wrap.is-readonly:focus {
+    transform: none !important;
+    filter: none !important;
+    box-shadow: none !important;
+    outline: none !important;
+}
+
+@media (max-width: 768px) {
+    .bt-readonly-badge {
+        padding: 0 7px;
+        height: 26px;
+    }
+
+    .bt-readonly-badge span {
+        display: none;
+    }
+
+    .bb-status-pill-wrap.is-readonly {
+        height: 24px;
+        padding: 0 8px;
+    }
+}

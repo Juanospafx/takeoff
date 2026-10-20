@@ -90,6 +90,35 @@
         return cfg[key] || { label: key, color: '#1d5cc9' };
     }
 
+    function isReadOnly() {
+        if (typeof window !== 'undefined' && window.TakeoffAuth) {
+            if (typeof window.TakeoffAuth.canWrite === 'boolean') {
+                return !window.TakeoffAuth.canWrite;
+            }
+            if (typeof window.TakeoffAuth.readOnly === 'boolean') {
+                return window.TakeoffAuth.readOnly;
+            }
+            if (window.TakeoffAuth.role) {
+                return window.TakeoffAuth.role !== 'admin';
+            }
+        }
+        if (typeof document !== 'undefined') {
+            const header = document.querySelector('[data-global-tools-header]') || document.querySelector('.bt-global-header');
+            if (header) {
+                if (header.getAttribute('data-read-only') === 'true') return true;
+                if (header.getAttribute('data-can-write') === 'false') return true;
+                if (header.getAttribute('data-can-mutate') === 'false') return true;
+                const role = header.getAttribute('data-user-role');
+                if (role) return role !== 'admin';
+            }
+        }
+        return false;
+    }
+
+    function canMutate() {
+        return !isReadOnly();
+    }
+
     let filterState = {
         estimator: '',
         requester: '',
@@ -247,6 +276,9 @@
     }
 
     function postProjectAction(action, payload, options = {}) {
+        if (!canMutate()) {
+            return Promise.reject(new Error('Forbidden: Viewer role cannot perform mutations.'));
+        }
         const bodyData = { ...payload };
         delete bodyData.signal;
         return fetch(`${projectApiUrl}?action=${encodeURIComponent(action)}`, {
@@ -467,6 +499,7 @@
     }
 
     function openPhaseConfig() {
+        if (!canMutate()) return;
         const cfg = getPhaseConfig();
         const list = document.getElementById('bbPhaseList');
         if (!list) return;
@@ -509,6 +542,7 @@
     }
 
     function savePhasesFromModal() {
+        if (!canMutate()) return;
         const list = document.getElementById('bbPhaseList');
         if (!list) return;
         const cfg = getPhaseConfig();
@@ -529,6 +563,7 @@
     }
 
     async function resetPhasesToDefault() {
+        if (!canMutate()) return;
         const ok = typeof window.showConfirmDialog === 'function'
             ? await window.showConfirmDialog({
                 title: 'Reset Pipeline Phases',
@@ -810,6 +845,16 @@
         const bgPale = hexToRgba(currentPhase.color, bgAlpha);
         const borderPale = hexToRgba(currentPhase.color, borderAlpha);
         const textPale = isDark ? '#ffffff' : getDarkerShade(currentPhase.color);
+        if (!canMutate()) {
+            return `
+                <div class="bb-status-pill-container">
+                    <div class="bb-status-pill-wrap is-readonly" style="background-color: ${bgPale}; color: ${textPale}; border: 1px solid ${borderPale}; cursor: default;">
+                        <span class="bb-status-dot" style="background-color: ${currentPhase.color};"></span>
+                        <span class="bb-status-pill-label" style="color: ${textPale};">${esc(currentPhase.label.toUpperCase())}</span>
+                    </div>
+                </div>
+            `;
+        }
         const isOpen = openStatusMenuId === String(project.id);
         return `
             <div class="bb-status-pill-container ${isOpen ? 'open' : ''}">
@@ -876,6 +921,7 @@
             button.addEventListener('click', event => {
                 event.stopPropagation();
                 openMenuId = null;
+                if (!canMutate()) return;
                 openStatusMenuId = openStatusMenuId === button.dataset.statusTrigger ? null : button.dataset.statusTrigger;
                 renderTable();
                 const activeTrigger = [...document.querySelectorAll('[data-status-trigger]')]
@@ -891,6 +937,7 @@
                 const status = item.dataset.setStatus;
                 const projectId = item.dataset.projectId;
                 openStatusMenuId = null;
+                if (!canMutate()) return;
                 updateProjectStatus(projectId, status);
             });
         });
@@ -1152,6 +1199,10 @@
     }
 
     function updateProjectStatus(projectId, statusLabel) {
+        if (!canMutate()) {
+            showError('Read-only mode: status changes are not permitted.');
+            return;
+        }
         const rawProject = (state.projects || []).find(project => String(project.id) === String(projectId));
         if (!rawProject) return;
         const previousState = JSON.parse(JSON.stringify(state));
@@ -1165,6 +1216,10 @@
     }
 
     async function runProjectAction(action, projectId) {
+        if (!canMutate()) {
+            showError('Read-only mode: mutations are not permitted.');
+            return;
+        }
         openMenuId = null;
         if (action === 'delete') {
             const ok = typeof window.showConfirmDialog === 'function'
@@ -1321,7 +1376,10 @@
     }
 
     function openCreateProject() {
-        document.getElementById('bbProjectForm').reset();
+        if (!canMutate()) return;
+        const form = document.getElementById('bbProjectForm');
+        if (!form) return;
+        form.reset();
         const nameInput = document.getElementById('bbProjectName');
         if (nameInput) {
             nameInput.value = 'New Project';
@@ -1363,6 +1421,10 @@
 
     async function createProjectDraft(event) {
         event.preventDefault();
+        if (typeof canMutate === 'function' && !canMutate()) {
+            showError('Read-only mode: mutations are not permitted.');
+            return;
+        }
         const mode = document.querySelector('input[name="bbProjectMode"]:checked')?.value || 'empty';
         const templateId = mode === 'template' ? document.getElementById('bbProjectTemplate').value : '';
         const template = (state.templates || []).find(row => String(row.id) === String(templateId));
@@ -1523,7 +1585,7 @@
 
     document.addEventListener('DOMContentLoaded', () => {
         initFieldSelectors();
-        document.getElementById('bbCreateProject').addEventListener('click', openCreateProject);
+        document.getElementById('bbCreateProject')?.addEventListener('click', openCreateProject);
         document.querySelectorAll('[data-open-project-modal]').forEach(btn => btn.addEventListener('click', openCreateProject));
         document.getElementById('bbSearch').addEventListener('input', render);
         document.getElementById('bbSortBy').addEventListener('change', render);
@@ -1567,7 +1629,7 @@
 
         document.querySelectorAll('[data-close-modal]').forEach(btn => btn.addEventListener('click', closeModals));
         document.querySelectorAll('input[name="bbProjectMode"]').forEach(input => input.addEventListener('change', toggleProjectTemplate));
-        document.getElementById('bbProjectForm').addEventListener('submit', createProjectDraft);
+        document.getElementById('bbProjectForm')?.addEventListener('submit', createProjectDraft);
 
         document.getElementById('bbActionDuplicate')?.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -1575,7 +1637,7 @@
             const projectId = menu?.dataset.currentProject;
             if (menu) menu.hidden = true;
             document.querySelectorAll('.bb-row-menu-toggle.active').forEach(b => b.classList.remove('active'));
-            if (projectId) runProjectAction('duplicate', projectId);
+            if (projectId && canMutate()) runProjectAction('duplicate', projectId);
         });
         document.getElementById('bbActionArchive')?.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -1583,7 +1645,7 @@
             const projectId = menu?.dataset.currentProject;
             if (menu) menu.hidden = true;
             document.querySelectorAll('.bb-row-menu-toggle.active').forEach(b => b.classList.remove('active'));
-            if (projectId) runProjectAction('archive', projectId);
+            if (projectId && canMutate()) runProjectAction('archive', projectId);
         });
         document.getElementById('bbActionDelete')?.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -1591,7 +1653,7 @@
             const projectId = menu?.dataset.currentProject;
             if (menu) menu.hidden = true;
             document.querySelectorAll('.bb-row-menu-toggle.active').forEach(b => b.classList.remove('active'));
-            if (projectId) runProjectAction('delete', projectId);
+            if (projectId && canMutate()) runProjectAction('delete', projectId);
         });
 
         document.addEventListener('click', (e) => {
