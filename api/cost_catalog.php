@@ -346,17 +346,35 @@ try {
                 $stmt = $pdo->prepare("UPDATE catalog_items SET deleted_at=NULL WHERE id IN ($inClause)");
                 $stmt->execute($ids);
             } elseif ($action === 'batch_purge') {
-                if (catalog_ra_table_exists($pdo, 'assembly_parts')) {
-                    $pdo->prepare("DELETE FROM assembly_parts WHERE part_catalog_item_id IN ($inClause) OR assembly_catalog_item_id IN ($inClause)")
-                        ->execute(array_merge($ids, $ids));
+                $ownTx = !$pdo->inTransaction();
+                if ($ownTx) {
+                    $pdo->beginTransaction();
                 }
-                if (catalog_ra_table_exists($pdo, 'catalog_item_attachments')) {
-                    $pdo->prepare("DELETE FROM catalog_item_attachments WHERE catalog_item_id IN ($inClause)")->execute($ids);
+                try {
+                    if (catalog_ra_table_exists($pdo, 'assembly_parts')) {
+                        $pdo->prepare("DELETE FROM assembly_parts WHERE part_catalog_item_id IN ($inClause) OR assembly_catalog_item_id IN ($inClause)")
+                            ->execute(array_merge($ids, $ids));
+                    }
+                    if (catalog_ra_table_exists($pdo, 'assembly_items')) {
+                        $pdo->prepare("DELETE FROM assembly_items WHERE assembly_id IN ($inClause) OR catalog_item_id IN ($inClause)")
+                            ->execute(array_merge($ids, $ids));
+                    }
+                    if (catalog_ra_table_exists($pdo, 'catalog_item_attachments')) {
+                        $pdo->prepare("DELETE FROM catalog_item_attachments WHERE catalog_item_id IN ($inClause)")->execute($ids);
+                    }
+                    if (catalog_ra_table_exists($pdo, 'catalog_item_attributes')) {
+                        $pdo->prepare("DELETE FROM catalog_item_attributes WHERE catalog_item_id IN ($inClause)")->execute($ids);
+                    }
+                    $pdo->prepare("DELETE FROM catalog_items WHERE id IN ($inClause)")->execute($ids);
+                    if ($ownTx) {
+                        $pdo->commit();
+                    }
+                } catch (\Throwable $e) {
+                    if ($ownTx && $pdo->inTransaction()) {
+                        $pdo->rollBack();
+                    }
+                    throw $e;
                 }
-                if (catalog_ra_table_exists($pdo, 'catalog_item_attributes')) {
-                    $pdo->prepare("DELETE FROM catalog_item_attributes WHERE catalog_item_id IN ($inClause)")->execute($ids);
-                }
-                $pdo->prepare("DELETE FROM catalog_items WHERE id IN ($inClause)")->execute($ids);
             } elseif ($action === 'batch_move') {
                 $targetCatId = cc_int($input['target_catalog_id'] ?? ($input['catalog_id'] ?? 0));
                 $targetGrpId = cc_int($input['target_group_id'] ?? ($input['catalog_group_id'] ?? 0));
@@ -396,7 +414,8 @@ try {
                         $newId = (int)$pdo->lastInsertId();
 
                         if (strtolower((string)($r['item_type'] ?? '')) === 'assembly' && catalog_ra_table_exists($pdo, 'assembly_parts')) {
-                            $partStmt = $pdo->prepare('SELECT * FROM assembly_parts WHERE assembly_catalog_item_id=? AND deleted_at IS NULL ORDER BY sort_order, id');
+                            $partOrder = in_array('sort_order', cc_columns($pdo, 'assembly_parts'), true) ? 'sort_order, id' : 'id';
+                            $partStmt = $pdo->prepare("SELECT * FROM assembly_parts WHERE assembly_catalog_item_id=? AND deleted_at IS NULL ORDER BY $partOrder");
                             $partStmt->execute([$sourceId]);
                             foreach ($partStmt->fetchAll(PDO::FETCH_ASSOC) as $part) {
                                 foreach (['id', 'revision', 'created_at', 'updated_at', 'deleted_at'] as $pk) unset($part[$pk]);

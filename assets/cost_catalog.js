@@ -68,7 +68,7 @@
         let intPart = parts[0];
         let hasDot = parts.length > 1;
         let decPart = parts.slice(1).join('');
-        
+
         if (maxInt !== null && intPart !== '') {
             const intVal = parseInt(intPart, 10);
             if (!isNaN(intVal)) {
@@ -82,11 +82,11 @@
                 }
             }
         }
-        
+
         if (decPart.length > maxDecimals) {
             decPart = decPart.slice(0, maxDecimals);
         }
-        
+
         return hasDot ? `${intPart}.${decPart}` : intPart;
     }
 
@@ -1831,12 +1831,25 @@
         setVal('ccItemMarkup', item?.markup_percent || '0');
         setVal('ccItemWaste', item?.waste_factor_percent || '0');
         setVal('ccItemTaxable', String(item?.taxable ?? '1'));
-        
+
         setItemColor(item?.color || '#2563eb');
         setItemSymbol(item?.symbol || 'Solid Circle');
 
         setVal('ccItemCatalogNumber', item?.catalog_number || item?.sku || '');
         setVal('ccItemCostCode', item?.cost_code || '');
+        setVal('ccItemSize', item?.size || '');
+        setVal('ccItemDiameter', item?.diameter || '');
+        setVal('ccItemTradeSize', item?.trade_size || '');
+        setVal('ccItemThickness', item?.thickness || '');
+        setVal('ccItemGauge', item?.gauge || '');
+        setVal('ccItemMaterial', item?.material || '');
+        setVal('ccItemManufacturer', item?.manufacturer || '');
+        setVal('ccItemSupplier', item?.supplier || '');
+        setVal('ccItemMasterFormat', item?.masterformat || '');
+        setVal('ccItemUniFormat', item?.uniformat || '');
+        setVal('ccItemSubJobCode', item?.sub_job_code || '');
+        setVal('ccItemSubJobName', item?.sub_job_name || '');
+        setVal('ccItemEpdUrl', item?.epd_url || '');
         setVal('ccItemAttachmentUrl', item?.attachment_url || '');
         setVal('ccItemNotes', item?.notes || '');
 
@@ -3107,8 +3120,8 @@
             const willHide = !browser.hidden;
             browser.hidden = willHide;
             btn.setAttribute('aria-expanded', String(!willHide));
-            btn.innerHTML = willHide 
-                ? '<i class="fas fa-plus"></i> <span>Add / Browse Items</span>' 
+            btn.innerHTML = willHide
+                ? '<i class="fas fa-plus"></i> <span>Add / Browse Items</span>'
                 : '<i class="fas fa-chevron-up"></i> <span>Hide Catalog Items</span>';
             if (!willHide) {
                 renderAssemblyBrowserResults();
@@ -3655,6 +3668,7 @@
                     formData.append('catalog_id', catId);
                     formData.append('group_id', grpId);
                     formData.append('import_type', 'auto');
+                    formData.append('csrf_token', document.querySelector('meta[name="catalog-io-csrf-token"]')?.content || '');
 
                     submitBtn.disabled = true;
                     if (submitIcon) submitIcon.className = 'fas fa-spinner fa-spin';

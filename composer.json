@@ -1,5 +1,26 @@
 {
+    "name": "takeoff/takeoff",
+    "description": "Takeoff application with SSO integration",
+    "type": "project",
+    "license": "proprietary",
     "require": {
+        "php": "~8.2.0",
+        "league/oauth2-client": "^2.9",
         "phpoffice/phpspreadsheet": "^5.10"
+    },
+    "autoload": {
+        "psr-4": {
+            "Takeoff\\Config\\": "config/",
+            "Takeoff\\Core\\Auth\\": "core/auth/",
+            "Takeoff\\Core\\Config\\": "core/config/"
+        },
+        "classmap": [
+            "config/",
+            "core/"
+        ]
+    },
+    "config": {
+        "optimize-autoloader": true,
+        "sort-packages": true
     }
 }

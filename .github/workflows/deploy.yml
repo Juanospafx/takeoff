@@ -3,6 +3,11 @@ name: Deploy to FTP
 on:
   push:
     branches: [ "main" ]
+  workflow_dispatch:
+
+concurrency:
+  group: takeoff-production
+  cancel-in-progress: false
 
 jobs:
   ftp-deploy:
@@ -11,6 +16,98 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
+      - name: Setup PHP
+        uses: shivammathur/setup-php@v2
+        with:
+          php-version: "8.2"
+          tools: composer:v2
+
+      - name: Install optimized production dependencies
+        run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
+
+      - name: Build deployment artifact
+        run: |
+          set -e
+          ARTIFACT_DIR="deploy_artifact"
+          mkdir -p "$ARTIFACT_DIR"
+
+          # Copy everything except excluded items into artifact directory
+          # Using rsync to reliably exclude non-production and development assets
+          rsync -av --progress ./ "$ARTIFACT_DIR/" \
+            --exclude '.git' \
+            --exclude '.github' \
+            --exclude '.env' \
+            --exclude '.env.*' \
+            --exclude 'tests' \
+            --exclude 'docs' \
+            --exclude '/templates/' \
+            --exclude 'harness' \
+            --exclude '/db/' \
+            --exclude '/migrations/' \
+            --exclude '/migration/' \
+            --exclude '*.sql' \
+            --exclude 'graphify-out' \
+            --exclude '.swarm' \
+            --exclude '.claude-flow' \
+            --exclude 'ruvector.db' \
+            --exclude 'uploads' \
+            --exclude 'logs' \
+            --exclude '*.log' \
+            --exclude 'tmp' \
+            --exclude 'temp' \
+            --exclude 'cache' \
+            --exclude '.cache' \
+            --exclude 'coverage' \
+            --exclude "$ARTIFACT_DIR"
+
+          # Verify critical runtime paths are present in artifact including vendor
+          test -d "$ARTIFACT_DIR/api"
+          test -d "$ARTIFACT_DIR/core"
+          test -f "$ARTIFACT_DIR/core/db/connection.php"
+          test -d "$ARTIFACT_DIR/assets"
+          test -d "$ARTIFACT_DIR/vendor"
+          test -f "$ARTIFACT_DIR/bin/dispatch-won-project-outbox.php"
+
+          # Verify excluded items are strictly absent from artifact
+          test ! -d "$ARTIFACT_DIR/tests"
+          test ! -d "$ARTIFACT_DIR/docs"
+          test ! -d "$ARTIFACT_DIR/templates"
+          test ! -d "$ARTIFACT_DIR/db"
+          test ! -d "$ARTIFACT_DIR/migrations"
+          test ! -d "$ARTIFACT_DIR/cache"
+
+          # Generate deterministic SHA256SUMS for runtime files avoiding recursive autochecksum
+          # Sorting with LC_ALL=C ensures byte-order deterministic output across environments
+          (
+            cd "$ARTIFACT_DIR"
+            find . -type f ! -name 'SHA256SUMS' -print0 | LC_ALL=C sort -z | xargs -0 sha256sum > SHA256SUMS
+          )
+          test -s "$ARTIFACT_DIR/SHA256SUMS"
+
+          # Generate deployment manifest JSON with revision and run metadata
+          # Excludes branch, actor, environment, secrets and private configuration
+          jq -n \
+            --arg format_version "1.0" \
+            --arg repository "${{ github.repository }}" \
+            --arg commit_sha "${{ github.sha }}" \
+            --arg generated_at_utc "$(date -u +'%Y-%m-%dT%H:%M:%SZ')" \
+            --arg workflow_run_id "${{ github.run_id }}" \
+            '{
+              format_version: $format_version,
+              repository: $repository,
+              commit_sha: $commit_sha,
+              generated_at_utc: $generated_at_utc,
+              workflow_run_id: $workflow_run_id
+            }' > "$ARTIFACT_DIR/deployment-manifest.json"
+          test -s "$ARTIFACT_DIR/deployment-manifest.json"
+
+          echo "Deployment artifact generated successfully."
+
+      # Security Note:
+      # Port 21 (plain FTP) is retained due to lack of FTPS evidence from the hosting provider.
+      # Plain FTP transmits credentials and code unencrypted over the network.
+      # Migration to FTPS (port 990 / 21 with explicit TLS) or SFTP is recommended as soon as
+      # provider configuration is confirmed. Do not attempt network connection checks during CI/build.
       - name: Deploy to FTP server
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
@@ -18,6 +115,6 @@ jobs:
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           port: 21
-          local-dir: ./
+          local-dir: ./deploy_artifact/
           server-dir: ./
           dangerous-clean-slate: false

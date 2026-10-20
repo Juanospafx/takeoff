@@ -1,0 +1,30 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Plantilla de configuracion privada de SSO OAuth2 para Takeoff.
+ *
+ * INSTRUCCIONES:
+ * 1. Copia este archivo a un directorio seguro FUERA del document root del servidor web
+ *    y FUERA del repositorio Git (por ejemplo: /etc/takeoff/sso.private.php).
+ * 2. Asigna permisos estrictos para que solo el proceso PHP/web pueda leerlo (ej. chmod 0600).
+ * 3. Configura la variable de entorno TAKEOFF_SSO_PRIVATE_CONFIG apuntando a la ruta absoluta.
+ *
+ * PRECEDENCIA:
+ * Las variables de entorno del sistema (TAKEOFF_SSO_*) prevalecen sobre los valores de este archivo.
+ *
+ * REGLAS DE SEGURIDAD:
+ * - TAKEOFF_SSO_ENABLED debe permanecer en false por defecto hasta completar el aprovisionamiento.
+ * - TAKEOFF_SSO_HUB_BASE_URL debe utilizar el esquema HTTPS obligatoriamente.
+ * - TAKEOFF_SSO_REDIRECT_URI debe coincidir exactamente con el URI registrado en el Hub central.
+ * - No incluyas credenciales reales en este archivo de ejemplo ni en el repositorio.
+ */
+
+return [
+    'TAKEOFF_SSO_ENABLED' => false,
+    'TAKEOFF_SSO_HUB_BASE_URL' => 'https://hub.example.internal',
+    'TAKEOFF_SSO_CLIENT_ID' => 'takeoff-client-placeholder',
+    'TAKEOFF_SSO_CLIENT_SECRET' => 'CHANGE_ME_IN_SECURE_DEPLOYMENT',
+    'TAKEOFF_SSO_REDIRECT_URI' => 'https://takeoff.example.internal/sso/callback.php',
+    'TAKEOFF_SSO_TIMEOUT' => 10,
+];

@@ -1,0 +1,23 @@
+<?php
+declare(strict_types=1);
+
+/**
+ * Plantilla de configuracion privada de base de datos para Takeoff.
+ *
+ * INSTRUCCIONES:
+ * 1. Copia este archivo a un directorio seguro FUERA del document root del servidor web
+ *    y FUERA del repositorio Git (por ejemplo: /etc/takeoff/database.private.php).
+ * 2. Asigna permisos estrictos para que solo el proceso PHP/web pueda leerlo (ej. chmod 0600).
+ * 3. Configura la variable de entorno TAKEOFF_DB_PRIVATE_CONFIG apuntando a la ruta absoluta.
+ *
+ * PRECEDENCIA:
+ * Las variables de entorno del sistema (TAKEOFF_DB_*) prevalecen sobre los valores de este archivo.
+ */
+
+return [
+    'TAKEOFF_DB_HOST' => 'db.example.internal',
+    'TAKEOFF_DB_PORT' => 3306,
+    'TAKEOFF_DB_NAME' => 'takeoff_db_placeholder',
+    'TAKEOFF_DB_USER' => 'takeoff_user_placeholder',
+    'TAKEOFF_DB_PASSWORD' => 'CHANGE_ME_IN_SECURE_DEPLOYMENT',
+];

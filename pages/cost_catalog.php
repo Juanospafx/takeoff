@@ -1,5 +1,11 @@
 <?php
 // Standalone Cost Catalog module with Brightronix DNA & Procore style.
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    session_start();
+}
+if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_io_csrf_token'])) {
+    $_SESSION['catalog_io_csrf_token'] = bin2hex(random_bytes(32));
+}
 ?>
 <!doctype html>
 <html lang="en">
@@ -7,6 +13,7 @@
     <meta charset="utf-8">
     <meta name="viewport" content="width=device-width, initial-scale=1">
     <title>Cost Catalog | Brightronix</title>
+    <meta name="catalog-io-csrf-token" content="<?= htmlspecialchars($_SESSION['catalog_io_csrf_token'], ENT_QUOTES, 'UTF-8') ?>">
     <link rel="preconnect" href="https://fonts.googleapis.com">
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
@@ -114,7 +121,7 @@
                 <span>Catalogs</span>
             </div>
             <div class="cc-sidebar-tree-wrap" id="ccCatalogTree" role="tree" aria-label="Catalogs and groups"></div>
-            
+
             <div class="cc-tree-divider">
                 <span>Special Views</span>
             </div>
@@ -384,7 +391,7 @@
             </div>
             <div class="pd-modal-body cc-modal-body" aria-describedby="ccItemFormError">
                 <div class="cc-inline-error" id="ccItemFormError" role="alert" hidden></div>
-                
+
                 <div class="cc-field full cc-hero-field">
                     <label for="ccItemName">Item Name <span class="req">*</span></label>
                     <input id="ccItemName" class="cc-hero-input cc-input-compact-center" required placeholder="e.g. 1-1/2 Rigid Steel Couplings">
@@ -599,10 +606,25 @@
                 <input id="ccItemTags" type="hidden">
                 <input id="ccItemAttributes" type="hidden">
                 <input id="ccItemMarkerSize" type="hidden">
-                <input id="ccItemDiameter" type="hidden">
-                <input id="ccItemTradeSize" type="hidden">
-                <input id="ccItemThickness" type="hidden">
-                <input id="ccItemGauge" type="hidden">
+
+                <details class="cc-field full cc-advanced-metadata">
+                    <summary>Advanced item metadata</summary>
+                    <div class="cc-field-grid-2 full">
+                        <div class="cc-field"><label for="ccItemSize">Size</label><input id="ccItemSize"></div>
+                        <div class="cc-field"><label for="ccItemDiameter">Diameter</label><input id="ccItemDiameter"></div>
+                        <div class="cc-field"><label for="ccItemTradeSize">Trade Size</label><input id="ccItemTradeSize"></div>
+                        <div class="cc-field"><label for="ccItemThickness">Thickness</label><input id="ccItemThickness"></div>
+                        <div class="cc-field"><label for="ccItemGauge">Gauge</label><input id="ccItemGauge"></div>
+                        <div class="cc-field"><label for="ccItemMaterial">Material</label><input id="ccItemMaterial"></div>
+                        <div class="cc-field"><label for="ccItemManufacturer">Manufacturer</label><input id="ccItemManufacturer"></div>
+                        <div class="cc-field"><label for="ccItemSupplier">Supplier</label><input id="ccItemSupplier"></div>
+                        <div class="cc-field"><label for="ccItemMasterFormat">MasterFormat</label><input id="ccItemMasterFormat"></div>
+                        <div class="cc-field"><label for="ccItemUniFormat">UniFormat</label><input id="ccItemUniFormat"></div>
+                        <div class="cc-field"><label for="ccItemSubJobCode">Sub-job Code</label><input id="ccItemSubJobCode"></div>
+                        <div class="cc-field"><label for="ccItemSubJobName">Sub-job Name</label><input id="ccItemSubJobName"></div>
+                        <div class="cc-field full"><label for="ccItemEpdUrl">EPD URL</label><input id="ccItemEpdUrl" type="url"></div>
+                    </div>
+                </details>
 
                 <!-- Spec Sheet & Image Attachment Dropzone (PDF, PNG, JPG, WEBP) -->
                 <div class="cc-field full cc-attachment-field">
@@ -623,7 +645,7 @@
                                 <i class="fas fa-folder-open"></i> Browse Files
                             </button>
                         </div>
-                        
+
                         <!-- Current Attached File Preview -->
                         <div class="cc-attached-card" id="ccItemPdfCurrent" hidden>
                             <div class="cc-attached-preview" id="ccAttachedPreviewBox">

@@ -1,5 +1,21 @@
 <?php
+require_once __DIR__ . '/../core/auth/session.php';
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/config/WonProjectIntegrationConfig.php';
+
+if (empty($_SESSION['won_project_csrf_token'])) {
+    $_SESSION['won_project_csrf_token'] = bin2hex(random_bytes(32));
+}
+$wonProjectCsrfToken = (string) $_SESSION['won_project_csrf_token'];
+$isAdminUser = strtolower(trim((string) ($_SESSION['role'] ?? ''))) === 'admin';
+
+$integrationEnabled = false;
+try {
+    $wonConfig = WonProjectIntegrationConfig::load();
+    $integrationEnabled = $wonConfig->isExportEnabled();
+} catch (Throwable) {
+    $integrationEnabled = false;
+}
 
 $projectId = (int) ($_GET['id'] ?? $_GET['project_id'] ?? 0);
 $isDraftProject = $projectId <= 0 && isset($_GET['draft']);
@@ -521,7 +537,7 @@ $state = [
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="../assets/global_tools.css?v=<?= time() ?>">
+    <link rel="stylesheet" href="../assets/global_tools.css?v=view-trans-20260929-1">
     <script>
         (function () {
             try {
@@ -839,10 +855,11 @@ $state = [
             }
         }
     </style>
-    <link rel="stylesheet" href="../assets/project_overview.css?v=<?= time() ?>">
-    <link rel="stylesheet" href="../assets/project_takeoff.css?v=<?= time() ?>">
-    <link rel="stylesheet" href="../assets/project_estimating.css?v=<?= time() ?>">
-    <link rel="stylesheet" href="../assets/project_proposal.css?v=<?= time() ?>">
+    <link rel="stylesheet" href="../assets/project_overview.css?v=btn-blue-tabs-20261005-3">
+    <link rel="stylesheet" href="../assets/project_takeoff.css?v=scale-stage-pill-dark-20261005-40">
+    <link rel="stylesheet" href="../assets/project_estimating.css?v=unified-hierarchy-20260930-1">
+    <link rel="stylesheet" href="../assets/project_proposal.css?v=unified-hierarchy-20260930-1">
+    <link rel="stylesheet" href="../assets/won_project_export.css?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.css') ?>">
 </head>
 
 <body>
@@ -868,6 +885,27 @@ $state = [
                             </button>
                             <div class="bb-status-menu-panel project-status-menu" id="projectStatusMenu"></div>
                         </div>
+                        <?php if ($projectId > 0): ?>
+                        <div class="won-export-container" id="wonProjectExportContainer">
+                            <?php if ($isAdminUser): ?>
+                            <button type="button" class="btn-mark-won" id="markAsWonBtn"
+                                <?= ($project['status'] ?? '') === 'accepted' ? 'disabled' : '' ?>>
+                                <i class="fas fa-trophy"></i>
+                                <span>Mark as Won</span>
+                            </button>
+                            <button type="button" class="btn-retry-export" id="retryWonExportBtn" style="display:none;">
+                                <i class="fas fa-arrows-rotate"></i>
+                                <span>Retry Export</span>
+                            </button>
+                            <?php endif; ?>
+                            <span class="won-export-status-badge" id="wonExportStatusBadge" style="display:none;">
+                                <span class="won-export-dot"></span>
+                                <span class="won-export-label" id="wonExportStatusLabel"></span>
+                                <span class="won-export-meta" id="wonExportStatusMeta"></span>
+                            </span>
+                            <div class="won-export-alert" id="wonProjectAlert" role="alert" aria-live="polite" style="display:none;"></div>
+                        </div>
+                        <?php endif; ?>
                         <!-- Active Takeoff Item info with quick actions -->
                         <div class="takeoff-subhead-item-info" id="takeoffSubheadItemInfo" style="display:none;"
                             title="Active Takeoff Item">
@@ -1104,38 +1142,7 @@ $state = [
                                 <div id="takeoffPresetWrap">
                                     <label for="takeoffScalePreset">Scale preset</label>
                                     <select id="takeoffScalePreset">
-                                        <option value="">Choose a scale preset...</option>
-                                        <optgroup label="Architectural">
-                                            <option value="0">1/128&quot; = 1'</option>
-                                            <option value="1">1/64&quot; = 1'</option>
-                                            <option value="2">1/32&quot; = 1'</option>
-                                            <option value="3">1/16&quot; = 1'</option>
-                                            <option value="4">3/32&quot; = 1'</option>
-                                            <option value="5">1/8&quot; = 1'</option>
-                                            <option value="6">3/16&quot; = 1'</option>
-                                            <option value="7">1/4&quot; = 1'</option>
-                                            <option value="8">3/8&quot; = 1'</option>
-                                            <option value="9">1/2&quot; = 1'</option>
-                                            <option value="10">3/4&quot; = 1'</option>
-                                            <option value="11">1&quot; = 1'</option>
-                                            <option value="12">1 1/2&quot; = 1'</option>
-                                            <option value="13">3&quot; = 1'</option>
-                                        </optgroup>
-                                        <optgroup label="Civil">
-                                            <option value="14">1&quot; = 10'</option>
-                                            <option value="15">1&quot; = 20'</option>
-                                            <option value="16">1&quot; = 30'</option>
-                                            <option value="17">1&quot; = 40'</option>
-                                            <option value="18">1&quot; = 50'</option>
-                                            <option value="19">1&quot; = 60'</option>
-                                            <option value="20">1&quot; = 70'</option>
-                                            <option value="21">1&quot; = 80'</option>
-                                            <option value="22">1&quot; = 90'</option>
-                                            <option value="23">1&quot; = 100'</option>
-                                            <option value="24">1&quot; = 300'</option>
-                                            <option value="25">1&quot; = 500'</option>
-                                            <option value="26">1&quot; = 1000'</option>
-                                        </optgroup>
+                                        <option value="">Loading scales...</option>
                                     </select>
                                 </div>
                                 <div id="takeoffManualWrap" class="pro-scale-manual" hidden>
@@ -2230,6 +2237,12 @@ $state = [
 
     <script>
         window.ProjectState = <?= json_encode($state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+        window.WonProjectConfig = <?= json_encode([
+            'projectId' => (int) $projectId,
+            'token' => $wonProjectCsrfToken,
+            'isAdmin' => $isAdminUser,
+            'integrationEnabled' => $integrationEnabled,
+        ]) ?>;
         <?php if (!empty($_GET['stage'])): ?>
             try {
                 localStorage.setItem('takeoff.bidBoardStage', <?= json_encode($_GET['stage']) ?>);
@@ -2510,7 +2523,8 @@ $state = [
     <script src="../assets/project_estimating.js?v=estimating-all-modals-20260929-5"></script>
     <script src="../assets/catalog_update_ui.js?v=catalog-update-ui-20260827-1"></script>
     <script src="../assets/project_proposal.js?v=quantity-context-format-20260831-1"></script>
-    <script src="../assets/global_tools.js?v=<?= time() ?>"></script>
+    <script src="../assets/won_project_export.js?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.js') ?>"></script>
+    <script src="../assets/global_tools.js"></script>
 </body>
 
 </html>

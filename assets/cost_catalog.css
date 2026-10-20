@@ -5741,6 +5741,31 @@ body.theme-dark .cc-row-item-floating-menu button.danger:hover i {
 /* ==========================================================================
    Catalog Import / Export Modal Blueprint Mode Cards (Create New Project Style)
    ========================================================================== */
+
+@media (max-width: 400px) {
+    .cc-shell button,
+    .cc-shell [role="button"],
+    .cc-shell input,
+    .cc-shell select {
+        min-height: 44px;
+    }
+}
+
+[data-theme="dark"] .cc-breadcrumb {
+    color: var(--text-muted, #94a3b8);
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .cc-shell *,
+    .cc-shell *::before,
+    .cc-shell *::after {
+        scroll-behavior: auto !important;
+        transition-duration: 0.01ms !important;
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+    }
+}
+
 .bb-studio-mode-stack {
     display: flex;
     flex-direction: column;
@@ -5883,4 +5908,3 @@ body.theme-dark .cc-row-item-floating-menu button.danger:hover i {
 [data-theme="dark"] .bb-mode-desc {
     color: var(--text-muted, #94a3b8) !important;
 }
-
