@@ -1,17 +1,54 @@
 <?php
-// api.php - Backend Enterprise V6.3 (Strict File Validation)
+// api.php - Backend Enterprise V6.3 (Strict File Validation with RBAC)
 require_once __DIR__ . '/../core/auth/session.php';
-require_once __DIR__ . '/../core/db/connection.php';
-require_once __DIR__ . '/../funciones/file_names.php';
+
+
 header('Content-Type: application/json');
 
-$userId = $_SESSION['user_id'] ?? 1;
-$userRoleRaw = $_SESSION['role'] ?? 'viewer';
-$userRole = strtolower($userRoleRaw); 
+$readActions = [
+    'get_projects_list',
+    'get_folders_list',
+];
 
-$action = $_POST['action'] ?? '';
-$input = json_decode(file_get_contents('php://input'), true);
-if(isset($input['action'])) $action = $input['action'];
+$mutationActions = [
+    'create_project',
+    'update_project',
+    'assign_project_user',
+    'update_project_info',
+    'add_project_folders',
+    'move_folder',
+    'assign_project_users',
+    'create_folder',
+    'upload_file',
+    'delete_entity',
+    'delete_file',
+    'restore_entity',
+    'delete_bulk',
+    'hard_delete_entity',
+    'save_report_flow',
+    'soft_delete_report',
+    'move_entity',
+];
+
+
+$input = json_decode(file_get_contents('php://input') ?: '', true);
+if (!is_array($input)) {
+    $input = [];
+}
+$action = (string)($_POST['action'] ?? $_GET['action'] ?? $input['action'] ?? '');
+
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions);
+$userId = (int)$user['user_id'];
+$userRole = (string)$user['role'];
+
+require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../funciones/file_names.php';
+
+
+
+
+
+
 
 function cleanName($name) {
     return clean_filename($name);

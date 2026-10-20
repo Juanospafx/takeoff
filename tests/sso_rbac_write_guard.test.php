@@ -222,8 +222,11 @@ function run_guard_in_subprocess(array $sessionData, ?string $action, array $rea
     $sessionFileExport = var_export($sessionFile, true);
 
     $code = <<<PHP
-require_once {$sessionFileExport};
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    @session_start();
+}
 \$_SESSION = json_decode(base64_decode('{$sessionEncoded}'), true) ?? [];
+require_once {$sessionFileExport};
 
 register_shutdown_function(function() {
     \$statusCode = http_response_code();
@@ -319,6 +322,350 @@ assert_equals('success', $subDefault['json']['status'] ?? null, 'Subprocess: Saf
 $subEmptyNoDefault = run_guard_in_subprocess($viewerSession, '', $readActions, $mutationActions);
 assert_equals(403, $subEmptyNoDefault['httpStatus'], 'Subprocess: Empty action without safe default returns HTTP 403');
 assert_equals('error', $subEmptyNoDefault['json']['status'] ?? null, 'Subprocess: Empty action without safe default returns error JSON');
+
+// =========================================================================
+// Group 7: Static AST / Invariant Verification for Modified API Endpoints
+// =========================================================================
+echo "\n--- Group 7: Static Verification of Modified API Endpoints ---\n";
+
+$targetEndpoints = [
+    'api/api.php',
+    'api/bid_board.php',
+    'api/catalog_admin.php',
+    'api/catalog_io.php',
+    'api/catalog_item_attachment.php',
+    'api/company_settings.php',
+    'api/cost_catalog.php',
+    'api/create_project.php',
+    'api/customers.php',
+    'api/project_module.php',
+];
+
+$baseDir = dirname(__DIR__);
+
+foreach ($targetEndpoints as $relPath) {
+    $fullPath = $baseDir . '/' . $relPath;
+    assert_true(file_exists($fullPath), "Endpoint file exists: {$relPath}");
+    $code = file_get_contents($fullPath);
+    assert_true(is_string($code) && strlen($code) > 0, "Endpoint code is readable: {$relPath}");
+
+    // Invariant 1: Requires session.php
+    $requiresSession = (strpos($code, "core/auth/session.php") !== false);
+    assert_true($requiresSession, "Endpoint {$relPath} requires core/auth/session.php");
+
+    // Invariant 2: Calls takeoff_guard_api_action or SessionGuard::guardApiAction
+    $hasGuardCall = preg_match('/(takeoff_guard_api_action|SessionGuard::guardApiAction)\s*\(/', $code, $guardMatch);
+    assert_true((bool)$hasGuardCall, "Endpoint {$relPath} invokes SessionGuard before logic");
+
+    // Invariant 3: Guard call occurs before switch statement if switch is used
+    $switchPos = strpos($code, 'switch');
+    if ($switchPos !== false && $hasGuardCall) {
+        $guardPos = strpos($code, $guardMatch[0]);
+        assert_true($guardPos < $switchPos, "Endpoint {$relPath} calls guard before switch statement");
+    }
+
+    // Invariant 4: Disjoint read and mutation allowlists
+    $hasRead = preg_match('/\$readActions\s*=\s*\[(.*?)\];/s', $code, $readMatch);
+    $hasMutation = preg_match('/\$mutationActions\s*=\s*\[(.*?)\];/s', $code, $mutMatch);
+
+    assert_true((bool)$hasRead, "Endpoint {$relPath} defines explicit \$readActions");
+    assert_true((bool)$hasMutation, "Endpoint {$relPath} defines explicit \$mutationActions");
+
+    if ($hasRead && $hasMutation) {
+        preg_match_all("/'([^']+)'/", $readMatch[1], $rm);
+        $readList = $rm[1];
+        preg_match_all("/'([^']+)'/", $mutMatch[1], $mm);
+        $mutationList = $mm[1];
+
+        $overlap = array_intersect($readList, $mutationList);
+        assert_equals([], array_values($overlap), "Endpoint {$relPath} has disjoint read and mutation allowlists");
+
+        if ($relPath === 'api/create_project.php') {
+            assert_equals([], $readList, "create_project has strictly empty read allowlist");
+            assert_true(in_array('create_project', $mutationList, true), "create_project allowlist contains 'create_project'");
+        }
+    }
+
+    // Invariant 5: Guard invocation precedes DB connection, vendor autoload and services
+    if ($hasGuardCall) {
+        $guardPos = strpos($code, $guardMatch[0]);
+        $forbiddenBeforeGuard = [
+            'core/db/connection.php',
+            'vendor/autoload.php',
+            'core/services/CatalogAdminService.php',
+            'core/services/',
+        ];
+        foreach ($forbiddenBeforeGuard as $dependency) {
+            $depPos = strpos($code, $dependency);
+            if ($depPos !== false) {
+                assert_true($guardPos < $depPos, "Endpoint {$relPath} invokes guard before requiring {$dependency}");
+            }
+        }
+    }
+}
+
+// =========================================================================
+// Group 8: Isolated Subprocess API Entry-Point Execution Harness
+// =========================================================================
+echo "\n--- Group 8: Isolated Subprocess API Entry-Point Execution Harness ---\n";
+
+function run_api_entrypoint_subprocess(
+    string $apiRelPath,
+    array $sessionData,
+    string $method = 'GET',
+    array $getParams = [],
+    array $postParams = [],
+    ?array $jsonBody = null,
+    bool $allowDbConnection = true
+): array {
+    $baseDir = dirname(__DIR__);
+    $scriptPath = $baseDir . '/' . $apiRelPath;
+    $sessionEncoded = base64_encode(json_encode($sessionData));
+    $getExport = var_export($getParams, true);
+    $postExport = var_export($postParams, true);
+    $methodExport = var_export($method, true);
+    $scriptExport = var_export($scriptPath, true);
+    if ($jsonBody !== null) {
+        if (isset($jsonBody['command']) && !isset($postParams['command'])) {
+            $postParams['command'] = $jsonBody['command'];
+        }
+        if (isset($jsonBody['action']) && !isset($postParams['action'])) {
+            $postParams['action'] = $jsonBody['action'];
+        }
+    }
+    $postExport = var_export($postParams, true);
+    $allowDbExport = $allowDbConnection ? 'true' : 'false';
+    $jsonEncoded = $jsonBody !== null ? json_encode($jsonBody, JSON_UNESCAPED_SLASHES) : '';
+    $jsonEncodedBase64 = base64_encode($jsonEncoded);
+
+    $code = <<<PHP
+if (!empty('{$jsonEncodedBase64}')) {
+    if (!class_exists('PhpCliInputStreamWrapper', false)) {
+        class PhpCliInputStreamWrapper {
+            public \$context;
+            private static \$data = '';
+            private \$pos = 0;
+            public static function setBuffer(string \$d): void { self::\$data = \$d; }
+            public function stream_open(string \$path, string \$mode, int \$options, &\$opened_path): bool {
+                \$this->pos = 0;
+                return true;
+            }
+            public function stream_read(int \$count): string {
+                \$chunk = substr(self::\$data, \$this->pos, \$count);
+                \$this->pos += strlen(\$chunk);
+                return \$chunk;
+            }
+            public function stream_write(string \$data): int { return strlen(\$data); }
+            public function stream_tell(): int { return \$this->pos; }
+            public function stream_eof(): bool { return \$this->pos >= strlen(self::\$data); }
+            public function stream_stat(): array { return ['size' => strlen(self::\$data)]; }
+            public function stream_seek(int \$offset, int \$whence = SEEK_SET): bool {
+                if (\$whence === SEEK_SET) \$this->pos = \$offset;
+                elseif (\$whence === SEEK_CUR) \$this->pos += \$offset;
+                elseif (\$whence === SEEK_END) \$this->pos = strlen(self::\$data) + \$offset;
+                return true;
+            }
+        }
+    }
+    PhpCliInputStreamWrapper::setBuffer(base64_decode('{$jsonEncodedBase64}'));
+    if (in_array('php', stream_get_wrappers(), true)) {
+        @stream_wrapper_unregister('php');
+    }
+    @stream_wrapper_register('php', 'PhpCliInputStreamWrapper');
+}
+
+if (!{$allowDbExport}) {
+    putenv('TAKEOFF_DB_HOST=');
+    putenv('TAKEOFF_DB_NAME=');
+    putenv('TAKEOFF_DB_USER=');
+    putenv('TAKEOFF_DB_PASSWORD=');
+    \$GLOBALS['__TAKEOFF_PDO_FACTORY__'] = function() {
+        throw new RuntimeException('Database connection must NOT be initialized before authorization!');
+    };
+} else {
+    putenv('TAKEOFF_DB_HOST=127.0.0.1');
+    putenv('TAKEOFF_DB_NAME=takeoff_mock');
+
+    putenv('TAKEOFF_DB_USER=takeoff_user');
+    putenv('TAKEOFF_DB_PASSWORD=takeoff_pass');
+    if (!class_exists('SubprocessTestMockPdo', false)) {
+        class SubprocessTestMockPdo extends PDO {
+            public function __construct() {
+                parent::__construct('sqlite::memory:');
+            }
+            public function exec(string \$statement): int|false {
+                try {
+                    return parent::exec(\$statement);
+                } catch (\Throwable \$e) {
+                    return 0;
+                }
+            }
+            public function query(string \$query, ?int \$fetchMode = null, mixed ...\$fetchModeArgs): PDOStatement|false {
+                try {
+                    \$stmt = parent::query(\$query, \$fetchMode, ...\$fetchModeArgs);
+                    if (\$stmt !== false) return \$stmt;
+                } catch (\Throwable \$e) {}
+                return parent::query('SELECT 1 WHERE 1=0');
+            }
+            public function prepare(string \$query, array \$options = []): PDOStatement|false {
+                try {
+                    \$stmt = parent::prepare(\$query, \$options);
+                    if (\$stmt !== false) return \$stmt;
+                } catch (\Throwable \$e) {}
+                return parent::prepare('SELECT 1 WHERE 1=0');
+            }
+        }
+    }
+    \$GLOBALS['__TAKEOFF_PDO_FACTORY__'] = function() {
+        echo "\n__POST_GUARD_DB_INIT__:1\n";
+        return new SubprocessTestMockPdo();
+    };
+}
+
+if (session_status() !== PHP_SESSION_ACTIVE) {
+    @session_start();
+}
+\$_SESSION = json_decode(base64_decode('{$sessionEncoded}'), true) ?? [];
+\$_GET = {$getExport};
+\$_POST = {$postExport};
+\$_SERVER['REQUEST_METHOD'] = {$methodExport};
+
+register_shutdown_function(function() {
+    \$statusCode = http_response_code();
+    if (!is_int(\$statusCode) || \$statusCode < 100) {
+        \$statusCode = 200;
+    }
+    echo "\n__HTTP_STATUS__:" . \$statusCode;
+});
+
+require {$scriptExport};
+PHP;
+
+    $evalSnippet = 'eval(base64_decode(\'' . base64_encode($code) . '\'));';
+
+    $descriptors = [
+        0 => ['pipe', 'r'],
+        1 => ['pipe', 'w'],
+        2 => ['pipe', 'w'],
+    ];
+
+    $cmd = [PHP_BINARY, '-r', $evalSnippet];
+    $process = @proc_open($cmd, $descriptors, $pipes);
+    if (!is_resource($process)) {
+        $cmdString = escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($evalSnippet);
+        $process = @proc_open($cmdString, $descriptors, $pipes, null, null, ['bypass_shell' => true]);
+    }
+    if (!is_resource($process)) {
+        $cmdString = escapeshellarg(PHP_BINARY) . ' -r ' . escapeshellarg($evalSnippet);
+        $process = proc_open($cmdString, $descriptors, $pipes);
+    }
+    if (!is_resource($process)) {
+        throw new RuntimeException("Failed to launch PHP subprocess for entrypoint testing.");
+    }
+
+    if ($jsonEncoded !== '') {
+        fwrite($pipes[0], $jsonEncoded);
+    }
+    fclose($pipes[0]);
+    $rawStdout = stream_get_contents($pipes[1]);
+    fclose($pipes[1]);
+    $stderr = stream_get_contents($pipes[2]);
+    fclose($pipes[2]);
+    proc_close($process);
+
+    $dbInitialized = (strpos($rawStdout, '__POST_GUARD_DB_INIT__:1') !== false);
+    $httpStatus = null;
+    $body = $rawStdout;
+    if (preg_match('/__HTTP_STATUS__:(\d+)/', $rawStdout, $matches)) {
+        $httpStatus = (int)$matches[1];
+        $body = trim((string)preg_replace('/__HTTP_STATUS__:(\d+)/', '', $rawStdout));
+    }
+
+    $json = json_decode($body, true);
+
+    return [
+        'httpStatus' => $httpStatus,
+        'body' => $body,
+        'json' => is_array($json) ? $json : null,
+        'stderr' => $stderr,
+        'dbInitialized' => $dbInitialized,
+    ];
+}
+
+$testMatrix = [
+    'api/api.php' => [
+        'read' => ['get' => ['action' => 'get_projects_list']],
+        'mutation' => ['post' => ['action' => 'delete_file', 'id' => 1]],
+    ],
+    'api/bid_board.php' => [
+        'read' => ['get' => ['action' => 'list']],
+        'mutation' => ['post' => ['action' => 'delete'], 'json' => ['id' => 1]],
+    ],
+    'api/catalog_admin.php' => [
+        'read' => null, // mutation-only
+        'mutation' => ['post' => [], 'json' => ['command' => 'item.purge', 'payload' => ['id' => 1]]],
+    ],
+    'api/catalog_io.php' => [
+        'read' => ['get' => ['action' => 'template', 'type' => 'items']],
+        'mutation' => ['post' => ['action' => 'import']],
+    ],
+    'api/catalog_item_attachment.php' => [
+        'read' => ['get' => ['action' => 'view', 'item_id' => 99999]],
+        'mutation' => ['post' => ['action' => 'upload']],
+    ],
+    'api/company_settings.php' => [
+        'read' => ['get' => ['action' => 'list']],
+        'mutation' => ['post' => ['action' => 'save_settings'], 'json' => ['settings' => []]],
+    ],
+    'api/cost_catalog.php' => [
+        'read' => ['get' => ['action' => 'list']],
+        'mutation' => ['post' => ['action' => 'delete_item'], 'json' => ['id' => 1]],
+    ],
+    'api/create_project.php' => [
+        'read' => null, // mutation-only
+        'mutation' => ['post' => ['project_name' => 'Test Project']],
+    ],
+    'api/customers.php' => [
+        'read' => ['get' => ['action' => 'list']],
+        'mutation' => ['post' => ['action' => 'save'], 'json' => ['company' => 'ACME']],
+    ],
+    'api/project_module.php' => [
+        'read' => ['get' => ['action' => 'list']],
+        'mutation' => ['post' => ['action' => 'delete'], 'json' => ['id' => 1]],
+    ],
+];
+
+foreach ($testMatrix as $endpoint => $cases) {
+    // 8.1 Anonymous denial -> HTTP 401
+    $mutPost = $cases['mutation']['post'] ?? [];
+    $mutJson = $cases['mutation']['json'] ?? null;
+    $resAnon = run_api_entrypoint_subprocess($endpoint, [], 'POST', [], $mutPost, $mutJson);
+    assert_equals(401, $resAnon['httpStatus'], "Harness: Anonymous access to {$endpoint} returns HTTP 401");
+    assert_equals('error', $resAnon['json']['status'] ?? null, "Harness: Anonymous {$endpoint} returns error status");
+    assert_equals(401, $resAnon['json']['code'] ?? null, "Harness: Anonymous {$endpoint} payload includes code 401");
+    assert_equals(false, $resAnon['dbInitialized'], "Harness: Anonymous {$endpoint} denies before database initialization");
+
+    // 8.2 Viewer mutation denial -> HTTP 403
+    $resViewerMut = run_api_entrypoint_subprocess($endpoint, $viewerSession, 'POST', [], $mutPost, $mutJson);
+    assert_equals(403, $resViewerMut['httpStatus'], "Harness: Viewer mutation on {$endpoint} returns HTTP 403");
+    assert_equals('error', $resViewerMut['json']['status'] ?? null, "Harness: Viewer mutation {$endpoint} returns error status");
+    assert_equals(403, $resViewerMut['json']['code'] ?? null, "Harness: Viewer mutation {$endpoint} payload includes code 403");
+    assert_equals(false, $resViewerMut['dbInitialized'], "Harness: Viewer mutation {$endpoint} denies before database initialization");
+
+    // 8.3 Viewer read admission (when endpoint has read actions)
+    if ($cases['read'] !== null) {
+        $readGet = $cases['read']['get'] ?? [];
+        $resViewerRead = run_api_entrypoint_subprocess($endpoint, $viewerSession, 'GET', $readGet);
+        assert_true($resViewerRead['httpStatus'] !== 401 && $resViewerRead['httpStatus'] !== 403,
+            "Harness: Viewer read on {$endpoint} is admitted by guard (got HTTP {$resViewerRead['httpStatus']})");
+    }
+
+    // 8.4 Unknown action denial -> HTTP 403
+    $resUnknown = run_api_entrypoint_subprocess($endpoint, $adminSession, 'GET', ['action' => 'totally_unknown_action_xyz'], ['action' => 'totally_unknown_action_xyz'], ['command' => 'unknown.command', 'action' => 'totally_unknown_action_xyz']);
+    assert_equals(403, $resUnknown['httpStatus'], "Harness: Unknown action on {$endpoint} returns HTTP 403");
+    assert_equals('error', $resUnknown['json']['status'] ?? null, "Harness: Unknown action on {$endpoint} returns error status");
+    assert_equals(false, $resUnknown['dbInitialized'], "Harness: Unknown action on {$endpoint} denies before database initialization");
+}
 
 echo "\n=======================================================\n";
 echo "Test Execution Completed.\n";
