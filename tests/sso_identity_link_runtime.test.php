@@ -3,7 +3,7 @@ declare(strict_types=1);
 
 /**
  * Runtime Test Suite for Takeoff SSO Federated Identity Link & Local Session Boundary.
- * Task: TASK-0258 (Fail-closed session and portable isolated test)
+ * Task: TASK-0380-CORRECTION (Takeoff shadow identity provisioning & fail-closed authorization)
  *
  * Acceptance Criteria Covered:
  * 1. Isolated PDO/PDOStatement doubles perform no real database or network connection
@@ -20,6 +20,11 @@ declare(strict_types=1);
  *    existing local session shape.
  * 6. Adds negative assertions for cookie downgrade, incomplete federation metadata, and
  *    transient-key cleanup; no role policy, callback, UI, logout or feature-flag wiring.
+ * 7. Executable isolated tests for first login shadow user provisioning, repeat login,
+ *    admin-to-viewer downgrade, viewer-to-admin upgrade, collision/race recovery, inactive
+ *    records fail-closed, and zero username/email auto-linking.
+ * 8. Zero exception leakage: no exception exposed outside repository includes PDO, SQL,
+ *    credentials, paths, DSNs, or internal failure details.
  */
 
 require_once dirname(__DIR__) . '/core/auth/FederatedIdentityRepository.php';
@@ -52,13 +57,23 @@ function assertCondition(bool $condition, string $description): void
  */
 class IsolatedMockPdo extends PDO
 {
-    /** @var array<int, array{id: int, username: string, role: string, active: int}> */
+    /** @var array<int, array{id: int, username: string, password?: string, role: string, active: int, created_at?: string, updated_at?: string}> */
     public array $users = [];
 
-    /** @var array<int, array{id: int, user_id: int, provider: string, hub_user_id: string, active: int}> */
+    /** @var array<int, array{id: int, user_id: int, provider: string, hub_user_id: string, active: int, created_at?: string, updated_at?: string}> */
     public array $links = [];
 
+    public int $nextUserId = 1;
     public int $nextLinkId = 1;
+    public int $lastInsertId = 0;
+    public bool $inTransaction = false;
+
+    /** @var callable|null */
+    public $onInsertUser = null;
+    /** @var callable|null */
+    public $onInsertLink = null;
+    /** @var callable|null */
+    public $onQuery = null;
 
     public function __construct()
     {
@@ -82,22 +97,63 @@ class IsolatedMockPdo extends PDO
     }
 
     #[\ReturnTypeWillChange]
+    public function beginTransaction(): bool
+    {
+        $this->inTransaction = true;
+        return true;
+    }
+
+    #[\ReturnTypeWillChange]
+    public function commit(): bool
+    {
+        $this->inTransaction = false;
+        return true;
+    }
+
+    #[\ReturnTypeWillChange]
+    public function rollBack(): bool
+    {
+        $this->inTransaction = false;
+        return true;
+    }
+
+    #[\ReturnTypeWillChange]
+    public function inTransaction(): bool
+    {
+        return $this->inTransaction;
+    }
+
+    #[\ReturnTypeWillChange]
+    public function lastInsertId($name = null): string|false
+    {
+        return (string)$this->lastInsertId;
+    }
+
+    #[\ReturnTypeWillChange]
     public function prepare($query, $options = [])
     {
         return new IsolatedMockPdoStatement($this, $query);
     }
 
-    public function insertUser(int $id, string $username, string $role, int $active): void
+    public function insertUser(int $id, string $username, string $role, int $active, string $password = 'hash'): int
     {
         $this->users[$id] = [
             'id' => $id,
             'username' => $username,
+            'password' => $password,
             'role' => $role,
             'active' => $active,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
         ];
+        if ($id >= $this->nextUserId) {
+            $this->nextUserId = $id + 1;
+        }
+        $this->lastInsertId = $id;
+        return $id;
     }
 
-    public function insertLink(int $userId, string $provider, string $hubUserId, int $active): int
+    public function insertLink(int $userId, string $provider, string $hubUserId, int $active = 1): int
     {
         $linkId = $this->nextLinkId++;
         $this->links[$linkId] = [
@@ -106,7 +162,10 @@ class IsolatedMockPdo extends PDO
             'provider' => $provider,
             'hub_user_id' => $hubUserId,
             'active' => $active,
+            'created_at' => date('Y-m-d H:i:s'),
+            'updated_at' => date('Y-m-d H:i:s'),
         ];
+        $this->lastInsertId = $linkId;
         return $linkId;
     }
 }
@@ -133,14 +192,35 @@ class IsolatedMockPdoStatement extends PDOStatement
         $this->fetched = false;
         $this->resultRow = null;
 
+        // Custom query callback for testing error injection
+        if ($this->pdo->onQuery !== null) {
+            ($this->pdo->onQuery)($this->sql, $params);
+        }
+
         // INSERT INTO users
         if (preg_match('/INSERT\s+INTO\s+\S*users/i', $this->sql)) {
+            if ($this->pdo->onInsertUser !== null) {
+                ($this->pdo->onInsertUser)($params);
+            }
+
+            // Prepared statement with parameters
+            if ($params !== null && (isset($params[':username']) || isset($params['username']))) {
+                $id = $this->pdo->nextUserId++;
+                $username = (string)($params[':username'] ?? $params['username']);
+                $password = (string)($params[':password'] ?? $params['password'] ?? 'hash');
+                $role = (string)($params[':role'] ?? $params['role'] ?? 'viewer');
+                $this->pdo->insertUser($id, $username, $role, 1, $password);
+                return true;
+            }
+
+            // Literal values
             if (preg_match('/VALUES\s*\(\s*(\d+)\s*,\s*\'([^\']+)\'\s*,\s*\'([^\']+)\'\s*,\s*\'([^\']+)\'\s*,\s*(\d+)\s*\)/i', $this->sql, $matches)) {
                 $id = (int)$matches[1];
                 $username = $matches[2];
+                $password = $matches[3];
                 $role = $matches[4];
                 $active = (int)$matches[5];
-                $this->pdo->insertUser($id, $username, $role, $active);
+                $this->pdo->insertUser($id, $username, $role, $active, $password);
                 return true;
             }
             return false;
@@ -148,8 +228,11 @@ class IsolatedMockPdoStatement extends PDOStatement
 
         // INSERT INTO sso_identity_links
         if (preg_match('/INSERT\s+INTO\s+\S*sso_identity_links/i', $this->sql)) {
+            if ($this->pdo->onInsertLink !== null) {
+                ($this->pdo->onInsertLink)($params);
+            }
+
             if ($params !== null) {
-                // Prepared statement from FederatedIdentityRepository::createLink
                 $userId = (int)($params[':user_id'] ?? $params['user_id'] ?? 0);
                 $provider = (string)($params[':provider'] ?? $params['provider'] ?? '');
                 $hubUserId = (string)($params[':hub_user_id'] ?? $params['hub_user_id'] ?? '');
@@ -158,7 +241,6 @@ class IsolatedMockPdoStatement extends PDOStatement
                 return true;
             }
 
-            // Literal values from test setup
             if (preg_match('/VALUES\s*\(\s*(\d+)\s*,\s*\'([^\']+)\'\s*,\s*\'([^\']+)\'\s*,\s*(\d+)\s*\)/i', $this->sql, $matches)) {
                 $userId = (int)$matches[1];
                 $provider = $matches[2];
@@ -170,10 +252,25 @@ class IsolatedMockPdoStatement extends PDOStatement
             return false;
         }
 
-        // SELECT query from FederatedIdentityRepository::findActiveUser
+        // UPDATE users SET role = :role ... WHERE id = :id
+        if (preg_match('/UPDATE\s+\S*users\s+SET\s+role\s*=\s*:role/i', $this->sql)) {
+            $role = (string)($params[':role'] ?? $params['role'] ?? '');
+            $id = (int)($params[':id'] ?? $params['id'] ?? 0);
+            if (isset($this->pdo->users[$id])) {
+                $this->pdo->users[$id]['role'] = $role;
+                $this->pdo->users[$id]['updated_at'] = date('Y-m-d H:i:s');
+                return true;
+            }
+            return false;
+        }
+
+        // SELECT query from FederatedIdentityRepository (findActiveUser & findExactLink)
         if (preg_match('/SELECT/i', $this->sql)) {
             $provider = (string)($params[':provider'] ?? $params['provider'] ?? '');
             $hubUserId = (string)($params[':hub_user_id'] ?? $params['hub_user_id'] ?? '');
+
+            // findActiveUser requires active = 1 for both link and user
+            $requireActive = (bool)preg_match('/l\.active\s*=\s*1\s+AND\s+u\.active\s*=\s*1/i', $this->sql);
 
             foreach ($this->pdo->links as $link) {
                 if ($link['provider'] === $provider && $link['hub_user_id'] === $hubUserId) {
@@ -185,8 +282,8 @@ class IsolatedMockPdoStatement extends PDOStatement
                         continue;
                     }
 
-                    // Strict active filtering: l.active = 1 AND u.active = 1
-                    if ((int)$link['active'] !== 1 || (int)$user['active'] !== 1) {
+                    // Strict active filtering when requested
+                    if ($requireActive && ((int)$link['active'] !== 1 || (int)$user['active'] !== 1)) {
                         continue;
                     }
 
@@ -633,6 +730,155 @@ $flowValid = $ssoFlow->validateIdentityClaimsContract([
 ]);
 assertCondition($flowValid['sub'] === 'hub_canonical_sub_123', 'SsoFlow populates canonical sub from validated sub');
 assertCondition($flowValid['hub_user_id'] === 'hub_canonical_sub_123', 'SsoFlow mirrors canonical sub into compatibility hub_user_id');
+
+// -----------------------------------------------------------------------------
+// 13. Focused Shadow User Lifecycle & Exception Sanitization Coverage
+// -----------------------------------------------------------------------------
+echo "\n13. Testing shadow user lifecycle in FederatedIdentityRepository...\n";
+
+// 13.1 First login transactional shadow user provisioning
+$freshPdo = new IsolatedMockPdo();
+$freshRepo = new FederatedIdentityRepository($freshPdo);
+
+assertCondition(count($freshPdo->users) === 0, 'Repo starts with 0 users');
+assertCondition(count($freshPdo->links) === 0, 'Repo starts with 0 links');
+
+$firstProvisioned = $freshRepo->provisionOrSynchronize('hub', 'canonical_sub_alpha', 'admin');
+
+assertCondition(count($freshPdo->users) === 1, 'First login creates exactly one user record');
+assertCondition(count($freshPdo->links) === 1, 'First login creates exactly one link record');
+
+$userRecord = array_values($freshPdo->users)[0];
+$linkRecord = array_values($freshPdo->links)[0];
+
+$expectedUsername = FederatedIdentityRepository::deriveShadowUsername('hub', 'canonical_sub_alpha');
+assertCondition($userRecord['username'] === $expectedUsername, 'Created user has deterministic shadow username');
+assertCondition($userRecord['role'] === 'admin', 'Created user has role admin');
+assertCondition((int)$userRecord['active'] === 1, 'Created user is active');
+assertCondition(!empty($userRecord['password']), 'Created user has password hash');
+assertCondition(password_get_info($userRecord['password'])['algo'] !== 0, 'Password hash is a valid unrecoverable cryptographic hash');
+
+assertCondition($linkRecord['user_id'] === $userRecord['id'], 'Link points to created user ID');
+assertCondition($linkRecord['provider'] === 'hub', 'Link provider is hub');
+assertCondition($linkRecord['hub_user_id'] === 'canonical_sub_alpha', 'Link hub_user_id matches canonical sub');
+assertCondition((int)$linkRecord['active'] === 1, 'Link is active');
+
+assertCondition($firstProvisioned['user_id'] === $userRecord['id'], 'Return user_id matches user ID');
+assertCondition($firstProvisioned['role'] === 'admin', 'Return role matches requested role');
+assertCondition($firstProvisioned['sub'] === 'canonical_sub_alpha', 'Return sub matches canonical sub');
+
+// 13.2 Repeat login: idempotent, link unchanged
+$repeatProvisioned = $freshRepo->provisionOrSynchronize('hub', 'canonical_sub_alpha', 'admin');
+assertCondition(count($freshPdo->users) === 1, 'Repeat login creates no duplicate user');
+assertCondition(count($freshPdo->links) === 1, 'Repeat login creates no duplicate link');
+assertCondition($repeatProvisioned['user_id'] === $userRecord['id'], 'Repeat login returns same user ID');
+assertCondition($repeatProvisioned['link_id'] === $linkRecord['id'], 'Repeat login returns same link ID');
+
+// 13.3 Role downgrade: admin -> viewer
+$downgraded = $freshRepo->provisionOrSynchronize('hub', 'canonical_sub_alpha', 'viewer');
+assertCondition($downgraded['role'] === 'viewer', 'Downgrade: returned role is viewer');
+assertCondition($freshPdo->users[$userRecord['id']]['role'] === 'viewer', 'Downgrade: DB user role updated to viewer');
+assertCondition($downgraded['link_id'] === $linkRecord['id'], 'Downgrade: link ID is preserved (link unchanged)');
+assertCondition(count($freshPdo->users) === 1, 'Downgrade: user count remains 1');
+
+// 13.4 Role upgrade: viewer -> admin
+$upgraded = $freshRepo->provisionOrSynchronize('hub', 'canonical_sub_alpha', 'admin');
+assertCondition($upgraded['role'] === 'admin', 'Upgrade: returned role is admin');
+assertCondition($freshPdo->users[$userRecord['id']]['role'] === 'admin', 'Upgrade: DB user role updated to admin');
+assertCondition($upgraded['link_id'] === $linkRecord['id'], 'Upgrade: link ID is preserved (link unchanged)');
+
+// 13.5 Collision and concurrent race recovery
+$racePdo = new IsolatedMockPdo();
+$raceRepo = new FederatedIdentityRepository($racePdo);
+
+$winnerUserId = 1234;
+$racePdo->onInsertUser = function ($params) use ($racePdo, $winnerUserId) {
+    $racePdo->onInsertUser = null;
+    $racePdo->insertUser($winnerUserId, 'sso_winning_racer_sub', 'viewer', 1);
+    $racePdo->insertLink($winnerUserId, 'hub', 'sub_race_test', 1);
+    throw new PDOException('SQLSTATE[23000]: Duplicate entry');
+};
+
+$raceRecovered = $raceRepo->provisionOrSynchronize('hub', 'sub_race_test', 'admin');
+assertCondition($raceRecovered['user_id'] === $winnerUserId, 'Race recovery: resolved the winning concurrent user ID');
+assertCondition($raceRecovered['role'] === 'admin', 'Race recovery: synchronized role to admin');
+assertCondition($racePdo->users[$winnerUserId]['role'] === 'admin', 'Race recovery: winning DB record updated to admin');
+assertCondition(count($racePdo->users) === 1, 'Race recovery: zero duplicate users');
+
+// 13.6 Inactive link and user fail-closed without writes
+$inactPdo = new IsolatedMockPdo();
+$inactRepo = new FederatedIdentityRepository($inactPdo);
+
+$inactPdo->insertUser(801, 'user_inactive_account', 'admin', 0);
+$inactPdo->insertLink(801, 'hub', 'sub_inactive_user_link', 1);
+
+$userInactCaught = false;
+$userInactMsg = '';
+try {
+    $inactRepo->provisionOrSynchronize('hub', 'sub_inactive_user_link', 'viewer');
+} catch (RuntimeException $e) {
+    $userInactCaught = true;
+    $userInactMsg = $e->getMessage();
+}
+assertCondition($userInactCaught, 'Inactive local user fails closed in provisionOrSynchronize');
+assertCondition(str_contains($userInactMsg, 'local user account is inactive'), 'Error message specifies local user inactive');
+assertCondition($inactPdo->users[801]['role'] === 'admin', 'Inactive local user: role is NOT updated');
+
+$inactPdo->insertUser(802, 'user_with_dead_link', 'admin', 1);
+$inactPdo->insertLink(802, 'hub', 'sub_dead_link', 0);
+
+$linkInactCaught = false;
+$linkInactMsg = '';
+try {
+    $inactRepo->provisionOrSynchronize('hub', 'sub_dead_link', 'viewer');
+} catch (RuntimeException $e) {
+    $linkInactCaught = true;
+    $linkInactMsg = $e->getMessage();
+}
+assertCondition($linkInactCaught, 'Inactive link fails closed in provisionOrSynchronize');
+assertCondition(str_contains($linkInactMsg, 'federated identity link is inactive'), 'Error message specifies link inactive');
+assertCondition($inactPdo->users[802]['role'] === 'admin', 'Inactive link: role is NOT updated');
+
+// 13.7 Zero auto-linking by username or email
+$antiAutoPdo = new IsolatedMockPdo();
+$antiAutoRepo = new FederatedIdentityRepository($antiAutoPdo);
+
+// Preexisting user at id 99 with username and password
+$antiAutoPdo->insertUser(99, 'existing_username_foo', 'admin', 1);
+
+$provisionedAntiAuto = $antiAutoRepo->provisionOrSynchronize('hub', 'sub_brand_new_sub_xyz', 'viewer');
+assertCondition($provisionedAntiAuto['user_id'] !== 99, 'Never auto-links: does NOT link to id 99');
+assertCondition(count($antiAutoPdo->users) === 2, 'Never auto-links: creates a new separate shadow user');
+assertCondition($antiAutoPdo->users[99]['username'] === 'existing_username_foo', 'Preexisting user is untouched');
+
+// 13.8 Zero exception leakage outside repository
+$leakTestPdo = new IsolatedMockPdo();
+$leakTestRepo = new FederatedIdentityRepository($leakTestPdo);
+
+$leakTestPdo->onQuery = function ($sql, $params) {
+    throw new PDOException(
+        "SQLSTATE[HY000]: General error 2002: Connection refused for dsn=mysql:host=internal-db.local;dbname=takeoff;user=admin;password=super_secret_db_pass; in C:\\inetpub\\takeoff\\core\\auth\\FederatedIdentityRepository.php line 78"
+    );
+};
+
+$leakCaught = false;
+$leakMessage = '';
+$leakPrevious = null;
+try {
+    $leakTestRepo->provisionOrSynchronize('hub', 'sub_leak_test', 'admin');
+} catch (RuntimeException $e) {
+    $leakCaught = true;
+    $leakMessage = $e->getMessage();
+    $leakPrevious = $e->getPrevious();
+}
+
+assertCondition($leakCaught, 'Simulated internal PDOException triggers RuntimeException');
+assertCondition(!str_contains($leakMessage, 'SQLSTATE'), 'Exception message reveals no SQLSTATE');
+assertCondition(!str_contains($leakMessage, 'internal-db'), 'Exception message reveals no hostnames');
+assertCondition(!str_contains($leakMessage, 'super_secret_db_pass'), 'Exception message reveals no credentials');
+assertCondition(!str_contains($leakMessage, 'dsn='), 'Exception message reveals no DSN');
+assertCondition(!str_contains($leakMessage, 'C:\\inetpub'), 'Exception message reveals no file paths');
+assertCondition($leakPrevious === null, 'No PDOException is exposed via getPrevious()');
 
 // -----------------------------------------------------------------------------
 // Final Report

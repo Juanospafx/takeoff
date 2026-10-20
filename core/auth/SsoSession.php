@@ -14,8 +14,9 @@ use InvalidArgumentException;
  * 3. Regenerates the session ID to prevent session fixation attacks.
  * 4. Writes only the existing Takeoff local session shape (user_id, username, role) plus
  *    non-sensitive federation metadata.
- * 5. Never writes sensitive secrets, access tokens, code verifiers, or credentials to session.
- * 6. Never assigns default user IDs or fallback roles.
+ * 5. Uses central display name or username for presentation identity.
+ * 6. Never writes sensitive secrets, access tokens, code verifiers, passwords, emails, or credentials to session.
+ * 7. Never assigns default user IDs or fallback roles.
  */
 class SsoSession
 {
@@ -105,7 +106,7 @@ class SsoSession
      * Never assigns fallback users or default roles.
      *
      * @param array $identity
-     * @return array{user_id: int, username: string, role: string, provider: string, hub_user_id: string}
+     * @return array{user_id: int, username: string, role: string, provider: string, hub_user_id: string, sub: string}
      * @throws InvalidArgumentException
      */
     public function validateResolvedIdentity(array $identity): array
@@ -124,9 +125,16 @@ class SsoSession
             throw new InvalidArgumentException('Resolved local user_id must be greater than zero.');
         }
 
-        // Resolve username: must be a non-empty string
-        $username = $identity['username'] ?? null;
-        if (!is_string($username) || trim($username) === '') {
+        // Resolve presentation username: central display name or username
+        $displayName = $identity['display_name'] ?? null;
+        $rawUsername = $identity['username'] ?? null;
+
+        $chosenUsername = null;
+        if (is_string($displayName) && trim($displayName) !== '') {
+            $chosenUsername = trim($displayName);
+        } elseif (is_string($rawUsername) && trim($rawUsername) !== '') {
+            $chosenUsername = trim($rawUsername);
+        } else {
             throw new InvalidArgumentException('Resolved identity must contain a non-empty local username.');
         }
 
@@ -175,7 +183,7 @@ class SsoSession
 
         return [
             'user_id' => $userId,
-            'username' => trim($username),
+            'username' => $chosenUsername,
             'role' => trim($role),
             'provider' => $provider,
             'sub' => $sub,
@@ -189,7 +197,7 @@ class SsoSession
      * 1. Validates the explicitly resolved local identity.
      * 2. Configures cookie parameters (Secure, HttpOnly, SameSite=Lax).
      * 3. Ensures active session and regenerates session ID.
-     * 4. Clears transient SSO flow tokens (state, verifier).
+     * 4. Clears transient SSO flow tokens (state, verifier) and credentials (password, email).
      * 5. Populates the legacy/existing local session shape:
      *    $_SESSION['user_id'], $_SESSION['username'], $_SESSION['role']
      * 6. Writes non-sensitive federation metadata:
@@ -266,13 +274,14 @@ class SsoSession
 
     /**
      * Writes existing session shape and non-sensitive federation metadata.
+     * Enforces that no token, verifier, password, email, or secret is written.
      *
      * @param array $session
      * @param array $validated
      */
     private function writeSessionData(array &$session, array $validated): void
     {
-        // Remove transient SSO authorization tokens to prevent leakage
+        // Remove transient SSO authorization tokens and credentials to prevent leakage
         unset(
             $session['sso_state'],
             $session['sso_state_expires_at'],
@@ -284,10 +293,12 @@ class SsoSession
             $session['userinfo'],
             $session['refresh_token'],
             $session['token'],
-            $session['secret']
+            $session['secret'],
+            $session['password'],
+            $session['email']
         );
 
-        // Standard Takeoff local session shape
+        // Standard Takeoff local session shape with central presentation name
         $session['user_id'] = $validated['user_id'];
         $session['username'] = $validated['username'];
         $session['role'] = $validated['role'];
