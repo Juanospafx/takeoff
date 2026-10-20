@@ -1,5 +1,11 @@
 <?php
-// Standalone Bid Board module. No auth/session dependency.
+require_once __DIR__ . '/../core/auth/session.php';
+$authUser = SessionGuard::getAuthenticatedUser($_SESSION ?? null);
+$authRole = $authUser['role'] ?? SessionGuard::ROLE_VIEWER;
+$isViewer = ($authRole === SessionGuard::ROLE_VIEWER);
+$isAdmin = ($authRole === SessionGuard::ROLE_ADMIN);
+$canWrite = $isAdmin;
+$readOnly = !$canWrite;
 ?>
 <!doctype html>
 <html lang="en">
@@ -42,9 +48,11 @@
             <div class="bb-pipeline-tabs-wrapper">
                 <section class="bb-pipeline-tabs" id="bbPipelineTabs" aria-label="Bid status pipeline"></section>
                 <div class="bb-pipeline-more">
+                    <?php if (!$isViewer): ?>
                     <button class="bb-icon-btn" id="bbConfigPhasesBtn" type="button"
                         aria-label="Configure pipeline phases" title="Customize Phases & Colors"><i
                             class="fas fa-ellipsis-vertical"></i></button>
+                    <?php endif; ?>
                 </div>
             </div>
 
@@ -54,8 +62,10 @@
                     <h2>No projects yet</h2>
                     <p>Create your first project to start managing bids, documents, takeoffs, estimates, and proposals.
                     </p>
+                    <?php if (!$isViewer): ?>
                     <button class="bb-btn-procore-primary" type="button" data-open-project-modal><i
                             class="fas fa-plus"></i> Create Project</button>
+                    <?php endif; ?>
                 </section>
 
                 <div class="bb-card-container">
@@ -125,9 +135,11 @@
                                 <i class="fas fa-filter"></i>
                                 <span class="bb-filter-badge" id="bbFilterActiveBadge" hidden>0</span>
                             </button>
+                            <?php if (!$isViewer): ?>
                             <button class="bb-btn-procore-primary" id="bbCreateProject" type="button">
                                 <i class="fas fa-plus"></i> Create New Project
                             </button>
+                            <?php endif; ?>
                             <div class="bb-head-actions-wrap">
                                 <button class="bb-icon-btn" id="bbHeadMoreBtn" type="button" title="More actions"
                                     aria-label="More actions" aria-expanded="false">
@@ -248,6 +260,7 @@
         </div>
     </div>
 
+    <?php if (!$isViewer): ?>
     <div class="bb-modal-backdrop" id="bbProjectModal">
         <div class="bb-modal bb-create-project-modal bb-studio-modal">
             <form id="bbProjectForm">
@@ -415,11 +428,15 @@
         </div>
     </div>
 
+    <?php endif; ?>
+
     <div class="bb-floating-row-menu" id="bbFloatingRowMenu" hidden>
         <a href="#" id="bbActionOpen"><i class="fas fa-arrow-up-right-from-square"></i> Open</a>
+        <?php if (!$isViewer): ?>
         <button type="button" id="bbActionDuplicate"><i class="fas fa-copy"></i> Duplicate</button>
         <button type="button" id="bbActionArchive"><i class="fas fa-box-archive"></i> Archive</button>
         <button type="button" class="danger" id="bbActionDelete"><i class="fas fa-trash-can"></i> Delete</button>
+        <?php endif; ?>
     </div>
 
     <script src="../assets/global_tools.js?v=<?= time() ?>"></script>

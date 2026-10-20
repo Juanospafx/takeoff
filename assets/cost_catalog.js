@@ -1,4 +1,49 @@
 (function () {
+    function getTakeoffAuth() {
+        if (typeof window !== 'undefined' && window.TakeoffAuth) {
+            return window.TakeoffAuth;
+        }
+        if (typeof document !== 'undefined') {
+            try {
+                const el = document.getElementById('takeoff-auth-metadata');
+                if (el && el.textContent) {
+                    const parsed = JSON.parse(el.textContent);
+                    if (typeof window !== 'undefined') {
+                        window.TakeoffAuth = Object.freeze(Object.assign({}, parsed));
+                    }
+                    return parsed;
+                }
+            } catch (_) {}
+            try {
+                const headerEl = document.querySelector('[data-global-tools-header]') || document.querySelector('.bt-global-header') || document.body;
+                if (headerEl && typeof headerEl.getAttribute === 'function') {
+                    const role = headerEl.getAttribute('data-user-role') || 'viewer';
+                    const canWriteVal = headerEl.getAttribute('data-can-write') === 'true' || headerEl.getAttribute('data-can-mutate') === 'true';
+                    const readOnlyVal = headerEl.getAttribute('data-read-only') === 'true' || !canWriteVal;
+                    const auth = {
+                        displayName: headerEl.getAttribute('data-display-name') || '',
+                        role: role,
+                        canWrite: canWriteVal,
+                        readOnly: readOnlyVal
+                    };
+                    if (typeof window !== 'undefined') {
+                        window.TakeoffAuth = Object.freeze(Object.assign({}, auth));
+                    }
+                    return auth;
+                }
+            } catch (_) {}
+        }
+        return null;
+    }
+
+    function canWrite() {
+        const auth = getTakeoffAuth();
+        return Boolean(auth && auth.canWrite === true);
+    }
+
+    function isReadOnly() {
+        return !canWrite();
+    }
     const apiUrl = '../api/cost_catalog.php';
     const attachmentApiUrl = '../api/catalog_item_attachment.php';
     let state = { catalogs: [], groups: [], items: [], allItems: [], assemblyParts: [] };
@@ -214,6 +259,12 @@
     }
 
     function request(action, payload = {}) {
+        if (action !== 'list' && !canWrite()) {
+            const error = new Error('Read-only mode: mutations are not permitted.');
+            error.code = 'read_only_forbidden';
+            showError(error.message);
+            return Promise.reject(error);
+        }
         return fetch(apiUrl, {
             method: 'POST',
             headers: { 'Content-Type': 'application/json' },
@@ -224,6 +275,12 @@
     }
 
     function attachmentRequest(action, itemId, revision, file = null) {
+        if (action !== 'view' && !canWrite()) {
+            const error = new Error('Read-only mode: mutations are not permitted.');
+            error.code = 'read_only_forbidden';
+            showError(error.message);
+            return Promise.reject(error);
+        }
         const options = { method: 'POST' };
         if (file) {
             const form = new FormData(); form.append('action', action); form.append('item_id', itemId); form.append('pdf', file);
@@ -386,6 +443,7 @@
     }
 
     function renderTree() {
+        const writable = canWrite();
         document.querySelectorAll('[data-view]').forEach(btn => {
             btn.classList.toggle('active', selection.view === btn.dataset.view);
         });
@@ -428,8 +486,8 @@
                     <i class="fas fa-book"></i>
                     <span>${esc(catalog.name)}</span>
                     <span class="status ${Number(catalog.active) ? '' : 'off'}" title="${Number(catalog.active) ? 'Active globally' : 'Inactive'}"></span>
-                    <button class="cc-tree-more-btn" type="button" data-tree-more-catalog="${catalog.id}" aria-label="Catalog actions" title="Actions">
-                      <i class="fas fa-ellipsis-vertical"></i>
+                    ${canWrite() ? `<button class="cc-tree-more-btn" type="button" data-tree-more-catalog="${catalog.id}" aria-label="Catalog actions" title="Actions"><i class="fas fa-ellipsis-vertical"></i>` : `<button class="cc-tree-more-btn" type="button" style="display:none !important;" disabled>`}
+
                     </button>
                   </div>
                 </div>
@@ -456,7 +514,7 @@
                 <i class="fas fa-folder"></i>
                 <span>${esc(group.name)}</span>
                 <span class="status ${Number(group.active) ? '' : 'off'}" title="${Number(group.active) ? 'Active' : 'Inactive'}"></span>
-                <button class="cc-tree-more-btn" type="button" data-tree-more-group="${group.id}" aria-label="Group actions" title="Actions">
+                ${canWrite() ? `<button class="cc-tree-more-btn" type="button" data-tree-more-group="${group.id}" aria-label="Group actions" title="Actions">` : `<button class="cc-tree-more-btn" type="button" style="display:none !important;" disabled>`}
                   <i class="fas fa-ellipsis-vertical"></i>
                 </button>
               </div>
@@ -566,7 +624,12 @@
         }
 
         const catActions = document.getElementById('ccCatalogActions');
-        if (catActions) {
+        if (!canWrite()) {
+            if (catActions) catActions.innerHTML = '';
+            const ga = document.getElementById('ccGroupActions');
+            if (ga) ga.innerHTML = '';
+        }
+        if (catActions && canWrite()) {
             const isCatActive = Boolean(catalog && Number(catalog.enabled_for_projects) && Number(catalog.active));
             catActions.innerHTML = `
                 <button class="cc-action-pill" data-catalog-action="add" title="Add new catalog"><i class="fas fa-plus"></i> New</button>
@@ -580,7 +643,7 @@
         }
 
         const grpActions = document.getElementById('ccGroupActions');
-        if (grpActions) {
+        if (grpActions && canWrite()) {
             const isGrpActive = Boolean(group && Number(group.enabled_for_projects) && Number(group.active));
             grpActions.innerHTML = `
                 <button class="cc-action-pill" data-group-action="add" title="Add new group"><i class="fas fa-plus"></i> New</button>
@@ -764,7 +827,7 @@
 
     function updateBulkToolbar() {
         const toolbar = document.getElementById('ccBulkToolbar');
-        if (!toolbar) return;
+        if (!toolbar || !canWrite()) { if (toolbar) toolbar.hidden = true; return; }
         const isArchived = selection.view === 'archived';
         const count = isArchived
             ? (selectedItemIds.size + selectedArchivedCatalogIds.size + selectedArchivedGroupIds.size)
@@ -877,7 +940,7 @@
         return `
             <tr class="cc-archived-row cc-archived-catalog-row" data-catalog-id="${cat.id}">
                 <td class="col-check-cell">
-                    <input type="checkbox" class="cc-archived-cat-check" data-catalog-id="${cat.id}" ${isChecked ? 'checked' : ''} aria-label="Select catalog ${esc(cat.name)}">
+                    ${canWrite() ? `<input type="checkbox" class="cc-archived-cat-check" data-catalog-id="${cat.id}" ${isChecked ? 'checked' : ''} aria-label="Select catalog ${esc(cat.name)}">` : ''}
                 </td>
                 <td class="col-name-cell">
                     <div class="cc-item-primary-row">
@@ -905,7 +968,7 @@
         return `
             <tr class="cc-archived-row cc-archived-group-row" data-group-id="${grp.id}">
                 <td class="col-check-cell">
-                    <input type="checkbox" class="cc-archived-grp-check" data-group-id="${grp.id}" ${isChecked ? 'checked' : ''} aria-label="Select group ${esc(grp.name)}">
+                    ${canWrite() ? `<input type="checkbox" class="cc-archived-grp-check" data-group-id="${grp.id}" ${isChecked ? 'checked' : ''} aria-label="Select group ${esc(grp.name)}">` : ''}
                 </td>
                 <td class="col-name-cell">
                     <div class="cc-item-primary-row">
@@ -959,7 +1022,7 @@
         return `
             <tr class="${isArchived ? 'cc-archived-row' : ''} ${isSelected ? 'is-selected' : ''}" data-item-row="${item.id}">
                 <td class="col-check-cell">
-                    <input type="checkbox" class="cc-item-check" data-item-id="${item.id}" ${isChecked ? 'checked' : ''} aria-label="Select ${esc(item.name)}">
+                    ${canWrite() ? `<input type="checkbox" class="cc-item-check" data-item-id="${item.id}" ${isChecked ? 'checked' : ''} aria-label="Select ${esc(item.name)}">` : ''}
                 </td>
                 <td class="col-name-cell" data-item-details="${item.id}" role="button" tabindex="0" title="Inspect ${esc(item.name)}">
                     <div class="cc-item-primary-row">
@@ -978,7 +1041,7 @@
                 <td class="col-cat-cell">${renderCatalogPill(item.catalog_name, item.catalog_id)}</td>
                 <td class="col-group-cell cc-muted-cell">${esc(item.group_name || '-')}</td>
                 <td class="col-actions-cell">
-                    ${hideActions ? '' : `
+                    ${hideActions || !canWrite() ? '' : `
                         <div class="cc-row-actions">
                             <button class="cc-btn cc-row-menu-toggle" type="button" data-item-menu="${item.id}" aria-label="Actions for ${esc(item.name)}" aria-expanded="false"><i class="fas fa-ellipsis-vertical" aria-hidden="true"></i></button>
                         </div>
@@ -1090,6 +1153,7 @@
     }
 
     function openItemRowMenu(triggerBtn, itemId) {
+        if (!canWrite()) return;
         itemId = Number(itemId);
         const menu = document.getElementById('ccRowItemFloatingMenu');
         if (!menu) return;
@@ -1217,6 +1281,7 @@
     }
 
     async function catalogAction(action) {
+        if (!canWrite()) return;
         const catalog = currentCatalog();
         if (action === 'add') return openCatalogModal();
         if (!catalog) return;
@@ -1255,6 +1320,7 @@
     }
 
     async function groupAction(action) {
+        if (!canWrite()) return;
         const group = currentGroup();
         if (action === 'add') return openGroupModal(null, selection.catalogId);
         if (!group) return;
@@ -1287,6 +1353,7 @@
     let archivingGroupId = null;
 
     function openCatalogModal(catalog = null) {
+        if (!canWrite()) return;
         catalogEditor = catalog;
         const modal = document.getElementById('ccCatalogModal');
         if (!modal) return;
@@ -1304,6 +1371,11 @@
     }
 
     async function saveCatalog(event) {
+        if (!canWrite()) {
+            event.preventDefault();
+            showError('Read-only mode: mutations are not permitted.');
+            return;
+        }
         event.preventDefault();
         const button = document.getElementById('ccCatalogSave');
         const error = document.getElementById('ccCatalogError');
@@ -1336,6 +1408,7 @@
     }
 
     function openGroupModal(group = null, prefillCatalogId = null, prefillParentId = null) {
+        if (!canWrite()) return;
         if (!state.catalogs.length) return showError('Create a catalog before adding groups.');
         groupEditor = group;
         const modal = document.getElementById('ccGroupModal');
@@ -1396,7 +1469,7 @@
         select._syncCustom?.();
     }
 
-    async function saveGroup(event) {
+    async function saveGroup(event) { if (!canWrite()) { event?.preventDefault?.(); showError('Read-only mode: mutations are not permitted.'); return; }
         event.preventDefault();
         const button = document.getElementById('ccGroupSave');
         const error = document.getElementById('ccGroupError');
@@ -1453,13 +1526,13 @@
         }
     }
 
-    function reorderEntity(kind,entity,direction){const list=(kind==='catalog'?state.catalogs:state.groups.filter(g=>Number(g.catalog_id)===Number(entity.catalog_id)&&Number(g.parent_group_id||0)===Number(entity.parent_group_id||0))).filter(row=>!row.deleted_at).slice().sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||Number(a.id)-Number(b.id));const index=list.findIndex(row=>Number(row.id)===Number(entity.id)),other=direction==='up'?index-1:index+1;if(index<0||other<0||other>=list.length)return;[list[index],list[other]]=[list[other],list[index]];mutate(kind==='catalog'?'reorder_catalogs':'reorder_groups',kind==='catalog'?{ordered_ids:list.map(row=>row.id)}:{catalog_id:entity.catalog_id,parent_group_id:entity.parent_group_id||'',ordered_ids:list.map(row=>row.id)});}
+    function reorderEntity(kind,entity,direction){ if (!canWrite()) return; const list=(kind==='catalog'?state.catalogs:state.groups.filter(g=>Number(g.catalog_id)===Number(entity.catalog_id)&&Number(g.parent_group_id||0)===Number(entity.parent_group_id||0))).filter(row=>!row.deleted_at).slice().sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||Number(a.id)-Number(b.id));const index=list.findIndex(row=>Number(row.id)===Number(entity.id)),other=direction==='up'?index-1:index+1;if(index<0||other<0||other>=list.length)return;[list[index],list[other]]=[list[other],list[index]];mutate(kind==='catalog'?'reorder_catalogs':'reorder_groups',kind==='catalog'?{ordered_ids:list.map(row=>row.id)}:{catalog_id:entity.catalog_id,parent_group_id:entity.parent_group_id||'',ordered_ids:list.map(row=>row.id)});}
 
-    function openGroupArchive(group){archivingGroupId=Number(group.id);const descendants=state.groups.filter(g=>Number(g.parent_group_id||0)===Number(group.id));const items=(state.allItems||state.items).filter(i=>Number(i.catalog_group_id||0)===Number(group.id));document.getElementById('ccArchiveGroupImpact').textContent=`${items.length} item(s) and ${descendants.length} direct subgroup(s) are affected. Items will be moved, never deleted.`;const target=document.getElementById('ccArchiveGroupTarget');target.innerHTML='<option value="">Ungrouped</option>'+state.groups.filter(g=>Number(g.catalog_id)===Number(group.catalog_id)&&Number(g.id)!==Number(group.id)&&!g.deleted_at).map(g=>`<option value="${g.id}">${esc(g.name)}</option>`).join('');document.getElementById('ccArchiveGroupTree').checked=descendants.length>0;document.getElementById('ccArchiveGroupModal').classList.add('open');}
-    async function archiveGroup(event){event.preventDefault();const group=state.groups.find(g=>Number(g.id)===archivingGroupId),error=document.getElementById('ccArchiveGroupError');if(!group)return;error.hidden=true;try{const data=await request('delete_group',revisionPayload(group,{id:group.id,target_group_id:document.getElementById('ccArchiveGroupTarget').value,archive_tree:document.getElementById('ccArchiveGroupTree').checked?1:0}));state=data.data;selection={view:'catalog',catalogId:Number(group.catalog_id),groupId:null};closeGroupArchive();render();}catch(err){error.textContent=err.message;error.hidden=false;}}
+    function openGroupArchive(group){ if (!canWrite()) return; archivingGroupId=Number(group.id);const descendants=state.groups.filter(g=>Number(g.parent_group_id||0)===Number(group.id));const items=(state.allItems||state.items).filter(i=>Number(i.catalog_group_id||0)===Number(group.id));document.getElementById('ccArchiveGroupImpact').textContent=`${items.length} item(s) and ${descendants.length} direct subgroup(s) are affected. Items will be moved, never deleted.`;const target=document.getElementById('ccArchiveGroupTarget');target.innerHTML='<option value="">Ungrouped</option>'+state.groups.filter(g=>Number(g.catalog_id)===Number(group.catalog_id)&&Number(g.id)!==Number(group.id)&&!g.deleted_at).map(g=>`<option value="${g.id}">${esc(g.name)}</option>`).join('');document.getElementById('ccArchiveGroupTree').checked=descendants.length>0;document.getElementById('ccArchiveGroupModal').classList.add('open');}
+    async function archiveGroup(event){ if (!canWrite()) { event?.preventDefault?.(); showError('Read-only mode: mutations are not permitted.'); return; } event.preventDefault();const group=state.groups.find(g=>Number(g.id)===archivingGroupId),error=document.getElementById('ccArchiveGroupError');if(!group)return;error.hidden=true;try{const data=await request('delete_group',revisionPayload(group,{id:group.id,target_group_id:document.getElementById('ccArchiveGroupTarget').value,archive_tree:document.getElementById('ccArchiveGroupTree').checked?1:0}));state=data.data;selection={view:'catalog',catalogId:Number(group.catalog_id),groupId:null};closeGroupArchive();render();}catch(err){error.textContent=err.message;error.hidden=false;}}
     function closeGroupArchive(){document.getElementById('ccArchiveGroupModal')?.classList.remove('open');archivingGroupId=null;}
 
-    async function itemAction(action, id) {
+    async function itemAction(action, id) { if (!canWrite()) return;
         const item = (state.allItems?.length?state.allItems:state.items).find(row => Number(row.id) === id);
         if (!item) return;
         if (action === 'edit') return openItemModal(item);
@@ -1496,7 +1569,7 @@
         }
     }
 
-    async function handleArchivedCatalogAction(action, id) {
+    async function handleArchivedCatalogAction(action, id) { if (!canWrite()) return;
         const cat = (state.archivedCatalogs || []).find(c => Number(c.id) === id);
         if (!cat) return;
         if (action === 'restore') return mutate('restore_catalog', revisionPayload(cat, { id }));
@@ -1516,7 +1589,7 @@
         }
     }
 
-    async function handleArchivedGroupAction(action, id) {
+    async function handleArchivedGroupAction(action, id) { if (!canWrite()) return;
         const grp = (state.archivedGroups || []).find(g => Number(g.id) === id);
         if (!grp) return;
         if (action === 'restore') return mutate('restore_group', revisionPayload(grp, { id }));
@@ -1792,7 +1865,7 @@
         }
     }
 
-    function openItemModal(item = null) {
+    function openItemModal(item = null) { if (!canWrite()) return;
         document.querySelectorAll('.pro-custom-dropdown.is-open').forEach(d => d.classList.remove('is-open'));
         modalReturnFocus = document.activeElement instanceof HTMLElement ? document.activeElement : null;
         editingItemId = item ? Number(item.id) : null;
@@ -2289,7 +2362,7 @@
         document.getElementById('ccAssemblyTotals').textContent = `Cost ${money(totalCost)} · Labor ${formatLaborHours(totalLabor)}`;
     }
 
-    function openMoveItemModal(itemOrIds) {
+    function openMoveItemModal(itemOrIds) { if (!canWrite()) return;
         if (Array.isArray(itemOrIds)) {
             movingItemIds = itemOrIds.map(Number);
             movingItemId = null;
@@ -2317,7 +2390,7 @@
         document.getElementById('ccMoveItemModal').classList.add('open');
     }
 
-    function openPasteItemModal() {
+    function openPasteItemModal() { if (!canWrite()) return;
         if (!clipboardItemIds.length) return showError('No items copied to clipboard.');
         const modal = document.getElementById('ccPasteItemModal');
         if (!modal) return;
@@ -2349,7 +2422,7 @@
         document.getElementById('ccPasteItemModal')?.classList.remove('open');
     }
 
-    async function pasteCopiedItems(event) {
+    async function pasteCopiedItems(event) { if (!canWrite()) { event?.preventDefault?.(); showError('Read-only mode: mutations are not permitted.'); return; }
         event.preventDefault();
         if (!clipboardItemIds.length) return;
         const destCat = Number(document.getElementById('ccPasteCatalog').value);
@@ -2396,7 +2469,7 @@
         }
     }
 
-    async function saveItem(event) {
+    async function saveItem(event) { if (!canWrite()) { event?.preventDefault?.(); showError('Read-only mode: mutations are not permitted.'); return; }
         event.preventDefault();
         const unitCost = Number(document.getElementById('ccItemUnitCost').value);
         const laborHours = Number(document.getElementById('ccItemLaborHours').value);
@@ -2511,21 +2584,21 @@
 
     function showItemFormError(message){const el=document.getElementById('ccItemFormError');el.textContent=message;el.hidden=false;el.scrollIntoView?.({block:'nearest'});}
 
-    function addAssemblyPart(childId) {
+    function addAssemblyPart(childId) { if (!canWrite()) return;
         toggleAssemblyComponentSelection(childId);
     }
 
-    function updateAssemblyPart(id){const row=document.querySelector(`[data-part-row="${id}"]`);const ratio=row.querySelector('[data-part-ratio]')?.value||state.assemblyParts.find(p=>Number(p.id)===id)?.ratio_type||'per_unit';request('update_assembly_part',assemblyContext({id,quantity:Number(row.querySelector('[data-part-quantity]').value),ratio_type:ratio,spacing_value:ratio==='spacing_based'?Number(row.querySelector('[data-part-spacing]')?.value||1):null,waste_factor_percent:Number(row.querySelector('[data-part-waste]')?.value||0),notes:row.querySelector('[data-part-notes]')?.value||''})).then(data=>{state=data.data;renderAssemblyParts();}).catch(err=>showItemFormError(err.message));}
+    function updateAssemblyPart(id){ if (!canWrite()) return; const row=document.querySelector(`[data-part-row="${id}"]`);const ratio=row.querySelector('[data-part-ratio]')?.value||state.assemblyParts.find(p=>Number(p.id)===id)?.ratio_type||'per_unit';request('update_assembly_part',assemblyContext({id,quantity:Number(row.querySelector('[data-part-quantity]').value),ratio_type:ratio,spacing_value:ratio==='spacing_based'?Number(row.querySelector('[data-part-spacing]')?.value||1):null,waste_factor_percent:Number(row.querySelector('[data-part-waste]')?.value||0),notes:row.querySelector('[data-part-notes]')?.value||''})).then(data=>{state=data.data;renderAssemblyParts();}).catch(err=>showItemFormError(err.message));}
 
-    function moveAssemblyPart(id,direction){const parts=state.assemblyParts.filter(p=>Number(p.assembly_catalog_item_id)===Number(editingItemId)).sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||Number(a.id)-Number(b.id));const index=parts.findIndex(p=>Number(p.id)===id),other=direction==='up'?index-1:index+1;if(index<0||other<0||other>=parts.length)return;[parts[index],parts[other]]=[parts[other],parts[index]];request('reorder_assembly_parts',assemblyContext({assembly_catalog_item_id:editingItemId,ordered_ids:parts.map(p=>p.id)})).then(data=>{state=data.data;renderAssemblyParts();}).catch(err=>showItemFormError(err.message));}
+    function moveAssemblyPart(id,direction){ if (!canWrite()) return; const parts=state.assemblyParts.filter(p=>Number(p.assembly_catalog_item_id)===Number(editingItemId)).sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||Number(a.id)-Number(b.id));const index=parts.findIndex(p=>Number(p.id)===id),other=direction==='up'?index-1:index+1;if(index<0||other<0||other>=parts.length)return;[parts[index],parts[other]]=[parts[other],parts[index]];request('reorder_assembly_parts',assemblyContext({assembly_catalog_item_id:editingItemId,ordered_ids:parts.map(p=>p.id)})).then(data=>{state=data.data;renderAssemblyParts();}).catch(err=>showItemFormError(err.message));}
 
-    function deleteAssemblyPart(id) {
+    function deleteAssemblyPart(id) { if (!canWrite()) return;
         stagedAssemblyComponents.delete(Number(id));
         renderAssemblyParts();
         renderAssemblyBrowserResults();
     }
 
-    async function moveItem(event) {
+    async function moveItem(event) { if (!canWrite()) { event?.preventDefault?.(); showError('Read-only mode: mutations are not permitted.'); return; }
         event.preventDefault();
         const destCat = document.getElementById('ccMoveCatalog').value;
         const destGrp = document.getElementById('ccMoveGroup').value;
@@ -2591,7 +2664,7 @@
         modalReturnFocus = null;
     }
 
-    function mutate(action, payload) {
+    function mutate(action, payload) { if (!canWrite()) { showError('Read-only mode: mutations are not permitted.'); return; }
         request(action, payload)
             .then(data => {
                 state = data.data;
@@ -2632,7 +2705,7 @@
         }, 18000);
     }
 
-    function openTreeMoreMenu(triggerBtn, type, id) {
+    function openTreeMoreMenu(triggerBtn, type, id) { if (!canWrite()) return;
         id = Number(id);
         const menu = document.getElementById('ccTreeMoreMenu');
         if (!menu) return;
@@ -3596,7 +3669,7 @@
 
             catSelect?.addEventListener('change', updateIoGroups);
 
-            function openIoModal(mode = 'export') {
+            function openIoModal(mode = 'export') { if (mode === 'import' && !canWrite()) return;
                 if (!catSelect) return;
                 catSelect.innerHTML = '';
                 const cats = state.catalogs || [];
@@ -3654,6 +3727,7 @@
                     }
                     setTimeout(closeIoModal, 1500);
                 } else {
+                    if (!canWrite()) { if (errEl) { errEl.textContent = 'Read-only mode: mutations are not permitted.'; errEl.style.display = 'block'; } return; }
                     const file = fileInput.files?.[0];
                     if (!file) {
                         if (errEl) {
@@ -3794,5 +3868,35 @@
             renderItems();
         });
         themeObserver.observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+    } catch (_) {}
+    try {
+        if (typeof window !== 'undefined') {
+        window.CostCatalogClient = {
+            canWrite,
+            isReadOnly,
+            request,
+            mutate,
+            saveItem,
+            moveItem,
+            saveCatalog,
+            saveGroup,
+            archiveGroup,
+            pasteCopiedItems,
+            catalogAction,
+            groupAction,
+            itemAction,
+            openCatalogModal,
+            openGroupModal,
+            openItemModal,
+            openMoveItemModal,
+            openPasteItemModal,
+            handleArchivedCatalogAction,
+            handleArchivedGroupAction,
+            addAssemblyPart,
+            updateAssemblyPart,
+            moveAssemblyPart,
+            deleteAssemblyPart
+        };
+    }
     } catch (_) {}
 })();

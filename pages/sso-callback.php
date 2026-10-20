@@ -7,8 +7,8 @@ declare(strict_types=1);
  * Implements strict order of operations:
  * 1. Validates single-use state and consumes PKCE code verifier (SsoFlow).
  * 2. Obtains identity through server-to-server token exchange + userinfo (OAuthIdentityProviderClient).
- * 3. Resolves exact active local link and active local user (FederatedIdentityRepository).
- * 4. Applies authorization boundary with role whitelist and anti-elevation (SsoAuthorization).
+ * 3. Provisions or synchronizes Takeoff shadow user and exact link (FederatedIdentityRepository).
+ * 4. Applies authorization boundary with role whitelist and central display identity (SsoAuthorization).
  * 5. Establishes session shape and non-sensitive federation metadata (SsoSession).
  * 6. Fail-closed: any failure produces no partial session and redirects to local login with sanitized error.
  */
@@ -120,12 +120,14 @@ try {
         $_SESSION['sso_sub'],
         $_SESSION['sso_hub_user_id'],
         $_SESSION['sso_authenticated_at'],
-        $_SESSION['federation']
+        $_SESSION['federation'],
+        $_SESSION['password'],
+        $_SESSION['email']
     );
 
     // Select sanitized generic error parameter
     $msg = $e->getMessage();
-    if (str_contains($msg, 'unmapped') || str_contains($msg, 'unauthorized') || str_contains($msg, 'inactive') || str_contains($msg, 'role')) {
+    if (str_contains($msg, 'unmapped') || str_contains($msg, 'unauthorized') || str_contains($msg, 'inactive') || str_contains($msg, 'role') || str_contains($msg, 'provision')) {
         takeoff_redirect('/pages/login.php?error=unauthorized');
     } else {
         takeoff_redirect('/pages/login.php?error=sso_failed');

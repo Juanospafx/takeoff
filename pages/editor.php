@@ -1,5 +1,5 @@
 <?php
-// editor.php - Takeoff editor. Runs independently from auth/roles.
+// editor.php - Takeoff editor with central SSO capability enforcement.
 if (session_status() !== PHP_SESSION_ACTIVE) {
     session_start();
 }
@@ -8,6 +8,21 @@ header('Pragma: no-cache');
 header('Expires: 0');
 require_once __DIR__ . '/../core/db/connection.php';
 require_once __DIR__ . '/../core/files/upload_storage.php';
+require_once __DIR__ . '/../core/auth/session.php';
+
+$authUser = SessionGuard::getAuthenticatedUser($_SESSION ?? null);
+$authRole = $authUser['role'] ?? SessionGuard::ROLE_VIEWER;
+$canWrite = $authRole === SessionGuard::ROLE_ADMIN;
+$authDisplayName = trim((string) ($authUser['username'] ?? ''));
+if ($authDisplayName === '') {
+    $authDisplayName = $canWrite ? 'Admin' : 'Viewer';
+}
+$clientAuthMetadata = [
+    'displayName' => $authDisplayName,
+    'role' => $authRole,
+    'canWrite' => $canWrite,
+    'readOnly' => !$canWrite,
+];
 
 $id = $_GET['id'] ?? 0;
 
@@ -611,7 +626,53 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
     </style>
 </head>
 
-<body class="<?= $embedded ? 'embedded-editor' : '' ?>">
+<body class="<?= $embedded ? 'embedded-editor' : '' ?>" data-user-role="<?= htmlspecialchars($authRole, ENT_QUOTES, 'UTF-8') ?>" data-can-write="<?= $canWrite ? 'true' : 'false' ?>" data-read-only="<?= $canWrite ? 'false' : 'true' ?>">
+    <script id="takeoff-auth-metadata" type="application/json"><?= json_encode($clientAuthMetadata, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
+    <script>
+        (function () {
+            var fallback = { displayName: 'Viewer', role: 'viewer', canWrite: false, readOnly: true };
+            try {
+                var node = document.getElementById('takeoff-auth-metadata');
+                var parsed = node ? JSON.parse(node.textContent || '{}') : fallback;
+                window.TakeoffAuth = Object.freeze({
+                    displayName: String(parsed.displayName || fallback.displayName),
+                    role: String(parsed.role || fallback.role),
+                    canWrite: parsed.canWrite === true,
+                    readOnly: parsed.canWrite !== true
+                });
+            } catch (_) { window.TakeoffAuth = Object.freeze(fallback); }
+            window.takeoffCanWrite = function () { return window.TakeoffAuth?.canWrite === true; };
+            window.takeoffRequireWrite = function () {
+                if (window.takeoffCanWrite()) return true;
+                window.showToast?.('Read-only access: this action requires an administrator.', 'warning');
+                return false;
+            };
+
+            if (!window.takeoffCanWrite()) {
+                var nativeFetch = window.fetch.bind(window);
+                window.fetch = function (input, init) {
+                    var method = String(init?.method || (input instanceof Request ? input.method : 'GET') || 'GET').toUpperCase();
+                    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+                        return Promise.reject(new Error('Read-only access: mutation request blocked.'));
+                    }
+                    return nativeFetch(input, init);
+                };
+                document.addEventListener('DOMContentLoaded', function () {
+                    document.querySelectorAll('#btn-save,#btn-delete-selected,#btn-del-cal,#btn-generate,#btn-draw,#btn-text,#btn-cloud,#btn-stamp,#btn-measure,#btn-cal,[onclick*="finishCal"],[onclick*="clearCalLine"],[onclick*="deleteSelected"],[onclick*="submitReport"],[onclick*="addText"],[onclick*="addCloud"],[onclick*="addPin"],[onclick*="addStamp"]').forEach(function (element) {
+                        element.hidden = true;
+                        element.setAttribute('aria-hidden', 'true');
+                        if ('disabled' in element) element.disabled = true;
+                    });
+                    document.body.classList.add('takeoff-read-only');
+                });
+                document.addEventListener('click', function (event) {
+                    var mutation = event.target?.closest?.('#btn-save,#btn-delete-selected,#btn-del-cal,#btn-generate,#btn-draw,#btn-text,#btn-cloud,#btn-stamp,#btn-measure,#btn-cal,[onclick*="finishCal"],[onclick*="clearCalLine"],[onclick*="deleteSelected"],[onclick*="submitReport"]');
+                    if (!mutation) return;
+                    event.preventDefault(); event.stopImmediatePropagation();
+                }, true);
+            }
+        })();
+    </script>
 
     <div class="sidebar-overlay" id="sidebarOverlay" onclick="closeAllOverlays()"></div>
 
@@ -1068,6 +1129,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             }
         }
         function persistDraftAnnotations() {
+            if (!window.takeoffCanWrite()) return false;
             try {
                 localStorage.setItem(draftAnnotationsKey, JSON.stringify(allAnnotations));
             } catch (e) {
@@ -1209,6 +1271,9 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
 
         // Calibration persistence is isolated by estimate + file + page.
         async function takeoffScaleRequest(action, payload = {}, method = 'GET') {
+            if (method !== 'GET' && !window.takeoffRequireWrite()) {
+                throw new Error('Read-only access: scale mutation blocked.');
+            }
             const endpoint = '../api/takeoff.php';
             const options = method === 'GET' ? {} : {
                 method: 'POST',
@@ -1251,6 +1316,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
 
         function saveCalibrationForPage(scaleName, calibration = {}, applyAll = false) {
+            if (!window.takeoffCanWrite()) return false;
             const pageCount = pdfDoc ? pdfDoc.numPages : 1;
             if (applyAll) {
                 for (let p = 1; p <= pageCount; p++) {
@@ -1843,6 +1909,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
 
         function saveCurrentPageAnnotations() {
+            if (!window.takeoffCanWrite()) return false;
             const fabricJson = JSON.stringify(canvas.toJSON(['isMeasureLine', 'labelId', 'labelOffsetX', 'labelOffsetY']));
             if (!useKonvaRuler) {
                 allAnnotations[pageNum] = fabricJson;
@@ -2055,6 +2122,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
 
         function removeKonvaNote(note) {
+            if (!window.takeoffRequireWrite()) return false;
             if (!note) return;
             if (konvaSelectedNote === note) konvaSelectedNote = null;
             if (konvaSelectedNode && konvaSelectedNode.type === 'note' && konvaSelectedNode.ref === note) {
@@ -2083,6 +2151,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
 
         function createKonvaNote(pos, text = 'annotation', targetPage = pageNum) {
+            if (!window.takeoffRequireWrite()) return false;
             const preset = getResponsiveNotePreset();
             const group = new Konva.Group({ x: pos.x, y: pos.y, draggable: true });
             const padX = 10;
@@ -2180,6 +2249,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
 
         function createKonvaCloud(pos, targetPage = pageNum, strokeWidth = 3.5, initialW = 180, initialH = 120, cloudColor = '#ef4444') {
+            if (!window.takeoffRequireWrite()) return false;
             const group = new Konva.Group({ x: pos.x, y: pos.y, draggable: true });
 
             const cloud = {
@@ -2315,6 +2385,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
 
         function createKonvaPin(pos, targetPage = pageNum) {
+            if (!window.takeoffRequireWrite()) return false;
             const group = new Konva.Group({ x: pos.x, y: pos.y, draggable: true });
             const pinPath = new Konva.Path({
                 data: 'M12 2C8.13 2 5 5.13 5 9c0 5.25 7 13 7 13s7-7.75 7-13c0-3.87-3.13-7-7-7zm0 9.5c-1.38 0-2.5-1.12-2.5-2.5s1.12-2.5 2.5-2.5 2.5 1.12 2.5 2.5-1.12 2.5-2.5 2.5z',
@@ -2361,6 +2432,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
 
         function deleteKonvaSelection() {
+            if (!window.takeoffRequireWrite()) return false;
             if (!konvaSelectedNode) return false;
             const { type, ref } = konvaSelectedNode;
             if (type === 'ruler') {
@@ -3050,6 +3122,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
 
         // --- DELETE FUNCTIONALITY ---
         function deleteSelected() {
+            if (!window.takeoffRequireWrite()) return false;
             const takeoffSelectionIds = window.projectTakeoffGetSelectionIds?.() || [];
             if (window.projectTakeoffDeleteCurrentSelection?.()) {
                 showToast("Selection deleted", "success");
@@ -3632,6 +3705,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
 
         // --- HISTORY ---
         function saveHistory() {
+            if (!window.takeoffCanWrite()) return false;
             if (historyProcessing) return;
             if (historyIndex < undoStack.length - 1) { undoStack = undoStack.slice(0, historyIndex + 1); }
             const json = JSON.stringify(canvas.toJSON(['isMeasureLine', 'isMeasureLabel', 'labelId', 'id']));
@@ -3852,6 +3926,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
 
         function addStamp(text, color) {
+            if (!window.takeoffRequireWrite()) return false;
             setMode('smart');
             const center = canvas.getVpCenter();
             const rect = new fabric.Rect({ width: 200, height: 80, rx: 10, ry: 10, fill: 'transparent', stroke: color, strokeWidth: 5, originX: 'center', originY: 'center' });
@@ -4073,6 +4148,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
 
         function clearCalLine() {
+            if (!window.takeoffRequireWrite()) return false;
             if (calLineObject) { canvas.remove(calLineObject); calLineObject = null; }
             document.getElementById('cal-actions').style.display = 'none';
             document.getElementById('cal-hint').style.display = 'block';
@@ -4083,6 +4159,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
 
         function finishCal(save, applyAll = false) {
+            if (!window.takeoffRequireWrite()) return false;
             if (save) {
                 const val = parseFloat(document.getElementById('cal-val').value);
                 if (val > 0) {
@@ -4160,6 +4237,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
 
         function addText() {
+            if (!window.takeoffRequireWrite()) return false;
             setMode('smart');
             if (useKonvaRuler) {
                 startPlacementTool('note');
@@ -4190,6 +4268,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
 
         function addCloud() {
+            if (!window.takeoffRequireWrite()) return false;
             setMode('smart');
             showPropSection('cloud');
             syncCloudStrokeControl();
@@ -4199,6 +4278,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
 
         function addPin() {
+            if (!window.takeoffRequireWrite()) return false;
             setMode('smart');
             if (!useKonvaRuler) return false;
             startPlacementTool('pin');
@@ -4207,6 +4287,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         window.addPin = addPin;
 
         function updateSelectedNoteTypography(params = {}) {
+            if (!window.takeoffRequireWrite()) return false;
             if (!konvaSelectedNote || !konvaSelectedNote.label) return false;
             if (params.fontSize && isFinite(params.fontSize)) {
                 konvaSelectedNote.label.fontSize(Number(params.fontSize));
@@ -4222,6 +4303,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         window.updateSelectedNoteTypography = updateSelectedNoteTypography;
 
         function updateSelectedCloudColor(color) {
+            if (!window.takeoffRequireWrite()) return false;
             if (!konvaSelectedNode || konvaSelectedNode.type !== 'cloud' || !konvaSelectedNode.ref) return false;
             const cloud = konvaSelectedNode.ref;
             cloud.stroke = color;
@@ -4337,6 +4419,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
 
         function addReportAttachments(fileList) {
+            if (!window.takeoffRequireWrite()) return false;
             const files = Array.from(fileList || []);
             for (const file of files) {
                 if (reportAttachments.length >= REPORT_ATTACH_MAX_FILES) {
@@ -4404,6 +4487,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
 
         async function submitReport() {
+            if (!window.takeoffRequireWrite()) return false;
             const btn = document.getElementById('btn-generate');
             btn.disabled = true; btn.innerHTML = '<i class="fas fa-spinner fa-spin me-2"></i> Generating...';
             try {

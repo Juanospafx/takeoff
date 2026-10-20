@@ -1,11 +1,24 @@
 <?php
 // Standalone Cost Catalog module with Brightronix DNA & Procore style.
 if (session_status() !== PHP_SESSION_ACTIVE) {
-    session_start();
+    if (PHP_SAPI !== 'cli' || !isset($_SESSION)) {
+        @session_start();
+    }
+}
+if (!isset($_SESSION) || !is_array($_SESSION)) {
+    $_SESSION = [];
 }
 if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_io_csrf_token'])) {
     $_SESSION['catalog_io_csrf_token'] = bin2hex(random_bytes(32));
 }
+
+require_once __DIR__ . '/../core/auth/session.php';
+$authUser = SessionGuard::getAuthenticatedUser($_SESSION ?? null);
+$authRole = $authUser['role'] ?? SessionGuard::ROLE_VIEWER;
+$isViewer = ($authRole === SessionGuard::ROLE_VIEWER);
+$isAdmin = ($authRole === SessionGuard::ROLE_ADMIN);
+$canWrite = $isAdmin;
+$readOnly = !$canWrite;
 ?>
 <!doctype html>
 <html lang="en">
@@ -19,6 +32,7 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="../assets/global_tools.css?v=<?= time() ?>">
+    <link rel="stylesheet" href="../assets/sso_readonly.css?v=<?= time() ?>">
     <script>
         (function () {
             try {
@@ -67,6 +81,7 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
                 </div>
             </div>
             <div class="project-header-actions cc-header-actions">
+                <?php if ($canWrite): ?>
                 <button class="bb-btn-procore-primary" id="ccAddItem" type="button">
                     <i class="fas fa-plus"></i> Create New Item
                 </button>
@@ -76,13 +91,16 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
                 <button class="bb-control-btn cc-btn-head" id="ccAddCatalogTop" type="button" title="Create new catalog library">
                     <i class="fas fa-book-medical"></i> Add Catalog
                 </button>
+                <?php endif; ?>
                 <div class="cc-header-menu-wrap" style="position: relative; display: inline-block;">
                     <button class="bb-control-btn cc-btn-head" id="ccMoreActionsBtn" type="button" title="More options (Excel Import / Export / Templates)" aria-label="More options" aria-expanded="false" style="padding: 0 10px;">
                         <i class="fas fa-ellipsis-vertical"></i>
                     </button>
                     <div class="cc-row-item-floating-menu" id="ccHeaderMoreMenu" hidden style="position: absolute; right: 0; top: calc(100% + 4px); z-index: 1000; min-width: 200px; box-shadow: 0 4px 16px rgba(0,0,0,0.15);">
                         <button type="button" id="ccMenuExportCatalog">Export Master Catalog</button>
+                        <?php if ($canWrite): ?>
                         <button type="button" id="ccMenuImportCatalog">Import Master Catalog</button>
+                        <?php endif; ?>
                         <div class="cc-menu-divider" style="height: 1px; background: var(--border-soft); margin: 4px 0;"></div>
                         <button type="button" id="ccMenuDownloadMasterTemplate">Download Master Template</button>
                     </div>
@@ -103,9 +121,11 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
                     <span class="cc-sidebar-eyebrow">Company Tool</span>
                     <strong class="cc-sidebar-title">Catalog Library</strong>
                 </div>
+                <?php if ($canWrite): ?>
                 <button class="pro-add-btn" id="ccAddCatalog" type="button" title="Add catalog" aria-label="Add catalog">
                     <i class="fas fa-plus" aria-hidden="true"></i>
                 </button>
+                <?php endif; ?>
             </div>
             <div class="cc-sidebar-nav-fixed">
                 <button class="cc-tree-row static-view active" data-view="all" type="button">
@@ -158,6 +178,7 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
                         </div>
                     </div>
                     <div class="cc-table-controls-right bb-table-controls-right">
+                        <?php if ($canWrite): ?>
                         <!-- Bulk Actions Toolbar (Requests 1, 13 & 14 styled like takeoffSubheadItemInfo) -->
                         <div class="cc-bulk-toolbar takeoff-subhead-item-info" id="ccBulkToolbar" hidden title="Bulk actions">
                             <div class="takeoff-subhead-item-main">
@@ -193,6 +214,7 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
                                 <i class="fas fa-times"></i>
                             </button>
                         </div>
+                        <?php endif; ?>
                         <div class="bt-selector-wrap" id="ccSortByWrap">
                             <button class="bt-selector bt-company-tools-trigger bt-field-selector" id="ccSortByTrigger" type="button" aria-expanded="false" aria-haspopup="listbox" title="Sort items">
                                 <div class="bt-picker-lines">
@@ -314,14 +336,14 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
                             <table class="cc-table bb-table">
                                 <thead>
                                     <tr>
-                                        <th class="col-check"><input type="checkbox" id="ccSelectAll" aria-label="Select all items"></th>
+                                        <th class="col-check"><?php if ($canWrite): ?><input type="checkbox" id="ccSelectAll" aria-label="Select all items"><?php endif; ?></th>
                                         <th class="col-name">Item Name</th>
                                         <th class="col-uom">UoM</th>
                                         <th class="col-cost">Unit Cost</th>
                                         <th class="col-labor">Labor Time</th>
                                         <th class="col-cat">Catalog</th>
                                         <th class="col-group">Group</th>
-                                        <th class="col-actions"><span class="sr-only">Actions</span></th>
+                                        <th class="col-actions"><?php if ($canWrite): ?><span class="sr-only">Actions</span><?php endif; ?></th>
                                     </tr>
                                 </thead>
                                 <tbody id="ccItemsBody">
@@ -379,6 +401,7 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
     </div>
 </div>
 
+<?php if ($canWrite): ?>
 <!-- Modal 1: Create / Edit Catalog Item (Procore / Project Dashboard Style) -->
 <div class="cc-modal-backdrop pd-modal-backdrop" id="ccItemModal">
     <div class="cc-modal pd-modal cc-item-modal-lg">
@@ -857,6 +880,7 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
         </form>
     </div>
 </div>
+<?php endif; ?>
 
 <!-- Modal: Unified Master Excel Import / Export -->
 <div class="cc-modal-backdrop pd-modal-backdrop" id="ccIoModal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="ccIoModalTitle">
@@ -876,9 +900,11 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
                 <button type="button" class="bb-control-btn is-active" id="ccIoTabExport" style="flex: 1; justify-content: center; font-weight: 700;">
                     <i class="fas fa-file-export"></i> Export Master Excel
                 </button>
+                <?php if ($canWrite): ?>
                 <button type="button" class="bb-control-btn" id="ccIoTabImport" style="flex: 1; justify-content: center; font-weight: 700;">
                     <i class="fas fa-file-import"></i> Import Master Excel
                 </button>
+                <?php endif; ?>
             </div>
 
             <div class="cc-inline-error" id="ccIoModalError" role="alert" style="display:none; margin-bottom: 12px; padding: 10px 14px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 6px; color: #dc2626; font-size: 12.5px;"></div>
@@ -929,6 +955,7 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
                 </div>
             </div>
 
+            <?php if ($canWrite): ?>
             <!-- IMPORT TAB CONTENT -->
             <div id="ccIoImportSection" style="display:none;">
                 <div class="cc-field full">
@@ -957,6 +984,7 @@ if (empty($_SESSION['catalog_io_csrf_token']) || !is_string($_SESSION['catalog_i
                     </a>
                 </div>
             </div>
+            <?php endif; ?>
         </div>
 
         <div class="pd-modal-foot cc-modal-foot">
