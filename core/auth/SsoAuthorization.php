@@ -13,14 +13,18 @@ require_once __DIR__ . '/FederatedIdentityRepository.php';
  * Fail-closed Authorization Boundary for Takeoff SSO.
  *
  * Enforces strict authorization security invariants:
- * 1. Fail-closed: requires an explicitly active IdentityProfile and an exact active
- *    provider plus hub_user_id federated link resolved by FederatedIdentityRepository.
- * 2. Role preservation: preserves the persisted local role exactly; central userinfo roles
- *    never grant, map, or elevate local access.
- * 3. Role whitelist: accepts only valid Takeoff roles: 'admin', 'technician', 'viewer'.
- * 4. Zero default fallback: no missing, unknown, misspelled or central role can become
- *    admin or receive a default or fallback role.
- * 5. Sanitized errors: error messages are generic, sanitized, and reveal no sensitive
+ * 1. Fail-closed: requires an explicitly active IdentityProfile with exactly one
+ *    approved central role, admin or viewer.
+ * 2. Identity matching uses only exact provider plus sub; username and email are never
+ *    used for lookup, linking, or authorization.
+ * 3. An existing exact active link synchronizes the local shadow user's role to the central
+ *    approved role and keeps the immutable link unchanged. Authorization no longer trusts
+ *    a stale local role over the approved central role.
+ * 4. First login provisions an active local shadow user and exact active link transactionally.
+ * 5. Inactive central identities, inactive local users, and inactive links fail closed and
+ *    create or update nothing.
+ * 6. Unknown, empty, multiple, or malformed central roles fail closed and create or update nothing.
+ * 7. Sanitized errors: error messages are generic, sanitized, and reveal no sensitive
  *    tokens, secrets, credentials, or system paths.
  */
 class SsoAuthorization
@@ -30,11 +34,18 @@ class SsoAuthorization
     public const ROLE_VIEWER = 'viewer';
 
     /**
-     * Complete list of valid local Takeoff roles accepted by authorization.
+     * Approved central roles eligible for provisioning, synchronization, and authorization.
+     */
+    public const APPROVED_CENTRAL_ROLES = [
+        self::ROLE_ADMIN,
+        self::ROLE_VIEWER,
+    ];
+
+    /**
+     * Complete list of valid Takeoff SSO roles accepted by authorization.
      */
     public const ALLOWED_ROLES = [
         self::ROLE_ADMIN,
-        self::ROLE_TECHNICIAN,
         self::ROLE_VIEWER,
     ];
 
@@ -80,28 +91,40 @@ class SsoAuthorization
     }
 
     /**
-     * Resolves and authorizes an active central identity against local persistence.
+     * Resolves, provisions, synchronizes, and authorizes an active central identity.
      *
      * Invariants enforced:
      * - Requires an explicitly active IdentityProfile (or valid claims array).
-     * - Requires an exact active provider plus hub_user_id federated link.
-     * - Requires an associated active local user.
-     * - Requires an explicit local role strictly matching admin, technician, or viewer.
-     * - Central userinfo roles never grant or elevate local access.
-     * - No missing, unknown, or misspelled role can become admin or receive a default role.
+     * - Requires exactly one approved central role ('admin' or 'viewer').
+     * - Fails closed on unknown, empty, multiple, or malformed central roles.
+     * - Uses exact provider plus sub for identity resolution and linking.
+     * - Synchronizes local shadow user's role to the approved central role.
+     * - Inactive central, local, or link records fail closed and create or update nothing.
+     * - Established session presentation uses central display name or username.
      * - External errors are generic and sanitized.
      *
      * @param mixed $profile Central identity (IdentityProfile instance or claims array)
      * @param FederatedIdentityRepository|null $repository Optional repository override
-     * @return array{user_id: int, id: int, username: string, role: string, active: bool, provider: string, hub_user_id: string, link_id: int, link_active: bool}
+     * @return array{user_id: int, id: int, username: string, shadow_username: string, role: string, active: bool, provider: string, hub_user_id: string, sub: string, link_id: int, link_active: bool}
      * @throws InvalidArgumentException On missing profile, invalid arguments, or missing repository
-     * @throws RuntimeException On inactive central user, unmapped link, inactive user, or unauthorized role
+     * @throws RuntimeException On inactive central user, unapproved/malformed role, inactive records, or failure
      */
     public function authorize(mixed $profile, ?FederatedIdentityRepository $repository = null): array
     {
         $repo = $repository ?? $this->repository;
         if ($repo === null) {
             throw new InvalidArgumentException('Federated identity repository is required for authorization.');
+        }
+
+        // Strict role payload validation if raw claims array provided
+        if (is_array($profile) && array_key_exists('roles', $profile)) {
+            if (!is_array($profile['roles']) || count($profile['roles']) !== 1) {
+                throw new RuntimeException('SSO authorization failed: central identity must provide exactly one approved role.');
+            }
+            $rawRole = $profile['roles'][0];
+            if (!is_string($rawRole) || trim($rawRole) === '') {
+                throw new RuntimeException('SSO authorization failed: central role is malformed.');
+            }
         }
 
         $identityProfile = $this->resolveProfileInstance($profile);
@@ -111,13 +134,27 @@ class SsoAuthorization
             throw new RuntimeException('SSO authorization failed: central user account is inactive or disabled.');
         }
 
-        // Invariant 2: Exact active link and active local user resolved via FederatedIdentityRepository
-        $resolvedUser = $repo->findActiveUser($identityProfile->getProvider(), $identityProfile->getSub());
+        // Invariant 2: Central identity must have exactly one approved role ('admin' or 'viewer')
+        $roles = $identityProfile->getRoles();
+        if (count($roles) !== 1) {
+            throw new RuntimeException('SSO authorization failed: central identity must have exactly one approved role.');
+        }
+
+        $centralRole = $roles[0];
+        if (!in_array($centralRole, self::APPROVED_CENTRAL_ROLES, true)) {
+            throw new RuntimeException('SSO authorization failed: central role is unauthorized, unknown, or malformed.');
+        }
+
+        $provider = $identityProfile->getProvider();
+        $sub = $identityProfile->getSub();
+
+        // Invariant 3: Provision or synchronize shadow user using exact provider plus sub
+        $resolvedUser = $repo->provisionOrSynchronize($provider, $sub, $centralRole);
         if ($resolvedUser === null) {
             throw new RuntimeException('SSO authorization failed: unmapped or inactive federated identity link.');
         }
 
-        // Verify active flags fail closed if explicitly present in resolved identity
+        // Invariant 4: Verify active flags fail closed if explicitly present in resolved identity
         if (isset($resolvedUser['active']) && $resolvedUser['active'] !== true && $resolvedUser['active'] !== 1 && $resolvedUser['active'] !== '1') {
             throw new RuntimeException('SSO authorization failed: local user account is inactive.');
         }
@@ -130,26 +167,13 @@ class SsoAuthorization
             throw new RuntimeException('SSO authorization failed: federated identity link is inactive.');
         }
 
-        // Invariant 3: Preserved local role must be explicit, non-empty, and strictly in ALLOWED_ROLES
-        $rawRole = $resolvedUser['role'] ?? null;
-        if (!is_string($rawRole) || trim($rawRole) === '') {
-            throw new RuntimeException('SSO authorization failed: local user has no explicit role assigned.');
-        }
-
-        $localRole = trim($rawRole);
-        if (!in_array($localRole, self::ALLOWED_ROLES, true)) {
-            throw new RuntimeException('SSO authorization failed: local role is unauthorized, unknown, or misspelled.');
-        }
-
-        // Invariant 4: Central userinfo roles never grant or elevate local access.
-        // The returned identity preserves the persisted local role exactly.
         $userId = (int)($resolvedUser['user_id'] ?? $resolvedUser['id'] ?? 0);
         if ($userId <= 0) {
             throw new RuntimeException('SSO authorization failed: invalid local user identifier.');
         }
 
-        $username = isset($resolvedUser['username']) ? (string)$resolvedUser['username'] : '';
-        if (trim($username) === '') {
+        $shadowUsername = isset($resolvedUser['username']) ? (string)$resolvedUser['username'] : '';
+        if (trim($shadowUsername) === '') {
             throw new RuntimeException('SSO authorization failed: invalid local username.');
         }
 
@@ -158,19 +182,24 @@ class SsoAuthorization
             throw new RuntimeException('SSO authorization failed: resolved identity missing valid sub.');
         }
 
-        $provider = (string)$resolvedUser['provider'];
-        $sub = trim((string)$rawSub);
+        // Presentation identity: use central display name or username if available; fallback to shadow username
+        $displayName = $identityProfile->getDisplayName() ?? $identityProfile->getUsername();
+        $presentationUsername = ($displayName !== null && trim($displayName) !== '')
+            ? trim($displayName)
+            : $shadowUsername;
+
         $linkId = (int)($resolvedUser['link_id'] ?? 0);
 
         return [
             'user_id' => $userId,
             'id' => $userId,
-            'username' => $username,
-            'role' => $localRole,
+            'username' => $presentationUsername,
+            'shadow_username' => $shadowUsername,
+            'role' => $centralRole,
             'active' => true,
-            'provider' => $provider,
-            'hub_user_id' => $sub,
-            'sub' => $sub,
+            'provider' => (string)$resolvedUser['provider'],
+            'hub_user_id' => (string)$rawSub,
+            'sub' => (string)$rawSub,
             'link_id' => $linkId,
             'link_active' => true,
         ];
@@ -245,7 +274,18 @@ class SsoAuthorization
     }
 
     /**
-     * Checks if a given role is one of the valid Takeoff local roles.
+     * Checks if a given role is an approved central role ('admin' or 'viewer').
+     *
+     * @param string $role
+     * @return bool
+     */
+    public static function isApprovedCentralRole(string $role): bool
+    {
+        return in_array(trim($role), self::APPROVED_CENTRAL_ROLES, true);
+    }
+
+    /**
+     * Checks if a given role is one of the valid Takeoff SSO roles ('admin' or 'viewer').
      *
      * @param string $role
      * @return bool

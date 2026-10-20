@@ -1,9 +1,24 @@
 <?php
-if (session_status() !== PHP_SESSION_ACTIVE) session_start();
-require_once __DIR__ . '/../core/db/connection.php';
-require_once __DIR__ . '/../core/files/upload_storage.php';
+require_once __DIR__ . '/../core/auth/session.php';
+
 header('Content-Type: application/json; charset=utf-8');
 header('Cache-Control: no-store');
+
+$readActions = [];
+$mutationActions = ['prepare_takeoff', 'start_takeoff'];
+
+$rawBody = file_get_contents('php://input');
+$body = json_decode($rawBody ?: '', true);
+if (!is_array($body)) {
+    $body = [];
+}
+$action = (string)($_POST['action'] ?? $_GET['action'] ?? ($body['action'] ?? ''));
+
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'prepare_takeoff');
+$userId = (int)$user['user_id'];
+
+require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/files/upload_storage.php';
 
 function takeoff_json_error(int $status, string $code, string $message): void
 {
@@ -48,7 +63,6 @@ try {
         takeoff_json_error(413, 'POST_TOO_LARGE', 'The uploaded file exceeds the server upload limit.');
     }
 
-    $body = json_decode(file_get_contents('php://input'), true) ?: [];
     $projectValue = $_POST['project_id'] ?? ($body['project_id'] ?? null);
     $projectId = is_numeric($projectValue) ? (int)$projectValue : 0;
     if ($projectId < 1) takeoff_json_error(422, 'INVALID_PROJECT', 'A valid project is required.');
@@ -73,7 +87,7 @@ try {
         if (!is_dir($targetDir) && !mkdir($targetDir, 0755, true)) throw new RuntimeException('Upload directory is unavailable.');
         $storedName = bin2hex(random_bytes(8)) . '_' . preg_replace('/[^A-Za-z0-9._-]/', '_', $original);
         if (!move_uploaded_file($_FILES['file']['tmp_name'], $targetDir . $storedName)) throw new RuntimeException('Unable to store drawing.');
-        $uploadedBy = !empty($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : 1;
+        $uploadedBy = $userId;
         $path = 'uploads/' . $storedName;
         $insert = $pdo->prepare('INSERT INTO files (project_id,folder_id,filename,filepath,file_type,uploaded_by,version_number) VALUES (?,NULL,?,?,?,?,1)');
         $insert->execute([$projectId, $original, $path, $extension, $uploadedBy]);
@@ -145,7 +159,7 @@ try {
         if ($filename === '' && $titleColumn) $filename = trim((string)($document[$titleColumn] ?? ''));
         if ($filename === '') $filename = basename($path);
         $extension = strtolower(pathinfo($filename, PATHINFO_EXTENSION));
-        $uploadedBy = !empty($_SESSION['user_id']) ? (int)$_SESSION['user_id'] : 1;
+        $uploadedBy = $userId;
         $insert = $pdo->prepare('INSERT INTO files (project_id,folder_id,filename,filepath,file_type,uploaded_by,version_number) VALUES (?,NULL,?,?,?,?,1)');
         $mimeColumn = takeoff_first_column($documentColumns, ['mime_type', 'file_type', 'content_type']);
         $fileType = $extension ?: (string)($mimeColumn ? ($document[$mimeColumn] ?? '') : '');

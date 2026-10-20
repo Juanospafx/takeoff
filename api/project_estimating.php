@@ -11,11 +11,19 @@ header('Cache-Control: no-store');
 
 $pewRequestId = substr(sha1(uniqid('estimating-', true)), 0, 12);
 $pewStage = 'bootstrap';
+require_once __DIR__ . '/../core/auth/session.php';
 header('X-Request-ID: ' . $pewRequestId);
 
 $body = json_decode(file_get_contents('php://input'), true);
 if (!is_array($body)) $body = array();
-$action = isset($_GET['action']) ? (string)$_GET['action'] : (isset($body['action']) ? (string)$body['action'] : 'load');
+$readActions = array('list', 'load');
+$mutationActions = array('save', 'create', 'delete');
+$action = (string)(isset($_GET['action']) ? $_GET['action'] : (isset($body['action']) ? $body['action'] : (isset($_POST['action']) ? $_POST['action'] : '')));
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'load');
+$userId = (int)$user['user_id'];
+if ($action === '') {
+    $action = 'load';
+}
 
 class PewRevisionConflict extends RuntimeException {
     public $conflicts;

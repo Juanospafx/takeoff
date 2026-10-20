@@ -1,6 +1,20 @@
 <?php
 // upload.php - Página dedicada V3
 require_once __DIR__ . '/../core/auth/session.php';
+
+$readActions = ['view', 'form', 'upload_page'];
+$mutationActions = ['upload', 'upload_file'];
+
+$rawBody = file_get_contents('php://input');
+$body = json_decode($rawBody ?: '', true);
+if (!is_array($body)) {
+    $body = [];
+}
+$action = (string)($_GET['action'] ?? $_POST['action'] ?? ($body['action'] ?? ''));
+
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'view');
+$userId = (int)$user['user_id'];
+
 require_once __DIR__ . '/../core/db/connection.php';
 
 // Obtener Proyectos para el dropdown
@@ -70,4 +84,3 @@ document.getElementById('uploadForm').addEventListener('submit', async function(
 </script>
 </body>
 </html>
-

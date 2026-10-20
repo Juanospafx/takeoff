@@ -1,9 +1,9 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../core/db/connection.php';
+
 require_once __DIR__ . '/../core/auth/session.php';
-require_once __DIR__ . '/../core/services/CatalogAdminService.php';
+
 
 const CATALOG_PDF_MAX_BYTES = 10485760;
 
@@ -41,7 +41,13 @@ function cia_safe_original_name(string $name): string
     return ($base!==''?$base:'catalog-item').'.'.$safeExt;
 }
 
-$action=(string)($_GET['action']??$_POST['action']??'');
+$action = (string)($_GET['action'] ?? $_POST['action'] ?? '');
+$readActions = ['view'];
+$mutationActions = ['upload', 'remove'];
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions);
+
+require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/services/CatalogAdminService.php';
 try {
     if ($action==='view') {
         if (!catalog_ra_table_exists($pdo,'catalog_item_attachments')) { http_response_code(404); exit; }
@@ -80,7 +86,7 @@ try {
         try {
             $payload=['item_id'=>$id,'storage_name'=>$storage,'original_name'=>cia_safe_original_name((string)($file['name']??'')),
                 'size_bytes'=>$size,'mime_type'=>$mime,'sha256'=>hash_file('sha256',$destination),'expected_revision'=>$_POST['expected_revision']??null,
-                'request_id'=>catalog_ra_request_id($_POST),'actor_user_id'=>!empty($_SESSION['user_id'])?(int)$_SESSION['user_id']:null];
+                'request_id'=>catalog_ra_request_id($_POST),'actor_user_id'=>(int)$user['user_id']];
             $result=$service->replaceItemPdf($payload);
         } catch (Throwable $e) { @unlink($destination); throw $e; }
         $old=$result['previous_storage_name']??null; if ($old && $old!==$storage) { try { @unlink(cia_storage_path((string)$old,true)); } catch(Throwable $ignored) {} }
