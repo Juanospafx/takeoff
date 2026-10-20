@@ -3,6 +3,13 @@
     RewriteBase /
 </IfModule>
 
+<IfModule mod_env.c>
+    # Local development database config fallback (only applied if local file exists)
+    <If "-f 'C:/xampp/database.private.php'">
+        SetEnv TAKEOFF_DB_PRIVATE_CONFIG C:/xampp/database.private.php
+    </If>
+</IfModule>
+
 <IfModule mod_php.c>
     php_value upload_max_filesize 512M
     php_value post_max_size 512M
