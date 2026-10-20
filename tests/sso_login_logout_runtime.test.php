@@ -180,6 +180,7 @@ if (!class_exists('League\OAuth2\Client\Provider\GenericProvider', false)) {
                     "display_name" => "Alice Admin",
                     "email" => "alice@example.com",
                     "active" => true,
+                    "roles" => ["admin"],
                 ];
             }
 
@@ -785,6 +786,7 @@ $mockOAuthClient->setMockProfile(IdentityProfile::fromArray([
     'display_name' => 'Alice Admin',
     'email' => 'alice@example.com',
     'active' => true,
+    'roles' => ['admin'],
 ]));
 
 $lastRedirect = null;
@@ -792,7 +794,7 @@ include dirname(__DIR__) . '/pages/sso-callback.php';
 
 assertCondition($lastRedirect === '/pages/takeoff.php', 'SSO Callback: redirects to /pages/takeoff.php on success');
 assertCondition($_SESSION['user_id'] === 1, 'SSO Callback: establishes local user_id (1)');
-assertCondition($_SESSION['username'] === 'alice_admin', 'SSO Callback: establishes local username (alice_admin)');
+assertCondition($_SESSION['username'] === 'Alice Admin', 'SSO Callback: presents central display name without exposing the shadow username');
 assertCondition($_SESSION['role'] === 'admin', 'SSO Callback: preserves local role (admin)');
 assertCondition($_SESSION['auth_source'] === 'sso', 'SSO Callback: auth_source is sso');
 assertCondition($_SESSION['sso_provider'] === 'hub', 'SSO Callback: federation provider is hub');
@@ -845,7 +847,7 @@ include dirname(__DIR__) . '/pages/sso-callback.php';
 assertCondition($lastRedirect === '/pages/login.php?error=unauthorized', 'SSO Callback: inactive user redirects with unauthorized error');
 assertCondition(!isset($_SESSION['user_id']), 'SSO Callback: inactive user establishes no session');
 
-// Test 5.5: Disallowed / unknown role rejected
+// Test 5.5: Accepted central role synchronizes a stale/disallowed local role
 $_SESSION = [
     'sso_state' => 'state_disallowed_role',
     'sso_state_expires_at' => time() + 300,
@@ -856,10 +858,10 @@ $mockOAuthClient->setMockProfile(new IdentityProfile('hub', 'hub_eve_disallowed_
 
 $lastRedirect = null;
 include dirname(__DIR__) . '/pages/sso-callback.php';
-assertCondition($lastRedirect === '/pages/login.php?error=unauthorized', 'SSO Callback: disallowed local role redirects with unauthorized error');
-assertCondition(!isset($_SESSION['user_id']), 'SSO Callback: disallowed local role establishes no session');
+assertCondition($lastRedirect === '/pages/takeoff.php', 'SSO Callback: accepted central role authorizes linked identity');
+assertCondition(($_SESSION['role'] ?? null) === 'admin', 'SSO Callback: central admin role replaces stale disallowed local role');
 
-// Test 5.6: Anti-privilege-elevation: central claims cannot elevate local role
+// Test 5.6: Ambiguous central roles fail closed
 $_SESSION = [
     'sso_state' => 'state_anti_elevation',
     'sso_state_expires_at' => time() + 300,
@@ -871,8 +873,8 @@ $mockOAuthClient->setMockProfile(new IdentityProfile('hub', 'hub_charlie_003', t
 
 $lastRedirect = null;
 include dirname(__DIR__) . '/pages/sso-callback.php';
-assertCondition($lastRedirect === '/pages/takeoff.php', 'SSO Callback: Charlie authorized successfully');
-assertCondition($_SESSION['role'] === 'viewer', 'Anti-elevation: central ["admin", "superadmin"] claims CANNOT elevate local viewer to admin');
+assertCondition($lastRedirect === '/pages/login.php?error=unauthorized', 'SSO Callback: multiple/unknown central roles are rejected');
+assertCondition(!isset($_SESSION['user_id']) && !isset($_SESSION['role']), 'Anti-elevation: ambiguous central roles establish no session');
 
 // -----------------------------------------------------------------------------
 // Section 6: Hub Unavailability, Network Failures & Sanitized Generic Errors
@@ -1021,7 +1023,10 @@ $headerHtml = ob_get_clean();
 assertCondition(preg_match('/<form[^>]+method=[\'"]POST[\'"][^>]+action=[\'"][^\'"]*logout\.php[\'"]/i', $headerHtml) === 1, 'Header: visible logout control contains POST form targeting logout.php');
 assertCondition(preg_match('/<input[^>]+type=[\'"]hidden[\'"][^>]+name=[\'"]csrf_token[\'"][^>]+value=[\'"]visible_control_csrf_token_456[\'"]/i', $headerHtml) === 1, 'Header: logout form contains session-bound CSRF token');
 assertCondition(str_contains($headerHtml, 'Sign out'), 'Header: logout form contains visible Sign out control');
-assertCondition(!str_contains($headerHtml, 'alice_admin'), 'Header: logout control does not expose user session data');
+assertCondition(
+    !preg_match('/sso_sub|hub_user_id|access_token|refresh_token|password|client_secret/i', $headerHtml),
+    'Header: logout control exposes no sensitive federation or credential data'
+);
 
 // Test 7.7: Disabling SSO immediately restores existing traditional login and does not force Hub redirect
 $GLOBALS['__TAKEOFF_TEST_SSO_CONFIG__'] = new SsoConfig(['TAKEOFF_SSO_ENABLED' => false]);
