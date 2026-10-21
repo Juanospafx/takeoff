@@ -1,6 +1,8 @@
 <?php
 require_once __DIR__ . '/../core/auth/session.php';
-require_once __DIR__ . '/../core/db/connection.php';
+
+$readActions = ['get', 'download', 'start_takeoff'];
+$mutationActions = ['rename', 'delete'];
 
 function pdoc_json($data, $status = 200) {
     http_response_code($status);
@@ -13,14 +15,29 @@ function pdoc_error($code, $message, $status = 400) {
 }
 function pdoc_int($value) { return is_numeric($value) ? max(0, (int)$value) : 0; }
 function pdoc_body() {
+    static $body = null;
+    if ($body !== null) return $body;
     $decoded = json_decode(file_get_contents('php://input'), true);
-    return is_array($decoded) ? $decoded : array();
+    $body = is_array($decoded) ? $decoded : array();
+    return $body;
 }
 function pdoc_source($value) {
     $source = (string)$value;
     if (!in_array($source, array('legacy_file', 'project_document'), true)) pdoc_error('invalid_source', 'A valid document source is required.', 422);
     return $source;
 }
+
+$body = pdoc_body();
+$action = (string)($_GET['action'] ?? $body['action'] ?? $_POST['action'] ?? '');
+
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'get');
+$userId = (int)$user['user_id'];
+if ($action === '') {
+    $action = 'get';
+}
+
+require_once __DIR__ . '/../core/db/connection.php';
+
 function pdoc_row(PDO $pdo, $projectId, $documentId, $source, $includeDeleted = false) {
     $active = $includeDeleted ? '' : ' AND deleted_at IS NULL';
     if ($source === 'legacy_file') {
@@ -67,8 +84,6 @@ function pdoc_mirror_paths(PDO $pdo, $projectId, $documentId) {
     return strpos($path, 'api/') === 0 ? array($path, substr($path, 4)) : array($path);
 }
 
-$body = pdoc_body();
-$action = (string)($_GET['action'] ?? $body['action'] ?? $_POST['action'] ?? 'get');
 $projectId = pdoc_int($_GET['project_id'] ?? $body['project_id'] ?? $_POST['project_id'] ?? 0);
 $documentId = pdoc_int($_GET['document_id'] ?? $body['document_id'] ?? $_POST['document_id'] ?? 0);
 $source = pdoc_source($_GET['source'] ?? $body['source'] ?? $_POST['source'] ?? '');

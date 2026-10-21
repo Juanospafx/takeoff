@@ -11,13 +11,54 @@ if (empty($_SESSION['csrf_token']) || !is_string($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 
+require_once __DIR__ . '/../core/auth/session.php';
+$authUser = SessionGuard::getAuthenticatedUser($_SESSION ?? null);
+$authRole = $authUser['role'] ?? SessionGuard::ROLE_VIEWER;
+$isViewer = ($authRole === SessionGuard::ROLE_VIEWER);
+$isAdmin = ($authRole === SessionGuard::ROLE_ADMIN);
+$canWrite = $isAdmin;
+$readOnly = !$canWrite;
+$canMutate = $canWrite;
+
+$rawDisplayName = $authUser['username'] ?? '';
+if (isset($_SESSION['display_name']) && is_string($_SESSION['display_name']) && trim($_SESSION['display_name']) !== '') {
+    $rawDisplayName = trim($_SESSION['display_name']);
+} elseif (isset($_SESSION['name']) && is_string($_SESSION['name']) && trim($_SESSION['name']) !== '') {
+    $rawDisplayName = trim($_SESSION['name']);
+}
+$authDisplayName = trim((string)$rawDisplayName);
+if ($authDisplayName === '') {
+    $authDisplayName = $isAdmin ? 'Admin' : 'Viewer';
+}
+$displayRoleLabel = ucfirst($authRole);
+
+$parts = preg_split('/\s+/', $authDisplayName, -1, PREG_SPLIT_NO_EMPTY);
+if (count($parts) >= 2) {
+    $firstChar = function_exists('mb_substr') ? mb_substr($parts[0], 0, 1) : substr($parts[0], 0, 1);
+    $lastChar = function_exists('mb_substr') ? mb_substr(end($parts), 0, 1) : substr(end($parts), 0, 1);
+    $rawInitials = $firstChar . $lastChar;
+} else {
+    $rawInitials = function_exists('mb_substr') ? mb_substr($authDisplayName, 0, 2) : substr($authDisplayName, 0, 2);
+}
+$userInitials = function_exists('mb_strtoupper') ? mb_strtoupper($rawInitials) : strtoupper($rawInitials);
+if ($userInitials === '') {
+    $userInitials = $isAdmin ? 'AD' : 'VW';
+}
+
+$clientAuthMetadata = [
+    'displayName' => $authDisplayName,
+    'role' => $authRole,
+    'canWrite' => $canWrite,
+    'readOnly' => $readOnly,
+];
+
 require_once __DIR__ . '/company_tools_data.php';
 $companyToolsCategories = company_tools_existing_categories();
 $favoriteTools = array_slice(company_tools_favorites(), 0, 5);
 $bidBoardPath = company_tools_bid_board_path();
 $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
 ?>
-<header class="bt-global-header bt-floating-header" data-global-tools-header>
+<header class="bt-global-header bt-floating-header" data-global-tools-header data-user-role="<?= htmlspecialchars($authRole) ?>" data-can-write="<?= $canWrite ? 'true' : 'false' ?>" data-read-only="<?= $readOnly ? 'true' : 'false' ?>" data-can-mutate="<?= $canMutate ? 'true' : 'false' ?>" data-display-name="<?= htmlspecialchars($authDisplayName) ?>">
     <div class="bt-global-left">
         <button class="bt-icon-procore bt-header-theme-toggle" type="button" data-theme-toggle
             title="Toggle Dark/Light Mode" aria-label="Toggle Theme">
@@ -143,6 +184,12 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
     </div>
 
     <div class="bt-global-right">
+        <?php if ($isViewer): ?>
+            <div class="bt-readonly-badge" title="Read-Only Mode: viewer role active" aria-label="Read-Only Mode">
+                <i class="fas fa-eye"></i>
+                <span>Read-Only</span>
+            </div>
+        <?php endif; ?>
         <?php
         $quickToolsList = [
             ['id' => 'cost_catalog', 'label' => 'Catalog Update', 'path' => 'cost_catalog.php', 'icon' => 'fas fa-box-archive'],
@@ -240,12 +287,12 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
         <div class="bt-menu-wrap">
             <button class="bt-avatar-procore" type="button" data-global-menu-toggle="user" aria-expanded="false"
                 aria-label="Account & Profile">
-                <span>ID</span>
+                <span><?= htmlspecialchars($userInitials) ?></span>
             </button>
             <div class="bt-small-menu bt-align-right" data-global-menu="user">
                 <button class="bt-menu-action" type="button">
                     <i class="fas fa-user"></i>
-                    <span>Profile (Admin)</span>
+                    <span><?= htmlspecialchars($authDisplayName . ' (' . $displayRoleLabel . ')') ?></span>
                 </button>
                 <a href="company_settings.php">
                     <i class="fas fa-sliders"></i>
@@ -321,7 +368,37 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
         </div>
     </div>
 </div>
+<script id="takeoff-auth-metadata" type="application/json"><?= json_encode($clientAuthMetadata, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
 <script>
+    (function () {
+        var authData = null;
+        try {
+            var metaEl = document.getElementById('takeoff-auth-metadata');
+            if (metaEl && metaEl.textContent) {
+                authData = JSON.parse(metaEl.textContent);
+            }
+        } catch (e) {}
+        if (!authData && typeof document !== 'undefined' && typeof document.querySelector === 'function') {
+            try {
+                var headerEl = document.querySelector('[data-global-tools-header]') || document.querySelector('.bt-global-header');
+                if (headerEl && typeof headerEl.getAttribute === 'function') {
+                    var role = headerEl.getAttribute('data-user-role') || 'viewer';
+                    var canWrite = headerEl.getAttribute('data-can-write') === 'true' || headerEl.getAttribute('data-can-mutate') === 'true';
+                    var readOnly = headerEl.getAttribute('data-read-only') === 'true' || !canWrite;
+                    var dispName = headerEl.getAttribute('data-display-name') || '';
+                    authData = {
+                        displayName: dispName,
+                        role: role,
+                        canWrite: canWrite,
+                        readOnly: readOnly
+                    };
+                }
+            } catch (e) {}
+        }
+        if (authData && typeof window !== 'undefined') {
+            window.TakeoffAuth = Object.freeze(Object.assign({}, authData));
+        }
+    })();
     (function () {
         var key = 'takeoff.theme';
         var saved = null;
@@ -758,5 +835,6 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
         window.showConfirmDialog = window.TakeoffAnnouncement.confirm;
     })();
 </script>
+<link rel="stylesheet" href="../assets/sso_readonly.css?v=20261020-1">
 <link rel="stylesheet" href="../assets/global_datetime_picker.css?v=20260924-3">
 <script src="../assets/global_datetime_picker.js?v=20260924-3"></script>
