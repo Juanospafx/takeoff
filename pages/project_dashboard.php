@@ -7,7 +7,20 @@ if (empty($_SESSION['won_project_csrf_token'])) {
     $_SESSION['won_project_csrf_token'] = bin2hex(random_bytes(32));
 }
 $wonProjectCsrfToken = (string) $_SESSION['won_project_csrf_token'];
-$isAdminUser = strtolower(trim((string) ($_SESSION['role'] ?? ''))) === 'admin';
+$authUser = SessionGuard::getAuthenticatedUser($_SESSION ?? null);
+$authRole = $authUser['role'] ?? SessionGuard::ROLE_VIEWER;
+$isAdminUser = $authRole === SessionGuard::ROLE_ADMIN;
+$canWrite = $isAdminUser;
+$authDisplayName = trim((string) ($authUser['username'] ?? ''));
+if ($authDisplayName === '') {
+    $authDisplayName = $isAdminUser ? 'Admin' : 'Viewer';
+}
+$clientAuthMetadata = [
+    'displayName' => $authDisplayName,
+    'role' => $authRole,
+    'canWrite' => $canWrite,
+    'readOnly' => !$canWrite,
+];
 
 $integrationEnabled = false;
 try {
@@ -862,7 +875,7 @@ $state = [
     <link rel="stylesheet" href="../assets/won_project_export.css?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.css') ?>">
 </head>
 
-<body>
+<body data-user-role="<?= htmlspecialchars($authRole, ENT_QUOTES, 'UTF-8') ?>" data-can-write="<?= $canWrite ? 'true' : 'false' ?>" data-read-only="<?= $canWrite ? 'false' : 'true' ?>">
     <?php include __DIR__ . '/../views/global_tools_header.php'; ?>
     <div class="workspace-shell">
         <div class="project-subhead-wrapper <?= $activeTab === 'takeoff' ? 'is-takeoff-tab' : '' ?>">
@@ -2235,7 +2248,67 @@ $state = [
         </div>
     </div>
 
+    <script id="takeoff-auth-metadata" type="application/json"><?= json_encode($clientAuthMetadata, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
     <script>
+        (function () {
+            var fallback = { displayName: 'Viewer', role: 'viewer', canWrite: false, readOnly: true };
+            try {
+                var node = document.getElementById('takeoff-auth-metadata');
+                var parsed = node ? JSON.parse(node.textContent || '{}') : fallback;
+                window.TakeoffAuth = Object.freeze({
+                    displayName: String(parsed.displayName || fallback.displayName),
+                    role: String(parsed.role || fallback.role),
+                    canWrite: parsed.canWrite === true,
+                    readOnly: parsed.canWrite !== true
+                });
+            } catch (_) { window.TakeoffAuth = Object.freeze(fallback); }
+
+            window.TakeoffAuthorization = Object.freeze({
+                canWrite: function () { return window.TakeoffAuth?.canWrite === true; },
+                requireWrite: function () {
+                    if (window.TakeoffAuth?.canWrite === true) return true;
+                    window.TakeoffAnnouncement?.show?.('Read-only access: this action requires an administrator.', { type: 'warning' });
+                    return false;
+                }
+            });
+
+            if (window.TakeoffAuth.canWrite !== true) {
+                var nativeFetch = window.fetch.bind(window);
+                window.fetch = function (input, init) {
+                    var method = String(init?.method || (input instanceof Request ? input.method : 'GET') || 'GET').toUpperCase();
+                    if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+                        return Promise.reject(new Error('Read-only access: mutation request blocked.'));
+                    }
+                    return nativeFetch(input, init);
+                };
+                document.addEventListener('DOMContentLoaded', function () {
+                    var mutationSelectors = [
+                        '#saveProjectBtn','#projectStatusButton','#markAsWonBtn','#retryWonExportBtn',
+                        '#saveCustomerBtn','#editCustomerInfoBtn','#editProjectAddressBtn','#addProjectAddressBtn','#addNoteBtnHead',
+                        '#docUploadArrowBtn','[data-doc-folder-action]','[data-doc-action="delete"]','[data-doc-action="move"]',
+                        '[data-subhead-item-action]','[data-scale-apply-manual]','[data-scale-clear-line]','#takeoffScaleApplyBtn',
+                        '[data-takeoff-action="create-layer"]','[data-takeoff-action="create-group"]',
+                        '[data-tool-command="count"]','[data-tool-command="linear"]','[data-tool-command="area"]',
+                        '[data-tool-command="measure"]','[data-tool-command="text"]','[data-tool-command="cloud"]',
+                        '[data-tool-command="undo"]','[data-tool-command="redo"]',
+                        '[data-est-action="create-group"]','[data-est-action="reset-quantities"]','[data-est-action="delete-selected"]',
+                        '[data-est-option="save"]','[data-est-option="copy"]','[data-est-option="status"]',
+                        '[data-est-option="import"]','[data-est-option="delete-estimate"]','[data-editor-cmd]'
+                    ];
+                    document.querySelectorAll(mutationSelectors.join(',')).forEach(function (element) {
+                        element.hidden = true;
+                        element.setAttribute('aria-hidden', 'true');
+                        if ('disabled' in element) element.disabled = true;
+                    });
+                });
+                document.addEventListener('click', function (event) {
+                    var target = event.target?.closest?.('[data-subhead-item-action],[data-doc-folder-action],[data-takeoff-action],[data-scale-apply-manual],[data-scale-clear-line],[data-est-action],[data-est-option],[data-editor-cmd],#saveProjectBtn,#projectStatusButton,#markAsWonBtn,#retryWonExportBtn,#docUploadArrowBtn');
+                    if (!target) return;
+                    event.preventDefault(); event.stopImmediatePropagation();
+                }, true);
+            }
+        })();
+
         window.ProjectState = <?= json_encode($state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
         window.WonProjectConfig = <?= json_encode([
             'projectId' => (int) $projectId,

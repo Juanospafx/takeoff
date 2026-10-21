@@ -1,13 +1,26 @@
 <?php
 declare(strict_types=1);
 
-require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/session.php';
 
 header('Content-Type: application/json; charset=utf-8');
 
 $input = json_decode(file_get_contents('php://input'), true);
 if (!is_array($input)) $input = [];
-$action = $_GET['action'] ?? $_POST['action'] ?? $input['action'] ?? '';
+$readActions = ['bootstrap', 'state', 'scale'];
+$mutationActions = [
+    'save_scale',
+    'delete_scale',
+    'save_state',
+    'save_catalog_item',
+    'delete_catalog_item',
+    'save_assembly',
+    'delete_assembly',
+];
+$action = (string)($_GET['action'] ?? $_POST['action'] ?? ($input['action'] ?? ''));
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions, null);
+$userId = (int)$user['user_id'];
+require_once __DIR__ . '/../core/db/connection.php';
 
 class TakeoffObjectConflict extends RuntimeException {
     public $conflicts;
@@ -704,7 +717,7 @@ try {
             if ($drawingId <= 0 || $pixelsPerUnit <= 0) out_json(['status' => 'error', 'msg' => 'drawing_id and a positive pixels_per_unit are required'], 422);
             if ($estimateKey === '') out_json(['status' => 'error', 'msg' => 'estimate_key is required'], 422);
             $projectId = project_id_for_file($pdo, $drawingId, i($input['project_id'] ?? 0));
-            $userId = i($_SESSION['user_id'] ?? 0) ?: null;
+            $userId = (int)$user['user_id'];
             $stmt = $pdo->prepare(
                 "INSERT INTO takeoff_sheet_scales (project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, created_by, updated_by)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)

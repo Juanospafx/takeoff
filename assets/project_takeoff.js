@@ -2,6 +2,14 @@
     const $ = (id) => document.getElementById(id);
     let editorEstimateGeneration = 0;
 
+    function canWrite() {
+        return window.TakeoffAuth?.canWrite === true;
+    }
+
+    function requireWrite() {
+        return window.TakeoffAuthorization?.requireWrite?.() === true;
+    }
+
     function takeoffWindow() {
         const frame = $('takeoffFrame');
         if (!frame || !frame.contentWindow) return null;
@@ -1405,6 +1413,7 @@
     }
 
     function saveTakeoffState() {
+        if (!canWrite()) return false;
         // iframe/API owns persistent Takeoff state
         takeoffIsDirty = true;
         try {
@@ -1415,6 +1424,7 @@
     }
 
     function pushTakeoffHistory(reason = 'change') {
+        if (!canWrite()) return false;
         takeoffIsDirty = true;
         try {
             redoHistoryState.length = 0;
@@ -2018,6 +2028,7 @@
     }
 
     function toggleGroupLock(groupId) {
+        if (!requireWrite()) return false;
         const group = findGroup(groupId);
         if (!group) return;
         const layers = group.layers || [];
@@ -2871,6 +2882,7 @@
     }
 
     function openCreateLayerModal(groupId = null) {
+        if (!requireWrite()) return false;
         ensureCreateLayerModal();
         const activeEst = activeEstimateId();
         const scopedGroups = takeoffState.groups.filter(g => groupBelongsToEstimate(g, activeEst));
@@ -2989,6 +3001,7 @@
     }
 
     function submitCreateLayerModal() {
+        if (!requireWrite()) return false;
         const items = takeoffState.pendingCatalogItems || [];
         const chosenGroupId = $('createLayerGroup')?.value || takeoffState.pendingCreateGroupId;
         let group = findGroupExact(chosenGroupId) || findGroup(chosenGroupId);
@@ -3255,6 +3268,7 @@
     }
 
     function openLayerModal(groupId = takeoffState.activeGroupId, layerId = null) {
+        if (!requireWrite()) return false;
         if (!layerId && !takeoffState.groups.some(group => groupBelongsToEstimate(group))) {
             ensureEstimateTakeoffWorkspace(activeEstimateId(), true);
             groupId = takeoffState.activeGroupId;
@@ -3650,6 +3664,7 @@
     }
 
     async function submitLayerModal() {
+        if (!requireWrite()) return false;
         const name = $('layerNameInput')?.value.trim();
         if (!name) return closeLayerModal();
         const submit = $('layerCreateSubmit');
@@ -4048,6 +4063,7 @@
     }
 
     function openCatalogModal() {
+        if (!requireWrite()) return false;
         ensureTakeoffModal();
         ensureCatalogModal();
         const createModal = $('takeoffCreateLayerModal');
@@ -4561,6 +4577,7 @@
     }
 
     function openTakeoffGroupModal(trigger = document.activeElement, groupToRename = null) {
+        if (!requireWrite()) return false;
         const modal = $('takeoffGroupModal');
         const input = $('takeoffGroupName');
         if (!modal || !input) return;
@@ -4595,6 +4612,7 @@
     }
 
     function createTakeoffGroup(name) {
+        if (!requireWrite()) return false;
         const normalizedName = String(name || '').trim().replace(/\s+/g, ' ');
         if (!normalizedName) return false;
         const estimateId = activeEstimateId();
@@ -4619,6 +4637,7 @@
 
     function submitTakeoffGroupModal(event) {
         event.preventDefault();
+        if (!requireWrite()) return false;
         const input = $('takeoffGroupName');
         const error = $('takeoffGroupNameError');
         const name = String(input?.value || '').trim().replace(/\s+/g, ' ');
@@ -4675,6 +4694,7 @@
     }
 
     function duplicateGroup(groupId) {
+        if (!requireWrite()) return false;
         const group = findGroup(groupId);
         pushTakeoffHistory('duplicate-group');
         const copy = {
@@ -4725,6 +4745,7 @@
     }
 
     function moveGroupToEstimate(groupId, targetEstimateId) {
+        if (!requireWrite()) return false;
         const group = findGroupExact(groupId);
         if (!group || !targetEstimateId) return;
         group.estimateId = targetEstimateId;
@@ -4735,6 +4756,7 @@
     }
 
     function openGroupContextMenu(groupId, button) {
+        if (!requireWrite()) return false;
         let menu = $('takeoffGroupContextMenu');
         if (!menu) {
             menu = document.createElement('div');
@@ -4868,6 +4890,7 @@
     }
 
     function openEstimatePickerPopup(button, groupId, action = 'move') {
+        if (!requireWrite()) return false;
         closeEstimatePickerPopup();
         const state = loadEstimatingStateForSync();
         const otherEstimates = (state?.estimates || []).filter(est => String(est.id) !== activeEstimateId());
@@ -4935,17 +4958,20 @@
     }
 
     function promptRenameGroup(group) {
+        if (!requireWrite()) return false;
         if (!group) return;
         openTakeoffGroupModal(document.activeElement, group);
     }
 
     function renameGroup(groupId) {
+        if (!requireWrite()) return false;
         const group = findGroup(groupId);
         if (!group) return;
         promptRenameGroup(group);
     }
 
     async function deleteGroup(groupId) {
+        if (!requireWrite()) return false;
         const group = findGroupExact(groupId);
         if (!group) return;
         const msg = group.layers.length
@@ -4967,6 +4993,7 @@
     }
 
     async function deleteTakeoffGroups(groupIds, ask = true) {
+        if (!requireWrite()) return false;
         const wanted = new Set((groupIds || []).map(String));
         const groups = takeoffState.groups.filter(group => wanted.has(String(group.id))
             && groupBelongsToEstimate(group));
@@ -5008,6 +5035,7 @@
     }
 
     function reorderTakeoffGroup(sourceId, targetId) {
+        if (!requireWrite()) return false;
         const estimateId = activeEstimateId();
         const scopedIndexes = takeoffState.groups.map((group, index) => groupBelongsToEstimate(group, estimateId) ? index : -1).filter(index => index >= 0);
         const scoped = scopedIndexes.map(index => takeoffState.groups[index]);
@@ -5029,6 +5057,7 @@
     }
 
     async function deleteLayer(layerId) {
+        if (!requireWrite()) return false;
         const layer = findLayer(layerId);
         if (!layer) return;
         let confirmed = false;
@@ -5054,6 +5083,7 @@
     }
 
     function duplicateLayer(layerId) {
+        if (!requireWrite()) return false;
         const layer = findLayer(layerId);
         if (!layer) return;
         pushTakeoffHistory('duplicate-layer');
@@ -5078,6 +5108,7 @@
     }
 
     function renameLayer(layerId) {
+        if (!requireWrite()) return false;
         const layer = findLayer(layerId);
         if (!layer) return;
         if (typeof window.openRenameModal === 'function') {
@@ -5124,6 +5155,7 @@
     }
 
     function moveLayerToGroup(layerId) {
+        if (!requireWrite()) return false;
         const layer = findLayer(layerId);
         if (!layer) return;
         const names = takeoffState.groups.map(group => group.name).join(', ');
@@ -5860,6 +5892,7 @@
     }
 
     function toggleLayerLock(layerId) {
+        if (!requireWrite()) return false;
         const layer = findLayer(layerId);
         if (!layer) return;
         const editorState = callEditor('projectTakeoffGetLayerLockState', layer.id) || {};
@@ -6500,6 +6533,7 @@
     }
 
     function openScalePanel(mode) {
+        if (!requireWrite()) return false;
         const panel = $('takeoffScalePanel');
         const toggle = $('takeoffScaleStatus');
         const presetSelect = $('takeoffScalePreset');

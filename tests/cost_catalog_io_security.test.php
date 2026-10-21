@@ -14,7 +14,10 @@ $check = static function (bool $condition, string $message) use (&$failures): vo
 };
 
 $check(str_contains($api, 'WonProjectAdminAuthenticator'), 'uses persisted admin authentication');
-$check(!str_contains($api, "core/auth/session.php"), 'does not use permissive legacy session shim');
+$guardPos = strpos($api, 'takeoff_guard_api_action') !== false ? strpos($api, 'takeoff_guard_api_action') : strpos($api, 'SessionGuard::guardApiAction');
+$dbPos = strpos($api, 'core/db/connection.php');
+$check(str_contains($api, 'core/auth/session.php') && $guardPos !== false && $dbPos !== false && $guardPos < $dbPos, 'requires centralized session guard before database connection');
+$check(preg_match('/\$mutationActions\s*=\s*\[[^\]]*\'import\'[^\]]*\];/s', $api) === 1, 'explicitly classifies import as mutation action');
 $check(str_contains($api, "'import' => 'POST'"), 'import is POST-only');
 $check(str_contains($api, 'hash_equals($sessionCsrf, $csrfToken)'), 'validates CSRF in constant time');
 $check(str_contains($page, 'catalog_io_csrf_token') && str_contains($js, "formData.append('csrf_token'"), 'page issues and client submits catalog CSRF token');

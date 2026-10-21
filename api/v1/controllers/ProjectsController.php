@@ -2,6 +2,7 @@
 declare(strict_types=1);
 
 require_once __DIR__ . '/../helpers.php';
+require_once __DIR__ . '/../../../core/auth/session.php';
 
 class ProjectsController
 {
@@ -21,7 +22,10 @@ class ProjectsController
     {
         try {
             $stmt = $this->pdo->query(
-                "SELECT id, name, description, status, assigned_user_id, created_at, updated_at\n                 FROM projects\n                 WHERE deleted_at IS NULL\n                 ORDER BY created_at DESC"
+                "SELECT id, name, description, status, assigned_user_id, created_at, updated_at
+                 FROM projects
+                 WHERE deleted_at IS NULL
+                 ORDER BY created_at DESC"
             );
             $projects = $stmt->fetchAll(PDO::FETCH_ASSOC);
             ok_response($projects);
@@ -106,18 +110,16 @@ class ProjectsController
         }
     }
 
-    private function get_default_admin_user_id(): ?int
-    {
-        $stmt = $this->pdo->prepare(
-            "SELECT id FROM users WHERE role = 'admin' ORDER BY id ASC LIMIT 1"
-        );
-        $stmt->execute();
-        $row = $stmt->fetch(PDO::FETCH_ASSOC);
-        return $row ? (int)$row['id'] : null;
-    }
-
     public function store(): void
     {
+        $user = SessionGuard::getAuthenticatedUser();
+        if ($user === null) {
+            error_response('UNAUTHORIZED', 'Authentication required', null, 401);
+        }
+        if ($user['role'] !== SessionGuard::ROLE_ADMIN) {
+            error_response('FORBIDDEN', 'Insufficient privileges', null, 403);
+        }
+
         $data = read_json_body();
         $name = require_string($data['name'] ?? null);
         $desc = $data['description'] ?? '';
@@ -128,22 +130,16 @@ class ProjectsController
         }
 
         $assignedUserId = require_int($data['assigned_user_id'] ?? null);
-        if ($assignedUserId !== null) {
-            require_client_role('admin');
-        } else {
-            $assignedUserId = $this->get_default_admin_user_id();
-        }
-
-        if (!$assignedUserId) {
-            error_response('VALIDATION_ERROR', 'No admin user available for assignment', null, 422);
+        if ($assignedUserId === null) {
+            $assignedUserId = (int)$user['user_id'];
         }
 
         try {
             $stmt = $this->pdo->prepare(
-                "INSERT INTO projects (name, description, status, created_by, assigned_user_id)\n                 VALUES (?, ?, ?, ?, ?)"
+                "INSERT INTO projects (name, description, status, created_by, assigned_user_id)
+                 VALUES (?, ?, ?, ?, ?)"
             );
-            // No session in v1. created_by nullable.
-            $createdBy = null;
+            $createdBy = (int)$user['user_id'];
             $stmt->execute([$name, $desc, $status, $createdBy, $assignedUserId]);
 
             $projectId = (int)$this->pdo->lastInsertId();
@@ -165,6 +161,14 @@ class ProjectsController
 
     public function update(array $params): void
     {
+        $user = SessionGuard::getAuthenticatedUser();
+        if ($user === null) {
+            error_response('UNAUTHORIZED', 'Authentication required', null, 401);
+        }
+        if ($user['role'] !== SessionGuard::ROLE_ADMIN) {
+            error_response('FORBIDDEN', 'Insufficient privileges', null, 403);
+        }
+
         $id = require_int($params['id'] ?? null);
         if (!$id) {
             error_response('VALIDATION_ERROR', 'Invalid id', ['field' => 'id'], 422);
