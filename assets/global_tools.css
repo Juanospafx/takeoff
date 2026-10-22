@@ -1959,6 +1959,108 @@ body.header-is-collapsed .bb-pipeline-tabs-wrapper {
     color: #ffffff;
 }
 
+/* Note-log categories and cards in announcements modal */
+.g-ann-tabs {
+    display: flex;
+    gap: 6px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid var(--border, #e2e8f0);
+    padding-bottom: 8px;
+}
+
+.g-ann-tab {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    padding: 6px 14px;
+    border-radius: 6px;
+    font-size: 12.5px;
+    font-weight: 600;
+    cursor: pointer;
+    border: 1px solid transparent;
+    background: transparent;
+    color: var(--text-muted, #64748b);
+    transition: all 0.15s ease;
+}
+
+.g-ann-tab:hover {
+    background: var(--bg-hover, rgba(0, 0, 0, 0.04));
+    color: var(--text-main, #0f172a);
+}
+
+.g-ann-tab.active {
+    background: rgba(251, 90, 58, 0.12) !important;
+    color: var(--primary, #fb5a3a) !important;
+    border-color: rgba(251, 90, 58, 0.25) !important;
+}
+
+.g-ann-pane {
+    display: flex;
+    flex-direction: column;
+    gap: 10px;
+}
+
+.g-ann-pane:not(.active) {
+    display: none !important;
+}
+
+.g-ann-note-card {
+    background: var(--bg-card, #f8fafc);
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+}
+
+[data-theme="dark"] .g-ann-note-card {
+    background: #181f2a;
+    border-color: #2b3648;
+}
+
+.g-ann-note-head {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+}
+
+.g-ann-note-badge {
+    display: inline-block;
+    padding: 2px 7px;
+    border-radius: 4px;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    background: rgba(251, 90, 58, 0.14);
+    color: #ea580c;
+}
+
+.g-ann-note-date {
+    font-size: 11px;
+    color: var(--text-muted, #94a3b8);
+}
+
+.g-ann-note-title {
+    font-size: 13px;
+    font-weight: 700;
+    color: var(--text-main, #0f172a);
+    margin: 2px 0 0;
+}
+
+[data-theme="dark"] .g-ann-note-title {
+    color: #f1f5f9;
+}
+
+.g-ann-note-desc {
+    font-size: 12px;
+    color: var(--text-muted, #64748b);
+    line-height: 1.45;
+    margin: 0;
+}
+
 /* Footer */
 .g-announcement-footer {
     padding: 16px 28px;
@@ -2066,6 +2168,229 @@ body.header-is-collapsed .bb-pipeline-tabs-wrapper {
 [data-theme="dark"] .g-announcement-btn.cancel:hover {
     background: rgba(255, 255, 255, 0.06);
     color: #ffffff;
+}
+
+
+body.theme-dark select:not(.native-raw-select),
+body.theme-dark .form-select,
+body.theme-dark .pd-modal-body .cc-field select,
+body.theme-dark .overview-field select {
+    background-color: #242a38 !important;
+    color: #f8fafc !important;
+    border-color: #2f384a !important;
+    background-image: url("data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='12' height='8' viewBox='0 0 12 8'%3E%3Cpath fill='none' stroke='%2394a3b8' stroke-width='1.75' stroke-linecap='round' stroke-linejoin='round' d='M1.5 2l4.5 4 4.5-4'/%3E%3C/svg%3E") !important;
+}
+
+/* Explicit exclusion for selects inside control box wrappers with separate caret elements */
+.pro-create-control-box select,
+.cc-takeoff-selectors-row .pro-create-control-box select,
+[data-theme="dark"] .pro-create-control-box select,
+[data-theme="dark"] .cc-takeoff-selectors-row .pro-create-control-box select,
+body.theme-dark .pro-create-control-box select,
+body.theme-dark .cc-takeoff-selectors-row .pro-create-control-box select,
+#ccItemType,
+#ccItemMeasurementType {
+    border: none !important;
+    background-image: none !important;
+    background: transparent !important;
+    background-color: transparent !important;
+    height: 100% !important;
+    min-height: 100% !important;
+    padding: 0 24px 0 10px !important;
+}
+
+/* Overview Dropdowns & Estimator Input Typography Standardization */
+.overview-field .pro-custom-dropdown-trigger,
+.overview-field .pro-custom-dropdown-trigger .pcd-trigger-text,
+.pd-input-with-actions .pro-custom-dropdown-trigger,
+.pd-input-with-actions .pro-custom-dropdown-trigger .pcd-trigger-text,
+#poEstimator,
+.overview-field select,
+.overview-field input,
+.overview-field .pcd-select-item {
+    font-size: 12px !important;
+    font-family: 'Inter', -apple-system, sans-serif !important;
+    font-weight: 400 !important;
+}
+
+/* Dark mode theme styles */
+[data-theme="dark"] .cc-custom-select .pro-custom-dropdown-trigger,
+[data-theme="dark"] .pro-custom-select .pro-custom-dropdown-trigger,
+[data-theme="dark"] .pro-custom-dropdown-trigger,
+body.theme-dark .cc-custom-select .pro-custom-dropdown-trigger,
+body.theme-dark .pro-custom-select .pro-custom-dropdown-trigger,
+body.theme-dark .pro-custom-dropdown-trigger {
+    background: #242a38;
+    color: #f1f5f9;
+    border-color: #2f384a;
+}
+
+[data-theme="dark"] .cc-custom-select .pro-custom-dropdown-trigger:hover,
+[data-theme="dark"] .pro-custom-select .pro-custom-dropdown-trigger:hover,
+[data-theme="dark"] .pro-custom-dropdown-trigger:hover,
+body.theme-dark .cc-custom-select .pro-custom-dropdown-trigger:hover,
+body.theme-dark .pro-custom-select .pro-custom-dropdown-trigger:hover,
+body.theme-dark .pro-custom-dropdown-trigger:hover {
+    border-color: #475569;
+}
+
+[data-theme="dark"] .pro-custom-dropdown .pcd-caret,
+[data-theme="dark"] .cc-custom-select .pcd-caret,
+body.theme-dark .pro-custom-dropdown .pcd-caret,
+body.theme-dark .cc-custom-select .pcd-caret {
+    border-top-color: #94a3b8;
+}
+
+[data-theme="dark"] .pro-custom-dropdown.is-open .pcd-caret,
+body.theme-dark .pro-custom-dropdown.is-open .pcd-caret {
+    border-top-color: transparent;
+    border-bottom-color: #3b82f6;
+}
+
+[data-theme="dark"] .pro-custom-dropdown-menu.pcd-select-menu,
+[data-theme="dark"] .pro-custom-dropdown-menu,
+body.theme-dark .pro-custom-dropdown-menu.pcd-select-menu,
+body.theme-dark .pro-custom-dropdown-menu {
+    background: #242a38;
+    border-color: #2f384a;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.3);
+}
+
+[data-theme="dark"] .pcd-select-item,
+body.theme-dark .pcd-select-item {
+    color: #f1f5f9;
+}
+
+[data-theme="dark"] .pcd-select-item:hover,
+body.theme-dark .pcd-select-item:hover {
+    background: rgba(255, 255, 255, 0.08);
+}
+
+[data-theme="dark"] .pcd-select-item.is-selected,
+body.theme-dark .pcd-select-item.is-selected {
+    background: rgba(251, 90, 58, 0.15) !important;
+    color: #fb5a3a !important;
+}
+
+[data-theme="dark"] .pro-custom-dropdown.is-disabled .pro-custom-dropdown-trigger,
+body.theme-dark .pro-custom-dropdown.is-disabled .pro-custom-dropdown-trigger {
+    background: #1b212d !important;
+}
+
+/* ==========================================================
+   STANDARDIZED SEARCH BARS SYSTEM (Documents Search Pattern)
+   Clean, transparent background, subtle border, gray text & icon
+   ========================================================== */
+.documents-search input,
+#documentsSearch,
+.bb-search-field-procore input,
+.cc-search-procore input,
+#ccSearch,
+.pro-tree-search-bar input,
+#takeoffItemSearch,
+.pro-browse-search-box input,
+#catBrowseSearch,
+.est-search input,
+#estSearch,
+.bb-search-input,
+#bidBoardSearch,
+#projectsSearch {
+    background: transparent !important;
+    border: 1px solid var(--border, #cbd5e1) !important;
+    border-radius: 6px !important;
+    color: var(--text-main, #0f172a) !important;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif !important;
+    font-size: 12.5px !important;
+    font-weight: 400 !important;
+    outline: none !important;
+    box-shadow: none !important;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease !important;
+}
+
+.documents-search input::placeholder,
+#documentsSearch::placeholder,
+.bb-search-field-procore input::placeholder,
+.cc-search-procore input::placeholder,
+#ccSearch::placeholder,
+.pro-tree-search-bar input::placeholder,
+#takeoffItemSearch::placeholder,
+.pro-browse-search-box input::placeholder,
+#catBrowseSearch::placeholder,
+.est-search input::placeholder,
+#estSearch::placeholder,
+.bb-search-input::placeholder,
+#bidBoardSearch::placeholder,
+#projectsSearch::placeholder {
+    color: #94a3b8 !important;
+    font-size: 12px !important;
+    font-weight: 400 !important;
+    opacity: 1 !important;
+}
+
+.documents-search input:focus,
+#documentsSearch:focus,
+.bb-search-field-procore input:focus,
+.cc-search-procore input:focus,
+#ccSearch:focus,
+.pro-tree-search-bar input:focus,
+#takeoffItemSearch:focus,
+.pro-browse-search-box input:focus,
+#catBrowseSearch:focus,
+.est-search input:focus,
+#estSearch:focus,
+.bb-search-input:focus,
+#bidBoardSearch:focus,
+#projectsSearch:focus {
+    border-color: var(--primary, #fb5a3a) !important;
+    box-shadow: 0 0 0 2px rgba(251, 90, 58, 0.15) !important;
+}
+
+.documents-search i,
+.documents-search svg,
+.bb-search-submit i,
+.bb-search-submit svg,
+.pro-tree-search-bar i,
+.pro-tree-search-bar svg,
+.pro-browse-search-box i,
+.pro-browse-search-box svg,
+.est-search i,
+.est-search svg,
+.bb-search-icon i,
+.bb-search-icon svg {
+    color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .documents-search input,
+[data-theme="dark"] #documentsSearch,
+[data-theme="dark"] .bb-search-field-procore input,
+[data-theme="dark"] .cc-search-procore input,
+[data-theme="dark"] #ccSearch,
+[data-theme="dark"] .pro-tree-search-bar input,
+[data-theme="dark"] #takeoffItemSearch,
+[data-theme="dark"] .pro-browse-search-box input,
+[data-theme="dark"] #catBrowseSearch,
+[data-theme="dark"] .est-search input,
+[data-theme="dark"] #estSearch,
+[data-theme="dark"] .bb-search-input,
+[data-theme="dark"] #bidBoardSearch,
+[data-theme="dark"] #projectsSearch,
+body.theme-dark .documents-search input,
+body.theme-dark #documentsSearch,
+body.theme-dark .bb-search-field-procore input,
+body.theme-dark .cc-search-procore input,
+body.theme-dark #ccSearch,
+body.theme-dark .pro-tree-search-bar input,
+body.theme-dark #takeoffItemSearch,
+body.theme-dark .pro-browse-search-box input,
+body.theme-dark #catBrowseSearch,
+body.theme-dark .est-search input,
+body.theme-dark #estSearch,
+body.theme-dark .bb-search-input,
+body.theme-dark #bidBoardSearch,
+body.theme-dark #projectsSearch {
+    background: transparent !important;
+    border-color: #334155 !important;
+    color: #f1f5f9 !important;
 }
 
 /* Smooth View Transition for Light <-> Dark Theme Switch */

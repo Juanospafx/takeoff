@@ -38,7 +38,7 @@
 body.theme-dark {
     --bg-body: #1b212d;
     --bg-panel: #242a38;
-    --bg-input: #1f2633;
+    --bg-input: #242a38;
     --border: #2f384a;
     --border-soft: #384254;
     --text-main: #ffffff;
@@ -1047,11 +1047,38 @@ body.header-is-collapsed .project-subhead-wrapper,
     position: relative;
 }
 
-.overview-column > .overview-card:nth-child(1) { z-index: 1; }
-.overview-column > .overview-card:nth-child(2) { z-index: 2; }
-.overview-column > .overview-card:nth-child(3) { z-index: 3; }
-.overview-column > .overview-card:nth-child(4) { z-index: 4; }
-.overview-column > .overview-card:nth-child(5) { z-index: 5; }
+.overview-column > .overview-card:nth-child(1) { z-index: 12; }
+.overview-column > .overview-card:nth-child(2) { z-index: 10; }
+.overview-column > .overview-card:nth-child(3) { z-index: 8; }
+.overview-column > .overview-card:nth-child(4) { z-index: 6; }
+.overview-column > .overview-card:nth-child(5) { z-index: 4; }
+
+.overview-card:focus-within {
+    z-index: 50 !important;
+}
+
+.pd-pricing-wrap:focus-within {
+    z-index: 60 !important;
+}
+
+/* Standardized Typography for Overview dropdowns matching inputs */
+.overview-field select,
+.overview-field select option,
+.pd-pricing-wrap select,
+.pd-pricing-wrap select option,
+.overview-field .pro-custom-dropdown-trigger,
+.overview-field .pro-custom-dropdown-trigger .pcd-trigger-text,
+.pd-input-with-actions .pro-custom-dropdown-trigger,
+.pd-input-with-actions .pro-custom-dropdown-trigger .pcd-trigger-text,
+#poEstimator,
+.overview-field .pcd-select-item,
+.pd-pricing-wrap .pro-custom-dropdown-trigger,
+.pd-pricing-wrap .pcd-select-item,
+.pd-pricing-wrap .pcd-trigger-text {
+    font-size: 12px !important;
+    font-family: 'Inter', -apple-system, sans-serif !important;
+    font-weight: 400 !important;
+}
 
 .overview-card {
     background: var(--bg-panel);
@@ -1333,11 +1360,21 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     flex: 0 0 26px;
 }
 
+.pd-customer-details,
+.pd-contact-details {
+    flex: 1;
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    min-width: 0;
+}
+
 .pd-customer-name {
     flex: 1;
-    font-size: 13px !important;
-    font-weight: 550;
-    color: var(--text-main);
+    font-size: 13.5px !important;
+    font-weight: 700 !important;
+    color: var(--text-main, #0f172a);
+    line-height: 1.25;
 }
 
 .pd-contact-icon-box {
@@ -1357,14 +1394,6 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     color: #94a3b8;
 }
 
-.pd-contact-details {
-    flex: 1;
-    display: flex;
-    flex-direction: column;
-    gap: 1px;
-    min-width: 0;
-}
-
 .pd-contact-main-line {
     font-size: 12.5px !important;
     font-weight: 500;
@@ -1376,7 +1405,8 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 
 .pd-contact-sub-line {
     font-size: 11.5px !important;
-    color: var(--text-muted);
+    color: var(--text-muted, #64748b);
+    line-height: 1.25;
     white-space: nowrap;
     overflow: hidden;
     text-overflow: ellipsis;
@@ -1986,8 +2016,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 }
 
 /* Rounded Card Frames (Consistent with Overview Cards) */
-.documents-empty-view,
-.pro-documents {
+.documents-empty-view {
     flex: 1;
     height: 100%;
     min-height: 0;
@@ -1998,8 +2027,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     overflow: hidden;
 }
 
-[data-theme="dark"] .documents-empty-view,
-[data-theme="dark"] .pro-documents {
+[data-theme="dark"] .documents-empty-view {
     border-color: var(--border);
     box-shadow: 0 10px 28px rgba(0, 0, 0, 0.35), 0 2px 6px rgba(0, 0, 0, 0.2);
 }
@@ -2115,9 +2143,10 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     display: flex;
     flex-direction: row;
     gap: 0 !important;
-    background: var(--bg-panel) !important;
-    border-radius: 8px;
-    border: 1px solid var(--border-color);
+    background: transparent !important;
+    border-radius: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
     overflow: hidden;
     position: relative;
     height: 100%;
@@ -2132,11 +2161,12 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 }
 
 [data-theme="dark"] .pro-documents {
-    background: var(--bg-panel) !important;
-    border-color: var(--border) !important;
+    background: transparent !important;
+    border: none !important;
+    box-shadow: none !important;
 }
 
-/* Left Sidebar: Folders (Compact & Resizable) */
+/* Left Sidebar: Folders (Floating Card Box matching Cost Catalog) */
 .documents-sidebar {
     width: var(--doc-sidebar-w, 240px);
     min-width: 170px;
@@ -2145,49 +2175,61 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     display: flex;
     flex-direction: column;
     background: var(--bg-panel);
-    border-right: none;
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
     height: 100%;
     overflow: hidden;
     position: relative;
 }
 
-/* Resizer handle between sidebar and content */
+[data-theme="dark"] .documents-sidebar {
+    background: var(--bg-panel) !important;
+    border-color: var(--border) !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2) !important;
+}
+
+/* Resizer handle between sidebar and content (Standardized ccSidebarResizer 12px style) */
 .documents-sidebar-resizer {
-    width: 6px;
+    width: 12px;
+    margin: 0;
     cursor: col-resize;
-    background: transparent;
     position: relative;
     z-index: 30;
     flex-shrink: 0;
-    border-left: 1px solid var(--border);
-    margin-left: -1px;
-    transition: background 0.15s ease;
     user-select: none;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease;
 }
 
 .documents-sidebar-resizer:hover,
 .documents-sidebar-resizer.is-dragging {
-    background: var(--primary, #fb5a3a) !important;
+    background: transparent !important;
 }
 
 .doc-resizer-handle {
     width: 2px;
-    height: 32px;
+    height: 36px;
     border-radius: 2px;
-    background: var(--text-muted);
-    position: absolute;
-    top: 50%;
-    left: 50%;
-    transform: translate(-50%, -50%);
+    background: var(--border, #cbd5e1);
     pointer-events: none;
-    opacity: 0;
-    transition: opacity 0.15s;
+    transition: all 0.15s ease;
 }
 
 .documents-sidebar-resizer:hover .doc-resizer-handle,
 .documents-sidebar-resizer.is-dragging .doc-resizer-handle {
+    height: 52px;
+    background: #64748b !important;
+    box-shadow: none !important;
     opacity: 1;
-    background: #ffffff;
+}
+
+[data-theme="dark"] .documents-sidebar-resizer:hover .doc-resizer-handle,
+[data-theme="dark"] .documents-sidebar-resizer.is-dragging .doc-resizer-handle {
+    background: #94a3b8 !important;
+    box-shadow: none !important;
 }
 
 .documents-sidebar-head {
@@ -2343,15 +2385,25 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     color: #94a3b8;
 }
 
-/* Right Content Panel */
+/* Right Content Panel (Floating Card Box matching Cost Catalog) */
 .documents-content-panel {
-    flex: 1 1 0;
+    flex: 1 1 auto;
     min-width: 0;
     height: 100%;
     display: flex;
     flex-direction: column;
     background: var(--bg-panel);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
     overflow: hidden;
+    position: relative;
+}
+
+[data-theme="dark"] .documents-content-panel {
+    background: var(--bg-panel) !important;
+    border-color: var(--border) !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2) !important;
 }
 
 /* Main Topbar: Title + Density Slider */
@@ -3167,10 +3219,44 @@ body.theme-dark .toast-lite {
 [data-theme="dark"] .form-select,
 [data-theme="dark"] .overview-field input,
 [data-theme="dark"] .overview-field select,
-[data-theme="dark"] .overview-field textarea {
-    background: var(--bg-card);
-    color: var(--text-primary);
-    border-color: var(--border-color);
+[data-theme="dark"] .overview-field textarea,
+[data-theme="dark"] .pd-desc-textarea,
+[data-theme="dark"] .pd-modal-body input,
+[data-theme="dark"] .pd-modal-body select,
+[data-theme="dark"] .pd-modal-body textarea,
+[data-theme="dark"] .overview-field .pro-custom-dropdown-trigger,
+[data-theme="dark"] .pd-input-with-actions .pro-custom-dropdown-trigger,
+[data-theme="dark"] .pd-pricing-wrap .pro-custom-dropdown-trigger,
+[data-theme="dark"] .pcd-select-menu,
+body.theme-dark .form-control,
+body.theme-dark .form-select,
+body.theme-dark .overview-field input,
+body.theme-dark .overview-field select,
+body.theme-dark .overview-field textarea,
+body.theme-dark .pd-desc-textarea,
+body.theme-dark .pd-modal-body input,
+body.theme-dark .pd-modal-body select,
+body.theme-dark .pd-modal-body textarea,
+body.theme-dark .overview-field .pro-custom-dropdown-trigger,
+body.theme-dark .pd-input-with-actions .pro-custom-dropdown-trigger,
+body.theme-dark .pd-pricing-wrap .pro-custom-dropdown-trigger,
+body.theme-dark .pcd-select-menu {
+    background: #242a38 !important;
+    background-color: #242a38 !important;
+    color: var(--text-primary, #ffffff) !important;
+    border-color: var(--border-color, #2f384a) !important;
+}
+
+[data-theme="dark"] select option,
+[data-theme="dark"] .overview-field select option,
+[data-theme="dark"] .pd-pricing-wrap select option,
+[data-theme="dark"] .pd-modal-body select option,
+body.theme-dark select option,
+body.theme-dark .overview-field select option,
+body.theme-dark .pd-pricing-wrap select option,
+body.theme-dark .pd-modal-body select option {
+    background: #242a38 !important;
+    color: #ffffff !important;
 }
 
 [data-theme="dark"] #poDueDate,
@@ -3213,7 +3299,6 @@ body.theme-dark .pd-input-icon-wrap input {
 }
 
 [data-theme="dark"] .documents-page,
-[data-theme="dark"] .pro-documents,
 [data-theme="dark"] .documents-empty-state,
 [data-theme="dark"] .documents-empty-state>i {
     background: #111827;
