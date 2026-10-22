@@ -744,9 +744,11 @@
                     <div class="pd-task-icon-box"><i class="fas fa-clipboard"></i></div>
                     <div class="pd-task-content-wrap">
                         <div class="pd-task-title">${escapeHtml(task.title || '')}</div>
-                        <div class="pd-task-assignee">For ${escapeHtml(task.responsible || 'Isaac De Jesús')}</div>
+                        <div class="pd-task-meta-row">
+                            <div class="pd-task-assignee">For ${escapeHtml(task.responsible || 'Isaac De Jesús')}</div>
+                            ${dueText ? `<div class="pd-task-due-badge">${escapeHtml(dueText)}</div>` : ''}
+                        </div>
                     </div>
-                    ${dueText ? `<div class="pd-task-due-badge">${escapeHtml(dueText)}</div>` : ''}
                     <div class="pd-item-menu-wrap">
                         <button type="button" class="pd-row-dots-btn" data-task-menu="${idx}" title="Task options"><i class="fas fa-ellipsis-vertical"></i></button>
                     </div>
@@ -902,6 +904,10 @@
     function openItemContextMenu(button, type, index) {
         const menu = $('pdItemContextMenu');
         if (!menu) return;
+
+        const isOpen = menu.style.display === 'flex' && contextMenuTarget?.type === type && contextMenuTarget?.index === index;
+        closeItemContextMenu();
+        if (isOpen) return;
 
         contextMenuTarget = { type, index };
         const rect = button.getBoundingClientRect();
@@ -2133,9 +2139,18 @@
     function openSidebarMenu(target, trigger) {
         const menu = $('docSidebarMenu');
         if (!menu || !trigger) return;
+        const isOpen = (menu.classList.contains('open') && menu.__activeTarget === target) ||
+                       (trigger && trigger.__wasOpenAtPointerDown && Date.now() - trigger.__wasOpenAtPointerDown < 500);
+        if (trigger) trigger.__wasOpenAtPointerDown = 0;
         closeAllDocumentsMenus();
-
-        let html = '';
+        if (isOpen) {
+            menu.__activeTarget = null;
+            return;
+        }
+        menu.__activeTarget = target;
+        menu.__trigger = trigger;
+        trigger.classList.add('active');
+        trigger.setAttribute('aria-expanded', 'true');
         if (target.startsWith('doc:')) {
             const docId = target.replace('doc:', '');
             const doc = findDocumentById(docId);
@@ -2358,10 +2373,15 @@
             const menu = [...document.querySelectorAll('.documents-menu.row-menu')]
                 .find(candidate => candidate.dataset.docMenu === String(id));
             if (!menu) return;
-            const isOpen = menu.classList.contains('open');
+            const isOpen = menu.classList.contains('open') ||
+                           (trigger && trigger.__wasOpenAtPointerDown && Date.now() - trigger.__wasOpenAtPointerDown < 500);
+            if (trigger) trigger.__wasOpenAtPointerDown = 0;
             closeAllDocumentsMenus();
             if (!isOpen && trigger) {
                 menu.classList.add('open');
+                menu.__trigger = trigger;
+                trigger.classList.add('active');
+                trigger.setAttribute('aria-expanded', 'true');
                 positionFloatingMenu(menu, trigger);
             }
             return;
@@ -2554,10 +2574,15 @@
     function toggleFloatingMenu(menuId, trigger) {
         const menu = $(menuId);
         if (!menu) return;
-        const isOpen = menu.classList.contains('open');
+        const isOpen = menu.classList.contains('open') ||
+                       (trigger && trigger.__wasOpenAtPointerDown && Date.now() - trigger.__wasOpenAtPointerDown < 500);
+        if (trigger) trigger.__wasOpenAtPointerDown = 0;
         closeAllDocumentsMenus();
         if (!isOpen && trigger) {
             menu.classList.add('open');
+            menu.__trigger = trigger;
+            trigger.classList.add('active');
+            trigger.setAttribute('aria-expanded', 'true');
             positionFloatingMenu(menu, trigger);
         }
     }
@@ -2566,6 +2591,26 @@
         document.querySelectorAll('.documents-menu.open').forEach(menu => {
             menu.classList.remove('open');
             menu.style.display = '';
+            if (menu.__trigger) {
+                menu.__trigger.classList.remove('active', 'is-active');
+                menu.__trigger.setAttribute('aria-expanded', 'false');
+                menu.__trigger = null;
+            }
+        });
+        const sidebarMenu = $('docSidebarMenu');
+        if (sidebarMenu) {
+            sidebarMenu.classList.remove('open');
+            sidebarMenu.style.display = '';
+            sidebarMenu.__activeTarget = null;
+            if (sidebarMenu.__trigger) {
+                sidebarMenu.__trigger.classList.remove('active', 'is-active');
+                sidebarMenu.__trigger.setAttribute('aria-expanded', 'false');
+                sidebarMenu.__trigger = null;
+            }
+        }
+        document.querySelectorAll('[data-doc-sidebar-more].active, [data-doc-action="menu"].active, [data-doc-action="sheet-menu"].active, [data-doc-folder-more].active, [data-doc-folder-menu-toggle].active, [data-doc-view-menu-toggle].active, #docSortMenuBtn.active, .doc-tree-item-more.active').forEach(b => {
+            b.classList.remove('active', 'is-active');
+            b.setAttribute('aria-expanded', 'false');
         });
     }
 
@@ -2860,7 +2905,8 @@
                 toggleMenu(button.dataset.menuToggle);
             });
         });
-        document.addEventListener('click', () => {
+        document.addEventListener('click', (event) => {
+            if (event && event.target && event.target.closest('.documents-menu, [data-menu-toggle], [data-doc-sidebar-more], [data-doc-action="menu"], [data-doc-action="sheet-menu"], [data-doc-folder-more], [data-doc-folder-menu-toggle], [data-doc-view-menu-toggle], #docSortMenuBtn, .doc-tree-item-more')) return;
             document.querySelectorAll('.project-menu').forEach(menu => menu.classList.remove('open'));
             document.querySelectorAll('.documents-menu').forEach(menu => menu.classList.remove('open'));
             $('projectStatusMenu')?.classList.remove('open');
