@@ -45,7 +45,7 @@
 
     function takeoffEditorUrl(documentId, estimateId = activeEstimateId()) {
         const inheritLegacy = String(estimateId) === primaryEstimateId() ? '&inherit_legacy=1' : '';
-        return `editor.php?id=${encodeURIComponent(documentId)}&embedded=1&estimate_key=${encodeURIComponent(estimateId)}${inheritLegacy}`;
+        return `editor.php?id=${encodeURIComponent(documentId)}&embedded=1&estimate_key=${encodeURIComponent(estimateId)}${inheritLegacy}&_v=${Date.now()}`;
     }
     window.projectTakeoffEditorUrl = takeoffEditorUrl;
 
@@ -2700,6 +2700,7 @@
                     <button class="pro-icon-btn" type="button" data-create-layer-close aria-label="Close"><i class="fas fa-times"></i></button>
                 </div>
                 <div class="pro-create-layer-body">
+                    <div class="pro-create-added-items-wrap" id="createLayerAddedItemsWrap" style="display:none;"></div>
                     <div class="pro-create-layer-field" style="display:none;">
                         <label for="createLayerGroup">Target Group</label>
                         <div class="pro-create-control-box" style="width:100%;">
@@ -2708,9 +2709,9 @@
                         </div>
                     </div>
                     <div class="pro-create-layer-field">
-                        <label for="createLayerCatalogName">Catalog Item Name</label>
+                        <label for="createLayerCatalogName">Takeoff Layer Name</label>
                         <div class="pro-create-catalog-row">
-                            <input id="createLayerCatalogName" type="text" placeholder="Enter material name or pick one from catalog">
+                            <input id="createLayerCatalogName" type="text" placeholder="Enter layer name or pick items from catalog...">
                             <button type="button" class="pro-btn-browse-catalog" id="createLayerBrowseCatalogBtn">
                                 <i class="fas fa-bars-staggered"></i> Browse Catalog
                             </button>
@@ -2828,21 +2829,26 @@
         $('createLayerType')?.addEventListener('change', (e) => {
             updateTypeDropdownTrigger('createLayer', e.target.value);
             updateCreateLayerTypeUi(e.target.value);
+            updateActiveAddedItemFromForm();
         });
 
         $('createLayerUom')?.addEventListener('change', () => {
             updateUomDropdownTrigger('createLayer', $('createLayerUom').value);
+            updateActiveAddedItemFromForm();
         });
 
         $('createLayerSymbol')?.addEventListener('change', (e) => {
             updateSymbolDropdownTrigger('createLayer', e.target.value);
+            updateActiveAddedItemFromForm();
         });
 
         $('createLayerSize')?.addEventListener('change', (e) => {
             updateSizeDropdownTrigger('createLayer', e.target.value);
+            updateActiveAddedItemFromForm();
         });
 
         $('createLayerCatalogName')?.addEventListener('input', () => {
+            updateActiveAddedItemFromForm();
             updateCreateLayerSubmitState();
         });
 
@@ -2907,6 +2913,9 @@
         takeoffState.pendingCreateGroupId = String(targetGroup.id);
         takeoffState.activeGroupId = String(targetGroup.id);
         takeoffState.pendingCatalogItem = null;
+        takeoffState.pendingCatalogItems = [];
+        takeoffState.activeAddedItemId = null;
+        renderCreateLayerAddedItems();
 
         const modal = $('takeoffCreateLayerModal');
         if (!modal) return;
@@ -2983,26 +2992,38 @@
             else select.value = '__custom__';
         }
         updateColorDropdownTrigger('createLayer', hex);
+        updateActiveAddedItemFromForm();
     }
 
     function updateCreateLayerSubmitState() {
         const val = $('createLayerCatalogName')?.value.trim();
+        const items = takeoffState.pendingCatalogItems || [];
+        const hasItems = items.length > 0;
         const submit = $('createLayerSubmitBtn');
         if (submit) {
-            submit.classList.toggle('is-active', Boolean(val));
+            submit.classList.toggle('is-active', Boolean(val || hasItems));
+            if (items.length > 1) {
+                submit.textContent = `Create (${items.length} layers)`;
+            } else {
+                submit.textContent = 'Create';
+            }
         }
     }
 
     function submitCreateLayerModal() {
-        if (!requireWrite()) return false;
-        const name = $('createLayerCatalogName')?.value.trim();
-        if (!name) return closeCreateLayerModal();
 
-        const type = $('createLayerType')?.value || 'Count';
-        const uom = $('createLayerUom')?.value || typeToUom(type);
-        const symbol = $('createLayerSymbol')?.value || 'Solid Circle';
-        const size = $('createLayerSize')?.value || 'Medium';
-        const color = $('createLayerColorSwatch')?.style.background || '#ec4899';
+        if (!requireWrite()) return false;
+
+
+
+
+
+
+
+
+
+
+        const items = takeoffState.pendingCatalogItems || [];
 
         const chosenGroupId = $('createLayerGroup')?.value || takeoffState.pendingCreateGroupId;
         let group = findGroupExact(chosenGroupId) || findGroup(chosenGroupId);
@@ -3014,7 +3035,117 @@
             group = { id: makeId('grp'), estimateId: activeEstimateId(), name: 'Takeoff Group 1', isExpanded: true, isDefault: false, layers: [] };
             takeoffState.groups.push(group);
         }
+        if (!Array.isArray(group.layers)) group.layers = [];
 
+        // If items are selected from catalog, create a layer for EACH item!
+        if (items.length > 0) {
+            updateActiveAddedItemFromForm();
+
+            const createdLayers = [];
+            for (const it of items) {
+                const layerName = it.customName || it.name || 'Catalog Item';
+                const itemType = it.type || 'Count';
+                const itemUom = it.uom || typeToUom(itemType);
+                const itemSymbol = it.symbol || 'Solid Circle';
+                const itemSize = it.size || 'Medium';
+                const itemColor = it.color || '#00d2ff';
+                const strokeWidth = itemType.includes('Area') ? 2 : 2.5;
+                const radius = takeoffSizeRadius(itemSize);
+                const tag = $('createLayerTag')?.value.trim() || '';
+
+                const newLayer = {
+                    id: makeId('layer'),
+                    groupId: group.id,
+                    estimateId: activeEstimateId(),
+                    name: layerName,
+                    tag: tag,
+                    costCode: tag || it.supplier?.catalogNumber || it.classification?.costCode || '',
+                    metadata_json: {
+                        tag,
+                        catalog_item: {
+                            id: it.id,
+                            name: it.name,
+                            unitCost: getCatalogItemUnitCost(it),
+                            laborHours: getCatalogItemLaborHours(it),
+                            uom: itemUom,
+                            catalog: it.catalog,
+                            category: it.category
+                        }
+                    },
+                    catalogItemId: it.id,
+                    catalog_item_id: it.id,
+                    unitCost: getCatalogItemUnitCost(it),
+                    unit_cost: getCatalogItemUnitCost(it),
+                    laborHours: getCatalogItemLaborHours(it),
+                    labor_hours: getCatalogItemLaborHours(it),
+                    pricing: {
+                        unitCost: getCatalogItemUnitCost(it),
+                        laborHoursPerUnit: getCatalogItemLaborHours(it)
+                    },
+                    catalog: it.catalog,
+                    category: it.category?.name || it.category,
+                    type: itemType,
+                    uom: itemUom,
+                    symbol: itemSymbol,
+                    size: itemSize,
+                    markerDiameter: radius * 2,
+                    strokeWidth,
+                    color: itemColor,
+                    quantity: 0,
+                    baseQuantity: 0,
+                    dropLength: 0,
+                    spacing: 0,
+                    height: 0,
+                    depth: 0,
+                    shapes: [],
+                    takeoffObjects: []
+                };
+
+                try {
+                    const meta = catalogItemMeta(it);
+                    Object.assign(newLayer, meta);
+                    newLayer.name = layerName;
+                    newLayer.type = itemType;
+                    newLayer.uom = itemUom;
+                    newLayer.symbol = itemSymbol;
+                    newLayer.size = itemSize;
+                    newLayer.color = itemColor;
+                } catch (e) {}
+
+                group.layers.push(newLayer);
+                createdLayers.push(newLayer);
+            }
+
+            pushTakeoffHistory('create-layer');
+            group.isExpanded = true;
+            takeoffState.activeGroupId = group.id;
+
+            closeCreateLayerModal();
+            if (createdLayers.length) {
+                setActiveTakeoffLayer(createdLayers[0].id, true);
+            }
+            saveTakeoffState();
+            renderTakeoffPanel();
+            showPrepared(createdLayers.length === 1
+                ? `Takeoff layer "${createdLayers[0].name}" created.`
+                : `${createdLayers.length} takeoff layers added to "${group.name}".`);
+            return;
+        }
+
+        let name = $('createLayerCatalogName')?.value.trim();
+        if (!name) return closeCreateLayerModal();
+
+        const type = $('createLayerType')?.value || 'Count';
+        const uom = $('createLayerUom')?.value || typeToUom(type);
+        const symbol = $('createLayerSymbol')?.value || 'Solid Circle';
+        const size = $('createLayerSize')?.value || 'Medium';
+
+
+
+
+
+
+        const color = $('createLayerColorSwatch')?.style.background || '#00d2ff';
         const strokeWidth = type.includes('Area') ? 2 : 2.5;
         const radius = takeoffSizeRadius(size);
         const tag = $('createLayerTag')?.value.trim() || '';
@@ -3296,51 +3427,268 @@
         return window.TakeoffCatalogAdapter.catalogItemDtoToLegacyLayerMeta(item);
     }
 
-    function applyCatalogItemToLayerForm(item) {
+    function getActiveAddedItem() {
+        if (!takeoffState.activeAddedItemId || !takeoffState.pendingCatalogItems) return null;
+        return takeoffState.pendingCatalogItems.find(it => String(it.id) === String(takeoffState.activeAddedItemId)) || null;
+    }
+
+    function updateActiveAddedItemFromForm() {
+        const activeItem = getActiveAddedItem();
+        if (!activeItem) return;
+
+        const nameVal = $('createLayerCatalogName')?.value.trim();
+        if (nameVal) activeItem.customName = nameVal;
+        activeItem.type = $('createLayerType')?.value || activeItem.type || 'Count';
+        activeItem.uom = $('createLayerUom')?.value || activeItem.uom || 'ea';
+        activeItem.symbol = $('createLayerSymbol')?.value || activeItem.symbol || 'Solid Circle';
+        activeItem.size = $('createLayerSize')?.value || activeItem.size || 'Medium';
+        activeItem.color = $('createLayerColorSwatch')?.style.background || activeItem.color || '#00d2ff';
+
+        updateActiveItemRowPreview(activeItem);
+    }
+
+    function updateActiveItemRowPreview(item) {
         if (!item) return;
-        takeoffState.pendingCatalogItem = item;
+        const id = String(item.id);
+        const titleEl = document.querySelector(`[data-item-title="${id}"]`);
+        if (titleEl) titleEl.textContent = item.customName || item.name;
+
+        const badgeWrap = document.querySelector(`[data-item-badge-wrap="${id}"]`);
+        if (badgeWrap) badgeWrap.innerHTML = getLayerBadgeSvg(item, 18);
+
+        const colorTag = document.querySelector(`[data-item-color-tag="${id}"]`);
+        if (colorTag) {
+            colorTag.innerHTML = `
+                <span class="pro-color-dot-inline" style="background:${esc(item.color)};"></span>
+                <strong class="tag-val" style="font-family:monospace; font-size:11px;">${esc(item.color)}</strong>
+            `;
+        }
+
+        const typeTag = document.querySelector(`[data-item-type-tag="${id}"] .tag-val`);
+        if (typeTag) typeTag.textContent = item.type;
+    }
+
+    function syncFormWithActiveAddedItem() {
+        const activeItem = getActiveAddedItem();
+        if (!activeItem) return;
+
+        const nameInput = $('createLayerCatalogName');
+        if (nameInput) nameInput.value = activeItem.customName || activeItem.name || '';
+
+        const type = activeItem.type || 'Count';
+        if ($('createLayerType')) $('createLayerType').value = type;
+        updateCreateLayerTypeUi(type);
+
+        const uom = activeItem.uom || defaultUomForType(type);
+        if ($('createLayerUom')) $('createLayerUom').value = uom;
+        updateUomDropdownTrigger('createLayer', uom);
+
+        const symbol = activeItem.symbol || 'Solid Circle';
+        if ($('createLayerSymbol')) $('createLayerSymbol').value = symbol;
+        updateSymbolDropdownTrigger('createLayer', symbol);
+
+        const size = activeItem.size || 'Medium';
+        if ($('createLayerSize')) $('createLayerSize').value = size;
+        updateSizeDropdownTrigger('createLayer', size);
+
+        const color = activeItem.color || '#00d2ff';
+        const swatch = $('createLayerColorSwatch');
+        const select = $('createLayerColor');
+        if (swatch) swatch.style.background = color;
+        if (select) {
+            let match = Array.from(select.options).find(o => o.value.toLowerCase() === color.toLowerCase());
+            if (match) select.value = match.value;
+            else select.value = '__custom__';
+        }
+        updateColorDropdownTrigger('createLayer', color);
+
+        // Update active classes on rows
+        const wrap = $('createLayerAddedItemsWrap');
+        if (wrap) {
+            wrap.querySelectorAll('.pro-create-added-item-row').forEach(row => {
+                const isThis = String(row.dataset.addedItemId) === String(activeItem.id);
+                row.classList.toggle('is-active-item', isThis);
+                const badge = row.querySelector('.pro-added-item-editing-badge');
+                if (badge) badge.classList.toggle('is-hidden', !isThis);
+            });
+        }
+        updateCreateLayerSubmitState();
+    }
+
+    function renderCreateLayerAddedItems() {
+        const wrap = $('createLayerAddedItemsWrap');
+        if (!wrap) return;
+        const items = takeoffState.pendingCatalogItems || [];
+        if (!items.length) {
+            wrap.innerHTML = '';
+            wrap.style.display = 'none';
+            takeoffState.activeAddedItemId = null;
+            return;
+        }
+        if (!takeoffState.activeAddedItemId && items.length > 0) {
+            takeoffState.activeAddedItemId = String(items[0].id);
+        }
+        wrap.style.display = 'flex';
+        wrap.innerHTML = `
+            <div class="pro-create-added-items-header">
+                <span class="pro-create-added-title">
+                    <i class="fas fa-boxes-stacked"></i>
+                    Selected Items (${items.length})
+                    <span style="font-size:10.5px;font-weight:normal;opacity:0.85;margin-left:4px;">(Click an item to configure its color & properties)</span>
+                </span>
+                <button type="button" class="pro-create-clear-items-btn" id="createLayerClearItemsBtn">Clear all</button>
+            </div>
+            <div class="pro-create-added-items-list">
+                ${items.map(item => {
+                    const isActive = String(item.id) === String(takeoffState.activeAddedItemId);
+                    const isAssembly = item.type === 'assembly';
+                    const unitCost = getCatalogItemUnitCost(item);
+                    const laborHours = getCatalogItemLaborHours(item);
+                    const costStr = unitCost > 0 ? `$${unitCost.toFixed(2)}` : '$0.00';
+                    const laborStr = laborHours > 0 ? `${laborHours % 1 === 0 ? laborHours.toFixed(0) : laborHours.toFixed(2)} hrs` : '0.00 hrs';
+                    const catalogName = item.catalog?.name || '';
+                    const catalogId = item.catalog?.id || '';
+                    const groupName = item.category?.name || '';
+                    const groupId = item.category?.id || '';
+                    const code = item.supplier?.catalogNumber || item.classification?.costCode || 'n/a';
+                    return `
+                        <div class="pro-create-added-item-row ${isActive ? 'is-active-item' : ''}" data-added-item-id="${esc(item.id)}">
+                            <div class="pro-create-item-badge-wrap" data-item-badge-wrap="${esc(item.id)}">
+                                ${getLayerBadgeSvg(item, 18)}
+                            </div>
+                            <div class="pro-catalog-item-content">
+                                <div class="pro-catalog-item-top">
+                                    <span class="pro-catalog-item-title" data-item-title="${esc(item.id)}">${esc(item.customName || item.name)}</span>
+                                    ${isAssembly ? '<span class="cc-type-badge assembly"><i class="fas fa-boxes-stacked"></i> Assembly</span>' : ''}
+                                    <span class="pro-added-item-editing-badge ${isActive ? '' : 'is-hidden'}" data-item-editing="${esc(item.id)}"><i class="fas fa-pen"></i> Editing</span>
+                                </div>
+                                ${item.description ? `<div class="pro-catalog-item-desc">${esc(item.description)}</div>` : ''}
+                                <div class="pro-catalog-item-details-row">
+                                    <span class="pro-cat-info-tag tag-color" data-item-color-tag="${esc(item.id)}" title="Assigned Color">
+                                        <span class="pro-color-dot-inline" style="background:${esc(item.color)};"></span>
+                                        <strong class="tag-val" style="font-family:monospace; font-size:11px;">${esc(item.color)}</strong>
+                                    </span>
+                                    <span class="pro-cat-info-tag tag-type" data-item-type-tag="${esc(item.id)}" title="Layer Type">
+                                        <span class="tag-label">Type:</span>
+                                        <strong class="tag-val">${esc(item.type)}</strong>
+                                    </span>
+                                    <span class="pro-cat-info-tag tag-price" title="Unit Cost">
+                                        <i class="fas fa-tag"></i>
+                                        <span class="tag-label">Price:</span>
+                                        <strong class="tag-val">${costStr}</strong>
+                                        <span class="tag-uom">/ ${esc(item.uom || 'ea')}</span>
+                                    </span>
+                                    <span class="pro-cat-info-tag tag-labor" title="Labor Time">
+                                        <i class="far fa-clock"></i>
+                                        <span class="tag-label">Labor:</span>
+                                        <strong class="tag-val">${laborStr}</strong>
+                                    </span>
+                                    ${renderCatalogPill(catalogName, catalogId)}
+                                    ${groupName ? renderGroupPill(groupName, groupId, catalogId) : ''}
+                                </div>
+                            </div>
+                            <button type="button" class="pro-create-item-remove-btn" data-remove-item="${esc(item.id)}" title="Remove item">
+                                <i class="fas fa-times"></i>
+                            </button>
+                        </div>
+                    `;
+                }).join('')}
+            </div>
+        `;
+
+        wrap.querySelectorAll('.pro-create-added-item-row').forEach(row => {
+            row.addEventListener('click', (e) => {
+                if (e.target.closest('[data-remove-item]')) return;
+                const id = row.dataset.addedItemId;
+                takeoffState.activeAddedItemId = id;
+                syncFormWithActiveAddedItem();
+            });
+        });
+
+        wrap.querySelectorAll('[data-remove-item]').forEach(btn => {
+            btn.addEventListener('click', (e) => {
+                e.stopPropagation();
+                const id = btn.dataset.removeItem;
+                takeoffState.pendingCatalogItems = (takeoffState.pendingCatalogItems || []).filter(it => String(it.id) !== String(id));
+                if (String(takeoffState.activeAddedItemId) === String(id)) {
+                    takeoffState.activeAddedItemId = takeoffState.pendingCatalogItems[0]?.id ? String(takeoffState.pendingCatalogItems[0].id) : null;
+                }
+                takeoffState.pendingCatalogItem = takeoffState.pendingCatalogItems[0] || null;
+                renderCreateLayerAddedItems();
+                syncFormWithActiveAddedItem();
+                updateCreateLayerSubmitState();
+            });
+        });
+
+        $('createLayerClearItemsBtn')?.addEventListener('click', () => {
+            takeoffState.pendingCatalogItems = [];
+            takeoffState.pendingCatalogItem = null;
+            takeoffState.activeAddedItemId = null;
+            renderCreateLayerAddedItems();
+            updateCreateLayerSubmitState();
+        });
+    }
+
+    function applyCatalogItemsToLayerForm(items) {
+        if (!Array.isArray(items)) items = items ? [items] : [];
+        const palette = TAKEOFF_RICH_COLORS;
+        items.forEach((it, idx) => {
+            if (!it.customName) it.customName = it.name || '';
+            if (!it.type) {
+                it.type = window.TakeoffCatalogAdapter?.measurementType
+                    ? window.TakeoffCatalogAdapter.measurementType(it, inferTakeoffTypeFromUom(it.uom))
+                    : inferTakeoffTypeFromUom(it.uom) || 'Count';
+            }
+            if (!it.uom) it.uom = it.unit_of_measure || defaultUomForType(it.type);
+            if (!it.symbol) it.symbol = it.takeoffDefaults?.symbol || it.symbol || 'Solid Circle';
+            if (!it.size) it.size = it.takeoffDefaults?.size || 'Medium';
+            if (!it.color) {
+                it.color = it.takeoffDefaults?.color || it.color || palette[idx % palette.length];
+            }
+        });
+
+        takeoffState.pendingCatalogItems = items;
+        takeoffState.pendingCatalogItem = items[0] || null;
+        takeoffState.activeAddedItemId = items.length ? String(items[0].id) : null;
+
         const createModal = $('takeoffCreateLayerModal');
         if (createModal && !createModal.hidden) {
             createModal.classList.remove('is-behind');
-            if ($('createLayerCatalogName')) $('createLayerCatalogName').value = item.name || '';
-            const inferred = window.TakeoffCatalogAdapter?.measurementType ? window.TakeoffCatalogAdapter.measurementType(item, inferTakeoffTypeFromUom(item.uom)) : inferTakeoffTypeFromUom(item.uom);
-            if (inferred && $('createLayerType')) {
-                $('createLayerType').value = inferred;
-                updateCreateLayerTypeUi(inferred);
-            }
-            if ($('createLayerUom')) {
-                $('createLayerUom').value = item.uom || 'ea';
-                updateUomDropdownTrigger('createLayer', item.uom || 'ea');
-            }
-            const color = item.takeoffDefaults?.color || item.color;
-            if (color) setCreateLayerColor(color);
-            const symbol = item.takeoffDefaults?.symbol || item.symbol;
-            if (symbol && $('createLayerSymbol')) $('createLayerSymbol').value = symbol;
+            renderCreateLayerAddedItems();
+            syncFormWithActiveAddedItem();
             updateCreateLayerSubmitState();
             closeCatalogModal();
             setTimeout(() => $('createLayerCatalogName')?.focus(), 40);
             return;
         }
-        $('layerNameInput').value = item.name || '';
-        setSelectValue($('layerUomInput'), item.uom || 'ea');
-        updateUomDropdownTrigger('editLayer', item.uom || 'ea');
-        const inferred = window.TakeoffCatalogAdapter?.measurementType ? window.TakeoffCatalogAdapter.measurementType(item, inferTakeoffTypeFromUom(item.uom)) : inferTakeoffTypeFromUom(item.uom);
-        if (inferred) {
-            $('layerTypeInput').value = inferred;
-            $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[inferred];
-            updateLayerTypeIcon();
+
+        if (items.length) {
+            const item = items[0];
+            $('layerNameInput').value = item.name || '';
+            setSelectValue($('layerUomInput'), item.uom || 'ea');
+            updateUomDropdownTrigger('editLayer', item.uom || 'ea');
+            const inferred = item.type;
+            if (inferred) {
+                $('layerTypeInput').value = inferred;
+                $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[inferred];
+                updateLayerTypeIcon();
+            }
+            const symbol = item.symbol;
+            const color = item.color;
+            if (symbol && TAKEOFF_SYMBOLS.includes(symbol)) $('layerSymbolInput').value = symbol;
+            if (color) {
+                setLayerColor(color);
+            }
+            updateAssociatedCatalogCard(null);
+            updateCatalogSelectionIndicator();
+            updateLayerSubmitState();
         }
-        const symbol = item.takeoffDefaults?.symbol || item.symbol;
-        const color = item.takeoffDefaults?.color || item.color;
-        if (symbol && TAKEOFF_SYMBOLS.includes(symbol)) $('layerSymbolInput').value = symbol;
-        if (color) {
-            setLayerColor(color);
-        }
-        updateAssociatedCatalogCard(null);
-        updateCatalogSelectionIndicator();
-        updateLayerSubmitState();
         closeCatalogModal();
         setTimeout(() => $('layerNameInput')?.focus(), 40);
+    }
+
+    function applyCatalogItemToLayerForm(item) {
+        applyCatalogItemsToLayerForm(item ? [item] : []);
     }
 
     async function submitLayerModal() {
@@ -3444,11 +3792,143 @@
         }
     }
 
+    const CATALOG_PALETTE = [
+        '#2563eb', // Blue
+        '#059669', // Emerald
+        '#d97706', // Amber
+        '#7c3aed', // Purple
+        '#db2777', // Pink
+        '#0891b2', // Cyan
+        '#ea580c', // Orange
+        '#4f46e5', // Indigo
+        '#16a34a', // Green
+        '#0284c7', // Sky
+        '#9333ea', // Violet
+        '#ca8a04'  // Gold
+    ];
+
+    function getCatalogColor(catalogOrName, catalogId) {
+        if (typeof catalogOrName === 'object' && catalogOrName !== null) {
+            if (catalogOrName.color) return catalogOrName.color;
+            const id = catalogOrName.id;
+            if (id) {
+                return CATALOG_PALETTE[(Number(id) - 1) % CATALOG_PALETTE.length] || CATALOG_PALETTE[0];
+            }
+            catalogOrName = catalogOrName.name || '';
+        }
+        if (catalogId) {
+            return CATALOG_PALETTE[(Number(catalogId) - 1) % CATALOG_PALETTE.length] || CATALOG_PALETTE[0];
+        }
+        const str = String(catalogOrName || '');
+        if (!str || str === '-') return '#64748b';
+        let hash = 0;
+        for (let i = 0; i < str.length; i++) hash = ((hash << 5) - hash) + str.charCodeAt(i);
+        return CATALOG_PALETTE[Math.abs(hash) % CATALOG_PALETTE.length];
+    }
+
+    function hexToRgba(hex, alpha) {
+        if (!hex || typeof hex !== 'string') return `rgba(100, 116, 139, ${alpha})`;
+        hex = hex.replace('#', '');
+        if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+        const num = parseInt(hex, 16);
+        if (isNaN(num)) return `rgba(100, 116, 139, ${alpha})`;
+        const r = (num >> 16) & 255;
+        const g = (num >> 8) & 255;
+        const b = num & 255;
+        return `rgba(${r}, ${g}, ${b}, ${alpha})`;
+    }
+
+    function getDarkerShade(hex) {
+        if (!hex || typeof hex !== 'string') return '#1e293b';
+        hex = hex.replace('#', '');
+        if (hex.length === 3) hex = hex.split('').map(c => c + c).join('');
+        const num = parseInt(hex, 16);
+        if (isNaN(num)) return '#1e293b';
+        let r = Math.max(0, Math.floor(((num >> 16) & 255) * 0.72));
+        let g = Math.max(0, Math.floor(((num >> 8) & 255) * 0.72));
+        let b = Math.max(0, Math.floor((num & 255) * 0.72));
+        return `#${((1 << 24) + (r << 16) + (g << 8) + b).toString(16).slice(1)}`;
+    }
+
+    function getGroupColor(groupOrName, groupId, catalogId) {
+        let resolvedCatId = catalogId;
+        let resolvedCatName = '';
+        if (typeof groupOrName === 'object' && groupOrName !== null) {
+            resolvedCatId = resolvedCatId || groupOrName.catalog_id || groupOrName.catalogId;
+            resolvedCatName = groupOrName.catalog_name || groupOrName.catalogName || '';
+        }
+        if (!resolvedCatId && groupId) {
+            const found = (catalogState.groups || []).find(g => String(g.id) === String(groupId));
+            if (found) {
+                resolvedCatId = found.catalogId || found.catalog_id;
+                resolvedCatName = found.catalogName || '';
+            }
+        }
+        const cat = (catalogState.catalogs || []).find(c => String(c.id) === String(resolvedCatId));
+        const catColor = getCatalogColor(cat || resolvedCatName, resolvedCatId);
+        return getDarkerShade(catColor);
+    }
+
+    function renderCatalogPill(catalogName, catalogId) {
+        if (!catalogName || catalogName === '-') return '';
+        const color = getCatalogColor(catalogName, catalogId);
+        const bgLight = hexToRgba(color, 0.12);
+        const borderLight = hexToRgba(color, 0.35);
+        const textLight = getDarkerShade(color);
+        const bgDark = hexToRgba(color, 0.28);
+        const borderDark = hexToRgba(color, 0.60);
+        return `
+            <span class="cc-catalog-pill" style="--cat-color: ${color}; --cat-bg-light: ${bgLight}; --cat-border-light: ${borderLight}; --cat-text-light: ${textLight}; --cat-bg-dark: ${bgDark}; --cat-border-dark: ${borderDark};" title="Catalog: ${esc(catalogName)}">
+                <span class="bb-status-dot" style="background-color: ${color};"></span>
+                <span class="bb-status-pill-label">${esc(catalogName)}</span>
+            </span>
+        `;
+    }
+
+    function renderGroupPill(groupName, groupId, catalogId) {
+        if (!groupName || groupName === '-') return '';
+        const color = getGroupColor(groupName, groupId, catalogId);
+        const bgLight = hexToRgba(color, 0.14);
+        const borderLight = hexToRgba(color, 0.40);
+        const textLight = color;
+        const bgDark = hexToRgba(color, 0.30);
+        const borderDark = hexToRgba(color, 0.65);
+        return `
+            <span class="cc-catalog-pill cc-group-pill" style="--cat-color: ${color}; --cat-bg-light: ${bgLight}; --cat-border-light: ${borderLight}; --cat-text-light: ${textLight}; --cat-bg-dark: ${bgDark}; --cat-border-dark: ${borderDark};" title="Group: ${esc(groupName)}">
+                <i class="fas fa-folder" style="font-size: 10px; color: ${color};"></i>
+                <span class="bb-status-pill-label">${esc(groupName)}</span>
+            </span>
+        `;
+    }
+
+    function getCatalogItemUnitCost(item) {
+        if (!item) return 0;
+        if (window.TakeoffCatalogAdapter && typeof window.TakeoffCatalogAdapter.legacyUnitCost === 'function') {
+            const val = window.TakeoffCatalogAdapter.legacyUnitCost(item);
+            if (Number(val) > 0) return Number(val);
+        }
+        const p = item.pricing || {};
+        if (p.unitCost !== undefined && p.unitCost !== null && Number(p.unitCost) > 0) return Number(p.unitCost);
+        if (p.materialUnitCost !== undefined && p.materialUnitCost !== null && Number(p.materialUnitCost) > 0) return Number(p.materialUnitCost);
+        if (p.equipmentUnitCost !== undefined && p.equipmentUnitCost !== null && Number(p.equipmentUnitCost) > 0) return Number(p.equipmentUnitCost);
+        if (p.subcontractorUnitCost !== undefined && p.subcontractorUnitCost !== null && Number(p.subcontractorUnitCost) > 0) return Number(p.subcontractorUnitCost);
+        if (p.legacyUnitCost !== undefined && p.legacyUnitCost !== null && Number(p.legacyUnitCost) > 0) return Number(p.legacyUnitCost);
+        if (item.unit_cost !== undefined && item.unit_cost !== null) return Number(item.unit_cost) || 0;
+        if (item.unitCost !== undefined && item.unitCost !== null) return Number(item.unitCost) || 0;
+        return Number(item.cost ?? item.price ?? 0);
+    }
+
+    function getCatalogItemLaborHours(item) {
+        if (!item) return 0;
+        const p = item.pricing || {};
+        return Number(p.laborHoursPerUnit ?? item.labor_hours ?? item.laborHours ?? 0);
+    }
+
     const browseCatalogState = {
         activeTab: 'cost_catalog',
         selectedCatalogId: null,
         selectedGroupId: null,
-        selectedItemId: null,
+        selectedItemIds: new Set(),
         itemQuery: '',
         catalogQuery: '',
         page: 1,
@@ -3465,53 +3945,85 @@
         modal.innerHTML = `
             <div class="pro-browse-catalog-modal" role="dialog" aria-modal="true" aria-labelledby="takeoffCatalogModalTitle">
                 <div class="pro-browse-catalog-head">
-                    <h2 id="takeoffCatalogModalTitle">Select catalog item</h2>
-                    <button class="pro-icon-btn" type="button" data-catalog-close aria-label="Close">&times;</button>
-                </div>
-                <div class="pro-browse-catalog-tabs">
-                    <button type="button" class="pro-browse-catalog-tab active" data-browse-tab="cost_catalog">Cost Catalog</button>
-                    <button type="button" class="pro-browse-catalog-tab" data-browse-tab="masterformat">Masterformat</button>
-                    <button type="button" class="pro-browse-catalog-tab" data-browse-tab="uniformat">Uniformat</button>
+                    <div class="pro-browse-head-left">
+                        <div class="pro-browse-title-row">
+                            <h2 id="takeoffCatalogModalTitle" class="pro-browse-title">
+                                <i class="fas fa-book-open"></i> Cost Catalog
+                            </h2>
+                            <div class="pro-browse-context-badges">
+                                <span class="cc-context-badge catalog-badge" id="proBrowseCatBadge" title="Current catalog filter">
+                                    <i class="fas fa-book"></i>
+                                    <span id="proBrowseCatContext">All Catalogs</span>
+                                </span>
+                                <span class="cc-context-badge group-badge" id="proBrowseGrpBadge" title="Current group filter">
+                                    <i class="fas fa-folder"></i>
+                                    <span id="proBrowseGrpContext">All Groups</span>
+                                </span>
+                            </div>
+                        </div>
+                        <div class="pro-browse-subtitle">
+                            Browse and select items from company library to apply to this takeoff layer.
+                        </div>
+                    </div>
+                    <div class="pro-browse-head-right">
+                        <button type="button" class="bb-btn-procore-primary pro-browse-head-create-btn" id="proBrowseCreateNewItemBtn">
+                            <i class="fas fa-plus"></i> Create New Item
+                        </button>
+                        <button class="pro-icon-btn pro-modal-tab-close" type="button" data-catalog-close aria-label="Close" title="Close dialog">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
                 </div>
                 <div class="pro-browse-catalog-body">
-                    <aside class="pro-browse-cat-sidebar">
-                        <div class="pro-browse-cat-sidebar-head">Catalogs</div>
-                        <div class="pro-browse-cat-search">
-                            <input id="proBrowseCatSearch" type="search" placeholder="Search Catalogs" autocomplete="off">
-                            <i class="fas fa-magnifying-glass"></i>
-                        </div>
-                        <div class="pro-browse-cat-tree" id="proBrowseCatTree"></div>
-                    </aside>
-                    <main class="pro-browse-items-main">
-                        <div class="pro-browse-items-head">
-                            <div class="pro-browse-items-head-top">
-                                <span class="pro-browse-items-title" id="proBrowseItemsTitle">All Catalog Items</span>
+                    <aside class="pro-browse-cat-sidebar cc-catalog-sidebar" id="proBrowseCatSidebar" aria-label="Catalog library navigation">
+                        <div class="cc-sidebar-head">
+                            <div class="cc-sidebar-head-left">
+                                <span class="cc-sidebar-eyebrow">Company Tool</span>
+                                <strong class="cc-sidebar-title">Catalog Library</strong>
                             </div>
-                            <div class="pro-btn-create-item-row" style="margin-top:-2px; margin-bottom:4px;">
-                                <button type="button" class="pro-btn-create-item-link" id="proBrowseCreateNewItemBtn">
-                                    <i class="fas fa-plus"></i> Create New Item
+                        </div>
+                        <div class="cc-sidebar-search-wrap">
+                            <div class="bb-search-field-procore cc-sidebar-search">
+                                <input id="proBrowseCatSearch" type="search" placeholder="Search catalogs..." autocomplete="off">
+                                <button class="bb-search-submit" type="button" aria-label="Search">
+                                    <i class="fas fa-magnifying-glass"></i>
                                 </button>
                             </div>
-                            <div class="pro-browse-items-controls">
-                                <div class="pro-browse-items-controls-left">
-                                    <input type="checkbox" id="proBrowseSelectAll" aria-label="Select all items">
-                                    <button type="button" class="pro-cat-tool-btn">
-                                        <i class="fas fa-bars"></i> Common <i class="fas fa-caret-down"></i>
-                                    </button>
-                                    <button type="button" class="pro-cat-tool-btn">
-                                        <i class="fas fa-filter"></i> Filters
+                        </div>
+                        <div class="cc-sidebar-nav-fixed">
+                            <button class="cc-tree-row static-view active" data-cat-select="all" type="button">
+                                <i class="fas fa-layer-group" aria-hidden="true"></i>
+                                <span>All Catalog Items</span>
+                                <span class="cc-tree-count" id="proBrowseAllCount">0</span>
+                            </button>
+                            <button class="cc-tree-row static-view" data-cat-select="recent" type="button">
+                                <i class="far fa-clock" aria-hidden="true"></i>
+                                <span>Most Recently Used</span>
+                            </button>
+                        </div>
+                        <div class="cc-tree-divider">
+                            <span>Catalogs</span>
+                        </div>
+                        <div class="cc-sidebar-tree-wrap" id="proBrowseCatTree" role="tree" aria-label="Catalogs and groups"></div>
+                    </aside>
+                    <main class="pro-browse-items-main">
+                        <div class="pro-browse-items-controls cc-table-controls bb-table-controls">
+                            <div class="cc-table-controls-left bb-table-controls-left">
+                                <div class="bb-search-field-procore cc-search-procore" style="width: 340px;">
+                                    <input id="proBrowseItemSearch" type="search" placeholder="Search catalog items, codes, descriptions..." autocomplete="off">
+                                    <button class="bb-search-submit" type="button" aria-label="Search">
+                                        <i class="fas fa-magnifying-glass"></i>
                                     </button>
                                 </div>
-                                <div class="pro-browse-item-search">
-                                    <input id="proBrowseItemSearch" type="search" placeholder="Search catalog item name" autocomplete="off">
-                                    <i class="fas fa-magnifying-glass"></i>
-                                </div>
+                            </div>
+                            <div class="cc-table-controls-right bb-table-controls-right">
+                                <span class="pro-browse-count-label" id="proBrowseCountLabel">0 items</span>
                             </div>
                         </div>
                         <div class="pro-browse-items-list" id="proBrowseItemsList"></div>
                         <div class="pro-browse-pagination">
                             <span id="proBrowsePaginationText">0-0 of 0</span>
-                            <span>Page: <select id="proBrowsePageSelect" style="padding: 1px 4px; font-size: 11px; border: 1px solid var(--tk-border); border-radius: 4px; background: inherit; color: inherit;"></select></span>
+                            <span class="pro-browse-page-selector">Page: <select id="proBrowsePageSelect" class="native-raw-select" data-no-custom-select="true" style="padding: 2px 6px; font-size: 11.5px; border: 1px solid var(--tk-border, #cbd5e1); border-radius: 4px; background: inherit; color: inherit;"></select></span>
                             <div class="pro-browse-pagination-arrows">
                                 <button type="button" class="pro-browse-pagination-arrow" id="proBrowsePrevPage" disabled title="Previous page"><i class="fas fa-chevron-left"></i></button>
                                 <button type="button" class="pro-browse-pagination-arrow" id="proBrowseNextPage" disabled title="Next page"><i class="fas fa-chevron-right"></i></button>
@@ -3520,23 +4032,20 @@
                     </main>
                 </div>
                 <div class="pro-browse-catalog-foot">
-                    <button type="button" class="pro-btn-browse-cancel" data-catalog-close>Cancel</button>
-                    <button type="button" class="pro-btn-browse-select" id="proBrowseSelectBtn" disabled>Select</button>
+                    <div class="pro-browse-foot-left">
+                        <span class="pro-browse-footer-selection-text" id="proBrowseFooterSelection">No item selected</span>
+                    </div>
+                    <div class="pro-browse-foot-right">
+                        <button type="button" class="pro-btn-browse-cancel" data-catalog-close>Cancel</button>
+                        <button type="button" class="bb-btn-procore-primary pro-btn-browse-select" id="proBrowseSelectBtn" disabled>
+                            <i class="fas fa-check"></i> Select Item
+                        </button>
+                    </div>
                 </div>
             </div>`;
         document.body.appendChild(modal);
 
         modal.querySelectorAll('[data-catalog-close]').forEach(btn => btn.addEventListener('click', closeCatalogModal));
-
-        modal.querySelectorAll('[data-browse-tab]').forEach(tabBtn => {
-            tabBtn.addEventListener('click', () => {
-                modal.querySelectorAll('[data-browse-tab]').forEach(b => b.classList.remove('active'));
-                tabBtn.classList.add('active');
-                browseCatalogState.activeTab = tabBtn.dataset.browseTab;
-                browseCatalogState.page = 1;
-                renderCatalogBrowser();
-            });
-        });
 
         $('proBrowseCatSearch')?.addEventListener('input', e => {
             browseCatalogState.catalogQuery = e.target.value.trim().toLowerCase();
@@ -3553,9 +4062,9 @@
         });
 
         $('proBrowseSelectBtn')?.addEventListener('click', () => {
-            const selected = getSelectedCatalogItem();
-            if (selected) {
-                applyCatalogItemToLayerForm(selected);
+            const selectedItems = getSelectedCatalogItems();
+            if (selectedItems.length) {
+                applyCatalogItemsToLayerForm(selectedItems);
             }
         });
 
@@ -3589,10 +4098,12 @@
         if (createModal && !createModal.hidden) {
             createModal.classList.add('is-behind');
         }
-        browseCatalogState.selectedItemId = null;
+        browseCatalogState.selectedItemIds = new Set((takeoffState.pendingCatalogItems || []).map(i => String(i.id)));
         browseCatalogState.page = 1;
         browseCatalogState.itemQuery = '';
         browseCatalogState.catalogQuery = '';
+        if ($('proBrowseItemSearch')) $('proBrowseItemSearch').value = '';
+        if ($('proBrowseCatSearch')) $('proBrowseCatSearch').value = '';
         $('takeoffCatalogModal').hidden = false;
         loadCatalogItems();
         setTimeout(() => $('proBrowseItemSearch')?.focus(), 50);
@@ -3619,29 +4130,62 @@
         try {
             if (window.CatalogService) {
                 const snapshot = await window.CatalogService.getSnapshot({ enabledForProjectsOnly: false });
-                catalogState.catalogs = snapshot.catalogs || [];
-                catalogState.groups = snapshot.categories || [];
-                catalogState.items = snapshot.items || [];
+                catalogState.catalogs = (snapshot.catalogs || []).map(c => ({
+                    id: c.id,
+                    name: c.name,
+                    locked: Boolean(c.locked)
+                }));
+                catalogState.groups = (snapshot.categories || []).map(g => ({
+                    id: g.id,
+                    catalogId: g.catalogId || g.catalog_id,
+                    parentGroupId: g.parentId || g.parent_group_id,
+                    name: g.name
+                }));
+                catalogState.items = (snapshot.items || []).map(i => {
+                    const cost = getCatalogItemUnitCost(i);
+                    const labor = getCatalogItemLaborHours(i);
+                    return {
+                        ...i,
+                        unitCost: cost,
+                        unit_cost: cost,
+                        laborHours: labor,
+                        labor_hours: labor,
+                        pricing: {
+                            ...(i.pricing || {}),
+                            unitCost: cost,
+                            laborHoursPerUnit: labor,
+                            materialUnitCost: i.pricing?.materialUnitCost ?? cost
+                        }
+                    };
+                });
             } else {
                 const res = await fetch('../api/cost_catalog.php?action=list');
                 const json = await res.json();
                 if (json.status === 'success' && json.data) {
                     catalogState.catalogs = (json.data.catalogs || []).map(c => ({ id: c.id, name: c.name, locked: Boolean(Number(c.locked || 0)) }));
                     catalogState.groups = (json.data.groups || []).map(g => ({ id: g.id, catalogId: g.catalog_id, parentGroupId: g.parent_group_id, name: g.name }));
-                    catalogState.items = (json.data.items || json.data.allItems || []).map(i => ({
-                        id: i.id,
-                        name: i.name,
-                        description: i.description || '',
-                        type: i.item_type || 'material',
-                        uom: i.unit_of_measure || 'ea',
-                        color: i.color,
-                        symbol: i.symbol,
-                        pricing: { unitCost: Number(i.unit_cost || 0), laborHoursPerUnit: Number(i.labor_hours || 0) },
-                        catalog: { id: i.catalog_id, name: i.catalog_name || '' },
-                        category: { id: i.catalog_group_id, name: i.group_name || '' },
-                        supplier: { catalogNumber: i.catalog_number || '' },
-                        classification: { costCode: i.cost_code || '', masterformat: i.masterformat || '', uniformat: i.uniformat || '' }
-                    }));
+                    catalogState.items = (json.data.items || json.data.allItems || []).map(i => {
+                        const cost = Number(i.unit_cost ?? i.unitCost ?? i.cost ?? i.price ?? 0);
+                        const labor = Number(i.labor_hours ?? i.laborHours ?? 0);
+                        return {
+                            id: i.id,
+                            name: i.name,
+                            description: i.description || '',
+                            type: i.item_type || 'material',
+                            uom: i.unit_of_measure || 'ea',
+                            color: i.color,
+                            symbol: i.symbol,
+                            unitCost: cost,
+                            unit_cost: cost,
+                            laborHours: labor,
+                            labor_hours: labor,
+                            pricing: { unitCost: cost, laborHoursPerUnit: labor, materialUnitCost: cost },
+                            catalog: { id: i.catalog_id, name: i.catalog_name || '' },
+                            category: { id: i.catalog_group_id, name: i.group_name || '' },
+                            supplier: { catalogNumber: i.catalog_number || '' },
+                            classification: { costCode: i.cost_code || '', masterformat: i.masterformat || '', uniformat: i.uniformat || '' }
+                        };
+                    });
                 }
             }
             catalogState.loaded = true;
@@ -3659,48 +4203,113 @@
         renderCatalogItems();
     }
 
+    function updateCatalogContextBadges() {
+        const catBadge = $('proBrowseCatBadge');
+        const grpBadge = $('proBrowseGrpBadge');
+        const catContext = $('proBrowseCatContext');
+        const grpContext = $('proBrowseGrpContext');
+
+        const catId = browseCatalogState.selectedCatalogId;
+        const grpId = browseCatalogState.selectedGroupId;
+
+        const cat = (catalogState.catalogs || []).find(c => String(c.id) === String(catId));
+        const grp = (catalogState.groups || []).find(g => String(g.id) === String(grpId));
+
+        if (catContext) catContext.textContent = cat ? cat.name : (catId === '__recent__' ? 'Recently Used' : 'All Catalogs');
+        if (grpContext) grpContext.textContent = grp ? grp.name : 'All Groups';
+
+        if (catBadge) {
+            catBadge.classList.toggle('is-selected', Boolean(cat));
+            if (cat) {
+                const color = getCatalogColor(cat.name, cat.id);
+                catBadge.style.setProperty('--cat-color', color);
+                catBadge.style.setProperty('--cat-bg-light', hexToRgba(color, 0.12));
+                catBadge.style.setProperty('--cat-border-light', hexToRgba(color, 0.35));
+                catBadge.style.setProperty('--cat-text-light', getDarkerShade(color));
+                catBadge.style.setProperty('--cat-bg-dark', hexToRgba(color, 0.28));
+                catBadge.style.setProperty('--cat-border-dark', hexToRgba(color, 0.60));
+            } else {
+                catBadge.style.removeProperty('--cat-color');
+                catBadge.style.removeProperty('--cat-bg-light');
+                catBadge.style.removeProperty('--cat-border-light');
+                catBadge.style.removeProperty('--cat-text-light');
+                catBadge.style.removeProperty('--cat-bg-dark');
+                catBadge.style.removeProperty('--cat-border-dark');
+            }
+        }
+        if (grpBadge) {
+            grpBadge.classList.toggle('is-selected', Boolean(grp));
+            if (grp) {
+                const color = getGroupColor(grp.name, grp.id, catId);
+                grpBadge.style.setProperty('--cat-color', color);
+                grpBadge.style.setProperty('--cat-bg-light', hexToRgba(color, 0.14));
+                grpBadge.style.setProperty('--cat-border-light', hexToRgba(color, 0.40));
+                grpBadge.style.setProperty('--cat-text-light', color);
+                grpBadge.style.setProperty('--cat-bg-dark', hexToRgba(color, 0.30));
+                grpBadge.style.setProperty('--cat-border-dark', hexToRgba(color, 0.65));
+            } else {
+                grpBadge.style.removeProperty('--cat-color');
+                grpBadge.style.removeProperty('--cat-bg-light');
+                grpBadge.style.removeProperty('--cat-border-light');
+                grpBadge.style.removeProperty('--cat-text-light');
+                grpBadge.style.removeProperty('--cat-bg-dark');
+                grpBadge.style.removeProperty('--cat-border-dark');
+            }
+        }
+    }
+
     function renderCatalogSidebar() {
         const tree = $('proBrowseCatTree');
         if (!tree) return;
         const q = browseCatalogState.catalogQuery;
         const isAllActive = !browseCatalogState.selectedCatalogId && !browseCatalogState.selectedGroupId;
+        const isRecentActive = browseCatalogState.selectedCatalogId === '__recent__';
 
-        let html = `
-            <div class="pro-cat-tree-node ${isAllActive ? 'active' : ''}" data-cat-select="all">
-                <i class="fas fa-bars pro-cat-icon"></i>
-                <span class="node-name">All Catalog Items</span>
-            </div>
-            <div class="pro-cat-tree-node ${browseCatalogState.selectedCatalogId === '__recent__' ? 'active' : ''}" data-cat-select="recent">
-                <i class="fas fa-clock pro-cat-icon"></i>
-                <span class="node-name">Most Recently Used Items</span>
-            </div>
-        `;
+        const allBtn = document.querySelector('.pro-browse-cat-sidebar [data-cat-select="all"]');
+        if (allBtn) allBtn.classList.toggle('active', isAllActive);
+        const recentBtn = document.querySelector('.pro-browse-cat-sidebar [data-cat-select="recent"]');
+        if (recentBtn) recentBtn.classList.toggle('active', isRecentActive);
 
+        const allItems = catalogState.items || [];
+        if ($('proBrowseAllCount')) $('proBrowseAllCount').textContent = allItems.length;
+
+        updateCatalogContextBadges();
+
+        let html = '';
         (catalogState.catalogs || []).forEach(cat => {
             if (q && !cat.name.toLowerCase().includes(q)) return;
             const catId = String(cat.id);
             const isCatActive = String(browseCatalogState.selectedCatalogId) === catId && !browseCatalogState.selectedGroupId;
             const isExpanded = Boolean(browseCatalogState.expandedCatalogs[catId] ?? true);
-            const groups = (catalogState.groups || []).filter(g => String(g.catalogId) === catId && !g.parentGroupId);
+            const groups = (catalogState.groups || [])
+                .filter(g => String(g.catalogId) === catId && !g.parentGroupId)
+                .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), undefined, { numeric: true, sensitivity: 'base' }));
+            const catColor = getCatalogColor(cat.name, cat.id);
+            const catCount = allItems.filter(i => String(i.catalog?.id) === catId).length;
 
             html += `
-                <div class="pro-cat-tree-node ${isCatActive ? 'active' : ''}" data-cat-select="${esc(catId)}">
-                    ${groups.length ? `<i class="fas fa-caret-right node-carat ${isExpanded ? 'open' : ''}" data-cat-toggle="${esc(catId)}"></i>` : '<span style="width:14px;"></span>'}
-                    <i class="fas fa-folder node-icon"></i>
-                    <span class="node-name" title="${esc(cat.name)}">${esc(cat.name)}</span>
-                    ${cat.locked ? '<i class="fas fa-lock node-lock"></i>' : ''}
+                <div class="cc-tree-row cc-tree-catalog ${isCatActive ? 'active' : ''}" data-cat-select="${esc(catId)}" title="${esc(cat.name)}">
+                    ${groups.length ? `<i class="fas fa-caret-right cc-tree-caret ${isExpanded ? 'open' : ''}" data-cat-toggle="${esc(catId)}"></i>` : '<span style="width:16px;display:inline-block;"></span>'}
+                    <i class="fas fa-book cc-tree-icon" style="color: ${catColor};"></i>
+                    <span class="cc-tree-label">${esc(cat.name)}</span>
+                    ${cat.locked ? '<i class="fas fa-lock cc-tree-lock" title="Locked catalog"></i>' : ''}
+                    <span class="cc-tree-count">${catCount}</span>
                 </div>
             `;
 
             if (isExpanded && groups.length) {
-                html += '<div class="pro-cat-tree-children">';
+                html += '<div class="cc-tree-children" role="group">';
                 groups.forEach(grp => {
                     const grpId = String(grp.id);
                     const isGrpActive = String(browseCatalogState.selectedGroupId) === grpId;
+                    const grpColor = getGroupColor(grp.name, grp.id, cat.id);
+                    const grpCount = allItems.filter(i => String(i.category?.id) === grpId).length;
+
                     html += `
-                        <div class="pro-cat-tree-node ${isGrpActive ? 'active' : ''}" data-cat-group-select="${esc(grpId)}" data-cat-parent="${esc(catId)}">
-                            <i class="fas fa-folder-open node-icon" style="font-size:11px;"></i>
-                            <span class="node-name" title="${esc(grp.name)}">${esc(grp.name)}</span>
+                        <div class="cc-tree-row cc-tree-group ${isGrpActive ? 'active' : ''}" data-cat-group-select="${esc(grpId)}" data-cat-parent="${esc(catId)}" title="${esc(grp.name)}">
+                            <i class="fas fa-folder cc-tree-icon" style="color: ${grpColor}; font-size:11.5px;"></i>
+                            <span class="cc-tree-label">${esc(grp.name)}</span>
+                            <span class="cc-tree-count">${grpCount}</span>
                         </div>
                     `;
                 });
@@ -3719,22 +4328,19 @@
             });
         });
 
-        tree.querySelectorAll('[data-cat-select]').forEach(node => {
+        const rootModal = $('takeoffCatalogModal');
+        rootModal?.querySelectorAll('.pro-browse-cat-sidebar [data-cat-select]').forEach(node => {
             node.addEventListener('click', () => {
                 const target = node.dataset.catSelect;
                 if (target === 'all') {
                     browseCatalogState.selectedCatalogId = null;
                     browseCatalogState.selectedGroupId = null;
-                    if ($('proBrowseItemsTitle')) $('proBrowseItemsTitle').textContent = 'All Catalog Items';
                 } else if (target === 'recent') {
                     browseCatalogState.selectedCatalogId = '__recent__';
                     browseCatalogState.selectedGroupId = null;
-                    if ($('proBrowseItemsTitle')) $('proBrowseItemsTitle').textContent = 'Most Recently Used Items';
                 } else {
                     browseCatalogState.selectedCatalogId = target;
                     browseCatalogState.selectedGroupId = null;
-                    const cat = (catalogState.catalogs || []).find(c => String(c.id) === target);
-                    if ($('proBrowseItemsTitle')) $('proBrowseItemsTitle').textContent = cat ? cat.name : 'Catalog Items';
                 }
                 browseCatalogState.page = 1;
                 renderCatalogSidebar();
@@ -3748,9 +4354,6 @@
                 const parentCatId = node.dataset.catParent;
                 browseCatalogState.selectedCatalogId = parentCatId;
                 browseCatalogState.selectedGroupId = grpId;
-                const grp = (catalogState.groups || []).find(g => String(g.id) === grpId);
-                const cat = (catalogState.catalogs || []).find(c => String(c.id) === parentCatId);
-                if ($('proBrowseItemsTitle')) $('proBrowseItemsTitle').textContent = `${cat ? cat.name + ' > ' : ''}${grp ? grp.name : 'Group'}`;
                 browseCatalogState.page = 1;
                 renderCatalogSidebar();
                 renderCatalogItems();
@@ -3763,7 +4366,6 @@
         const q = browseCatalogState.itemQuery;
         const catId = browseCatalogState.selectedCatalogId;
         const grpId = browseCatalogState.selectedGroupId;
-        const tab = browseCatalogState.activeTab;
 
         return items.filter(item => {
             if (catId === '__recent__') {
@@ -3772,12 +4374,6 @@
                 if (String(item.category?.id || '') !== String(grpId)) return false;
             } else if (catId) {
                 if (String(item.catalog?.id || '') !== String(catId)) return false;
-            }
-            if (tab === 'masterformat' && !item.classification?.masterformat) {
-                // Allow browsing under masterformat tab
-            }
-            if (tab === 'uniformat' && !item.classification?.uniformat) {
-                // Allow browsing under uniformat tab
             }
             if (q) {
                 const searchString = [
@@ -3801,7 +4397,7 @@
         if (!list) return;
 
         if (catalogState.loading) {
-            list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--tk-text-muted);"><i class="fas fa-spinner fa-spin" style="font-size: 24px; color: var(--tk-primary);"></i><p style="margin-top: 10px;">Loading catalog items...</p></div>';
+            list.innerHTML = '<div style="padding: 60px 20px; text-align: center; color: var(--tk-text-muted);"><i class="fas fa-spinner fa-spin" style="font-size: 26px; color: var(--tk-primary, #fb5a3a);"></i><p style="margin-top: 12px; font-size: 13px; font-weight: 500;">Loading catalog items...</p></div>';
             return;
         }
 
@@ -3812,6 +4408,11 @@
         if (browseCatalogState.page > totalPages) browseCatalogState.page = totalPages;
         const start = (browseCatalogState.page - 1) * pageSize;
         const pageItems = filtered.slice(start, start + pageSize);
+
+        // Update items count
+        if ($('proBrowseCountLabel')) {
+            $('proBrowseCountLabel').textContent = `${total.toLocaleString()} ${total === 1 ? 'item found' : 'items found'}`;
+        }
 
         // Update pagination
         const end = Math.min(start + pageItems.length, total);
@@ -3830,65 +4431,90 @@
         }
 
         if (!pageItems.length) {
-            list.innerHTML = '<div style="padding: 40px; text-align: center; color: var(--tk-text-muted);"><i class="fas fa-box-open" style="font-size: 28px; opacity: 0.5;"></i><p style="margin-top: 10px; font-size: 13px;">No catalog items match this criteria.</p></div>';
+            list.innerHTML = '<div style="padding: 60px 20px; text-align: center; color: var(--tk-text-muted);"><i class="fas fa-box-open" style="font-size: 32px; opacity: 0.45; margin-bottom: 8px;"></i><p style="margin-top: 8px; font-size: 13.5px; font-weight: 500;">No catalog items match this criteria.</p></div>';
             if (selectBtn) { selectBtn.disabled = true; selectBtn.classList.remove('is-active'); }
+            updateBrowseSelectionUi();
             return;
         }
 
         list.innerHTML = pageItems.map(item => {
-            const isSelected = String(browseCatalogState.selectedItemId) === String(item.id);
+            const itemIdStr = String(item.id);
+            const isSelected = browseCatalogState.selectedItemIds.has(itemIdStr);
             const isAssembly = item.type === 'assembly';
-            const unitCost = Number(item.pricing?.unitCost || 0);
-            const laborHours = Number(item.pricing?.laborHoursPerUnit || 0);
+            const unitCost = getCatalogItemUnitCost(item);
+            const laborHours = getCatalogItemLaborHours(item);
             const costStr = unitCost > 0 ? `$${unitCost.toFixed(2)}` : '$0.00';
-            const laborStr = laborHours > 0 ? `${laborHours % 1 === 0 ? laborHours.toFixed(0) : laborHours.toFixed(2)} hrs` : '0 hrs';
-            const catalogName = item.catalog?.name || 'Catalog';
-            const categoryName = item.category?.name ? ` > ${item.category.name}` : '';
-            const catPath = `${catalogName}${categoryName}`;
-            const code = item.supplier?.catalogNumber || 'n/a';
+            const laborStr = laborHours > 0 ? `${laborHours % 1 === 0 ? laborHours.toFixed(0) : laborHours.toFixed(2)} hrs` : '0.00 hrs';
+            const catalogName = item.catalog?.name || '';
+            const catalogId = item.catalog?.id || '';
+            const groupName = item.category?.name || '';
+            const groupId = item.category?.id || '';
+            const code = item.supplier?.catalogNumber || item.classification?.costCode || 'n/a';
 
             return `
                 <div class="pro-catalog-item-card ${isSelected ? 'is-selected' : ''}" data-browse-item="${esc(item.id)}">
-                    <input type="checkbox" ${isSelected ? 'checked' : ''} data-item-check="${esc(item.id)}" aria-label="Select ${esc(item.name)}">
+                    <div class="pro-catalog-item-select-col">
+                        <input type="checkbox" class="pro-catalog-item-checkbox" ${isSelected ? 'checked' : ''} data-item-check="${esc(item.id)}" aria-label="Select ${esc(item.name)}">
+                    </div>
                     <div class="pro-catalog-item-content">
-                        <div class="pro-catalog-item-title">${esc(item.name)}</div>
+                        <div class="pro-catalog-item-top">
+                            <span class="pro-catalog-item-title">${esc(item.name)}</span>
+                            ${isAssembly ? '<span class="cc-type-badge assembly"><i class="fas fa-boxes-stacked"></i> Assembly</span>' : ''}
+                        </div>
                         ${item.description ? `<div class="pro-catalog-item-desc">${esc(item.description)}</div>` : ''}
-                        <div class="pro-catalog-item-chips">
-                            ${isAssembly ? '<span class="pro-cat-badge-assembly">Assembly</span>' : ''}
-                            <span>UoM <strong>${esc(item.uom || 'ea')}</strong></span>
-                            <span>UC <strong>${costStr}</strong></span>
-                            <span>ULT <strong>${laborStr}</strong></span>
-                            <span>CN <strong>${esc(code)}</strong></span>
-                            <span>CC <strong>${esc(catPath)}</strong></span>
+                        <div class="pro-catalog-item-details-row">
+                            <span class="pro-cat-info-tag tag-price" title="Unit Cost">
+                                <i class="fas fa-tag"></i>
+                                <span class="tag-label">Price:</span>
+                                <strong class="tag-val">${costStr}</strong>
+                                <span class="tag-uom">/ ${esc(item.uom || 'ea')}</span>
+                            </span>
+                            <span class="pro-cat-info-tag tag-labor" title="Labor Time">
+                                <i class="far fa-clock"></i>
+                                <span class="tag-label">Labor:</span>
+                                <strong class="tag-val">${laborStr}</strong>
+                            </span>
+                            <span class="pro-cat-info-tag tag-code" title="Catalog Number / Code">
+                                <i class="fas fa-barcode"></i>
+                                <span class="tag-label">Cn:</span>
+                                <strong class="tag-val">${esc(code)}</strong>
+                            </span>
+                            ${renderCatalogPill(catalogName, catalogId)}
+                            ${groupName ? renderGroupPill(groupName, groupId, catalogId) : ''}
                         </div>
                     </div>
-                    <button type="button" class="pro-catalog-item-menu" title="Item actions" aria-label="Item actions"><i class="fas fa-ellipsis-vertical"></i></button>
                 </div>
             `;
         }).join('');
 
         // Wire click handlers
         list.querySelectorAll('[data-browse-item]').forEach(card => {
-            const id = card.dataset.browseItem;
+            const id = String(card.dataset.browseItem);
             card.addEventListener('click', (e) => {
-                if (e.target.closest('.pro-catalog-item-menu')) return;
-                browseCatalogState.selectedItemId = id;
+                if (e.target.matches('input[type="checkbox"]')) return;
+                if (browseCatalogState.selectedItemIds.has(id)) {
+                    browseCatalogState.selectedItemIds.delete(id);
+                } else {
+                    browseCatalogState.selectedItemIds.add(id);
+                }
                 updateBrowseSelectionUi();
             });
             card.addEventListener('dblclick', () => {
-                browseCatalogState.selectedItemId = id;
-                const item = getSelectedCatalogItem();
-                if (item) applyCatalogItemToLayerForm(item);
+                browseCatalogState.selectedItemIds.add(id);
+                updateBrowseSelectionUi();
+                const selectedItems = getSelectedCatalogItems();
+                if (selectedItems.length) applyCatalogItemsToLayerForm(selectedItems);
             });
         });
 
         list.querySelectorAll('[data-item-check]').forEach(check => {
             check.addEventListener('change', (e) => {
                 e.stopPropagation();
+                const id = String(check.dataset.itemCheck);
                 if (check.checked) {
-                    browseCatalogState.selectedItemId = check.dataset.itemCheck;
-                } else if (String(browseCatalogState.selectedItemId) === String(check.dataset.itemCheck)) {
-                    browseCatalogState.selectedItemId = null;
+                    browseCatalogState.selectedItemIds.add(id);
+                } else {
+                    browseCatalogState.selectedItemIds.delete(id);
                 }
                 updateBrowseSelectionUi();
             });
@@ -3900,28 +4526,57 @@
     function updateBrowseSelectionUi() {
         const list = $('proBrowseItemsList');
         const selectBtn = $('proBrowseSelectBtn');
-        const selectedId = String(browseCatalogState.selectedItemId || '');
+        const footerSelection = $('proBrowseFooterSelection');
+        const selectedIds = browseCatalogState.selectedItemIds || new Set();
+        const selectedItems = getSelectedCatalogItems();
+        const count = selectedItems.length;
 
         if (list) {
             list.querySelectorAll('.pro-catalog-item-card').forEach(card => {
                 const cardId = String(card.dataset.browseItem || '');
-                const isSelected = selectedId && cardId === selectedId;
+                const isSelected = selectedIds.has(cardId);
                 card.classList.toggle('is-selected', isSelected);
                 const checkbox = card.querySelector('input[type="checkbox"]');
                 if (checkbox) checkbox.checked = isSelected;
             });
         }
 
+        if (footerSelection) {
+            if (count === 0) {
+                footerSelection.textContent = 'No items selected';
+            } else if (count === 1) {
+                const item = selectedItems[0];
+                const cost = getCatalogItemUnitCost(item);
+                const costStr = cost > 0 ? `$${cost.toFixed(2)}` : '$0.00';
+                footerSelection.innerHTML = `Selected 1 item: <strong>${esc(item.name)}</strong> · ${costStr} / ${esc(item.uom || 'ea')}`;
+            } else {
+                let totalCost = 0;
+                selectedItems.forEach(it => { totalCost += getCatalogItemUnitCost(it); });
+                footerSelection.innerHTML = `<strong>${count} items selected</strong> · Est. unit total: $${totalCost.toFixed(2)}`;
+            }
+        }
+
         if (selectBtn) {
-            const hasSelected = Boolean(selectedId && getSelectedCatalogItem());
+            const hasSelected = count > 0;
             selectBtn.disabled = !hasSelected;
             selectBtn.classList.toggle('is-active', hasSelected);
+            if (count > 1) {
+                selectBtn.innerHTML = `<i class="fas fa-check"></i> Add Selected Items (${count})`;
+            } else {
+                selectBtn.innerHTML = `<i class="fas fa-check"></i> Select Item`;
+            }
         }
     }
 
+    function getSelectedCatalogItems() {
+        const ids = browseCatalogState.selectedItemIds;
+        if (!ids || !ids.size) return [];
+        return (catalogState.items || []).filter(i => ids.has(String(i.id)));
+    }
+
     function getSelectedCatalogItem() {
-        if (!browseCatalogState.selectedItemId) return null;
-        return (catalogState.items || []).find(i => String(i.id) === String(browseCatalogState.selectedItemId));
+        const items = getSelectedCatalogItems();
+        return items[0] || null;
     }
 
     let takeoffGroupModalReturnFocus = null;
@@ -6678,16 +7333,18 @@
             const currentComputed = parseInt(getComputedStyle(workspace).getPropertyValue('--tk-sidebar-width'), 10) || 320;
             startWidth = currentComputed;
             resizer.classList.add('is-dragging');
+            workspace.classList.add('is-resizing');
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
-            resizer.setPointerCapture(e.pointerId);
+            try { resizer.setPointerCapture(e.pointerId); } catch (_) {}
             e.preventDefault();
         });
 
         resizer.addEventListener('pointermove', (e) => {
             if (!isDragging) return;
-            const delta = e.clientX - startX;
-            const newWidth = Math.max(220, Math.min(650, startWidth + delta));
+            const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+            const delta = (e.clientX - startX) / zoom;
+            const newWidth = Math.max(220, Math.min(650, Math.round(startWidth + delta)));
             workspace.style.setProperty('--tk-sidebar-width', `${newWidth}px`);
         });
 
@@ -6695,10 +7352,11 @@
             if (!isDragging) return;
             isDragging = false;
             resizer.classList.remove('is-dragging');
+            workspace.classList.remove('is-resizing');
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
             try {
-                if (e.pointerId) resizer.releasePointerCapture(e.pointerId);
+                if (e?.pointerId) resizer.releasePointerCapture(e.pointerId);
             } catch (err) { }
 
             const finalWidth = parseInt(getComputedStyle(workspace).getPropertyValue('--tk-sidebar-width'), 10) || 320;
