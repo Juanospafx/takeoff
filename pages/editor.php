@@ -1703,7 +1703,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
                 konvaStage.draw();
             }
             if (pdfDoc && pdfWorldWidth && pdfWorldHeight) {
-                fitPdfToView(false);
+                fitPdfToView(true);
                 schedulePdfRerender();
             }
         }
@@ -1724,7 +1724,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             if (pdfDoc && !canvas.backgroundImage && !isRenderingPage) {
                 renderPage(pageNum, true);
             } else if (pdfDoc) {
-                fitPdfToView(false);
+                fitPdfToView(true);
                 schedulePdfRerender();
             }
         });
