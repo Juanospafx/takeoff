@@ -207,15 +207,18 @@
     }
 
     function closeMenus(exceptMenu) {
-        document.querySelectorAll('[data-global-menu].open').forEach(menu => {
-            if (menu !== exceptMenu) menu.classList.remove('open');
-        });
-
-        document.querySelectorAll('[data-global-menu-toggle][aria-expanded="true"]').forEach(button => {
-            if (menuFor(button) !== exceptMenu) {
-                button.setAttribute('aria-expanded', 'false');
-            }
-        });
+        if (typeof closeAllOpenPopouts === 'function') {
+            closeAllOpenPopouts(exceptMenu);
+        } else {
+            document.querySelectorAll('[data-global-menu].open').forEach(menu => {
+                if (menu !== exceptMenu) menu.classList.remove('open');
+            });
+            document.querySelectorAll('[data-global-menu-toggle][aria-expanded="true"]').forEach(button => {
+                if (menuFor(button) !== exceptMenu) {
+                    button.setAttribute('aria-expanded', 'false');
+                }
+            });
+        }
     }
 
     function keepMenuOnScreen(menu) {
@@ -558,26 +561,283 @@
     window.enhanceSelect = enhanceSelect;
     window.initCustomSelects = initCustomSelects;
 
-    // Global click-outside & Escape listeners for all custom dropdowns
-    document.addEventListener('click', (event) => {
-        if (!event.target.closest('.pro-custom-dropdown')) {
-            document.querySelectorAll('.pro-custom-dropdown.is-open').forEach(d => {
+    // ==========================================================
+    // UNIVERSAL MUTUAL EXCLUSION POPOUT & DROPDOWN MANAGER
+    // Ensures only ONE menu, popover, or dropdown is open at a time.
+    // ==========================================================
+    function isElementVisible(el) {
+        if (!el) return false;
+        if (el.hidden) return false;
+        if (el.hasAttribute('hidden')) return false;
+        if (el.style.display === 'none') return false;
+        if (el.classList.contains('takeoff-hidden')) return false;
+        return true;
+    }
+
+    function closeAllOpenPopouts(exceptElement = null) {
+        const shouldKeep = (el) => {
+            if (!el || !exceptElement) return false;
+            return el === exceptElement || el.contains(exceptElement);
+        };
+
+        // 0. Header Dropdown Menus
+        document.querySelectorAll('[data-global-menu].open').forEach(menu => {
+            if (!shouldKeep(menu)) {
+                menu.classList.remove('open');
+            }
+        });
+        document.querySelectorAll('[data-global-menu-toggle][aria-expanded="true"]').forEach(btn => {
+            if (!shouldKeep(btn)) {
+                btn.setAttribute('aria-expanded', 'false');
+            }
+        });
+
+        // 1. Takeoff Group context menu
+        const groupMenu = document.getElementById('takeoffGroupContextMenu');
+        if (groupMenu && isElementVisible(groupMenu) && !shouldKeep(groupMenu)) {
+            groupMenu.style.display = 'none';
+        }
+
+        // 2. Takeoff Estimate picker popup
+        const estPicker = document.getElementById('takeoffEstimatePickerPopup');
+        if (estPicker && !shouldKeep(estPicker)) {
+            estPicker.remove();
+        }
+
+        // 3. Project overview item context menu (tasks, notes)
+        const pdMenu = document.getElementById('pdItemContextMenu');
+        if (pdMenu && isElementVisible(pdMenu) && !shouldKeep(pdMenu)) {
+            pdMenu.style.display = 'none';
+        }
+
+        // 4. Cost catalog row & tree floating menus
+        const ccRowMenu = document.getElementById('ccRowItemFloatingMenu');
+        if (ccRowMenu && isElementVisible(ccRowMenu) && !shouldKeep(ccRowMenu)) {
+            ccRowMenu.hidden = true;
+            ccRowMenu.style.display = 'none';
+            document.querySelectorAll('.cc-row-menu-toggle.is-active').forEach(b => {
+                b.classList.remove('is-active');
+                b.setAttribute('aria-expanded', 'false');
+            });
+        }
+        const ccTreeMenu = document.getElementById('ccTreeMoreMenu') || document.getElementById('ccTreeMoreFloatingMenu');
+        if (ccTreeMenu && isElementVisible(ccTreeMenu) && !shouldKeep(ccTreeMenu)) {
+            ccTreeMenu.hidden = true;
+            ccTreeMenu.style.display = 'none';
+            document.querySelectorAll('.cc-tree-more-btn.is-active').forEach(b => {
+                b.classList.remove('is-active');
+                b.setAttribute('aria-expanded', 'false');
+            });
+        }
+
+        // 5. Bid Board floating row menu & status panel
+        const bbRowMenu = document.getElementById('bbFloatingRowMenu');
+        if (bbRowMenu && isElementVisible(bbRowMenu) && !shouldKeep(bbRowMenu)) {
+            bbRowMenu.hidden = true;
+            bbRowMenu.style.display = 'none';
+            bbRowMenu.removeAttribute('data-current-project');
+            document.querySelectorAll('.bb-row-menu-toggle.active').forEach(b => b.classList.remove('active'));
+        }
+        document.querySelectorAll('.bb-status-menu-panel.open, [data-status-panel].open').forEach(p => {
+            if (!shouldKeep(p)) {
+                p.classList.remove('open');
+                document.querySelectorAll('.bb-status-pill-wrap.active').forEach(w => w.classList.remove('active'));
+            }
+        });
+
+        // 6. Estimate footer action menus & dropdown
+        document.querySelectorAll('[data-estimate-actions-menu]').forEach(m => {
+            if (isElementVisible(m) && !shouldKeep(m)) {
+                m.hidden = true;
+            }
+        });
+        document.querySelectorAll('.est-version-menu-toggle[aria-expanded="true"]').forEach(b => {
+            if (!shouldKeep(b)) {
+                b.setAttribute('aria-expanded', 'false');
+            }
+        });
+        const estPillMenu = document.querySelector('[data-est-pill-menu]');
+        if (estPillMenu && isElementVisible(estPillMenu) && !shouldKeep(estPillMenu)) {
+            estPillMenu.hidden = true;
+        }
+
+        // 7. Takeoff tool panels & popovers
+        const toolsPanel = document.getElementById('takeoffMoreToolsPanel');
+        if (toolsPanel && !toolsPanel.hasAttribute('hidden') && !shouldKeep(toolsPanel)) {
+            toolsPanel.setAttribute('hidden', '');
+        }
+        const drawDropdown = document.getElementById('takeoffDrawingDropdown');
+        if (drawDropdown && drawDropdown.classList.contains('open') && !shouldKeep(drawDropdown)) {
+            drawDropdown.classList.remove('open');
+        }
+        const scalePanel = document.getElementById('takeoffScalePanel');
+        if (scalePanel && scalePanel.classList.contains('open') && !shouldKeep(scalePanel)) {
+            scalePanel.classList.remove('open');
+        }
+        const layersPopover = document.getElementById('takeoffViewerLayersPopover');
+        if (layersPopover && layersPopover.classList.contains('open') && !shouldKeep(layersPopover)) {
+            layersPopover.classList.remove('open');
+        }
+
+        // 8. Generic .pro-menu, .pro-row-menu, .takeoff-menu, .dropdown-menu, .documents-menu
+        document.querySelectorAll('.pro-menu.open, .pro-row-menu.open, .takeoff-menu.open, .dropdown-menu.show, .documents-menu.open').forEach(m => {
+            if (!shouldKeep(m)) {
+                m.classList.remove('open', 'show');
+                m.style.display = '';
+                if (m.__trigger && !shouldKeep(m.__trigger)) {
+                    m.__trigger.classList.remove('active', 'is-active');
+                    m.__trigger.setAttribute('aria-expanded', 'false');
+                    m.__trigger = null;
+                }
+            }
+        });
+        document.querySelectorAll('[data-doc-sidebar-more].active, [data-doc-action="menu"].active, [data-doc-action="sheet-menu"].active, [data-doc-folder-more].active, [data-doc-folder-menu-toggle].active, [data-doc-view-menu-toggle].active, #docSortMenuBtn.active, .doc-tree-item-more.active').forEach(b => {
+            if (!shouldKeep(b)) {
+                b.classList.remove('active', 'is-active');
+                b.setAttribute('aria-expanded', 'false');
+            }
+        });
+
+        // 9. Custom dropdowns
+        document.querySelectorAll('.pro-custom-dropdown.is-open').forEach(d => {
+            if (!shouldKeep(d)) {
                 d.classList.remove('is-open');
                 const tr = d.querySelector('.pro-custom-dropdown-trigger');
                 if (tr) tr.setAttribute('aria-expanded', 'false');
-            });
-        }
-    });
+            }
+        });
 
+        // 10. Document sidebar action menus
+        document.querySelectorAll('#docSidebarActionMenu, .doc-sidebar-menu').forEach(m => {
+            if (!shouldKeep(m)) {
+                m.remove();
+            }
+        });
+
+        // 11. Any other buttons with aria-expanded="true"
+        document.querySelectorAll('[data-takeoff-menu-toggle][aria-expanded="true"]').forEach(b => {
+            if (!shouldKeep(b)) {
+                b.setAttribute('aria-expanded', 'false');
+            }
+        });
+    }
+
+    window.closeAllOpenPopouts = closeAllOpenPopouts;
+    window.closeAllOpenMenus = closeAllOpenPopouts;
+
+    let justClosedToggle = null;
+    let justClosedTime = 0;
+
+    const toggleSelector = (
+        '[data-global-menu-toggle], [data-group-menu], [data-layer-menu], [data-task-menu], ' +
+        '[data-note-menu], [data-doc-sidebar-more], [data-doc-folder-more], [data-doc-action="menu"], ' +
+        '[data-doc-action="sheet-menu"], [data-doc-folder-menu-toggle], [data-doc-view-menu-toggle], ' +
+        '#docSortMenuBtn, [data-doc-sort-toggle], .doc-tree-item-more, ' +
+        '.cc-row-menu-toggle, [data-item-menu], .cc-tree-more-btn, [data-tree-more-catalog], ' +
+        '[data-tree-more-group], .bb-row-menu-toggle, [data-row-menu], [data-status-trigger], ' +
+        '[data-estimate-menu], .est-version-menu-toggle, [data-est-pill-toggle], ' +
+        '#takeoffDrawingBtn, #takeoffScaleStatus, #takeoffMoreToolsBtn, [data-viewer-command="layers"], ' +
+        '.pro-row-menu-btn, .pd-row-dots-btn, .pro-custom-dropdown-trigger'
+    );
+
+    function handleUniversalCapture(event) {
+        const target = event.target;
+        if (!target) return;
+
+        // If this click closely follows a pointerdown that toggled off this switch, swallow it
+        if (event.type === 'click' && justClosedToggle && (Date.now() - justClosedTime < 500)) {
+            const isTargetOfClosedToggle = (
+                justClosedToggle === target ||
+                justClosedToggle.contains(target) ||
+                Boolean(target.closest && target.closest(toggleSelector) === justClosedToggle)
+            );
+            if (isTargetOfClosedToggle) {
+                event.preventDefault();
+                event.stopPropagation();
+                event.stopImmediatePropagation();
+                justClosedToggle = null;
+                justClosedTime = 0;
+                return;
+            }
+        }
+
+        // 1. Check if clicking INSIDE any active open menu
+        const activePopout = target.closest(
+            '[data-global-menu].open, #takeoffGroupContextMenu, #takeoffEstimatePickerPopup, #pdItemContextMenu, ' +
+            '#ccRowItemFloatingMenu, #ccTreeMoreMenu, #ccTreeMoreFloatingMenu, #bbFloatingRowMenu, ' +
+            '.bb-status-menu-panel.open, [data-status-panel].open, ' +
+            '[data-estimate-actions-menu]:not([hidden]), [data-est-pill-menu]:not([hidden]), ' +
+            '#takeoffMoreToolsPanel:not([hidden]), #takeoffDrawingDropdown.open, #takeoffScalePanel.open, ' +
+            '#takeoffViewerLayersPopover.open, .pro-menu.open, .pro-row-menu.open, .takeoff-menu.open, ' +
+            '.documents-menu.open, .pro-custom-dropdown.is-open, .dropdown-menu.show, #docSidebarActionMenu, .doc-sidebar-menu'
+        );
+        if (activePopout && isElementVisible(activePopout)) {
+            // User clicked inside this menu item/button. Keep this popout, close all others!
+            closeAllOpenPopouts(activePopout);
+            return;
+        }
+
+        // 2. Check if clicking on ANY 3-dots or menu toggle button
+        const clickedToggle = target.closest(toggleSelector);
+
+        if (clickedToggle) {
+            // Check if this toggle was the trigger of an ALREADY OPEN menu
+            const openDocMenu = document.querySelector('.documents-menu.open');
+            const isDocMenuTrigger = Boolean(
+                openDocMenu && (
+                    openDocMenu.__trigger === clickedToggle ||
+                    openDocMenu.__trigger?.contains(clickedToggle) ||
+                    clickedToggle.contains(openDocMenu.__trigger) ||
+                    (clickedToggle.dataset && clickedToggle.dataset.docSidebarMore && openDocMenu.id === 'docSidebarMenu' && openDocMenu.__activeTarget === clickedToggle.dataset.docSidebarMore) ||
+                    (clickedToggle.dataset && clickedToggle.dataset.docId && openDocMenu.dataset && openDocMenu.dataset.docMenu === String(clickedToggle.dataset.docId)) ||
+                    (clickedToggle.id === 'docSortMenuBtn' && document.getElementById('docSortMenu')?.classList.contains('open')) ||
+                    (clickedToggle.matches && clickedToggle.matches('[data-doc-view-menu-toggle]') && document.getElementById('documentsViewMenu')?.classList.contains('open')) ||
+                    (clickedToggle.matches && clickedToggle.matches('[data-doc-folder-menu-toggle]') && document.getElementById('docSidebarMenu')?.classList.contains('open') && document.getElementById('docSidebarMenu')?.__activeTarget === 'header:folders')
+                )
+            );
+
+            const isAlreadyActiveToggle = (
+                clickedToggle.classList.contains('is-active') ||
+                clickedToggle.classList.contains('active') ||
+                clickedToggle.getAttribute('aria-expanded') === 'true' ||
+                isDocMenuTrigger ||
+                (clickedToggle.id === 'takeoffDrawingBtn' && document.getElementById('takeoffDrawingDropdown')?.classList.contains('open')) ||
+                (clickedToggle.id === 'takeoffScaleStatus' && document.getElementById('takeoffScalePanel')?.classList.contains('open')) ||
+                (clickedToggle.id === 'takeoffMoreToolsBtn' && !document.getElementById('takeoffMoreToolsPanel')?.hasAttribute('hidden'))
+            );
+
+            if (isAlreadyActiveToggle) {
+                // The user clicked the same toggle that opened the menu, to toggle it off!
+                justClosedToggle = clickedToggle;
+                justClosedTime = Date.now();
+                clickedToggle.__wasOpenAtPointerDown = Date.now();
+                closeAllOpenPopouts();
+                if (event.type === 'click') {
+                    event.preventDefault();
+                    event.stopPropagation();
+                    event.stopImmediatePropagation();
+                }
+                return;
+            }
+
+            // The user clicked a DIFFERENT 3-dots button or menu toggle!
+            // Close any currently open menu immediately, so the new one can open fresh without overlap:
+            closeAllOpenPopouts();
+            return;
+        }
+
+        // 3. The user clicked anywhere else on the page (subheader, canvas, table, card, blank area):
+        // Close all open popouts!
+        closeAllOpenPopouts();
+    }
+
+    document.addEventListener('pointerdown', handleUniversalCapture, true);
+    document.addEventListener('click', handleUniversalCapture, true);
     document.addEventListener('keydown', (event) => {
         if (event.key === 'Escape') {
-            document.querySelectorAll('.pro-custom-dropdown.is-open').forEach(d => {
-                d.classList.remove('is-open');
-                const tr = d.querySelector('.pro-custom-dropdown-trigger');
-                if (tr) tr.setAttribute('aria-expanded', 'false');
-            });
+            closeAllOpenPopouts();
         }
-    });
+    }, true);
 
     // Auto-init on load
     if (document.readyState === 'loading') {

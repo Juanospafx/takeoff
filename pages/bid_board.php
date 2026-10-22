@@ -271,8 +271,7 @@ $readOnly = !$canWrite;
                         </div>
                         <div>
                             <strong class="bb-modal-heading">Create New Project</strong>
-                            <div class="bb-modal-subheading">Choose blueprint setup, assign pipeline stage, and
-                                initialize takeoff workspace</div>
+                            <div class="bb-modal-subheading">Setup workflow and initialize takeoff</div>
                         </div>
                     </div>
                     <button class="bb-icon-btn" type="button" data-close-modal aria-label="Close"><i
@@ -351,8 +350,7 @@ $readOnly = !$canWrite;
                                         placeholder="e.g. Commercial Plaza - Electrical Bid" required
                                         value="New Project">
                                 </div>
-                                <div class="bb-input-hint">Descriptive name displayed across the board, takeoffs, and
-                                    generated client estimates.</div>
+                                <div class="bb-input-hint">Displayed across board, takeoffs, and estimates.</div>
                             </div>
 
                             <div class="bb-form-group" id="bbProjectStageWrap">
@@ -365,8 +363,7 @@ $readOnly = !$canWrite;
                                 <!-- Native select kept in DOM for robust form submit compatibility -->
                                 <select id="bbProjectStage" class="bb-select-control"
                                     style="position: absolute; opacity: 0; pointer-events: none; width: 0; height: 0;"></select>
-                                <div class="bb-input-hint">Board column where this project will be routed and tracked.
-                                </div>
+                                <div class="bb-input-hint">Board tracking column.</div>
                             </div>
 
                             <div class="bb-form-group" id="bbProjectTemplateWrap">
@@ -378,8 +375,7 @@ $readOnly = !$canWrite;
                                     <i class="fas fa-folder-tree bb-input-icon"></i>
                                     <select id="bbProjectTemplate" class="bb-select-control"></select>
                                 </div>
-                                <div class="bb-input-hint">Cost items, default markups, and takeoff assemblies from this
-                                    template will be imported.</div>
+                                <div class="bb-input-hint">Imports template assemblies, rates, and cost items.</div>
                             </div>
                         </div>
                     </main>
@@ -388,7 +384,7 @@ $readOnly = !$canWrite;
                 <div class="bb-modal-foot">
                     <div class="bb-modal-foot-info">
                         <i class="fas fa-circle-check"></i>
-                        <span>Opens immediately in Takeoff Workspace</span>
+                        <span>Opens in Takeoff</span>
                     </div>
                     <div class="bb-modal-foot-actions">
                         <button class="bb-btn-procore-secondary" type="button" data-close-modal>Cancel</button>
