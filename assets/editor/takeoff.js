@@ -555,20 +555,30 @@
     }
 
     function normalizeSymbol(symbol) {
-        const raw = String(symbol || '').toLowerCase();
+        const raw = String(symbol || '').trim().toLowerCase();
+        if (raw.includes('hollow')) return 'hollow circle';
+        if (raw.includes('solid') && raw.includes('circle')) return 'circle';
+        if (raw.includes('checkmark') || raw.includes('check')) return 'checkmark';
+        if (raw.includes('octagon')) return 'octagon';
+        if (raw.includes('pentagon')) return 'pentagon';
+        if (raw.includes('target') || raw.includes('bullseye')) return 'target';
+        if (raw.includes('dimension')) return 'dimension';
         if (raw.includes('square')) return 'square';
         if (raw.includes('triangle')) return 'triangle';
         if (raw.includes('diamond')) return 'diamond';
-        if (raw.includes('cross')) return 'cross';
+        if (raw.includes('cross') || raw.includes('plus')) return 'cross';
         return 'circle';
     }
 
     function symbolRadius(size) {
         const numeric = Number(size);
         if (Number.isFinite(numeric) && numeric > 0) return Math.max(4, Math.min(96, numeric));
-        const raw = String(size || '').toLowerCase();
-        if (raw === 'small') return 7;
-        if (raw === 'large') return 12;
+        const raw = String(size || '').toLowerCase().trim();
+        if (raw === 'x-small' || raw === 'xsmall' || raw === 'xs' || raw === 'extra-small' || raw === 'extra small') return 5;
+        if (raw === 'small' || raw === 's') return 7;
+        if (raw === 'large' || raw === 'l') return 12;
+        if (raw === 'x-large' || raw === 'xlarge' || raw === 'xl' || raw === 'extra-large' || raw === 'extra large') return 16;
+        if (raw === 'medium' || raw === 'm') return 9;
         return 9;
     }
 
@@ -624,6 +634,37 @@
             group.add(new Konva.RegularPolygon({ sides: 4, radius: radius + 4, rotation: 45, ...ringCommon }));
             group.add(new Konva.Line({ points: [-radius, 0, radius, 0], stroke: color, strokeWidth: crossW, lineCap: 'round', listening: true }));
             group.add(new Konva.Line({ points: [0, -radius, 0, radius], stroke: color, strokeWidth: crossW, lineCap: 'round', listening: true }));
+        } else if (symbol === 'octagon') {
+            group.add(new Konva.RegularPolygon({ sides: 8, radius: hitRadius + 2, rotation: 22.5, ...hitCommon }));
+            group.add(new Konva.RegularPolygon({ sides: 8, radius: radius + 4, rotation: 22.5, ...ringCommon }));
+            group.add(new Konva.RegularPolygon({ sides: 8, radius: radius + 2, rotation: 22.5, ...common }));
+        } else if (symbol === 'pentagon') {
+            group.add(new Konva.RegularPolygon({ sides: 5, radius: hitRadius + 2, rotation: 0, ...hitCommon }));
+            group.add(new Konva.RegularPolygon({ sides: 5, radius: radius + 4, rotation: 0, ...ringCommon }));
+            group.add(new Konva.RegularPolygon({ sides: 5, radius: radius + 2, rotation: 0, ...common }));
+        } else if (symbol === 'hollow circle') {
+            group.add(new Konva.Circle({ radius: hitRadius, ...hitCommon }));
+            group.add(new Konva.Circle({ radius: radius + 3, ...ringCommon }));
+            group.add(new Konva.Circle({ radius, fill: 'transparent', stroke: color, strokeWidth: 2.2, listening: true }));
+        } else if (symbol === 'target') {
+            group.add(new Konva.Circle({ radius: hitRadius, ...hitCommon }));
+            group.add(new Konva.Circle({ radius: radius + 3, ...ringCommon }));
+            group.add(new Konva.Circle({ radius, fill: 'rgba(0,0,0,0.001)', stroke: color, strokeWidth: 1.8, listening: true }));
+            group.add(new Konva.Circle({ radius: Math.max(2.5, radius * 0.38), fill: color, stroke: color, strokeWidth: 1, listening: true }));
+            group.add(new Konva.Line({ points: [-radius * 0.75, 0, radius * 0.75, 0], stroke: color, strokeWidth: 1, listening: false }));
+            group.add(new Konva.Line({ points: [0, -radius * 0.75, 0, radius * 0.75], stroke: color, strokeWidth: 1, listening: false }));
+        } else if (symbol === 'checkmark') {
+            group.add(new Konva.Circle({ radius: hitRadius, ...hitCommon }));
+            group.add(new Konva.Circle({ radius: radius + 3, ...ringCommon }));
+            group.add(new Konva.Circle({ radius, fill: color, fillOpacity: 0.20, stroke: color, strokeWidth: 1.2, listening: true }));
+            const checkPoints = [-radius * 0.55, 0, -radius * 0.15, radius * 0.50, radius * 0.65, -radius * 0.50];
+            group.add(new Konva.Line({ points: checkPoints, stroke: color, strokeWidth: Math.max(2.2, radius * 0.26), lineCap: 'round', lineJoin: 'round', listening: false }));
+        } else if (symbol === 'dimension') {
+            group.add(new Konva.Rect({ x: -hitRadius, y: -hitRadius, width: hitRadius * 2, height: hitRadius * 2, ...hitCommon }));
+            group.add(new Konva.Rect({ x: -(radius + 3), y: -(radius + 3), width: (radius + 3) * 2, height: (radius + 3) * 2, ...ringCommon }));
+            group.add(new Konva.Line({ points: [-radius, 0, radius, 0], stroke: color, strokeWidth: 2, lineCap: 'round', listening: true }));
+            group.add(new Konva.Line({ points: [-radius, -radius * 0.6, -radius, radius * 0.6], stroke: color, strokeWidth: 2, listening: true }));
+            group.add(new Konva.Line({ points: [radius, -radius * 0.6, radius, radius * 0.6], stroke: color, strokeWidth: 2, listening: true }));
         } else {
             group.add(new Konva.Circle({ radius: hitRadius, ...hitCommon }));
             group.add(new Konva.Circle({ radius: radius + 3, ...ringCommon }));
@@ -663,6 +704,7 @@
         state.markers.forEach(marker => {
             marker.node?.listening(listening);
             marker.node?.draggable(listening && !panning && !isElementLocked(marker));
+            marker.transformer?.listening(listening && !panning && !isElementLocked(marker));
         });
         state.segments.forEach(segment => {
             segment.node?.listening(listening);
@@ -723,6 +765,8 @@
         marker.node.draggable(!locked && !isTakeoffObjectInteractionBlocked()
             && !state.panMode && !state.temporaryPan && !state.annotationPlacement);
         marker.node.opacity(locked ? 0.55 : 0.70);
+        marker.transformer?.visible(!locked && state.selectedObjectUids.has(String(marker.client_uid))
+            && isElementVisibleOnPage(marker));
         const ring = marker.node.findOne('.takeoff-selection-ring');
         if (ring) {
             ring.visible(!locked && state.selectedObjectUids.has(String(marker.client_uid)) && isElementVisibleOnPage(marker));
@@ -929,8 +973,55 @@
         group.on('dragend', () => finishTakeoffSelectionDrag(marker));
         konvaLayer.add(group);
 
+        const transformer = new Konva.Transformer({
+            node: symbol,
+            enabledAnchors: ['top-left', 'top-right', 'bottom-left', 'bottom-right'],
+            rotateEnabled: false,
+            keepRatio: true,
+            flipEnabled: false,
+            borderStroke: marker.color || '#38bdf8',
+            borderStrokeWidth: 1.5,
+            anchorFill: '#fff',
+            anchorStroke: marker.color || '#2563eb',
+            anchorStrokeWidth: 2,
+            anchorSize: 8,
+            visible: false,
+            boundBoxFunc: (oldBox, newBox) => {
+                const side = Math.max(Math.abs(newBox.width), Math.abs(newBox.height));
+                return side < 8 || side > 192 ? oldBox : newBox;
+            }
+        });
+        transformer.on('transformstart', () => {
+            if (isElementLocked(marker)) {
+                transformer.stopTransform?.();
+                return;
+            }
+            snapshot();
+        });
+        transformer.on('transformend', () => {
+            if (isElementLocked(marker)) return;
+            const scale = Math.max(Math.abs(symbol.scaleX()), Math.abs(symbol.scaleY()));
+            const nextRadius = Math.max(4, Math.min(96, symbolRadius(marker.symbol_size || marker.size) * scale));
+            symbol.scale({ x: 1, y: 1 });
+            marker.symbol_size = Number(nextRadius.toFixed(4));
+            marker.size = marker.symbol_size;
+            marker.metadata_json = { ...(marker.metadata_json || {}), symbol_size: marker.symbol_size };
+            marker.updatedAt = timestamp();
+            marker.updated_at = marker.updatedAt;
+            transformer.destroy();
+            group.destroy();
+            delete marker.node;
+            delete marker.symbolNode;
+            delete marker.transformer;
+            createMarkerNode(marker);
+            selectElement('marker', marker);
+            markDirty();
+        });
+        konvaLayer.add(transformer);
+
         marker.node = group;
         marker.symbolNode = symbol;
+        marker.transformer = transformer;
         applyMarkerLockVisual(marker);
         konvaLayer.batchDraw();
     }
@@ -1195,7 +1286,9 @@
     }
 
     function destroyMarkerNodes(marker) {
+        marker.transformer?.destroy();
         marker.node?.destroy();
+        delete marker.transformer;
         delete marker.symbolNode;
         delete marker.node;
     }
@@ -1226,6 +1319,7 @@
             const layer = state.layers.find(l => String(l.client_uid) === String(m.layer_client_uid));
             const isVisible = Number(m.page_number) === targetPage && Number(layer?.visible ?? 1) !== 0;
             if (m.node) m.node.visible(isVisible);
+            m.transformer?.visible(isVisible && !isElementLocked(m) && state.selectedObjectUids.has(String(m.client_uid)));
             const ring = m.node?.findOne('.takeoff-selection-ring');
             if (ring) {
                 ring.visible(isVisible && !isElementLocked(m) && state.selectedObjectUids.has(String(m.client_uid)));
@@ -1284,6 +1378,7 @@
         state.selectedElement = null;
         state.selectedObjectUids.clear();
         state.segments.forEach(s => (s.handles || []).forEach(h => h.visible(false)));
+        state.markers.forEach(marker => marker.transformer?.visible(false));
         applyObjectSelectionVisuals();
         renderProperties();
         if (konvaLayer) konvaLayer.batchDraw();
@@ -1296,6 +1391,7 @@
             if (!marker.node) return;
             const selected = state.selectedObjectUids.has(String(marker.client_uid));
             marker.node.scale({ x: 1, y: 1 });
+            marker.transformer?.visible(selected && !isElementLocked(marker) && isElementVisibleOnPage(marker));
             const ring = marker.node.findOne('.takeoff-selection-ring');
             if (ring) {
                 ring.visible(selected && !isElementLocked(marker) && isElementVisibleOnPage(marker));
@@ -3621,7 +3717,7 @@
             if (layer) {
                 const colorChanged = layer.color !== data.color;
                 const symbolChanged = layer.symbol !== data.symbol;
-                const sizeChanged = layer.symbol_size !== data.symbol_size;
+                const sizeChanged = symbolRadius(layer.symbol_size) !== symbolRadius(data.symbol_size);
                 Object.assign(layer, data);
                 if (colorChanged || symbolChanged || sizeChanged) {
                     const layerKeys = new Set([externalId, String(layer.client_uid || ''), String(layer.id || ''), String(layer.metadata_json?.project_layer_id || '')].filter(Boolean));
@@ -4004,7 +4100,7 @@
         snapshot();
         if (patch.symbol !== undefined) layer.symbol = normalizeSymbol(patch.symbol);
         if (patch.color !== undefined) layer.color = String(patch.color);
-        if (patch.symbolSize !== undefined) layer.symbol_size = Math.max(4, Math.min(96, num(patch.symbolSize)));
+        if (patch.symbolSize !== undefined) layer.symbol_size = symbolRadius(patch.symbolSize);
         if (patch.strokeWidth !== undefined) layer.stroke_width = Math.max(1, Math.min(3, num(patch.strokeWidth)));
         targets.forEach(ref => {
             if (isElementLocked(ref)) return;
@@ -4013,7 +4109,7 @@
             if (marker) {
                 if (patch.symbol !== undefined) ref.symbol = normalizeSymbol(patch.symbol);
                 if (patch.symbolSize !== undefined) {
-                    ref.symbol_size = Math.max(4, Math.min(96, num(patch.symbolSize)));
+                    ref.symbol_size = symbolRadius(patch.symbolSize);
                     ref.size = ref.symbol_size;
                 }
                 ref.metadata_json = { ...(ref.metadata_json || {}),

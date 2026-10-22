@@ -1671,10 +1671,11 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 /* Task Item */
 .pd-task-item {
     display: flex;
-    align-items: center;
-    gap: 12px;
+    align-items: flex-start;
+    gap: 10px;
     position: relative;
-    padding: 4px 0;
+    padding: 6px 0;
+    min-width: 0;
 }
 
 .pd-task-icon-box {
@@ -1684,39 +1685,58 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     align-items: center;
     justify-content: center;
     color: #64748b;
-    font-size: 17px;
+    font-size: 16px;
     flex: 0 0 28px;
+    margin-top: 1px;
 }
 
 .pd-task-content-wrap {
-    flex: 1 1 auto;
+    flex: 1 1 0;
     min-width: 0;
+    overflow-wrap: break-word;
+    word-break: break-word;
 }
 
 .pd-task-title {
     font-size: 13px;
     font-weight: 600;
     color: var(--text-main, #0f172a);
-    line-height: 1.3;
+    line-height: 1.35;
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: break-word;
+}
+
+.pd-task-meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 3px;
+    flex-wrap: wrap;
 }
 
 .pd-task-assignee {
     font-size: 11.5px;
     color: var(--text-muted, #64748b);
-    margin-top: 2px;
+    line-height: 1.25;
 }
 
 .pd-task-due-badge {
-    font-size: 11px;
-    color: #ef4444;
-    font-weight: 500;
-    margin-left: auto;
-    padding-right: 6px;
+    font-size: 10.5px;
+    color: #dc2626;
+    font-weight: 600;
+    flex-shrink: 0;
     white-space: nowrap;
+    padding: 1px 6px;
+    background: rgba(220, 38, 38, 0.08);
+    border-radius: 4px;
+    line-height: 1.2;
 }
 
 .pd-item-menu-wrap {
     flex: 0 0 auto;
+    margin-top: 1px;
 }
 
 /* Floating Options Menu for Notes and Tasks */
@@ -2334,17 +2354,40 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 }
 
 .doc-tree-item-more {
-    opacity: 0;
-    transition: opacity 0.12s ease;
+    opacity: 0.75;
+    color: var(--text-secondary, #64748b);
+    transition: opacity 0.15s ease, color 0.15s ease, background 0.15s ease;
     flex-shrink: 0;
     width: 22px !important;
     height: 22px !important;
     font-size: 11px !important;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    border-radius: 4px;
 }
 
+.doc-tree-item-more:hover,
+.doc-tree-item-more.active,
 .doc-tree-item:hover .doc-tree-item-more,
 .doc-tree-item.active .doc-tree-item-more {
     opacity: 1;
+    color: var(--text-primary, #0f172a);
+}
+
+.doc-tree-item-more:hover,
+.doc-tree-item-more.active {
+    background: rgba(0, 0, 0, 0.06);
+}
+
+[data-theme="dark"] .doc-tree-item-more {
+    color: var(--text-secondary, #94a3b8);
+}
+
+[data-theme="dark"] .doc-tree-item-more:hover,
+[data-theme="dark"] .doc-tree-item-more.active {
+    background: rgba(255, 255, 255, 0.1);
+    color: var(--text-primary, #f8fafc);
 }
 
 /* Sub-items under drawings */
@@ -3588,24 +3631,38 @@ body.theme-dark .pd-input-icon-wrap input {
 }
 
 .pd-task-content-wrap {
-    flex: 1;
+    flex: 1 1 0;
     min-width: 0;
     display: flex;
     flex-direction: column;
     gap: 1px;
+    overflow-wrap: break-word;
+    word-break: break-word;
 }
 
 .pd-task-title {
-    font-size: 12px;
+    font-size: 12.5px;
     font-weight: 600;
     color: var(--text-main);
-    line-height: 1.2;
+    line-height: 1.35;
+    white-space: normal;
+    overflow-wrap: break-word;
+    word-break: break-word;
+}
+
+.pd-task-meta-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 8px;
+    margin-top: 2px;
+    flex-wrap: wrap;
 }
 
 .pd-task-assignee {
-    font-size: 10.5px;
+    font-size: 11px;
     color: #8c9ba5;
-    line-height: 1.2;
+    line-height: 1.25;
 }
 
 [data-theme="dark"] .pd-task-assignee {
@@ -3614,19 +3671,24 @@ body.theme-dark .pd-input-icon-wrap input {
 
 .pd-task-due-badge {
     font-size: 10.5px;
-    font-weight: 500;
+    font-weight: 600;
     color: #dc2626;
-    margin-left: auto;
-    padding-right: 8px;
+    flex-shrink: 0;
     white-space: nowrap;
+    padding: 1px 6px;
+    background: rgba(220, 38, 38, 0.08);
+    border-radius: 4px;
+    line-height: 1.2;
 }
 
 [data-theme="dark"] .pd-task-due-badge {
     color: #f87171;
+    background: rgba(248, 113, 113, 0.12);
 }
 
 .pd-item-menu-wrap {
     flex-shrink: 0;
+    margin-top: 1px;
 }
 
 /* Unified clean + button for both Notes and Tasks card headers */

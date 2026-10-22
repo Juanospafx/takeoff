@@ -1438,13 +1438,15 @@ $state = [
                                             <div class="pd-task-icon-box"><i class="fas fa-clipboard"></i></div>
                                             <div class="pd-task-content-wrap">
                                                 <div class="pd-task-title"><?= htmlspecialchars($task['title'] ?? '') ?></div>
-                                                <div class="pd-task-assignee">For
-                                                    <?= htmlspecialchars($task['responsible'] ?? 'Isaac De Jesús') ?>
+                                                <div class="pd-task-meta-row">
+                                                    <div class="pd-task-assignee">For
+                                                        <?= htmlspecialchars($task['responsible'] ?? 'Isaac De Jesús') ?>
+                                                    </div>
+                                                    <?php if (!empty($task['due_date'])): ?>
+                                                        <div class="pd-task-due-badge">Due <?= htmlspecialchars($task['due_date']) ?></div>
+                                                    <?php endif; ?>
                                                 </div>
                                             </div>
-                                            <?php if (!empty($task['due_date'])): ?>
-                                                <div class="pd-task-due-badge">Due <?= htmlspecialchars($task['due_date']) ?></div>
-                                            <?php endif; ?>
                                             <div class="pd-item-menu-wrap">
                                                 <button type="button" class="pd-row-dots-btn" data-task-menu="<?= $idx ?>"
                                                     title="Task options"><i class="fas fa-ellipsis-vertical"></i></button>
@@ -1656,6 +1658,9 @@ $state = [
                             <i class="fas fa-chevron-left"></i>
                         </button>
                     </div>
+
+                    <!-- Takeoff Layer Drawer Sub-Panel (Option B) -->
+                    <aside class="pro-layer-drawer" id="takeoffLayerModal" aria-label="Takeoff Layer Details" hidden></aside>
 
                     <section class="pro-takeoff-viewer">
                         <div class="pro-viewer-toolbar" style="display:none;"></div>
