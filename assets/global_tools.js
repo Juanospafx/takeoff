@@ -369,6 +369,8 @@
             return;
         }
 
+        // Do not enhance selects that are already inside a custom dropdown or custom modal selector.
+        // The Cost Catalog selector row intentionally keeps the shared enhancer.
         if (selectEl.closest('.pro-custom-dropdown') ||
             selectEl.closest('.pro-create-layer-modal') ||
             selectEl.closest('.pro-layer-modal') ||
