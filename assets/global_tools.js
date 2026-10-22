@@ -1,7 +1,7 @@
 (function () {
     const COMPANY_KEY = 'takeoff.favorite_tools';
     const APPS_KEY = 'takeoff.favorite_apps';
-    const MAX_COMPANY_FAVORITES = 5;
+    const MAX_COMPANY_FAVORITES = 3;
     const MAX_APP_FAVORITES = 3;
 
     const DEFAULT_COMPANY_FAVORITES = [
@@ -81,7 +81,7 @@
             // > 1200px: up to 4 tabs, then + more
             // 960px - 1200px: 2 tabs, then + more
             // < 960px: tabs hidden by CSS, accessible via star button dropdown
-            const maxVisible = width < 1000 ? 1 : (width < 1240 ? 2 : 4);
+            const maxVisible = width < 1000 ? 1 : (width < 1240 ? 2 : 3);
             const visible = compFavs.slice(0, maxVisible);
             const overflow = compFavs.slice(maxVisible);
 
@@ -373,8 +373,8 @@
         if (selectEl.closest('.pro-custom-dropdown') ||
             selectEl.closest('.pro-create-layer-modal') ||
             selectEl.closest('.pro-layer-modal') ||
-            selectEl.closest('.pro-create-selectors-row') ||
-            selectEl.closest('.pro-edit-selectors-row')) {
+            selectEl.closest('.pro-edit-selectors-row') ||
+            (selectEl.closest('.pro-create-selectors-row') && !selectEl.closest('.cc-takeoff-selectors-row'))) {
             return;
         }
 
@@ -420,6 +420,7 @@
         if (parentBox) {
             const oldCaret = parentBox.querySelector('.pd-field-caret');
             if (oldCaret) oldCaret.style.display = 'none';
+            parentBox.classList.add('has-custom-dropdown');
             parentBox.style.border = 'none';
             parentBox.style.background = 'transparent';
             parentBox.style.padding = '0';

@@ -60,20 +60,27 @@ body.theme-dark {
     height: 100%;
     min-height: 0;
     display: grid;
-    grid-template-columns: var(--tk-sidebar-width, 320px) minmax(0, 1fr) !important;
+    grid-template-columns: var(--tk-sidebar-width, 320px) 12px minmax(0, 1fr) !important;
     grid-template-rows: minmax(0, 1fr) auto;
-    background: var(--tk-bg-workspace) !important;
+    row-gap: 8px;
+    background: transparent !important;
     color: var(--tk-text-main) !important;
     overflow: hidden !important;
     position: relative;
-    border-radius: 8px !important;
-    border: 1px solid var(--border-color, var(--tk-border, #cbd5e1)) !important;
-    box-shadow: 0 8px 24px rgba(0, 0, 0, 0.06), 0 2px 6px rgba(0, 0, 0, 0.03) !important;
+    border-radius: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
     transition: grid-template-columns 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+.pro-takeoff-workspace.is-resizing,
+.pro-takeoff-workspace.is-resizing * {
+    transition: none !important;
+    user-select: none !important;
+}
+
 .pro-takeoff-workspace.items-collapsed {
-    grid-template-columns: 0px minmax(0, 1fr) !important;
+    grid-template-columns: 0px 12px minmax(0, 1fr) !important;
 }
 
 .pro-takeoff-inspector {
@@ -89,8 +96,9 @@ body.theme-dark #tab-takeoff {
 [data-theme="dark"] .pro-takeoff-workspace,
 body.theme-dark .takeoff-workspace.pro-takeoff-workspace,
 body.theme-dark .pro-takeoff-workspace {
-    border-color: var(--border, #334155) !important;
-    box-shadow: 0 10px 28px rgba(0, 0, 0, 0.4), 0 2px 6px rgba(0, 0, 0, 0.2) !important;
+    border: none !important;
+    box-shadow: none !important;
+    background: transparent !important;
 }
 
 /* ==========================================================================
@@ -109,12 +117,21 @@ body.theme-dark .pro-takeoff-workspace {
     gap: 8px;
     overflow-x: auto;
     overflow-y: hidden;
-    background: var(--tk-bg-panel, #ffffff) !important;
-    border-top: 1px solid var(--tk-border, #cbd5e1) !important;
+    background: var(--bg-panel, #ffffff) !important;
+    border: 1px solid var(--border) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
     color: var(--tk-text-main, #0f172a) !important;
     z-index: 1000 !important;
     scrollbar-width: thin;
     box-sizing: border-box;
+}
+
+[data-theme="dark"] #takeoffEstimateTypesFooter,
+body.theme-dark #takeoffEstimateTypesFooter {
+    background: var(--bg-panel) !important;
+    border-color: var(--border) !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2) !important;
 }
 
 #takeoffEstimateTypesFooter .est-pill {
@@ -1346,69 +1363,102 @@ body.theme-dark .pro-inspector-head strong {
     color: var(--tk-text-main) !important;
 }
 
-.pro-takeoff-workspace.items-collapsed {
-    grid-template-columns: 0px minmax(0, 1fr) 292px;
-}
+
 
 .pro-takeoff-items {
     min-width: 0;
     display: grid;
     grid-template-rows: 40px auto auto minmax(0, 1fr);
-    background: var(--tk-bg-panel, #fff);
-    border-right: 1px solid var(--tk-border, #d8dee6);
+    background: var(--bg-panel, #fff);
+    border: 1px solid var(--border) !important;
+    border-radius: 8px;
+    box-shadow: none !important;
     overflow: hidden;
     position: relative;
+    height: 100%;
     transition: width 0.25s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
+[data-theme="dark"] .pro-takeoff-items,
+body.theme-dark .pro-takeoff-items {
+    background: var(--bg-panel) !important;
+    border-color: var(--border) !important;
+    box-shadow: none !important;
+}
+
 .pro-takeoff-workspace.items-collapsed .pro-takeoff-items {
-    width: 0;
-    min-width: 0;
-    border-right: none;
+    width: 0 !important;
+    min-width: 0 !important;
+    border: none !important;
+    box-shadow: none !important;
     visibility: hidden;
+    padding: 0 !important;
+    margin: 0 !important;
 }
 
 /* ==========================================================================
-   Takeoff Left Sidebar Resizer Slider & Collapse Flap Tab
+   Takeoff Left Sidebar Resizer Slider & Collapse Flap Tab (Standardized 12px)
    ========================================================================== */
 .pro-sidebar-resizer {
-    position: absolute;
-    top: 0;
-    left: var(--tk-sidebar-width, 320px);
-    bottom: 52px;
-    width: 6px;
-    margin-left: -3px;
+    position: relative;
+    width: 12px;
+    height: 100%;
+    margin: 0;
     cursor: col-resize;
     z-index: 45;
     background: transparent;
     user-select: none;
-    transition: left 0.25s cubic-bezier(0.4, 0, 0.2, 1), background 0.15s ease;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    transition: background 0.15s ease;
 }
 
 .pro-takeoff-workspace.items-collapsed .pro-sidebar-resizer {
-    left: 0;
-    width: 0;
     cursor: default;
-    pointer-events: none;
 }
 
 .pro-sidebar-resizer:hover,
 .pro-sidebar-resizer.is-dragging {
-    background: rgba(251, 90, 58, 0.45);
+    background: transparent !important;
+}
+
+.pro-resizer-handle {
+    width: 2px;
+    height: 36px;
+    border-radius: 2px;
+    background: var(--border, #cbd5e1);
+    pointer-events: none;
+    transition: all 0.15s ease;
+}
+
+.pro-sidebar-resizer:hover .pro-resizer-handle,
+.pro-sidebar-resizer.is-dragging .pro-resizer-handle {
+    height: 52px;
+    background: #64748b !important;
+    box-shadow: none !important;
+}
+
+[data-theme="dark"] .pro-sidebar-resizer:hover .pro-resizer-handle,
+[data-theme="dark"] .pro-sidebar-resizer.is-dragging .pro-resizer-handle,
+body.theme-dark .pro-sidebar-resizer:hover .pro-resizer-handle,
+body.theme-dark .pro-sidebar-resizer.is-dragging .pro-resizer-handle {
+    background: #94a3b8 !important;
+    box-shadow: none !important;
 }
 
 .pro-sidebar-collapse-tab {
     position: absolute;
-    top: 50%;
-    left: 2px;
-    transform: translateY(-50%);
+    top: 8px;
+    left: 11px;
+    transform: none;
     width: 14px;
     height: 48px;
     background: var(--tk-bg-panel, #ffffff);
     border: 1px solid var(--tk-border, #d5d8dc);
     border-left: none;
     border-radius: 0 8px 8px 0;
-    box-shadow: 2px 0 8px rgba(0, 0, 0, 0.12);
+    box-shadow: none !important;
     color: var(--tk-text-muted, #64748b);
     font-size: 10px;
     display: flex;
@@ -1419,6 +1469,13 @@ body.theme-dark .pro-inspector-head strong {
     padding: 0;
     pointer-events: auto;
     transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+}
+
+.pro-takeoff-workspace.items-collapsed .pro-sidebar-collapse-tab {
+    top: 8px;
+    left: 0;
+    border-left: none;
+    border-radius: 0 8px 8px 0;
 }
 
 .pro-sidebar-collapse-tab:hover {
@@ -1438,12 +1495,6 @@ body.theme-dark .pro-sidebar-collapse-tab {
 body.theme-dark .pro-sidebar-collapse-tab:hover {
     color: #fb5a3a;
     background: #2d3546;
-}
-
-.pro-takeoff-workspace.items-collapsed .pro-sidebar-collapse-tab {
-    left: 0;
-    border-left: none;
-    border-radius: 0 8px 8px 0;
 }
 
 .pro-takeoff-panel-head,
@@ -2854,6 +2905,17 @@ body.theme-dark .pro-stroke-preview {
     flex-direction: column;
     overflow: hidden;
     position: relative;
+    background: var(--bg-panel, #ffffff);
+    border: 1px solid var(--border);
+    border-radius: 8px;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03);
+}
+
+[data-theme="dark"] .pro-takeoff-viewer,
+body.theme-dark .pro-takeoff-viewer {
+    background: var(--bg-panel) !important;
+    border-color: var(--border) !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.2) !important;
 }
 
 .pro-viewer-toolbar {
@@ -4034,25 +4096,80 @@ body.theme-dark .pro-scale-panel select option {
 
 .pro-floating-controls {
     position: absolute;
-    left: auto;
-    right: 28px !important;
-    bottom: 8px !important;
-    transform: none;
+    left: auto !important;
+    right: 60px !important;
+    bottom: 12px !important;
+    width: max-content !important;
+    min-width: max-content !important;
+    max-width: calc(100% - 120px);
+    flex-shrink: 0 !important;
+    transform: scale(0.9);
+    transform-origin: right bottom;
     z-index: 40;
     display: flex;
     align-items: center;
     gap: 4px;
-    min-height: 28px;
-    max-width: calc(100% - 28px);
+    height: 38px;
+    min-height: 38px;
+    max-height: 38px;
     padding: 3px 6px;
-    border: 1px solid var(--tk-border);
-    border-radius: 6px;
-    background: var(--tk-bg-panel);
-    box-shadow: var(--tk-shadow-md);
-    color: var(--tk-text-main);
+    border: 1px solid var(--tk-border, #cbd5e1);
+    border-radius: 8px;
+    background: var(--tk-bg-panel, #ffffff);
+    box-shadow: 0 4px 16px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.05);
+    backdrop-filter: blur(10px);
+    color: var(--tk-text-main, #0f172a);
     transition: left 0.2s ease, right 0.2s ease;
     overflow-x: auto;
     scrollbar-width: none;
+    box-sizing: border-box;
+    white-space: nowrap !important;
+}
+
+.pro-floating-controls .pro-icon-btn {
+    width: 32px !important;
+    height: 32px !important;
+    min-width: 32px !important;
+    border-radius: 6px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    font-size: 16px !important;
+    padding: 0 !important;
+    color: var(--tk-text-muted, #64748b) !important;
+    background: transparent !important;
+    border: none !important;
+}
+
+.pro-floating-controls .pro-icon-btn i {
+    font-size: 16px !important;
+    line-height: 1 !important;
+}
+
+.pro-floating-controls .pro-floating-fit-btn {
+    height: 32px !important;
+    padding: 0 10px !important;
+    border-radius: 6px !important;
+    font-size: 12.5px !important;
+    font-weight: 600 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+}
+
+.pro-floating-controls .takeoff-subhead-page-wrap {
+    height: 32px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+}
+
+.pro-floating-controls .takeoff-subhead-page-badge {
+    height: 32px !important;
+    padding: 0 8px !important;
+    border-radius: 6px !important;
+    font-size: 12px !important;
+    display: inline-flex !important;
+    align-items: center !important;
 }
 
 .pro-floating-controls::-webkit-scrollbar {
@@ -4061,16 +4178,11 @@ body.theme-dark .pro-scale-panel select option {
 
 .pro-floating-controls.is-docked-left {
     right: auto !important;
-    left: 28px !important;
-}
-
-/* Offset when both toolbars are on the same side so they never collide */
-.pro-floating-tools:not(.is-docked-right) ~ .pro-floating-controls.is-docked-left {
     left: 60px !important;
-}
-
-.pro-floating-tools.is-docked-right ~ .pro-floating-controls:not(.is-docked-left) {
-    right: 60px !important;
+    width: max-content !important;
+    min-width: max-content !important;
+    transform: scale(0.9);
+    transform-origin: left bottom;
 }
 
 .pro-takeoff-inspector {
@@ -5840,12 +5952,12 @@ body.theme-dark #takeoffDownloadDrawingBtn:hover {
     color: var(--text-muted, #64748b) !important;
 }
 
-/* Floating tools inside canvas shell - Left vertical toolbar with compact buttons and dock toggle */
+/* Floating tools inside canvas shell - Left vertical toolbar with compact buttons and dock toggle (Vertically Centered) */
 .pro-floating-tools {
     position: absolute;
-    top: 14px;
+    top: 50% !important;
     left: 14px;
-    transform: none;
+    transform: translateY(-50%) !important;
     z-index: 40;
     display: flex;
     flex-direction: column;
@@ -5881,6 +5993,8 @@ body.theme-dark #takeoffDownloadDrawingBtn:hover {
 .pro-floating-tools.is-docked-right {
     left: auto !important;
     right: 14px !important;
+    top: 50% !important;
+    transform: translateY(-50%) !important;
 }
 
 @media (max-height: 680px) {
@@ -6387,7 +6501,7 @@ body.theme-dark .pro-group-context-menu .pro-menu-divider {
     border: 1px solid var(--tk-border, #cbd5e1);
     border-radius: 8px;
     box-shadow: 0 20px 50px rgba(0, 0, 0, 0.22);
-    overflow: visible;
+    overflow: visible !important;
     animation: proModalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
@@ -6411,8 +6525,9 @@ body.theme-dark .pro-group-context-menu .pro-menu-divider {
     display: flex;
     flex-direction: column;
     gap: 16px;
-    max-height: 80vh;
-    overflow-y: auto;
+    overflow: visible !important;
+    position: relative !important;
+    z-index: 50 !important;
 }
 
 /* Added Catalog Items at top of Create Layer Modal */
@@ -6647,31 +6762,56 @@ body.theme-dark .pro-create-item-badge-wrap {
     display: flex;
     align-items: flex-end;
     gap: 8px;
+    position: relative !important;
+    z-index: 60 !important;
+    overflow: visible !important;
 }
 
 .pro-create-selectors-row .col-type {
     flex: 2.2;
     min-width: 135px;
+    position: relative !important;
+    overflow: visible !important;
 }
 
 .pro-create-selectors-row .col-uom {
     width: 76px;
     flex-shrink: 0;
+    position: relative !important;
+    overflow: visible !important;
 }
 
 .pro-create-selectors-row .col-symbol {
     width: 60px;
     flex-shrink: 0;
+    position: relative !important;
+    overflow: visible !important;
 }
 
 .pro-create-selectors-row .col-size {
     width: 60px;
     flex-shrink: 0;
+    position: relative !important;
+    overflow: visible !important;
 }
 
 .pro-create-selectors-row .col-color {
     width: 60px;
     flex-shrink: 0;
+    position: relative !important;
+    overflow: visible !important;
+}
+
+.pro-create-selectors-row .pro-custom-dropdown {
+    position: relative !important;
+}
+
+.pro-create-selectors-row .pro-custom-dropdown.is-open {
+    z-index: 10000 !important;
+}
+
+.pro-create-selectors-row .pro-custom-dropdown-menu {
+    z-index: 10001 !important;
 }
 
 .pro-create-control-box {
@@ -6712,6 +6852,8 @@ body.theme-dark .pro-create-item-badge-wrap {
     padding: 14px 20px;
     border-top: 1px solid var(--tk-border, #e2e8f0);
     background: var(--tk-bg-subtle, #fbfcfe);
+    position: relative !important;
+    z-index: 1 !important;
 }
 
 .pro-btn-create-cancel {
@@ -6759,7 +6901,7 @@ body.theme-dark .pro-create-layer-modal {
 body.theme-dark .pro-create-layer-head,
 body.theme-dark .pro-create-layer-foot {
     border-color: #2f384a !important;
-    background: #1b212d !important;
+    background: #1e2430 !important;
 }
 
 [data-theme="dark"] .pro-create-layer-head h2,
@@ -6787,7 +6929,7 @@ body.theme-dark .pro-create-layer-field label {
 
 [data-theme="dark"] .pro-create-catalog-row input,
 body.theme-dark .pro-create-catalog-row input {
-    background: #1e2432 !important;
+    background: #242a38 !important;
     border: 1px solid #2f384a !important;
     color: #f8fafc !important;
     box-shadow: none !important;
@@ -6802,7 +6944,7 @@ body.theme-dark .pro-create-catalog-row input:focus {
 
 [data-theme="dark"] .pro-create-control-box,
 body.theme-dark .pro-create-control-box {
-    background: #1e2432 !important;
+    background: #242a38 !important;
     border: 1px solid #2f384a !important;
     color: #f8fafc !important;
 }
@@ -6818,6 +6960,8 @@ body.theme-dark .pro-create-control-box:focus-within {
 body.theme-dark .pro-create-control-box select {
     color: #f8fafc !important;
     background: transparent !important;
+    background-color: transparent !important;
+    background-image: none !important;
 }
 
 [data-theme="dark"] .pro-create-control-box select option,
@@ -6936,6 +7080,8 @@ body.theme-dark .pro-floating-controls .pro-floating-fit-btn:hover {
 .pro-takeoff-workspace.is-fullscreen {
     width: 100vw !important;
     height: 100vh !important;
+    padding: 16px 20px !important;
+    box-sizing: border-box !important;
     background: var(--tk-bg-app, #f8fafc) !important;
     z-index: 999999 !important;
 }
@@ -7778,7 +7924,7 @@ body.theme-dark .pro-browse-catalog-modal {
 [data-theme="dark"] .pro-browse-catalog-foot,
 body.theme-dark .pro-browse-catalog-head,
 body.theme-dark .pro-browse-catalog-foot {
-    background: #1b212d !important;
+    background: #1e2430 !important;
     border-color: #2f384a !important;
 }
 
@@ -7799,34 +7945,39 @@ body.theme-dark .pro-browse-catalog-head .pro-icon-btn {
 
 [data-theme="dark"] .pro-browse-catalog-head .pro-icon-btn:hover,
 body.theme-dark .pro-browse-catalog-head .pro-icon-btn:hover {
-    background: rgba(255, 255, 255, 0.08) !important;
+    background: #283040 !important;
     color: #ffffff !important;
 }
 
 [data-theme="dark"] .pro-browse-context-badges .cc-context-badge,
 body.theme-dark .pro-browse-context-badges .cc-context-badge {
-    background: #1f2633 !important;
+    background: #242a38 !important;
     border-color: #2f384a !important;
-    color: #94a3b8 !important;
+    color: #cbd5e1 !important;
 }
 
 [data-theme="dark"] .pro-browse-context-badges .cc-context-badge.is-selected,
 body.theme-dark .pro-browse-context-badges .cc-context-badge.is-selected {
-    background: var(--cat-bg-dark, rgba(37, 99, 235, 0.28)) !important;
-    border-color: var(--cat-border-dark, rgba(37, 99, 235, 0.60)) !important;
-    color: #ffffff !important;
+    background: rgba(251, 90, 58, 0.18) !important;
+    border-color: rgba(251, 90, 58, 0.40) !important;
+    color: #fb5a3a !important;
 }
 
 [data-theme="dark"] .pro-browse-cat-sidebar.cc-catalog-sidebar,
 body.theme-dark .pro-browse-cat-sidebar.cc-catalog-sidebar {
-    background: #1b212d !important;
+    background: #1e2430 !important;
     border-color: #2f384a !important;
 }
 
 [data-theme="dark"] .pro-browse-cat-sidebar .cc-sidebar-head,
 body.theme-dark .pro-browse-cat-sidebar .cc-sidebar-head {
-    background: #1b212d !important;
+    background: #1e2430 !important;
     border-color: #2f384a !important;
+}
+
+[data-theme="dark"] .pro-browse-cat-sidebar .cc-sidebar-eyebrow,
+body.theme-dark .pro-browse-cat-sidebar .cc-sidebar-eyebrow {
+    color: #64748b !important;
 }
 
 [data-theme="dark"] .pro-browse-cat-sidebar .cc-sidebar-title,
@@ -7836,9 +7987,20 @@ body.theme-dark .pro-browse-cat-sidebar .cc-sidebar-title {
 
 [data-theme="dark"] .pro-browse-cat-sidebar .cc-sidebar-search input,
 body.theme-dark .pro-browse-cat-sidebar .cc-sidebar-search input {
-    background: #151922 !important;
+    background: #181d26 !important;
     border-color: #2f384a !important;
     color: #f8fafc !important;
+}
+
+[data-theme="dark"] .pro-browse-cat-sidebar .cc-sidebar-search input:focus,
+body.theme-dark .pro-browse-cat-sidebar .cc-sidebar-search input:focus {
+    border-color: #fb5a3a !important;
+    box-shadow: 0 0 0 2px rgba(251, 90, 58, 0.15) !important;
+}
+
+[data-theme="dark"] .pro-browse-cat-sidebar .cc-tree-divider,
+body.theme-dark .pro-browse-cat-sidebar .cc-tree-divider {
+    color: #64748b !important;
 }
 
 [data-theme="dark"] .pro-browse-cat-sidebar .cc-tree-row,
@@ -7848,60 +8010,82 @@ body.theme-dark .pro-browse-cat-sidebar .cc-tree-row {
 
 [data-theme="dark"] .pro-browse-cat-sidebar .cc-tree-row:hover,
 body.theme-dark .pro-browse-cat-sidebar .cc-tree-row:hover {
-    background: rgba(255, 255, 255, 0.06) !important;
+    background: #283142 !important;
     color: #f8fafc !important;
 }
 
 [data-theme="dark"] .pro-browse-cat-sidebar .cc-tree-row.active,
 body.theme-dark .pro-browse-cat-sidebar .cc-tree-row.active {
-    background: rgba(37, 99, 235, 0.25) !important;
-    border-color: rgba(96, 165, 250, 0.45) !important;
-    color: #60a5fa !important;
+    background: rgba(251, 90, 58, 0.15) !important;
+    border-color: rgba(251, 90, 58, 0.35) !important;
+    color: #fb5a3a !important;
+}
+
+[data-theme="dark"] .pro-browse-cat-sidebar .cc-tree-row.active .cc-tree-icon,
+body.theme-dark .pro-browse-cat-sidebar .cc-tree-row.active .cc-tree-icon {
+    color: #fb5a3a !important;
 }
 
 [data-theme="dark"] .pro-browse-cat-sidebar .cc-tree-count,
 body.theme-dark .pro-browse-cat-sidebar .cc-tree-count {
-    background: #283040 !important;
+    background: #2a3344 !important;
     color: #94a3b8 !important;
+}
+
+[data-theme="dark"] .pro-browse-cat-sidebar .cc-tree-row.active .cc-tree-count,
+body.theme-dark .pro-browse-cat-sidebar .cc-tree-row.active .cc-tree-count {
+    background: rgba(251, 90, 58, 0.22) !important;
+    color: #fb5a3a !important;
 }
 
 [data-theme="dark"] .pro-browse-items-main,
 body.theme-dark .pro-browse-items-main {
-    background: #151922 !important;
+    background: #181d26 !important;
 }
 
 [data-theme="dark"] .pro-browse-items-controls,
 body.theme-dark .pro-browse-items-controls {
-    background: #1e2432 !important;
+    background: #202633 !important;
     border-color: #2f384a !important;
 }
 
 [data-theme="dark"] .pro-browse-items-controls .cc-search-procore input,
 body.theme-dark .pro-browse-items-controls .cc-search-procore input {
-    background: #151922 !important;
+    background: #181d26 !important;
     border-color: #2f384a !important;
     color: #f8fafc !important;
+}
+
+[data-theme="dark"] .pro-browse-items-controls .cc-search-procore input:focus,
+body.theme-dark .pro-browse-items-controls .cc-search-procore input:focus {
+    border-color: #fb5a3a !important;
+    box-shadow: 0 0 0 2px rgba(251, 90, 58, 0.15) !important;
+}
+
+[data-theme="dark"] .pro-browse-count-label,
+body.theme-dark .pro-browse-count-label {
+    color: #94a3b8 !important;
 }
 
 [data-theme="dark"] .pro-catalog-item-card,
 body.theme-dark .pro-catalog-item-card {
     background: transparent !important;
     border: none !important;
-    border-bottom: 1px solid #2f384a !important;
+    border-bottom: 1px solid #283040 !important;
     box-shadow: none !important;
 }
 
 [data-theme="dark"] .pro-catalog-item-card:hover,
 body.theme-dark .pro-catalog-item-card:hover {
-    background: #1e2432 !important;
-    border-bottom: 1px solid #2f384a !important;
+    background: #242c3b !important;
+    border-bottom: 1px solid #283040 !important;
     box-shadow: none !important;
 }
 
 [data-theme="dark"] .pro-catalog-item-card.is-selected,
 body.theme-dark .pro-catalog-item-card.is-selected {
-    background: rgba(251, 90, 58, 0.12) !important;
-    border-bottom: 1px solid #2f384a !important;
+    background: rgba(251, 90, 58, 0.14) !important;
+    border-bottom: 1px solid #283040 !important;
     box-shadow: inset 3px 0 0 var(--tk-primary, #fb5a3a) !important;
 }
 
@@ -7935,11 +8119,8 @@ body.theme-dark .pro-cat-info-tag.tag-price {
 }
 
 [data-theme="dark"] .pro-cat-info-tag.tag-price i,
-body.theme-dark .pro-cat-info-tag.tag-price i {
-    color: #34d399 !important;
-}
-
 [data-theme="dark"] .pro-cat-info-tag.tag-price strong,
+body.theme-dark .pro-cat-info-tag.tag-price i,
 body.theme-dark .pro-cat-info-tag.tag-price strong {
     color: #34d399 !important;
 }
@@ -7952,13 +8133,10 @@ body.theme-dark .pro-cat-info-tag.tag-labor {
 }
 
 [data-theme="dark"] .pro-cat-info-tag.tag-labor i,
-body.theme-dark .pro-cat-info-tag.tag-labor i {
-    color: #38bdf8 !important;
-}
-
 [data-theme="dark"] .pro-cat-info-tag.tag-labor strong,
+body.theme-dark .pro-cat-info-tag.tag-labor i,
 body.theme-dark .pro-cat-info-tag.tag-labor strong {
-    color: #7dd3fc !important;
+    color: #38bdf8 !important;
 }
 
 [data-theme="dark"] .pro-cat-info-tag.tag-code,
@@ -7980,14 +8158,14 @@ body.theme-dark .pro-cat-info-tag.tag-code strong {
 
 [data-theme="dark"] .cc-catalog-pill,
 body.theme-dark .cc-catalog-pill {
-    background-color: var(--cat-bg-dark, rgba(37, 99, 235, 0.28)) !important;
-    border-color: var(--cat-border-dark, rgba(37, 99, 235, 0.60)) !important;
-    color: #ffffff !important;
+    background-color: rgba(37, 99, 235, 0.22) !important;
+    border-color: rgba(37, 99, 235, 0.45) !important;
+    color: #93c5fd !important;
 }
 
 [data-theme="dark"] .cc-catalog-pill .bb-status-pill-label,
 body.theme-dark .cc-catalog-pill .bb-status-pill-label {
-    color: #ffffff !important;
+    color: #93c5fd !important;
 }
 
 [data-theme="dark"] .pro-catalog-pick-btn,
@@ -7997,7 +8175,7 @@ body.theme-dark .pro-catalog-pick-btn {
 
 [data-theme="dark"] .pro-browse-pagination,
 body.theme-dark .pro-browse-pagination {
-    background: #1e2432 !important;
+    background: #202633 !important;
     border-color: #2f384a !important;
     color: #94a3b8 !important;
 }
@@ -8011,9 +8189,21 @@ body.theme-dark .pro-browse-pagination-arrow {
 
 [data-theme="dark"] .pro-browse-pagination-arrow:hover:not(:disabled),
 body.theme-dark .pro-browse-pagination-arrow:hover:not(:disabled) {
-    background: #283040 !important;
-    border-color: #3b4559 !important;
+    background: #2e384d !important;
+    border-color: #475569 !important;
     color: #ffffff !important;
+}
+
+[data-theme="dark"] #proBrowsePageSelect,
+body.theme-dark #proBrowsePageSelect {
+    background: #181d26 !important;
+    border: 1px solid #2f384a !important;
+    color: #f8fafc !important;
+}
+
+[data-theme="dark"] .pro-browse-footer-selection-text,
+body.theme-dark .pro-browse-footer-selection-text {
+    color: #94a3b8 !important;
 }
 
 [data-theme="dark"] .pro-browse-footer-selection-text strong,
@@ -8030,8 +8220,8 @@ body.theme-dark .pro-btn-browse-cancel {
 
 [data-theme="dark"] .pro-btn-browse-cancel:hover,
 body.theme-dark .pro-btn-browse-cancel:hover {
-    background: #283040 !important;
-    border-color: #3b4559 !important;
+    background: #2e384d !important;
+    border-color: #475569 !important;
     color: #ffffff !important;
 }
 
@@ -8722,8 +8912,8 @@ body.theme-dark .pcd-add-custom-color-btn:hover {
 }
 
 /* Safeguard: Prevent generic dropdown wrappers from duplicating inside custom selector rows */
-.pro-create-selectors-row .pro-custom-dropdown.cc-custom-select,
-.pro-create-selectors-row .pro-custom-dropdown.pro-custom-select,
+.pro-create-selectors-row:not(.cc-takeoff-selectors-row) .pro-custom-dropdown.cc-custom-select,
+.pro-create-selectors-row:not(.cc-takeoff-selectors-row) .pro-custom-dropdown.pro-custom-select,
 .pro-create-selectors-row .pro-custom-dropdown .pro-custom-dropdown,
 .pro-edit-selectors-row .pro-custom-dropdown.cc-custom-select,
 .pro-edit-selectors-row .pro-custom-dropdown.pro-custom-select,
@@ -8773,9 +8963,9 @@ body.theme-dark .pcd-add-custom-color-btn:hover {
 /* Dark Theme Overrides */
 [data-theme="dark"] .pro-custom-dropdown-trigger,
 body.theme-dark .pro-custom-dropdown-trigger {
-    background: var(--tk-bg-input, #1f2633);
-    color: var(--tk-text-main, #ffffff);
-    border-color: var(--tk-border, #2f384a);
+    background: #242a38 !important;
+    color: var(--tk-text-main, #ffffff) !important;
+    border-color: var(--tk-border, #2f384a) !important;
 }
 
 [data-theme="dark"] .pro-custom-dropdown.is-open .pro-custom-dropdown-trigger,
@@ -8802,8 +8992,8 @@ body.theme-dark .pro-custom-dropdown.is-open .pcd-caret {
 
 [data-theme="dark"] .pro-custom-dropdown-menu,
 body.theme-dark .pro-custom-dropdown-menu {
-    background: #1f2633;
-    border-color: #3b82f6;
+    background: #242a38 !important;
+    border-color: var(--tk-border, #2f384a) !important;
     box-shadow: 0 12px 30px rgba(0, 0, 0, 0.5);
     scrollbar-color: #384254 transparent;
 }
