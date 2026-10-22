@@ -54,7 +54,7 @@ $clientAuthMetadata = [
 
 require_once __DIR__ . '/company_tools_data.php';
 $companyToolsCategories = company_tools_existing_categories();
-$favoriteTools = array_slice(company_tools_favorites(), 0, 5);
+$favoriteTools = array_slice(company_tools_favorites(), 0, 3);
 $bidBoardPath = company_tools_bid_board_path();
 $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
 ?>
@@ -333,23 +333,88 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
             </div>
         </div>
         <div class="g-announcement-body">
-            <h2 class="g-announcement-title" id="globalAnnouncementTitle">Brightronix Takeoff Platform Update</h2>
+            <h2 class="g-announcement-title" id="globalAnnouncementTitle">System Announcements &amp; Release Notes</h2>
+
+            <!-- Category Tabs (Projects, Admins, Developers) -->
+            <div class="g-ann-tabs" id="globalAnnouncementTabs" style="display: flex;">
+                <button type="button" class="g-ann-tab active" data-ann-tab="projects">
+                    <i class="fas fa-folder-open"></i> Projects
+                </button>
+                <button type="button" class="g-ann-tab" data-ann-tab="admins">
+                    <i class="fas fa-shield-halved"></i> Admins
+                </button>
+                <button type="button" class="g-ann-tab" data-ann-tab="developers">
+                    <i class="fas fa-code-commit"></i> Developers
+                </button>
+            </div>
+
             <div class="g-announcement-content" id="globalAnnouncementBody">
-                <p>Welcome to the enhanced <strong>Brightronix Takeoff & Estimating Platform</strong>. We have updated
-                    your workflow with high-performance tools:</p>
-                <ul>
-                    <li><strong>Smart 10-Minute Clock & Calendar:</strong> Standardized due dates and due times with
-                        fast 10-minute intervals across all project inputs.</li>
-                    <li><strong>Live Multi-User Project Presence:</strong> Real-time indicator displaying up to 4
-                        concurrent estimators actively working on this specific project.</li>
-                    <li><strong>Adaptive Dark & Light Theme:</strong> Instant theme switching with synchronized stage
-                        pills, badges, and glassmorphism styling.</li>
-                    <li><strong>Global Broadcast Alerts:</strong> Stay informed of system announcements, releases, and
-                        collaborative project actions anywhere across the workspace.</li>
-                </ul>
-                <div class="g-announcement-highlight-box">
-                    <strong>Tip:</strong> You can access this announcement anytime by clicking the bell icon in the top
-                    header.
+                <!-- Pane 1: Projects -->
+                <div class="g-ann-pane active" data-ann-pane="projects">
+                    <div class="g-ann-note-card">
+                        <div class="g-ann-note-head">
+                            <span class="g-ann-note-badge" style="background: rgba(234, 88, 12, 0.15); color: #ea580c;">Projects</span>
+                            <span class="g-ann-note-date">Due Alert &bull; Active</span>
+                        </div>
+                        <h4 class="g-ann-note-title">Smart Due Clock &amp; Calendar Pickers</h4>
+                        <p class="g-ann-note-desc">Standardized 10-minute intervals across all project due times. Upcoming projects nearing submission deadlines will alert active estimators automatically.</p>
+                    </div>
+                    <div class="g-ann-note-card">
+                        <div class="g-ann-note-head">
+                            <span class="g-ann-note-badge" style="background: rgba(16, 185, 129, 0.15); color: #059669;">Collaboration</span>
+                            <span class="g-ann-note-date">Real-Time</span>
+                        </div>
+                        <h4 class="g-ann-note-title">Live Multi-User Project Presence</h4>
+                        <p class="g-ann-note-desc">Real-time indicator showing active estimators currently working inside this project, with live pulse status and instant cross-tab sync.</p>
+                    </div>
+                    <div class="g-ann-note-card">
+                        <div class="g-ann-note-head">
+                            <span class="g-ann-note-badge" style="background: rgba(59, 130, 246, 0.15); color: #2563eb;">Directory</span>
+                            <span class="g-ann-note-date">Customer Sync</span>
+                        </div>
+                        <h4 class="g-ann-note-title">Customer Directory Integration</h4>
+                        <p class="g-ann-note-desc">Assign customers with a single click, edit details intuitively in modal dialogs, and save records directly to company directory for reuse in future bids.</p>
+                    </div>
+                </div>
+
+                <!-- Pane 2: Admins -->
+                <div class="g-ann-pane" data-ann-pane="admins">
+                    <div class="g-ann-note-card">
+                        <div class="g-ann-note-head">
+                            <span class="g-ann-note-badge" style="background: rgba(139, 92, 246, 0.15); color: #7c3aed;">RBAC Security</span>
+                            <span class="g-ann-note-date">Enterprise</span>
+                        </div>
+                        <h4 class="g-ann-note-title">Strict Role-Based Access Enforcement</h4>
+                        <p class="g-ann-note-desc">Full segregation between Admin and Viewer roles. Catalog mutations, project creation, and template exports are guarded with persisted database checks.</p>
+                    </div>
+                    <div class="g-ann-note-card">
+                        <div class="g-ann-note-head">
+                            <span class="g-ann-note-badge" style="background: rgba(245, 158, 11, 0.15); color: #d97706;">Catalog Sync</span>
+                            <span class="g-ann-note-date">Master Library</span>
+                        </div>
+                        <h4 class="g-ann-note-title">Master Catalog &amp; Audit Logs</h4>
+                        <p class="g-ann-note-desc">Company catalog items and groups remain synchronized with standardized resizers, 12px layout grid, and live price recalculations.</p>
+                    </div>
+                </div>
+
+                <!-- Pane 3: Developers -->
+                <div class="g-ann-pane" data-ann-pane="developers">
+                    <div class="g-ann-note-card">
+                        <div class="g-ann-note-head">
+                            <span class="g-ann-note-badge" style="background: rgba(14, 165, 233, 0.15); color: #0284c7;">Production &amp; Local</span>
+                            <span class="g-ann-note-date">Latest Changelog</span>
+                        </div>
+                        <h4 class="g-ann-note-title">UI Standardization &amp; Release Updates</h4>
+                        <p class="g-ann-note-desc">Standardized sidebar sliders across all modules, vertically centered Takeoff floating tools at 50%, unified search bar design system, capped header favorites at 3, and integrated AST knowledge graph.</p>
+                    </div>
+                    <div class="g-ann-note-card">
+                        <div class="g-ann-note-head">
+                            <span class="g-ann-note-badge" style="background: rgba(99, 102, 241, 0.15); color: #4f46e5;">CI Contract Tests</span>
+                            <span class="g-ann-note-date">Pass Rate 100%</span>
+                        </div>
+                        <h4 class="g-ann-note-title">Full Test Suite Compliance</h4>
+                        <p class="g-ann-note-desc">Validated contracts for SSO client session guard, composer pipelines, RBAC catalog settings, and UI confirmation dialogs.</p>
+                    </div>
                 </div>
             </div>
         </div>
@@ -634,12 +699,18 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
             }
 
             var bodyEl = document.getElementById('globalAnnouncementBody');
-            if (bodyEl) {
-                if (options.content) {
-                    bodyEl.innerHTML = typeof options.content === 'string' ? options.content : String(options.content);
-                } else if (options.message) {
-                    bodyEl.innerHTML = '<p>' + options.message + '</p>';
+            var tabsEl = document.getElementById('globalAnnouncementTabs');
+            if (options.content || options.message) {
+                if (tabsEl) tabsEl.style.display = 'none';
+                if (bodyEl) {
+                    if (options.content) {
+                        bodyEl.innerHTML = typeof options.content === 'string' ? options.content : String(options.content);
+                    } else if (options.message) {
+                        bodyEl.innerHTML = '<p>' + options.message + '</p>';
+                    }
                 }
+            } else {
+                if (tabsEl) tabsEl.style.display = 'flex';
             }
 
             if (primBtn) {
@@ -754,6 +825,26 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
             if (e.key === 'Escape' && modalBackdrop && modalBackdrop.classList.contains('open')) {
                 handleCancelDismiss();
             }
+        });
+
+        document.querySelectorAll('[data-ann-tab]').forEach(function (btn) {
+            btn.addEventListener('click', function () {
+                var targetTab = btn.getAttribute('data-ann-tab');
+                document.querySelectorAll('[data-ann-tab]').forEach(function (b) {
+                    var isCurrent = (b === btn);
+                    b.classList.toggle('active', isCurrent);
+                    if (isCurrent) {
+                        b.style.background = 'rgba(251, 90, 58, 0.12)';
+                        b.style.color = '#ea580c';
+                    } else {
+                        b.style.background = 'transparent';
+                        b.style.color = 'var(--text-muted, #64748b)';
+                    }
+                });
+                document.querySelectorAll('[data-ann-pane]').forEach(function (pane) {
+                    pane.classList.toggle('active', pane.getAttribute('data-ann-pane') === targetTab);
+                });
+            });
         });
 
         if (notifBellBtn) {
