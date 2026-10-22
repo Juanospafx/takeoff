@@ -1,0 +1,10 @@
+'use strict';
+const assert = require('assert');
+const fs = require('fs');
+const source = fs.readFileSync(require.resolve('../assets/editor/takeoff.js'), 'utf8');
+const scaleHydration = source.indexOf('(data.scales || []).forEach');
+const segmentRestore = source.indexOf('state.segments = (data.segments || []).map');
+assert(scaleHydration >= 0 && scaleHydration < segmentRestore, 'sheet scales must be hydrated before segments are restored');
+assert(source.includes('const persistedTotal = num(segment.total_length);'), 'linear calculation must preserve a persisted total without scale');
+assert(!source.includes('Run takeoff_mysql_schema.sql first.'), 'client must not show the obsolete schema instruction');
+console.log('takeoff linear reload persistence test passed');

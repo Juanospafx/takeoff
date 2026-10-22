@@ -140,7 +140,16 @@
             headers: { 'Content-Type': 'application/json' },
             body: JSON.stringify({ action, ...payload }),
         };
-        return fetch(url, options).then(r => r.json());
+        return fetch(url, options).then(async r => {
+            let body;
+            try { body = await r.json(); } catch (_) {
+                throw new Error(`Takeoff request failed (${r.status || 'invalid response'}).`);
+            }
+            if (!r.ok || body?.status === 'error') {
+                throw new Error(body?.msg || body?.error?.message || `Takeoff request failed (${r.status}).`);
+            }
+            return body;
+        });
     }
 
     function escapeHtml(v) {
@@ -287,6 +296,13 @@
         }
         const segPage = segment.page_number ?? segment.page ?? (typeof pageNum !== 'undefined' ? pageNum : 1);
         const scale = getPlanScale(segPage);
+        if (!(scale > 0)) {
+            const persistedTotal = num(segment.total_length);
+            const persistedMeasured = num(segment.measured_length);
+            if (persistedTotal > 0 || persistedMeasured > 0) {
+                return persistedTotal > 0 ? persistedTotal : persistedMeasured * num(segment.multiplier || 1);
+            }
+        }
         const horizontal = scale > 0 ? px / scale : 0;
         const subtype = normalizeLinearSubtype(segment.takeoff_subtype || segment.takeoff_type || segment.type);
         const dropLength = subtype === 'linear' ? 0 : Math.max(0, num(segment.drop_length ?? segment.dropLength));
@@ -341,6 +357,13 @@
         pxArea = Math.abs(pxArea) / 2;
         const segPage = segment.page_number ?? segment.page ?? (typeof pageNum !== 'undefined' ? pageNum : 1);
         const scale = getPlanScale(segPage);
+        if (!(scale > 0)) {
+            const persistedTotal = num(segment.total_area ?? segment.total_length);
+            const persistedMeasured = num(segment.measured_area);
+            if (persistedTotal > 0 || persistedMeasured > 0) {
+                return persistedTotal > 0 ? persistedTotal : persistedMeasured * num(segment.multiplier || 1);
+            }
+        }
         const measured = scale > 0 ? pxArea / (scale * scale) : 0;
         segment.measured_area = measured;
         segment.total_area = measured * num(segment.multiplier || 1);
@@ -3403,6 +3426,12 @@
             }
             if (loaded.status === 'success') {
                 const data = loaded.data || {};
+                window.sheetScales = window.sheetScales || {};
+                (data.scales || []).forEach(scale => {
+                    const page = Number(scale.page_number ?? scale.page ?? 1);
+                    const pixelsPerUnit = Number(scale.pixels_per_unit ?? scale.pixelsPerUnit ?? 0);
+                    if (page > 0 && pixelsPerUnit > 0) window.sheetScales[page] = pixelsPerUnit;
+                });
                 const dbLayerIdMap = new Map();
                 state.layers = (data.layers || []).map(l => {
                     const metadata = l.metadata_json || {};
@@ -3420,7 +3449,7 @@
             renderAll();
         }).catch(err => {
             console.error(err);
-            showToast('Takeoff could not load. Run takeoff_mysql_schema.sql first.', 'error');
+            showToast(err?.message || 'Takeoff could not load. Please retry or contact an administrator.', 'error');
             renderAll();
         });
     }

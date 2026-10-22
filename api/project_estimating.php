@@ -313,6 +313,16 @@ function pew_load_one(PDO $pdo, array $estimate) {
 function pew_item_metadata(array $item, $clientId) {
     return json_encode(array('workspaceClientId' => $clientId, 'workspace' => $item), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
 }
+function pew_flatten_workspace_items(array $items) {
+    $flat = array();
+    foreach ($items as $item) {
+        if (!is_array($item)) continue;
+        $flat[] = $item;
+        $children = isset($item['children']) && is_array($item['children']) ? $item['children'] : array();
+        if ($children) $flat = array_merge($flat, pew_flatten_workspace_items($children));
+    }
+    return $flat;
+}
 function pew_existing_items(PDO $pdo, $estimateId) {
     $stmt = $pdo->prepare('SELECT id, source_layer_key, metadata_json FROM estimate_items WHERE estimate_id = ? AND deleted_at IS NULL');
     $stmt->execute(array($estimateId));
@@ -363,7 +373,7 @@ function pew_save_items(PDO $pdo, $projectId, $estimateId, array $groups) {
     foreach ($groups as $group) {
         if (!is_array($group)) continue;
         $groupName = pew_text(isset($group['name']) ? $group['name'] : 'Default Group');
-        $items = isset($group['items']) && is_array($group['items']) ? $group['items'] : array();
+        $items = pew_flatten_workspace_items(isset($group['items']) && is_array($group['items']) ? $group['items'] : array());
         foreach ($items as $item) {
             if (!is_array($item)) continue;
             $clientId = pew_text(isset($item['id']) ? $item['id'] : '', 191);
