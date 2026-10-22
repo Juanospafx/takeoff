@@ -11,10 +11,24 @@ $authUser = SessionGuard::getAuthenticatedUser($_SESSION ?? null);
 $authRole = $authUser['role'] ?? SessionGuard::ROLE_VIEWER;
 $isAdminUser = $authRole === SessionGuard::ROLE_ADMIN;
 $canWrite = $isAdminUser;
-$authDisplayName = trim((string) ($authUser['username'] ?? ''));
+$authDisplayName = trim((string) ($_SESSION['display_name'] ?? $_SESSION['name'] ?? $authUser['username'] ?? ''));
 if ($authDisplayName === '') {
     $authDisplayName = $isAdminUser ? 'Admin' : 'Viewer';
 }
+$parts = preg_split('/\s+/', $authDisplayName, -1, PREG_SPLIT_NO_EMPTY);
+if (count($parts) >= 2) {
+    $firstChar = function_exists('mb_substr') ? mb_substr($parts[0], 0, 1) : substr($parts[0], 0, 1);
+    $lastChar = function_exists('mb_substr') ? mb_substr(end($parts), 0, 1) : substr(end($parts), 0, 1);
+    $selfInitials = strtoupper($firstChar . $lastChar);
+} else {
+    $selfInitials = strtoupper(function_exists('mb_substr') ? mb_substr($authDisplayName, 0, 2) : substr($authDisplayName, 0, 2));
+}
+if ($selfInitials === '') {
+    $selfInitials = $isAdminUser ? 'AD' : 'VW';
+}
+$selfName = $authDisplayName;
+$selfRole = ucfirst($authRole ?: 'Estimator');
+
 $clientAuthMetadata = [
     'displayName' => $authDisplayName,
     'role' => $authRole,
@@ -550,7 +564,7 @@ $state = [
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="../assets/global_tools.css?v=view-trans-20260929-1">
+    <link rel="stylesheet" href="../assets/global_tools.css?v=<?= filemtime(__DIR__ . '/../assets/global_tools.css') ?>">
     <script>
         (function () {
             try {
@@ -868,8 +882,8 @@ $state = [
             }
         }
     </style>
-    <link rel="stylesheet" href="../assets/project_overview.css?v=btn-blue-tabs-20261005-3">
-    <link rel="stylesheet" href="../assets/project_takeoff.css?v=scale-stage-pill-dark-20261005-40">
+    <link rel="stylesheet" href="../assets/project_overview.css?v=<?= filemtime(__DIR__ . '/../assets/project_overview.css') ?>">
+    <link rel="stylesheet" href="../assets/project_takeoff.css?v=<?= filemtime(__DIR__ . '/../assets/project_takeoff.css') ?>">
     <link rel="stylesheet" href="../assets/project_estimating.css?v=unified-hierarchy-20260930-1">
     <link rel="stylesheet" href="../assets/project_proposal.css?v=unified-hierarchy-20260930-1">
     <link rel="stylesheet" href="../assets/won_project_export.css?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.css') ?>">
@@ -901,11 +915,6 @@ $state = [
                         <?php if ($projectId > 0): ?>
                         <div class="won-export-container" id="wonProjectExportContainer">
                             <?php if ($isAdminUser): ?>
-                            <button type="button" class="btn-mark-won" id="markAsWonBtn"
-                                <?= ($project['status'] ?? '') === 'accepted' ? 'disabled' : '' ?>>
-                                <i class="fas fa-trophy"></i>
-                                <span>Mark as Won</span>
-                            </button>
                             <button type="button" class="btn-retry-export" id="retryWonExportBtn" style="display:none;">
                                 <i class="fas fa-arrows-rotate"></i>
                                 <span>Retry Export</span>
@@ -960,70 +969,25 @@ $state = [
                         <div class="pd-presence-stack" id="pdPresenceStack"
                             title="Active users in this project (Click to view collaborators)">
                             <div class="pd-presence-avatar self" style="background: #5b4364; z-index: 4;"
-                                title="Isaac Diaz (You) - Lead Estimator">
-                                <span>ID</span>
-                                <span class="pd-presence-dot" title="Active now"></span>
-                            </div>
-                            <div class="pd-presence-avatar" style="background: #2563eb; z-index: 3;"
-                                title="Sarah Connor - Senior Architect">
-                                <span>SC</span>
-                                <span class="pd-presence-dot" title="Active now"></span>
-                            </div>
-                            <div class="pd-presence-avatar" style="background: #059669; z-index: 2;"
-                                title="Marcus Vance - Project Manager">
-                                <span>MV</span>
-                                <span class="pd-presence-dot" title="Active now"></span>
-                            </div>
-                            <div class="pd-presence-avatar" style="background: #d97706; z-index: 1;"
-                                title="Elena Gomez - Electrical Estimator">
-                                <span>EG</span>
+                                title="<?= htmlspecialchars($selfName) ?> (You) - <?= htmlspecialchars($selfRole) ?>">
+                                <span><?= htmlspecialchars($selfInitials) ?></span>
                                 <span class="pd-presence-dot" title="Active now"></span>
                             </div>
                         </div>
                         <div class="pd-presence-menu" id="pdPresenceMenu">
                             <div class="pd-presence-menu-head">
                                 <span>Active in Project</span>
-                                <span class="pd-presence-count" id="pdPresenceCount">4 active</span>
+                                <span class="pd-presence-count" id="pdPresenceCount">1 active</span>
                             </div>
                             <div class="pd-presence-list" id="pdPresenceList">
                                 <div class="pd-presence-user-row">
-                                    <div class="pd-presence-avatar"
+                                    <div class="pd-presence-avatar self"
                                         style="background: #5b4364; width: 24px; height: 24px; font-size: 9.5px; margin: 0;">
-                                        <span>ID</span>
+                                        <span><?= htmlspecialchars($selfInitials) ?></span>
                                     </div>
                                     <div class="pd-presence-user-info">
-                                        <span class="pd-presence-user-name">Isaac Diaz (You)</span>
-                                        <span class="pd-presence-user-role">Lead Estimator • Active now</span>
-                                    </div>
-                                </div>
-                                <div class="pd-presence-user-row">
-                                    <div class="pd-presence-avatar"
-                                        style="background: #2563eb; width: 24px; height: 24px; font-size: 9.5px; margin: 0;">
-                                        <span>SC</span>
-                                    </div>
-                                    <div class="pd-presence-user-info">
-                                        <span class="pd-presence-user-name">Sarah Connor</span>
-                                        <span class="pd-presence-user-role">Senior Architect • Active now</span>
-                                    </div>
-                                </div>
-                                <div class="pd-presence-user-row">
-                                    <div class="pd-presence-avatar"
-                                        style="background: #059669; width: 24px; height: 24px; font-size: 9.5px; margin: 0;">
-                                        <span>MV</span>
-                                    </div>
-                                    <div class="pd-presence-user-info">
-                                        <span class="pd-presence-user-name">Marcus Vance</span>
-                                        <span class="pd-presence-user-role">Project Manager • Active now</span>
-                                    </div>
-                                </div>
-                                <div class="pd-presence-user-row">
-                                    <div class="pd-presence-avatar"
-                                        style="background: #d97706; width: 24px; height: 24px; font-size: 9.5px; margin: 0;">
-                                        <span>EG</span>
-                                    </div>
-                                    <div class="pd-presence-user-info">
-                                        <span class="pd-presence-user-name">Elena Gomez</span>
-                                        <span class="pd-presence-user-role">Electrical Estimator • Active now</span>
+                                        <span class="pd-presence-user-name"><?= htmlspecialchars($selfName) ?> (You)</span>
+                                        <span class="pd-presence-user-role"><?= htmlspecialchars($selfRole) ?> • Active now</span>
                                     </div>
                                 </div>
                             </div>
@@ -1035,14 +999,11 @@ $state = [
                         <button class="btn-ghost icon-only" type="button" data-menu-toggle="projectActionsMenu"
                             aria-label="Project actions"><i class="fas fa-ellipsis-vertical"></i></button>
                         <div class="project-menu align-right" id="projectActionsMenu">
-                            <button type="button"><i class="fas fa-briefcase"></i> Add to Portfolio</button>
                             <button type="button"><i class="fas fa-copy"></i> Copy Project</button>
                             <button type="button"><i class="fas fa-layer-group"></i> Convert to Template</button>
                             <button type="button"><i class="fas fa-wand-magic-sparkles"></i> Apply Template</button>
                             <button type="button"><i class="fas fa-box-archive"></i> Archive Project</button>
                             <button type="button" class="danger"><i class="fas fa-trash"></i> Delete Project</button>
-                            <button type="button"><i class="fas fa-file-lines"></i> Support Documentation</button>
-                            <button type="button"><i class="fas fa-book-open"></i> User Guide</button>
                         </div>
                     </div>
                 </div>
@@ -1186,6 +1147,16 @@ $state = [
                         </div>
                     </div>
                 </div>
+                <!-- Overview: Move to Portfolio centered right under Save Project button in top-tabs -->
+                <?php if ($projectId > 0 && $isAdminUser): ?>
+                <div class="overview-subhead-tabs-tools <?= $activeTab === 'overview' ? 'is-overview-tab' : '' ?>" id="overviewSubheadTabsTools" <?= $activeTab !== 'overview' ? 'style="display:none !important;"' : '' ?>>
+                    <button type="button" class="btn-mark-won" id="markAsWonBtn"
+                        title="Move to Portfolio" aria-label="Move to Portfolio"
+                        <?= ($project['status'] ?? '') === 'accepted' ? 'disabled' : '' ?>>
+                        <span>Move to Portfolio</span>
+                    </button>
+                </div>
+                <?php endif; ?>
             </nav>
         </div>
 
@@ -1201,7 +1172,7 @@ $state = [
                             </div>
                             <div class="overview-form-grid">
                                 <label class="overview-field">
-                                    <span>Estimate Name</span>
+                                    <span>Project Name</span>
                                     <input id="poEstimateName"
                                         value="<?= htmlspecialchars($project['name'] ?? 'New Project') ?>">
                                 </label>
@@ -1293,44 +1264,47 @@ $state = [
 
                         <!-- Customer Information Card -->
                         <?php
-                        $displayCompany = $customerCompany ?: 'GP Construction';
-                        $displayContact = $primaryContact ?: 'GP Construction';
-                        $displayPhone = $customerPhone ?: '3212002278';
-                        $displayEmail = $customerEmail ?: 'Paul@gpconstructioncompany.com';
-                        $displayAddress = $project['job_address'] ?: '';
-                        $companyInitial = strtoupper(substr($displayCompany, 0, 1)) ?: 'G';
+                        $displayCompany = trim((string) ($customerCompany ?? ''));
+                        $displayContact = trim((string) ($primaryContact ?? ''));
+                        $displayPhone = trim((string) ($customerPhone ?? ''));
+                        $displayEmail = trim((string) ($customerEmail ?? ''));
+                        $displayAddress = trim((string) ($project['job_address'] ?? ''));
+                        $hasCustomer = ($displayCompany !== '' || $displayContact !== '');
+                        $companyInitial = $displayCompany !== '' ? strtoupper(substr($displayCompany, 0, 1)) : 'C';
+                        $contactSummaryParts = array_filter([$displayContact, $displayPhone, $displayEmail]);
+                        $displayContactSummary = implode(', ', $contactSummaryParts);
                         ?>
                         <section class="overview-card">
                             <div class="overview-card-head">
                                 <h2>Customer Information</h2>
-                                <div class="d-flex align-items-center gap-2">
-                                    <button class="pd-btn-sm-text" type="button" id="saveCustomerBtn"
-                                        title="Save current customer to directory"><i class="fas fa-bookmark"></i>
-                                        Save</button>
-                                </div>
                             </div>
 
                             <!-- Customer Details Display -->
                             <div class="pd-customer-body" id="customerDisplayBlock">
-                                <!-- Customer Info: Company Name (Title) + Contact Summary (Subtitle) + Single Edit Button -->
+                                <!-- Customer Info: Company Name + Contact Summary + Edit button, or Add Customer -->
                                 <div class="pd-customer-section">
-                                    <div class="pd-customer-row">
+                                    <div class="pd-customer-row" id="customerFilledRow"
+                                        style="cursor: pointer; <?= $hasCustomer ? 'display:flex;' : 'display:none;' ?>">
                                         <div class="pd-company-avatar" id="customerAvatarLetter">
                                             <?= htmlspecialchars($companyInitial) ?>
                                         </div>
-                                        <div class="pd-customer-details" style="flex: 1; min-width: 0;">
+                                        <div class="pd-customer-details" style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
                                             <div class="pd-customer-name" id="displayCustomerCompany"
-                                                style="font-weight: 700; font-size: 13.5px;">
-                                                <?= htmlspecialchars($displayCompany) ?>
+                                                style="font-weight: 700; font-size: 13.5px; color: var(--text-main); line-height: 1.25;">
+                                                <?= htmlspecialchars($displayCompany ?: 'Customer') ?>
                                             </div>
                                             <div class="pd-contact-sub-line" id="displayContactSummary"
-                                                style="font-size: 11.5px; color: var(--text-muted); margin-top: 1px;">
-                                                <?= htmlspecialchars($displayContact . ', ' . $displayPhone . ', ' . $displayEmail) ?>
+                                                style="font-size: 11.5px; color: var(--text-muted); line-height: 1.25; margin-top: 1px;">
+                                                <?= htmlspecialchars($displayContactSummary ?: '') ?>
                                             </div>
                                         </div>
                                         <button class="pd-row-dots-btn" type="button" id="editCustomerInfoBtn"
                                             title="Edit Customer Information"><i class="fas fa-pen"></i></button>
                                     </div>
+                                    <button class="pd-add-address-bar" type="button" id="addCustomerBtn"
+                                        style="<?= $hasCustomer ? 'display:none;' : 'display:flex;' ?>">
+                                        <i class="fas fa-plus"></i> Add Customer
+                                    </button>
                                 </div>
 
                                 <!-- Project Address Section: Shows Address + Single Edit button, or Add Address -->
@@ -1676,6 +1650,7 @@ $state = [
 
                     <!-- Draggable Resizer & Collapse Flap Tab -->
                     <div class="pro-sidebar-resizer" id="takeoffSidebarResizer" title="Drag to resize sidebar">
+                        <div class="pro-resizer-handle"></div>
                         <button class="pro-sidebar-collapse-tab" id="takeoffSidebarCollapseTab" type="button"
                             title="Hide Sidebar" aria-label="Hide Sidebar">
                             <i class="fas fa-chevron-left"></i>
@@ -1720,7 +1695,7 @@ $state = [
 
                             <?php if ($selectedDoc && $selectedDoc['source'] === 'legacy_file'): ?>
                                 <iframe id="takeoffFrame" class="takeoff-frame pro-takeoff-frame"
-                                    src="editor.php?id=<?= (int) $selectedDoc['id'] ?>&embedded=1&estimate_key=est_primary&inherit_legacy=1&_t=<?= time() ?>"></iframe>
+                                    src="editor.php?id=<?= (int) $selectedDoc['id'] ?>&embedded=1&estimate_key=est_primary&inherit_legacy=1&_v=<?= time() ?>"></iframe>
                             <?php else: ?>
                                 <div id="takeoffEmpty" class="takeoff-empty pro-takeoff-empty">
                                     <div>
@@ -2089,10 +2064,17 @@ $state = [
                     <input id="poCustomerAddress" value="<?= htmlspecialchars($customerAddress) ?>">
                 </label>
             </div>
-            <div class="pd-modal-foot">
-                <button type="button" class="btn-ghost" data-close-modal="pdCustomerModal">Cancel</button>
-                <button type="button" class="btn-main orange" id="applyCustomerModalBtn"><i class="fas fa-check"></i>
-                    Apply &amp; Close</button>
+            <div class="pd-modal-foot" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+                <button type="button" class="btn-ghost" id="saveCustomerBtn"
+                    title="Save this customer to database directory for use in other projects"
+                    style="color: var(--primary, #ea580c); font-weight: 600;">
+                    <i class="fas fa-bookmark"></i> Save to Directory
+                </button>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button type="button" class="btn-ghost" data-close-modal="pdCustomerModal">Cancel</button>
+                    <button type="button" class="btn-main orange" id="applyCustomerModalBtn"><i class="fas fa-check"></i>
+                        Apply &amp; Close</button>
+                </div>
             </div>
         </div>
     </div>
@@ -2310,6 +2292,14 @@ $state = [
         })();
 
         window.ProjectState = <?= json_encode($state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
+        window.ProjectPresenceUser = {
+            id: <?= json_encode((int) ($authUser['id'] ?? 1)) ?>,
+            name: <?= json_encode($selfName . ' (You)') ?>,
+            role: <?= json_encode($selfRole) ?>,
+            initials: <?= json_encode($selfInitials) ?>,
+            color: '#5b4364',
+            isSelf: true
+        };
         window.WonProjectConfig = <?= json_encode([
             'projectId' => (int) $projectId,
             'token' => $wonProjectCsrfToken,
@@ -2365,6 +2355,13 @@ $state = [
                 setTimeout(() => {
                     window.syncTakeoffLayout?.();
                 }, 0);
+            }
+            const wonWrap = document.getElementById('overviewSubheadTabsTools');
+            if (wonWrap) {
+                const isOverview = (tab === 'overview');
+                wonWrap.classList.toggle('is-overview-tab', isOverview);
+                wonWrap.style.setProperty('display', isOverview ? 'inline-flex' : 'none', 'important');
+                if (isOverview) requestAnimationFrame(alignOverviewWonBtn);
             }
             tabs.forEach(btn => {
                 const active = btn.dataset.tab === tab;
@@ -2568,11 +2565,31 @@ $state = [
                 .catch(() => alert('Upload failed.'));
         });
 
+        function alignOverviewWonBtn() {
+            const wonWrap = document.getElementById('overviewSubheadTabsTools');
+            const wonBtn = document.getElementById('markAsWonBtn');
+            const saveBtn = document.getElementById('saveProjectBtn');
+            const topTabs = document.querySelector('.top-tabs');
+            if (!wonWrap || !wonBtn || !saveBtn || !topTabs) return;
+            if (wonWrap.style.display === 'none' || !wonWrap.classList.contains('is-overview-tab')) return;
+
+            const saveRect = saveBtn.getBoundingClientRect();
+            const tabsRect = topTabs.getBoundingClientRect();
+            const wonRect = wonBtn.getBoundingClientRect();
+            if (saveRect.width > 0 && tabsRect.width > 0 && wonRect.width > 0) {
+                const saveCenterFromRight = tabsRect.right - (saveRect.left + saveRect.width / 2);
+                const targetMarginRight = Math.max(0, Math.round(saveCenterFromRight - (wonRect.width / 2) - 23));
+                wonWrap.style.marginRight = `${targetMarginRight}px`;
+            }
+        }
+        window.addEventListener('resize', alignOverviewWonBtn);
+
         setActiveTab(ProjectState.activeTab || 'overview', false);
+        setTimeout(alignOverviewWonBtn, 60);
     </script>
     <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
     <script>if (window.pdfjsLib) window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';</script>
-    <script src="../assets/project_overview.js?v=active-users-4-20260930-1"></script>
+    <script src="../assets/project_overview.js?v=<?= filemtime(__DIR__ . '/../assets/project_overview.js') ?>"></script>
     <script src="../assets/estimating_catalog_snapshot_service.js?v=estimating-catalog-snapshot-20260827-1"></script>
     <script src="../assets/catalog_change_detection_service.js?v=catalog-change-detection-20260827-1"></script>
     <script src="../assets/takeoff_estimating_sync_service.js?v=estimating-linked-part-20260831-1"></script>

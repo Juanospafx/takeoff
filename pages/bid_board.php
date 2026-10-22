@@ -36,7 +36,7 @@ $readOnly = !$canWrite;
             }
         })();
     </script>
-    <link rel="stylesheet" href="../assets/bid_board.css?v=brightronix-responsive-info-v4">
+    <link rel="stylesheet" href="../assets/bid_board.css?v=<?= filemtime(__DIR__ . '/../assets/bid_board.css') ?>">
 </head>
 
 <body>

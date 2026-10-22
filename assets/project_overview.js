@@ -540,20 +540,38 @@
     }
 
     function syncCustomerDisplayCard() {
-        const company = $('poCustomerCompany')?.value?.trim() || 'GP Construction';
-        const contact = $('poPrimaryContact')?.value?.trim() || company;
-        const phone = $('poCustomerPhone')?.value?.trim() || '3212002278';
-        const email = $('poCustomerEmail')?.value?.trim() || 'Paul@gpconstructioncompany.com';
+        const company = $('poCustomerCompany')?.value?.trim() || '';
+        const contact = $('poPrimaryContact')?.value?.trim() || '';
+        const phone = $('poCustomerPhone')?.value?.trim() || '';
+        const email = $('poCustomerEmail')?.value?.trim() || '';
+        const address = $('poCustomerAddress')?.value?.trim() || '';
         const projectAddress = $('poProjectAddress')?.value?.trim() || '';
+        const hasCustomer = !!(company || contact);
+
+        const customerFilledRow = $('customerFilledRow');
+        const addCustomerBtn = $('addCustomerBtn');
+        if (customerFilledRow && addCustomerBtn) {
+            if (hasCustomer) {
+                customerFilledRow.style.display = 'flex';
+                addCustomerBtn.style.display = 'none';
+            } else {
+                customerFilledRow.style.display = 'none';
+                addCustomerBtn.style.display = 'flex';
+            }
+        }
 
         const avatar = $('customerAvatarLetter');
-        if (avatar) avatar.textContent = (company[0] || 'G').toUpperCase();
+        const initial = (company || contact || 'C').trim().charAt(0).toUpperCase() || 'C';
+        if (avatar) avatar.textContent = initial;
+
         const displayComp = $('displayCustomerCompany');
-        if (displayComp) displayComp.textContent = company;
+        if (displayComp) displayComp.textContent = company || contact || 'Customer';
+
         const displayContactSummary = $('displayContactSummary');
         if (displayContactSummary) {
             const parts = [contact, phone, email].filter(Boolean);
-            displayContactSummary.textContent = parts.join(', ');
+            if (!parts.length && address) parts.push(address);
+            displayContactSummary.textContent = parts.join(', ') || (company ? 'No contact details added' : '');
         }
 
         const displayProjectAddressText = $('displayProjectAddressText');
@@ -2556,51 +2574,60 @@
         const sidebar = $('documentsSidebar');
         if (!resizer || !sidebar) return;
 
-        const savedWidth = localStorage.getItem('takeoff.documentsSidebarWidth');
-        if (savedWidth) {
-            const w = Math.max(170, Math.min(500, Number(savedWidth)));
-            sidebar.style.setProperty('--doc-sidebar-w', `${w}px`);
-            sidebar.style.width = `${w}px`;
-        }
+        try {
+            const savedWidth = localStorage.getItem('takeoff.documentsSidebarWidth');
+            if (savedWidth) {
+                const w = Math.max(170, Math.min(650, parseInt(savedWidth, 10)));
+                sidebar.style.setProperty('--doc-sidebar-w', `${w}px`);
+                sidebar.style.width = `${w}px`;
+                sidebar.style.flexBasis = `${w}px`;
+            }
+        } catch (_) {}
 
-        let isResizing = false;
+        let isDragging = false;
         let startX = 0;
-        let startWidth = 0;
+        let startWidth = 240;
 
-        const onMouseDown = (e) => {
-            isResizing = true;
+        resizer.addEventListener('pointerdown', (e) => {
+            isDragging = true;
             startX = e.clientX;
-            startWidth = sidebar.getBoundingClientRect().width;
+            const currentComputed = parseInt(getComputedStyle(sidebar).width, 10) || 240;
+            startWidth = currentComputed;
             resizer.classList.add('is-dragging');
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
-            document.addEventListener('mousemove', onMouseMove);
-            document.addEventListener('mouseup', onMouseUp);
-        };
+            try { resizer.setPointerCapture(e.pointerId); } catch (_) {}
+            e.preventDefault();
+        });
 
-        const onMouseMove = (e) => {
-            if (!isResizing) return;
+        resizer.addEventListener('pointermove', (e) => {
+            if (!isDragging) return;
             const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
             const deltaX = (e.clientX - startX) / zoom;
-            const maxW = Math.min(520, (window.innerWidth / zoom) * 0.55);
-            const newWidth = Math.max(160, Math.min(maxW, startWidth + deltaX));
-            sidebar.style.setProperty('--doc-sidebar-w', `${Math.round(newWidth)}px`);
-            sidebar.style.width = `${Math.round(newWidth)}px`;
-        };
+            const newWidth = Math.max(170, Math.min(650, Math.round(startWidth + deltaX)));
+            sidebar.style.setProperty('--doc-sidebar-w', `${newWidth}px`);
+            sidebar.style.width = `${newWidth}px`;
+            sidebar.style.flexBasis = `${newWidth}px`;
+        });
 
-        const onMouseUp = () => {
-            if (!isResizing) return;
-            isResizing = false;
+        const stopDragging = (e) => {
+            if (!isDragging) return;
+            isDragging = false;
             resizer.classList.remove('is-dragging');
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
-            document.removeEventListener('mousemove', onMouseMove);
-            document.removeEventListener('mouseup', onMouseUp);
-            const currentW = sidebar.getBoundingClientRect().width;
-            localStorage.setItem('takeoff.documentsSidebarWidth', Math.round(currentW));
+            try {
+                if (e?.pointerId) resizer.releasePointerCapture(e.pointerId);
+            } catch (_) {}
+
+            const finalWidth = parseInt(getComputedStyle(sidebar).width, 10) || 240;
+            try {
+                localStorage.setItem('takeoff.documentsSidebarWidth', finalWidth);
+            } catch (_) {}
         };
 
-        resizer.addEventListener('mousedown', onMouseDown);
+        resizer.addEventListener('pointerup', stopDragging);
+        resizer.addEventListener('pointercancel', stopDragging);
     }
 
     function createDocumentFolder() {
@@ -2841,19 +2868,118 @@
             document.querySelector('.project-subhead-wrapper')?.classList.remove('has-open-menu');
         });
 
-        // Multi-User Presence System (4 active users allowed per project)
-        const initialCollaborators = [
-            { id: 1, name: 'Isaac Diaz (You)', initials: 'ID', color: '#5b4364', role: 'Lead Estimator', isSelf: true },
-            { id: 2, name: 'Sarah Connor', initials: 'SC', color: '#2563eb', role: 'Senior Architect', isSelf: false },
-            { id: 3, name: 'Marcus Vance', initials: 'MV', color: '#059669', role: 'Project Manager', isSelf: false },
-            { id: 4, name: 'Elena Gomez', initials: 'EG', color: '#d97706', role: 'Electrical Estimator', isSelf: false }
+        // Multi-User Real-Time Presence System
+        const FAKE_PRESENCE_NAMES = [
+            'sarah jenkins', 'marcus vance', 'carlos rodriguez',
+            'elena rostova', 'michael chang', 'david miller',
+            'amanda brooks', 'ana lopez', 'sarah connor'
         ];
 
+        try {
+            for (let i = localStorage.length - 1; i >= 0; i--) {
+                const k = localStorage.key(i);
+                if (k && (k.startsWith('takeoff_presence_') || k.startsWith('takeoff_active_presence_'))) {
+                    localStorage.removeItem(k);
+                }
+            }
+        } catch (e) { }
+
+        const currentUserPresence = window.ProjectPresenceUser || {
+            id: 1,
+            name: 'User (You)',
+            initials: 'US',
+            color: '#5b4364',
+            role: 'Estimator',
+            isSelf: true
+        };
+        const currentPresenceProjId = window.ProjectState?.id || window.WonProjectConfig?.projectId || 0;
+        const PRESENCE_STORAGE_KEY = 'takeoff_active_presence_p_' + currentPresenceProjId;
+        const presenceClientId = 'client_' + Math.random().toString(36).substring(2, 9);
+
+        function updatePresenceHeartbeat() {
+            try {
+                let data = {};
+                const raw = localStorage.getItem(PRESENCE_STORAGE_KEY);
+                if (raw) data = JSON.parse(raw);
+                const now = Date.now();
+                // Expire users unseen for > 8s and prune fake legacy names
+                Object.keys(data).forEach(k => {
+                    const u = data[k];
+                    const isOld = !u || (now - (u.lastSeen || 0)) > 8000;
+                    const isFake = u && FAKE_PRESENCE_NAMES.some(f => (u.name || '').toLowerCase().includes(f));
+                    if (isOld || isFake) {
+                        delete data[k];
+                    }
+                });
+                data[presenceClientId] = {
+                    id: currentUserPresence.id,
+                    name: currentUserPresence.name,
+                    initials: currentUserPresence.initials,
+                    color: currentUserPresence.color,
+                    role: currentUserPresence.role,
+                    lastSeen: now
+                };
+                localStorage.setItem(PRESENCE_STORAGE_KEY, JSON.stringify(data));
+            } catch (e) { }
+        }
+
+        function getActivePresenceList() {
+            try {
+                const raw = localStorage.getItem(PRESENCE_STORAGE_KEY);
+                if (!raw) return [{ ...currentUserPresence, isSelf: true }];
+                const data = JSON.parse(raw);
+                const now = Date.now();
+                const list = [];
+                const seenUserIds = new Set();
+
+                // Add self first
+                list.push({ ...currentUserPresence, isSelf: true });
+                seenUserIds.add(String(currentUserPresence.id));
+
+                Object.keys(data).forEach(k => {
+                    if (k === presenceClientId) return;
+                    const u = data[k];
+                    if (!u) return;
+                    const isFake = FAKE_PRESENCE_NAMES.some(f => (u.name || '').toLowerCase().includes(f));
+                    if (isFake) return;
+                    if ((now - (u.lastSeen || 0)) <= 8000) {
+                        const uid = String(u.id);
+                        if (!seenUserIds.has(uid)) {
+                            seenUserIds.add(uid);
+                            list.push({
+                                ...u,
+                                isSelf: false
+                            });
+                        }
+                    }
+                });
+                return list;
+            } catch (e) {
+                return [{ ...currentUserPresence, isSelf: true }];
+            }
+        }
+
+        function removePresenceClient() {
+            try {
+                const raw = localStorage.getItem(PRESENCE_STORAGE_KEY);
+                if (raw) {
+                    const data = JSON.parse(raw);
+                    delete data[presenceClientId];
+                    localStorage.setItem(PRESENCE_STORAGE_KEY, JSON.stringify(data));
+                }
+            } catch (e) { }
+        }
+
         window.ProjectPresence = {
-            users: [...initialCollaborators],
+            users: getActivePresenceList(),
             getUsers() { return this.users; },
             setUsers(newUsers) {
                 this.users = Array.isArray(newUsers) ? newUsers : [];
+                this.render();
+            },
+            syncRealtime() {
+                updatePresenceHeartbeat();
+                this.users = getActivePresenceList();
                 this.render();
             },
             addUser(user) {
@@ -2881,7 +3007,7 @@
                     const tooltip = `${escapeHtml(u.name)} (${escapeHtml(u.role || 'Collaborator')})`;
                     html += `
                         <div class="pd-presence-avatar ${u.isSelf ? 'self' : ''}" style="background: ${u.color || '#5b4364'}; z-index: ${z};" title="${tooltip}">
-                            <span>${escapeHtml(u.initials || u.name.slice(0, 2).toUpperCase())}</span>
+                            <span>${escapeHtml(u.initials || (u.name || 'U').slice(0, 2).toUpperCase())}</span>
                             <span class="pd-presence-dot" title="Active in project"></span>
                         </div>
                     `;
@@ -2900,8 +3026,8 @@
                 if (list) {
                     list.innerHTML = this.users.map(u => `
                         <div class="pd-presence-user-row">
-                            <div class="pd-presence-avatar" style="background: ${u.color || '#5b4364'}; width: 24px; height: 24px; font-size: 9.5px; margin: 0;">
-                                <span>${escapeHtml(u.initials || u.name.slice(0, 2).toUpperCase())}</span>
+                            <div class="pd-presence-avatar ${u.isSelf ? 'self' : ''}" style="background: ${u.color || '#5b4364'}; width: 24px; height: 24px; font-size: 9.5px; margin: 0;">
+                                <span>${escapeHtml(u.initials || (u.name || 'U').slice(0, 2).toUpperCase())}</span>
                             </div>
                             <div class="pd-presence-user-info">
                                 <span class="pd-presence-user-name">${escapeHtml(u.name)}</span>
@@ -2913,7 +3039,15 @@
             }
         };
 
-        window.ProjectPresence.render();
+        window.ProjectPresence.syncRealtime();
+        setInterval(() => window.ProjectPresence.syncRealtime(), 5000);
+        window.addEventListener('storage', (e) => {
+            if (e.key === PRESENCE_STORAGE_KEY) {
+                window.ProjectPresence.users = getActivePresenceList();
+                window.ProjectPresence.render();
+            }
+        });
+        window.addEventListener('beforeunload', removePresenceClient);
 
         $('pdPresenceStack')?.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -2924,39 +3058,6 @@
             event.stopPropagation();
             $('projectStatusMenu')?.classList.toggle('open');
         });
-
-        function syncCustomerDisplayCard() {
-            const company = $('poCustomerCompany')?.value?.trim() || 'GP Construction';
-            const contact = $('poPrimaryContact')?.value?.trim() || 'GP Construction';
-            const phone = $('poCustomerPhone')?.value?.trim() || '3212002278';
-            const email = $('poCustomerEmail')?.value?.trim() || 'Paul@gpconstructioncompany.com';
-            const address = $('poCustomerAddress')?.value?.trim() || '';
-            const projAddress = $('poProjectAddress')?.value?.trim() || '';
-
-            const avatar = $('customerAvatarLetter');
-            if (avatar) avatar.textContent = company.charAt(0).toUpperCase() || 'G';
-
-            const compEl = $('displayCustomerCompany');
-            if (compEl) compEl.textContent = company;
-
-            const summaryEl = $('displayContactSummary');
-            if (summaryEl) summaryEl.textContent = `${contact}, ${phone}, ${email}`;
-
-            const addrEl = $('displayContactAddress');
-            if (addrEl) addrEl.textContent = address || 'No address set';
-
-            const projText = $('displayProjectAddressText');
-            const projRow = $('editProjectAddressRow');
-            const addBtn = $('addProjectAddressBtn');
-            if (projAddress) {
-                if (projText) projText.textContent = projAddress;
-                if (projRow) projRow.style.display = 'flex';
-                if (addBtn) addBtn.style.display = 'none';
-            } else {
-                if (projRow) projRow.style.display = 'none';
-                if (addBtn) addBtn.style.display = 'flex';
-            }
-        }
 
         function openCustomerModal() {
             $('pdCustomerModal')?.classList.add('open');
@@ -2986,6 +3087,7 @@
         }
 
         $('saveProjectBtn')?.addEventListener('click', saveProject);
+        $('customerFilledRow')?.addEventListener('click', openCustomerModal);
         $('addCustomerBtn')?.addEventListener('click', openCustomerModal);
         $('toggleCustomerDrawerBtn')?.addEventListener('click', openCustomerModal);
         $('editCustomerInfoBtn')?.addEventListener('click', openCustomerModal);

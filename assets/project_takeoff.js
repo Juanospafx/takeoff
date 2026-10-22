@@ -45,7 +45,7 @@
 
     function takeoffEditorUrl(documentId, estimateId = activeEstimateId()) {
         const inheritLegacy = String(estimateId) === primaryEstimateId() ? '&inherit_legacy=1' : '';
-        return `editor.php?id=${encodeURIComponent(documentId)}&embedded=1&estimate_key=${encodeURIComponent(estimateId)}${inheritLegacy}`;
+        return `editor.php?id=${encodeURIComponent(documentId)}&embedded=1&estimate_key=${encodeURIComponent(estimateId)}${inheritLegacy}&_v=${Date.now()}`;
     }
     window.projectTakeoffEditorUrl = takeoffEditorUrl;
 
@@ -7333,16 +7333,18 @@
             const currentComputed = parseInt(getComputedStyle(workspace).getPropertyValue('--tk-sidebar-width'), 10) || 320;
             startWidth = currentComputed;
             resizer.classList.add('is-dragging');
+            workspace.classList.add('is-resizing');
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
-            resizer.setPointerCapture(e.pointerId);
+            try { resizer.setPointerCapture(e.pointerId); } catch (_) {}
             e.preventDefault();
         });
 
         resizer.addEventListener('pointermove', (e) => {
             if (!isDragging) return;
-            const delta = e.clientX - startX;
-            const newWidth = Math.max(220, Math.min(650, startWidth + delta));
+            const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
+            const delta = (e.clientX - startX) / zoom;
+            const newWidth = Math.max(220, Math.min(650, Math.round(startWidth + delta)));
             workspace.style.setProperty('--tk-sidebar-width', `${newWidth}px`);
         });
 
@@ -7350,10 +7352,11 @@
             if (!isDragging) return;
             isDragging = false;
             resizer.classList.remove('is-dragging');
+            workspace.classList.remove('is-resizing');
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
             try {
-                if (e.pointerId) resizer.releasePointerCapture(e.pointerId);
+                if (e?.pointerId) resizer.releasePointerCapture(e.pointerId);
             } catch (err) { }
 
             const finalWidth = parseInt(getComputedStyle(workspace).getPropertyValue('--tk-sidebar-width'), 10) || 320;
