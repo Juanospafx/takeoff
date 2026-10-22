@@ -1947,9 +1947,9 @@
             unit_of_measure: layer.uom,
             uom: layer.uom,
             symbol: layer.symbol,
-            symbol_size: layer.markerDiameter ? layer.markerDiameter / 2 : layer.size,
-            size: layer.markerDiameter ? layer.markerDiameter / 2 : layer.size,
-            marker_diameter: layer.markerDiameter || takeoffSizeRadius(layer.size) * 2,
+            symbol_size: takeoffSizeRadius(layer.size || (layer.markerDiameter ? layer.markerDiameter / 2 : 9)),
+            size: layer.size || takeoffDisplaySize(layer.markerDiameter ? layer.markerDiameter / 2 : 9),
+            marker_diameter: layer.markerDiameter || (takeoffSizeRadius(layer.size) * 2),
             stroke_width: layer.strokeWidth || 4,
             color: layer.color,
             quantity: layer.quantity,
@@ -2364,6 +2364,11 @@
             button.addEventListener('click', event => {
                 event.stopPropagation();
                 const groupId = button.dataset.groupMenu;
+                const menu = $('takeoffGroupContextMenu');
+                const isOpen = menu && menu.style.display !== 'none' && takeoffState.contextGroupId === groupId;
+                closeGroupContextMenu();
+                closeLayerModal();
+                if (isOpen) return;
                 openGroupContextMenu(groupId, button);
             });
         });
@@ -2371,8 +2376,15 @@
             button.addEventListener('click', event => {
                 event.stopPropagation();
                 const layerId = button.dataset.layerMenu;
+                const modal = $('takeoffLayerModal');
+                const isOpen = modal && !modal.hidden && takeoffState.editingLayerId === layerId;
+                closeGroupContextMenu();
+                if (isOpen) {
+                    closeLayerModal();
+                    return;
+                }
                 const layer = findLayer(layerId);
-                openLayerModal(layer?.groupId, layerId);
+                openLayerModal(layer?.groupId, layerId, button);
             });
         });
     }
@@ -2423,16 +2435,26 @@
     }
 
     function ensureTakeoffModal() {
-        if ($('takeoffLayerModal')) return;
-        const modal = document.createElement('div');
-        modal.id = 'takeoffLayerModal';
-        modal.className = 'pro-modal-backdrop';
+        let modal = $('takeoffLayerModal');
+        if (modal && modal.querySelector('.pro-layer-modal')) return;
+        if (!modal) {
+            modal = document.createElement('aside');
+            modal.id = 'takeoffLayerModal';
+            const workspace = $('takeoffWorkspace');
+            const viewer = workspace?.querySelector('.pro-takeoff-viewer');
+            if (workspace && viewer) {
+                workspace.insertBefore(modal, viewer);
+            } else {
+                document.body.appendChild(modal);
+            }
+        }
+        modal.className = 'pro-layer-drawer';
         modal.hidden = true;
-        modal.innerHTML = `<div class="pro-layer-modal" role="dialog" aria-modal="true" aria-labelledby="takeoffLayerModalTitle">
+        modal.innerHTML = `<div class="pro-layer-modal" role="region" aria-labelledby="takeoffLayerModalTitle">
             <div class="pro-layer-modal-tabs">
                 <button type="button" class="pro-modal-tab active" data-layer-tab="details">Main Details</button>
                 <button type="button" class="pro-modal-tab" data-layer-tab="drawings">List of Drawings</button>
-                <button class="pro-icon-btn pro-modal-tab-close" type="button" data-layer-modal-close aria-label="Close"><i class="fas fa-times"></i></button>
+                <button class="pro-icon-btn pro-modal-tab-close" type="button" data-layer-modal-close aria-label="Close" title="Close Panel"><i class="fas fa-times"></i></button>
             </div>
             <div class="pro-layer-tab-pane" id="layerTabPaneDetails">
                 <div class="pro-layer-form">
@@ -2447,38 +2469,20 @@
                                 <span class="pcd-caret"></span>
                             </button>
                             <div class="pro-custom-dropdown-menu pcd-type-menu" id="editLayerTypeMenu"></div>
-                            <select id="layerTypeInput" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                            <select id="layerTypeInput" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                 ${TAKEOFF_TYPES.map(type => `<option value="${type}">${type}</option>`).join('')}
                             </select>
                         </div>
                     </div>
+                    <div class="pro-field">
+                        <label for="layerNameInput">Takeoff Display Name</label>
+                        <input id="layerNameInput" type="text" placeholder="Enter takeoff display name">
+                    </div>
+                    <div class="pro-field">
+                        <label for="layerTagInput">Tag</label>
+                        <input id="layerTagInput" type="text" placeholder="Enter your own short text to tag this takeoff">
+                    </div>
                     <div class="pro-edit-selectors-row">
-                        <div class="pro-field col-stroke" id="layerStrokeCol">
-                            <label for="layerStrokeInput">Line width</label>
-                            <div class="pro-custom-select-wrap">
-                                <span class="pro-stroke-preview" id="layerStrokePreview"></span>
-                                <select id="layerStrokeInput">
-                                    <option value="1">1 px</option>
-                                    <option value="1.5">1.5 px</option>
-                                    <option value="2">2 px</option>
-                                    <option value="2.5" selected>2.5 px</option>
-                                    <option value="3">3 px</option>
-                                </select>
-                            </div>
-                        </div>
-                        <div class="pro-field col-uom" id="layerUomCol">
-                            <label>UoM</label>
-                            <div class="pro-custom-dropdown" id="editLayerUomDropdown">
-                                <button type="button" class="pro-custom-dropdown-trigger pcd-compact" id="editLayerUomTrigger">
-                                    <span class="pcd-trigger-text" id="editLayerUomText">ea</span>
-                                    <span class="pcd-caret"></span>
-                                </button>
-                                <div class="pro-custom-dropdown-menu pcd-uom-menu" id="editLayerUomMenu"></div>
-                                <select id="layerUomInput" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
-                                    ${TAKEOFF_UOMS.map(uom => `<option value="${uom}">${uom}</option>`).join('')}
-                                </select>
-                            </div>
-                        </div>
                         <div class="pro-field col-symbol" id="layerSymbolCol">
                             <label>Symbol</label>
                             <div class="pro-custom-dropdown" id="editLayerSymbolDropdown">
@@ -2487,7 +2491,7 @@
                                     <span class="pcd-caret"></span>
                                 </button>
                                 <div class="pro-custom-dropdown-menu pcd-symbol-menu" id="editLayerSymbolMenu"></div>
-                                <select id="layerSymbolInput" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                <select id="layerSymbolInput" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                     ${TAKEOFF_SYMBOLS.map(symbol => `<option value="${symbol}">${symbol}</option>`).join('')}
                                 </select>
                             </div>
@@ -2500,7 +2504,7 @@
                                     <span class="pcd-caret"></span>
                                 </button>
                                 <div class="pro-custom-dropdown-menu pcd-size-menu" id="editLayerSizeMenu"></div>
-                                <select id="layerSizeInput" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                <select id="layerSizeInput" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                     ${TAKEOFF_SIZES.map(size => `<option value="${size}">${size}</option>`).join('')}
                                 </select>
                             </div>
@@ -2513,42 +2517,70 @@
                                     <span class="pcd-caret"></span>
                                 </button>
                                 <div class="pro-custom-dropdown-menu pcd-color-menu" id="editLayerColorMenu"></div>
-                                <select id="layerColorInput" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                <select id="layerColorInput" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                     ${TAKEOFF_RICH_COLORS.map(c => `<option value="${c}">${c}</option>`).join('')}
                                     <option value="__custom__">Custom color...</option>
                                 </select>
                                 <input type="color" id="layerCustomColorPicker" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                             </div>
                         </div>
-                    </div>
-                    <div class="pro-field">
-                        <label for="layerNameInput">Takeoff Display Name</label>
-                        <input id="layerNameInput" type="text" placeholder="Enter takeoff display name">
-                    </div>
-                    <div class="pro-field">
-                        <label for="layerTagInput">Tag</label>
-                        <input id="layerTagInput" type="text" placeholder="Enter your own short text to tag this takeoff">
-                    </div>
-                    <div class="pro-layer-catalog-row">
-                        <div class="pro-field">
-                            <label for="layerMultiplierInput">Multiplier</label>
-                            <input id="layerMultiplierInput" type="number" min="1" step="1" value="1">
-                        </div>
-                        <div class="pro-field">
-                            <label>Associated Catalog item</label>
-                            <div class="pro-associated-catalog-card" id="layerCatalogCard">
-                                <div class="pro-acc-info">
-                                    <strong class="pro-acc-title" id="layerAccTitle">3/4" EMT Conduit, Overhead Branch, w/ 9 #12 THHN Wires</strong>
-                                    <p class="pro-acc-desc" id="layerAccDesc">Includes conduit, one hole straps, connectors, couplings and wire</p>
-                                    <div class="pro-acc-badges"><span class="pro-acc-badge" id="layerAccBadge">Assembly</span></div>
-                                    <div class="pro-acc-meta" id="layerAccMeta"><span>UoM <strong id="layerAccUom">ft</strong></span> <span>UC <strong id="layerAccUc">$3.47</strong></span> <span>ULT <strong id="layerAccUlt">0.12 hrs</strong></span> <span>CN <strong id="layerAccCn">EMT-ASM-2025</strong></span></div>
-                                    <div class="pro-acc-path" id="layerAccPath">CC 2025 COST CATALOG BRIGHTRONIX &gt; .EMT Assemblies</div>
-                                </div>
-                                <button type="button" class="pro-catalog-swap-btn" id="layerSwapCatalogBtn" title="Change item from Cost Catalog" aria-label="Change item from Cost Catalog">
-                                    <i class="fas fa-arrows-rotate"></i>
+                        <div class="pro-field col-uom" id="layerUomCol">
+                            <label>UoM</label>
+                            <div class="pro-custom-dropdown" id="editLayerUomDropdown">
+                                <button type="button" class="pro-custom-dropdown-trigger pcd-compact" id="editLayerUomTrigger">
+                                    <span class="pcd-trigger-text" id="editLayerUomText">ea</span>
+                                    <span class="pcd-caret"></span>
                                 </button>
+                                <div class="pro-custom-dropdown-menu pcd-uom-menu" id="editLayerUomMenu"></div>
+                                <select id="layerUomInput" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                    ${TAKEOFF_UOMS.map(uom => `<option value="${uom}">${uom}</option>`).join('')}
+                                </select>
                             </div>
                         </div>
+                        <div class="pro-field col-stroke" id="layerStrokeCol">
+                            <label for="layerStrokeInput">Line width</label>
+                            <div class="pro-custom-select-wrap">
+                                <span class="pro-stroke-preview" id="layerStrokePreview"></span>
+                                <select id="layerStrokeInput" data-no-custom-select="true" class="native-raw-select">
+                                    <option value="1">1 px</option>
+                                    <option value="1.5">1.5 px</option>
+                                    <option value="2">2 px</option>
+                                    <option value="2.5" selected>2.5 px</option>
+                                    <option value="3">3 px</option>
+                                </select>
+                            </div>
+                        </div>
+                    </div>
+                    <div class="pro-field">
+                        <label>Associated Catalog item</label>
+                        <div class="pro-associated-catalog-card" id="layerCatalogCard">
+                            <div class="pro-acc-info">
+                                <div class="pro-acc-top-row">
+                                    <span class="pro-acc-title cc-item-name" id="layerAccTitle">Catalog Item</span>
+                                </div>
+                                <div class="pro-acc-details-row cc-item-meta" id="layerAccMeta">
+                                    <span class="pro-cat-info-tag tag-price cc-money" title="Unit Cost">
+                                        <i class="fas fa-tag"></i>
+                                        <span class="tag-label">Price:</span>
+                                        <strong class="tag-val" id="layerAccUc">$0.00</strong>
+                                        <span class="tag-uom" id="layerAccUomSlash">/ ea</span>
+                                    </span>
+                                    <span class="pro-cat-info-tag tag-labor" title="Labor Time">
+                                        <i class="far fa-clock"></i>
+                                        <span class="tag-label">Labor:</span>
+                                        <strong class="tag-val" id="layerAccUlt">0.00 hrs</strong>
+                                    </span>
+                                    <span id="layerAccCatPillWrap"></span>
+                                </div>
+                            </div>
+                            <button type="button" class="pro-catalog-swap-btn" id="layerSwapCatalogBtn" title="Change item from Cost Catalog" aria-label="Change item from Cost Catalog">
+                                <i class="fas fa-arrows-rotate"></i>
+                            </button>
+                        </div>
+                    </div>
+                    <div class="pro-field" id="layerMultiplierField">
+                        <label for="layerMultiplierInput">Multiplier</label>
+                        <input id="layerMultiplierInput" type="number" min="1" step="1" value="1">
                     </div>
                     <div class="pro-field" id="layerDropField">
                         <label for="layerDropInput">Default Drop Length (ft)</label>
@@ -2574,19 +2606,16 @@
                     <button type="button" class="pro-foot-btn danger" data-layer-act="delete" title="Delete takeoff layer"><i class="fas fa-trash-can"></i> Delete</button>
                     <button type="button" class="pro-foot-btn" data-layer-act="copy" title="Copy takeoff layer"><i class="far fa-copy"></i> Copy</button>
                     <button type="button" class="pro-foot-btn" data-layer-act="lock" title="Lock/Unlock takeoff layer"><i class="fas fa-lock"></i> <span id="layerModalLockLabel">Lock</span></button>
-                    <button type="button" class="pro-foot-btn muted" data-layer-act="split" title="Split layer"><i class="fas fa-code-fork fa-rotate-270"></i> Split</button>
                 </div>
                 <div class="pro-modal-foot-right">
-                    <button type="button" class="pro-foot-btn-close" data-layer-modal-close>Close</button>
+                    <button type="button" class="pro-btn-save-layer" id="layerDrawerSaveBtn"><i class="fas fa-check"></i> Save</button>
                 </div>
             </div>
         </div>`;
-        document.body.appendChild(modal);
+        $('layerDrawerSaveBtn')?.addEventListener('click', submitLayerModal);
 
         modal.querySelectorAll('[data-layer-modal-close]').forEach(btn => btn.addEventListener('click', () => {
-            const name = $('layerNameInput')?.value.trim();
-            if (name) submitLayerModal();
-            else closeLayerModal();
+            closeLayerModal();
         }));
 
         modal.querySelectorAll('[data-layer-tab]').forEach(tabBtn => {
@@ -2659,7 +2688,10 @@
         });
 
         $('layerSizeInput')?.addEventListener('change', () => {
-            updateSizeDropdownTrigger('editLayer', $('layerSizeInput').value);
+            const nextSize = $('layerSizeInput').value;
+            updateSizeDropdownTrigger('editLayer', nextSize);
+            const r = takeoffSizeRadius(nextSize);
+            if ($('layerDiameterInput')) $('layerDiameterInput').value = r * 2;
         });
 
         $('layerStrokeInput').addEventListener('change', updateLayerStrokePreview);
@@ -2670,12 +2702,6 @@
             } else {
                 updateLayerColorSwatch();
             }
-        });
-        $('layerColorSwatch')?.addEventListener('click', () => {
-            $('layerCustomColorPicker')?.click();
-        });
-        $('editLayerColorSwatch')?.addEventListener('click', () => {
-            $('layerCustomColorPicker')?.click();
         });
         $('layerCustomColorPicker')?.addEventListener('input', event => {
             setLayerColor(event.target.value);
@@ -2734,7 +2760,7 @@
                                         <span class="pcd-caret"></span>
                                     </button>
                                     <div class="pro-custom-dropdown-menu pcd-type-menu" id="createLayerTypeMenu"></div>
-                                    <select id="createLayerType" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                    <select id="createLayerType" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                         <option value="Count">Count</option>
                                         <option value="Linear">Linear</option>
                                         <option value="Linear with drop">Linear with drop</option>
@@ -2752,7 +2778,7 @@
                                         <span class="pcd-caret"></span>
                                     </button>
                                     <div class="pro-custom-dropdown-menu pcd-uom-menu" id="createLayerUomMenu"></div>
-                                    <select id="createLayerUom" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                    <select id="createLayerUom" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                         ${TAKEOFF_UOMS.map(uom => `<option value="${uom}">${uom}</option>`).join('')}
                                     </select>
                                 </div>
@@ -2765,7 +2791,7 @@
                                         <span class="pcd-caret"></span>
                                     </button>
                                     <div class="pro-custom-dropdown-menu pcd-symbol-menu" id="createLayerSymbolMenu"></div>
-                                    <select id="createLayerSymbol" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                    <select id="createLayerSymbol" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                         ${TAKEOFF_SYMBOLS.map(symbol => `<option value="${symbol}">${symbol}</option>`).join('')}
                                     </select>
                                 </div>
@@ -2778,7 +2804,7 @@
                                         <span class="pcd-caret"></span>
                                     </button>
                                     <div class="pro-custom-dropdown-menu pcd-size-menu" id="createLayerSizeMenu"></div>
-                                    <select id="createLayerSize" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                    <select id="createLayerSize" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                         ${TAKEOFF_SIZES.map(size => `<option value="${size}">${size}</option>`).join('')}
                                     </select>
                                 </div>
@@ -2791,7 +2817,7 @@
                                         <span class="pcd-caret"></span>
                                     </button>
                                     <div class="pro-custom-dropdown-menu pcd-color-menu" id="createLayerColorMenu"></div>
-                                    <select id="createLayerColor" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                                    <select id="createLayerColor" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
                                         ${TAKEOFF_RICH_COLORS.map(c => `<option value="${c}">${c}</option>`).join('')}
                                         <option value="__custom__">Custom...</option>
                                     </select>
@@ -2865,10 +2891,6 @@
             } else {
                 setCreateLayerColor(e.target.value);
             }
-        });
-
-        $('createLayerColorSwatch')?.addEventListener('click', () => {
-            $('createLayerCustomColorPicker')?.click();
         });
 
         $('createLayerCustomColorPicker')?.addEventListener('input', (e) => {
@@ -3235,31 +3257,57 @@
             uom: layer.uom,
             unitCost: layer.unitCost,
             laborHours: layer.laborHours,
-            code: layer.catalogCode || 'EMT-ASM-2025',
-            group_name: layer.category || '.EMT Assemblies'
+            code: layer.catalogCode || '',
+            catalog_name: layer.catalog_name || layer.catalogName || '',
+            catalog_id: layer.catalog_id || layer.catalogId || '',
+            group_name: layer.category || layer.group_name || ''
         } : null);
 
         const card = $('layerCatalogCard');
         if (!card) return;
 
         if (item) {
+            const cost = Number(item.unit_cost ?? item.unitCost ?? 0);
+            const labor = Number(item.labor_hours ?? item.laborHours ?? 0);
+            const uom = esc(item.uom || layer?.uom || 'ea');
+            const code = item.code || item.item_code || item.supplier?.catalogNumber || layer?.catalogCode || '';
+            const catName = item.catalog?.name || item.catalog_name || '';
+            const catId = item.catalog?.id || item.catalog_id || '';
+            const grpName = item.category?.name || item.group_name || '';
+            const grpId = item.category?.id || item.catalog_group_id || '';
+
             if ($('layerAccTitle')) $('layerAccTitle').textContent = item.name || layer?.name || 'Catalog Item';
-            if ($('layerAccDesc')) $('layerAccDesc').textContent = item.description || 'Includes conduit, one hole straps, connectors, couplings and wire';
-            if ($('layerAccBadge')) $('layerAccBadge').textContent = item.itemType || item.type || 'Assembly';
-            if ($('layerAccUom')) $('layerAccUom').textContent = item.uom || layer?.uom || 'ft';
-            if ($('layerAccUc')) $('layerAccUc').textContent = '$' + Number(item.unit_cost || item.unitCost || 3.47).toFixed(2);
-            if ($('layerAccUlt')) $('layerAccUlt').textContent = Number(item.labor_hours || item.laborHours || 0.12).toFixed(2) + ' hrs';
-            if ($('layerAccCn')) $('layerAccCn').textContent = item.code || item.item_code || 'EMT-ASM-2025';
-            if ($('layerAccPath')) $('layerAccPath').textContent = `CC 2025 COST CATALOG BRIGHTRONIX > ${item.group_name || item.catalog_name || '.EMT Assemblies'}`;
+            if ($('layerAccDesc')) $('layerAccDesc').style.display = 'none';
+            if ($('layerAccUc')) $('layerAccUc').textContent = cost > 0 ? `$${cost.toFixed(2)}` : '$0.00';
+            if ($('layerAccUomSlash')) $('layerAccUomSlash').textContent = `/ ${uom}`;
+            if ($('layerAccUlt')) $('layerAccUlt').textContent = labor > 0 ? `${labor.toFixed(2)} hrs` : '0.00 hrs';
+            if ($('layerAccUom')) $('layerAccUom').textContent = uom;
+            if ($('layerAccCnTag')) $('layerAccCnTag').style.display = 'none';
+
+            const catWrap = $('layerAccCatPillWrap');
+            if (catWrap) {
+                catWrap.innerHTML = catName ? renderCatalogPill(catName, catId) : '';
+                catWrap.style.display = catName ? '' : 'none';
+            }
+            const grpWrap = $('layerAccGrpPillWrap');
+            if (grpWrap) grpWrap.style.display = 'none';
         } else {
+            const uom = esc(layer?.uom || 'ea');
+            const cost = Number(layer?.unitCost || 0);
+            const labor = Number(layer?.laborHours || 0);
+
             if ($('layerAccTitle')) $('layerAccTitle').textContent = layer?.name || 'Custom Layer';
-            if ($('layerAccDesc')) $('layerAccDesc').textContent = 'Custom project layer (use swap button to link with Cost Catalog)';
-            if ($('layerAccBadge')) $('layerAccBadge').textContent = 'Custom';
-            if ($('layerAccUom')) $('layerAccUom').textContent = layer?.uom || 'ea';
-            if ($('layerAccUc')) $('layerAccUc').textContent = '$' + Number(layer?.unitCost || 0).toFixed(2);
-            if ($('layerAccUlt')) $('layerAccUlt').textContent = Number(layer?.laborHours || 0).toFixed(2) + ' hrs';
-            if ($('layerAccCn')) $('layerAccCn').textContent = 'N/A';
-            if ($('layerAccPath')) $('layerAccPath').textContent = 'Custom Takeoff';
+            if ($('layerAccDesc')) $('layerAccDesc').style.display = 'none';
+            if ($('layerAccUc')) $('layerAccUc').textContent = cost > 0 ? `$${cost.toFixed(2)}` : '$0.00';
+            if ($('layerAccUomSlash')) $('layerAccUomSlash').textContent = `/ ${uom}`;
+            if ($('layerAccUlt')) $('layerAccUlt').textContent = labor > 0 ? `${labor.toFixed(2)} hrs` : '0.00 hrs';
+            if ($('layerAccUom')) $('layerAccUom').textContent = uom;
+            if ($('layerAccCnTag')) $('layerAccCnTag').style.display = 'none';
+            if ($('layerAccCatPillWrap')) {
+                $('layerAccCatPillWrap').innerHTML = '';
+                $('layerAccCatPillWrap').style.display = 'none';
+            }
+            if ($('layerAccGrpPillWrap')) $('layerAccGrpPillWrap').style.display = 'none';
         }
     }
 
@@ -3295,7 +3343,7 @@
         if (strokeCol) strokeCol.style.display = isCount ? 'none' : 'block';
     }
 
-    function openLayerModal(groupId = takeoffState.activeGroupId, layerId = null) {
+    function openLayerModal(groupId = takeoffState.activeGroupId, layerId = null, triggerEl = null) {
         if (!requireWrite()) return false;
         if (!layerId && !takeoffState.groups.some(group => groupBelongsToEstimate(group))) {
             ensureEstimateTakeoffWorkspace(activeEstimateId(), true);
@@ -3362,13 +3410,36 @@
         updateLayerColorSwatch();
         updateLayerTypeFields($('layerTypeInput').value);
         updateLayerSubmitState();
-        $('takeoffLayerModal').hidden = false;
-        setTimeout(() => $('layerNameInput')?.focus(), 40);
+
+        const modal = $('takeoffLayerModal');
+        const workspace = $('takeoffWorkspace');
+        if (modal) {
+            modal.hidden = false;
+            void modal.offsetWidth;
+            workspace?.classList.add('has-layer-drawer');
+            notifyEditorVisible();
+            setTimeout(() => notifyEditorVisible(), 260);
+        }
+        setTimeout(() => $('layerNameInput')?.focus(), 50);
+    }
+
+    function repositionLayerModal() {
+        notifyEditorVisible();
     }
 
     function closeLayerModal() {
         const modal = $('takeoffLayerModal');
-        if (modal) modal.hidden = true;
+        const workspace = $('takeoffWorkspace');
+        if (modal) {
+            workspace?.classList.remove('has-layer-drawer');
+            notifyEditorVisible();
+            setTimeout(() => {
+                if (!workspace?.classList.contains('has-layer-drawer')) {
+                    modal.hidden = true;
+                }
+                notifyEditorVisible();
+            }, 260);
+        }
         takeoffState.editingLayerId = null;
         takeoffState.pendingCatalogItem = null;
     }
@@ -3605,11 +3676,43 @@
             });
         });
 
+        function resetCreateLayerFormToDefaults() {
+            takeoffState.pendingCatalogItems = [];
+            takeoffState.pendingCatalogItem = null;
+            takeoffState.activeAddedItemId = null;
+            const nameInput = $('createLayerCatalogName');
+            if (nameInput) nameInput.value = '';
+            if ($('createLayerType')) $('createLayerType').value = 'Count';
+            if ($('createLayerUom')) $('createLayerUom').value = 'ea';
+            if ($('createLayerSymbol')) $('createLayerSymbol').value = 'Solid Circle';
+            if ($('createLayerSize')) $('createLayerSize').value = 'Medium';
+            setCreateLayerColor('#00d2ff');
+            updateCreateLayerTypeUi('Count');
+            const symCol = $('createLayerSymbolCol');
+            const sizeCol = $('createLayerSizeCol');
+            const uomCol = $('createLayerUomCol');
+            const colCol = $('createLayerColorCol');
+            if (symCol) symCol.style.display = '';
+            if (sizeCol) sizeCol.style.display = '';
+            if (uomCol) uomCol.style.display = '';
+            if (colCol) colCol.style.display = '';
+            updateTypeDropdownTrigger('createLayer', 'Count');
+            updateUomDropdownTrigger('createLayer', 'ea');
+            updateSymbolDropdownTrigger('createLayer', 'Solid Circle');
+            updateSizeDropdownTrigger('createLayer', 'Medium');
+            updateCreateLayerSubmitState();
+        }
+
         wrap.querySelectorAll('[data-remove-item]').forEach(btn => {
             btn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const id = btn.dataset.removeItem;
                 takeoffState.pendingCatalogItems = (takeoffState.pendingCatalogItems || []).filter(it => String(it.id) !== String(id));
+                if (!takeoffState.pendingCatalogItems.length) {
+                    resetCreateLayerFormToDefaults();
+                    renderCreateLayerAddedItems();
+                    return;
+                }
                 if (String(takeoffState.activeAddedItemId) === String(id)) {
                     takeoffState.activeAddedItemId = takeoffState.pendingCatalogItems[0]?.id ? String(takeoffState.pendingCatalogItems[0].id) : null;
                 }
@@ -3621,11 +3724,8 @@
         });
 
         $('createLayerClearItemsBtn')?.addEventListener('click', () => {
-            takeoffState.pendingCatalogItems = [];
-            takeoffState.pendingCatalogItem = null;
-            takeoffState.activeAddedItemId = null;
+            resetCreateLayerFormToDefaults();
             renderCreateLayerAddedItems();
-            updateCreateLayerSubmitState();
         });
     }
 
@@ -3634,12 +3734,24 @@
         const palette = TAKEOFF_RICH_COLORS;
         items.forEach((it, idx) => {
             if (!it.customName) it.customName = it.name || '';
-            if (!it.type) {
-                it.type = window.TakeoffCatalogAdapter?.measurementType
-                    ? window.TakeoffCatalogAdapter.measurementType(it, inferTakeoffTypeFromUom(it.uom))
-                    : inferTakeoffTypeFromUom(it.uom) || 'Count';
+            const mType = String(it.measurement_type || it.measurementType || '').toLowerCase();
+            const uomRaw = String(it.unit_of_measure || it.uom || '').toLowerCase();
+            let takeoffType = 'Count';
+            if (mType === 'linear' || ['ft', 'lf', 'linear ft', 'linear feet', 'feet', 'foot', 'm', 'lm'].includes(uomRaw)) {
+                takeoffType = 'Linear';
+            } else if (mType === 'area' || mType === 'volume' || ['sq ft', 'sf', 'sqft', 'ft2', 'm2', 'sqm', 'sq m', 'cu yd', 'cy', 'cu ft'].includes(uomRaw)) {
+                takeoffType = 'Area / Volume';
+            } else if (mType === 'count' || ['ea', 'each', 'unit', 'units', 'pcs', 'piece', 'pieces'].includes(uomRaw)) {
+                takeoffType = 'Count';
+            } else if (it.takeoff_type && TAKEOFF_TYPES.includes(it.takeoff_type)) {
+                takeoffType = it.takeoff_type;
+            } else if (it.type && TAKEOFF_TYPES.includes(it.type)) {
+                takeoffType = it.type;
+            } else {
+                takeoffType = inferTakeoffTypeFromUom(it.unit_of_measure || it.uom) || 'Count';
             }
-            if (!it.uom) it.uom = it.unit_of_measure || defaultUomForType(it.type);
+            it.type = takeoffType;
+            it.uom = it.unit_of_measure || it.uom || defaultUomForType(takeoffType);
             if (!it.symbol) it.symbol = it.takeoffDefaults?.symbol || it.symbol || 'Solid Circle';
             if (!it.size) it.size = it.takeoffDefaults?.size || 'Medium';
             if (!it.color) {
@@ -3698,6 +3810,11 @@
         const submit = $('layerCreateSubmit');
         if (submit?.dataset.saving === '1') return;
         const editingLayerId = takeoffState.editingLayerId;
+        const drawerSaveBtn = $('layerDrawerSaveBtn');
+        if (drawerSaveBtn) {
+            drawerSaveBtn.disabled = true;
+            drawerSaveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
+        }
         if (submit) {
             submit.dataset.saving = '1';
             submit.disabled = true;
@@ -3709,7 +3826,11 @@
             const chosenColor = ($('layerColorInput')?.value === '__custom__'
                 ? $('layerCustomColorPicker')?.value
                 : $('layerColorInput')?.value) || '#ef4444';
-            const strokeWidth = Number($('layerStrokeInput')?.value || 2.5);
+            const chosenSize = $('layerSizeInput')?.value || 'Medium';
+            const calcRadius = takeoffSizeRadius(chosenSize);
+            const markerDiameter = calcRadius * 2;
+            if ($('layerDiameterInput')) $('layerDiameterInput').value = markerDiameter;
+            const strokeVal = parseFloat($('layerStrokeInput')?.value || '2.5') || 2.5;
             const payload = {
                 name,
                 type,
@@ -3717,9 +3838,9 @@
                 multiplier: Number($('layerMultiplierInput')?.value || 1),
                 uom: $('layerUomInput')?.value || typeToUom(type),
                 symbol: $('layerSymbolInput')?.value || 'Solid Circle',
-                size: $('layerSizeInput')?.value || 'Medium',
-                markerDiameter: Math.max(8, Math.min(192, Number($('layerDiameterInput')?.value || (strokeWidth * 4)))),
-                strokeWidth: Math.max(1, Math.min(3, strokeWidth)),
+                size: chosenSize,
+                markerDiameter: markerDiameter,
+                strokeWidth: Math.max(1, Math.min(3, strokeVal)),
                 color: chosenColor,
                 dropLength: Number($('layerDropInput')?.value || 0),
                 spacing: Number($('layerSpacingInput')?.value || 0),
@@ -3749,8 +3870,8 @@
                 callEditor('projectTakeoffUpdateLayerObjects', editingLayerId, {
                     symbol: payload.symbol,
                     color: payload.color,
-                    symbolSize: payload.markerDiameter / 2,
-                    diameter: payload.markerDiameter,
+                    symbolSize: calcRadius,
+                    diameter: markerDiameter,
                     strokeWidth: payload.strokeWidth
                 });
                 setActiveTakeoffLayer(editingLayerId, false);
@@ -3775,8 +3896,12 @@
             // Modal Save is a durable operation, not merely a request for the
             // editor's delayed autosave. Waiting for this ACK prevents a quick
             // close/reload from restoring the duplicate's previous appearance.
-            const saved = callEditor('projectTakeoffSave');
-            if (saved && typeof saved.then === 'function') await saved;
+            try {
+                const saved = callEditor('projectTakeoffSave');
+                if (saved && typeof saved.then === 'function') await saved;
+            } catch (editorErr) {
+                console.warn('Takeoff editor background save notification warning:', editorErr);
+            }
             closeLayerModal();
             saveTakeoffState();
             renderTakeoffPanel();
@@ -3784,6 +3909,11 @@
             console.warn('Takeoff layer save failed', error);
             showPrepared('Unable to save Takeoff item changes. Please try again.');
         } finally {
+            const drawerSaveBtn = $('layerDrawerSaveBtn');
+            if (drawerSaveBtn) {
+                drawerSaveBtn.disabled = false;
+                drawerSaveBtn.innerHTML = '<i class="fas fa-check"></i> Save';
+            }
             if (submit) {
                 submit.dataset.saving = '0';
                 submit.disabled = !$('layerNameInput')?.value.trim();
@@ -3961,9 +4091,6 @@
                                 </span>
                             </div>
                         </div>
-                        <div class="pro-browse-subtitle">
-                            Browse and select items from company library to apply to this takeoff layer.
-                        </div>
                     </div>
                     <div class="pro-browse-head-right">
                         <button type="button" class="bb-btn-procore-primary pro-browse-head-create-btn" id="proBrowseCreateNewItemBtn">
@@ -4021,12 +4148,24 @@
                             </div>
                         </div>
                         <div class="pro-browse-items-list" id="proBrowseItemsList"></div>
-                        <div class="pro-browse-pagination">
-                            <span id="proBrowsePaginationText">0-0 of 0</span>
-                            <span class="pro-browse-page-selector">Page: <select id="proBrowsePageSelect" class="native-raw-select" data-no-custom-select="true" style="padding: 2px 6px; font-size: 11.5px; border: 1px solid var(--tk-border, #cbd5e1); border-radius: 4px; background: inherit; color: inherit;"></select></span>
-                            <div class="pro-browse-pagination-arrows">
-                                <button type="button" class="pro-browse-pagination-arrow" id="proBrowsePrevPage" disabled title="Previous page"><i class="fas fa-chevron-left"></i></button>
-                                <button type="button" class="pro-browse-pagination-arrow" id="proBrowseNextPage" disabled title="Next page"><i class="fas fa-chevron-right"></i></button>
+                        <div class="cc-pagination pro-browse-pagination" id="ccPagination" aria-label="Catalog items pagination">
+                            <div class="cc-pagination-info" id="ccPaginationInfo">
+                                Showing <span id="ccPageStart">0</span>–<span id="ccPageEnd">0</span> of <span id="ccPageTotal">0</span> items
+                            </div>
+                            <div class="cc-pagination-controls" id="ccPaginationControls">
+                                <button type="button" class="cc-page-btn" id="ccPageFirst" title="First page" aria-label="First page" disabled>
+                                    <i class="fas fa-angles-left" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" class="cc-page-btn" id="ccPagePrev" title="Previous page" aria-label="Previous page" disabled>
+                                    <i class="fas fa-angle-left" aria-hidden="true"></i>
+                                </button>
+                                <div class="cc-pagination-numbers" id="ccPaginationNumbers"></div>
+                                <button type="button" class="cc-page-btn" id="ccPageNext" title="Next page" aria-label="Next page" disabled>
+                                    <i class="fas fa-angle-right" aria-hidden="true"></i>
+                                </button>
+                                <button type="button" class="cc-page-btn" id="ccPageLast" title="Last page" aria-label="Last page" disabled>
+                                    <i class="fas fa-angles-right" aria-hidden="true"></i>
+                                </button>
                             </div>
                         </div>
                     </main>
@@ -4072,21 +4211,45 @@
             window.open('/pages/cost_catalog.php', '_blank');
         });
 
-        $('proBrowsePrevPage')?.addEventListener('click', () => {
+        $('ccPageFirst')?.addEventListener('click', () => {
+            if (browseCatalogState.page > 1) {
+                browseCatalogState.page = 1;
+                renderCatalogItems();
+            }
+        });
+
+        $('ccPagePrev')?.addEventListener('click', () => {
             if (browseCatalogState.page > 1) {
                 browseCatalogState.page--;
                 renderCatalogItems();
             }
         });
 
-        $('proBrowseNextPage')?.addEventListener('click', () => {
-            browseCatalogState.page++;
-            renderCatalogItems();
+        $('ccPageNext')?.addEventListener('click', () => {
+            const lastPage = browseCatalogState._lastTotalPages || 1;
+            if (browseCatalogState.page < lastPage) {
+                browseCatalogState.page++;
+                renderCatalogItems();
+            }
         });
 
-        $('proBrowsePageSelect')?.addEventListener('change', e => {
-            browseCatalogState.page = Number(e.target.value) || 1;
-            renderCatalogItems();
+        $('ccPageLast')?.addEventListener('click', () => {
+            const lastPage = browseCatalogState._lastTotalPages || 1;
+            if (browseCatalogState.page < lastPage) {
+                browseCatalogState.page = lastPage;
+                renderCatalogItems();
+            }
+        });
+
+        $('ccPaginationNumbers')?.addEventListener('click', (e) => {
+            const btn = e.target.closest('.cc-page-number');
+            if (btn && btn.dataset.page) {
+                const targetPage = Number(btn.dataset.page);
+                if (targetPage && targetPage !== browseCatalogState.page) {
+                    browseCatalogState.page = targetPage;
+                    renderCatalogItems();
+                }
+            }
         });
     }
 
@@ -4097,6 +4260,7 @@
         const createModal = $('takeoffCreateLayerModal');
         if (createModal && !createModal.hidden) {
             createModal.classList.add('is-behind');
+            createModal.style.visibility = 'hidden';
         }
         browseCatalogState.selectedItemIds = new Set((takeoffState.pendingCatalogItems || []).map(i => String(i.id)));
         browseCatalogState.page = 1;
@@ -4104,17 +4268,25 @@
         browseCatalogState.catalogQuery = '';
         if ($('proBrowseItemSearch')) $('proBrowseItemSearch').value = '';
         if ($('proBrowseCatSearch')) $('proBrowseCatSearch').value = '';
-        $('takeoffCatalogModal').hidden = false;
+        const modal = $('takeoffCatalogModal');
+        if (modal) {
+            modal.hidden = false;
+            modal.style.display = 'flex';
+        }
         loadCatalogItems();
         setTimeout(() => $('proBrowseItemSearch')?.focus(), 50);
     }
 
     function closeCatalogModal() {
         const modal = $('takeoffCatalogModal');
-        if (modal) modal.hidden = true;
+        if (modal) {
+            modal.hidden = true;
+            modal.style.display = 'none';
+        }
         const createModal = $('takeoffCreateLayerModal');
         if (createModal && !createModal.hidden) {
             createModal.classList.remove('is-behind');
+            createModal.style.visibility = '';
             setTimeout(() => $('createLayerCatalogName')?.focus(), 50);
         }
     }
@@ -4144,8 +4316,15 @@
                 catalogState.items = (snapshot.items || []).map(i => {
                     const cost = getCatalogItemUnitCost(i);
                     const labor = getCatalogItemLaborHours(i);
+                    const uom = i.unit_of_measure || i.uom || 'ea';
+                    const mType = i.measurement_type || i.measurementType || '';
                     return {
                         ...i,
+                        unit_of_measure: uom,
+                        uom: uom,
+                        measurement_type: mType,
+                        measurementType: mType,
+                        item_type: i.item_type || i.type || 'material',
                         unitCost: cost,
                         unit_cost: cost,
                         laborHours: labor,
@@ -4167,12 +4346,18 @@
                     catalogState.items = (json.data.items || json.data.allItems || []).map(i => {
                         const cost = Number(i.unit_cost ?? i.unitCost ?? i.cost ?? i.price ?? 0);
                         const labor = Number(i.labor_hours ?? i.laborHours ?? 0);
+                        const uom = i.unit_of_measure || i.uom || 'ea';
+                        const mType = i.measurement_type || i.measurementType || '';
                         return {
                             id: i.id,
                             name: i.name,
                             description: i.description || '',
-                            type: i.item_type || 'material',
-                            uom: i.unit_of_measure || 'ea',
+                            type: i.item_type || i.type || 'material',
+                            item_type: i.item_type || i.type || 'material',
+                            measurement_type: mType,
+                            measurementType: mType,
+                            unit_of_measure: uom,
+                            uom: uom,
                             color: i.color,
                             symbol: i.symbol,
                             unitCost: cost,
@@ -4307,7 +4492,7 @@
 
                     html += `
                         <div class="cc-tree-row cc-tree-group ${isGrpActive ? 'active' : ''}" data-cat-group-select="${esc(grpId)}" data-cat-parent="${esc(catId)}" title="${esc(grp.name)}">
-                            <i class="fas fa-folder cc-tree-icon" style="color: ${grpColor}; font-size:11.5px;"></i>
+                            <i class="fas fa-folder cc-tree-icon" style="font-size:11.5px;"></i>
                             <span class="cc-tree-label">${esc(grp.name)}</span>
                             <span class="cc-tree-count">${grpCount}</span>
                         </div>
@@ -4405,29 +4590,64 @@
         const total = filtered.length;
         const pageSize = browseCatalogState.pageSize;
         const totalPages = Math.max(1, Math.ceil(total / pageSize));
+        browseCatalogState._lastTotalPages = totalPages;
         if (browseCatalogState.page > totalPages) browseCatalogState.page = totalPages;
         const start = (browseCatalogState.page - 1) * pageSize;
         const pageItems = filtered.slice(start, start + pageSize);
+        const end = Math.min(start + pageItems.length, total);
 
         // Update items count
         if ($('proBrowseCountLabel')) {
             $('proBrowseCountLabel').textContent = `${total.toLocaleString()} ${total === 1 ? 'item found' : 'items found'}`;
         }
 
-        // Update pagination
-        const end = Math.min(start + pageItems.length, total);
-        const text = total > 0 ? `${start + 1}-${end} of ${total.toLocaleString()}` : '0 of 0';
-        if ($('proBrowsePaginationText')) $('proBrowsePaginationText').textContent = text;
-        if ($('proBrowsePrevPage')) $('proBrowsePrevPage').disabled = browseCatalogState.page <= 1;
-        if ($('proBrowseNextPage')) $('proBrowseNextPage').disabled = browseCatalogState.page >= totalPages;
+        // Cost Catalog-identical pagination bar
+        const pageStartEl = $('ccPageStart');
+        const pageEndEl = $('ccPageEnd');
+        const pageTotalEl = $('ccPageTotal');
+        if (pageStartEl && pageEndEl && pageTotalEl) {
+            const displayStart = total > 0 ? start + 1 : 0;
+            pageStartEl.textContent = Number(displayStart).toLocaleString();
+            pageEndEl.textContent = Number(end).toLocaleString();
+            pageTotalEl.textContent = Number(total).toLocaleString();
+        }
 
-        const pageSelect = $('proBrowsePageSelect');
-        if (pageSelect) {
-            let opts = '';
-            for (let i = 1; i <= totalPages; i++) {
-                opts += `<option value="${i}"${i === browseCatalogState.page ? ' selected' : ''}>${i}</option>`;
+        const btnFirst = $('ccPageFirst');
+        const btnPrev = $('ccPagePrev');
+        const btnNext = $('ccPageNext');
+        const btnLast = $('ccPageLast');
+        const currentPage = browseCatalogState.page;
+
+        if (btnFirst) btnFirst.disabled = currentPage <= 1 || totalPages <= 1;
+        if (btnPrev) btnPrev.disabled = currentPage <= 1 || totalPages <= 1;
+        if (btnNext) btnNext.disabled = currentPage >= totalPages || totalPages <= 1;
+        if (btnLast) btnLast.disabled = currentPage >= totalPages || totalPages <= 1;
+
+        const numbersContainer = $('ccPaginationNumbers');
+        if (numbersContainer) {
+            if (totalPages <= 1) {
+                numbersContainer.innerHTML = total > 0 ? `<button type="button" class="cc-page-number active" aria-current="page">1</button>` : '';
+            } else {
+                const pages = [];
+                if (totalPages <= 7) {
+                    for (let i = 1; i <= totalPages; i++) pages.push(i);
+                } else {
+                    if (currentPage <= 4) {
+                        pages.push(1, 2, 3, 4, 5, '...', totalPages);
+                    } else if (currentPage >= totalPages - 3) {
+                        pages.push(1, '...', totalPages - 4, totalPages - 3, totalPages - 2, totalPages - 1, totalPages);
+                    } else {
+                        pages.push(1, '...', currentPage - 1, currentPage, currentPage + 1, '...', totalPages);
+                    }
+                }
+                numbersContainer.innerHTML = pages.map(p => {
+                    if (p === '...') {
+                        return `<span class="cc-page-ellipsis" aria-hidden="true">&hellip;</span>`;
+                    }
+                    const isActive = p === currentPage;
+                    return `<button type="button" class="cc-page-number ${isActive ? 'active' : ''}" data-page="${p}" ${isActive ? 'aria-current="page"' : ''} title="Page ${p}">${p}</button>`;
+                }).join('');
             }
-            pageSelect.innerHTML = opts;
         }
 
         if (!pageItems.length) {
@@ -4437,10 +4657,11 @@
             return;
         }
 
+        const showCatGrpPills = !browseCatalogState.selectedCatalogId && !browseCatalogState.selectedGroupId;
+
         list.innerHTML = pageItems.map(item => {
             const itemIdStr = String(item.id);
             const isSelected = browseCatalogState.selectedItemIds.has(itemIdStr);
-            const isAssembly = item.type === 'assembly';
             const unitCost = getCatalogItemUnitCost(item);
             const laborHours = getCatalogItemLaborHours(item);
             const costStr = unitCost > 0 ? `$${unitCost.toFixed(2)}` : '$0.00';
@@ -4449,7 +4670,8 @@
             const catalogId = item.catalog?.id || '';
             const groupName = item.category?.name || '';
             const groupId = item.category?.id || '';
-            const code = item.supplier?.catalogNumber || item.classification?.costCode || 'n/a';
+            const code = item.supplier?.catalogNumber || item.classification?.costCode || '';
+            const uomStr = esc(item.uom || item.unit_of_measure || 'ea');
 
             return `
                 <div class="pro-catalog-item-card ${isSelected ? 'is-selected' : ''}" data-browse-item="${esc(item.id)}">
@@ -4457,30 +4679,35 @@
                         <input type="checkbox" class="pro-catalog-item-checkbox" ${isSelected ? 'checked' : ''} data-item-check="${esc(item.id)}" aria-label="Select ${esc(item.name)}">
                     </div>
                     <div class="pro-catalog-item-content">
-                        <div class="pro-catalog-item-top">
-                            <span class="pro-catalog-item-title">${esc(item.name)}</span>
-                            ${isAssembly ? '<span class="cc-type-badge assembly"><i class="fas fa-boxes-stacked"></i> Assembly</span>' : ''}
+                        <div class="pro-catalog-item-top cc-item-primary-row">
+                            <span class="pro-catalog-item-title cc-item-name">${esc(item.name)}</span>
+                            ${item.color ? `<span class="cc-swatch" style="background:${esc(item.color)};" title="Color: ${esc(item.color)}"></span>` : ''}
                         </div>
-                        ${item.description ? `<div class="pro-catalog-item-desc">${esc(item.description)}</div>` : ''}
-                        <div class="pro-catalog-item-details-row">
-                            <span class="pro-cat-info-tag tag-price" title="Unit Cost">
+                        ${item.description ? `<div class="pro-catalog-item-desc cc-item-desc-inline">${esc(item.description)}</div>` : ''}
+                        <div class="pro-catalog-item-details-row cc-item-meta">
+                            <span class="pro-cat-info-tag tag-price cc-money" title="Unit Cost">
                                 <i class="fas fa-tag"></i>
                                 <span class="tag-label">Price:</span>
                                 <strong class="tag-val">${costStr}</strong>
-                                <span class="tag-uom">/ ${esc(item.uom || 'ea')}</span>
+                                <span class="tag-uom">/ ${uomStr}</span>
                             </span>
                             <span class="pro-cat-info-tag tag-labor" title="Labor Time">
                                 <i class="far fa-clock"></i>
                                 <span class="tag-label">Labor:</span>
                                 <strong class="tag-val">${laborStr}</strong>
                             </span>
-                            <span class="pro-cat-info-tag tag-code" title="Catalog Number / Code">
-                                <i class="fas fa-barcode"></i>
-                                <span class="tag-label">Cn:</span>
-                                <strong class="tag-val">${esc(code)}</strong>
+                            <span class="pro-cat-info-tag tag-uom cc-uom-tag" title="Unit of measure">
+                                <span class="tag-label">UoM:</span>
+                                <strong class="tag-val">${uomStr}</strong>
                             </span>
-                            ${renderCatalogPill(catalogName, catalogId)}
-                            ${groupName ? renderGroupPill(groupName, groupId, catalogId) : ''}
+                            ${code && code !== 'n/a' ? `
+                                <span class="pro-cat-info-tag tag-code" title="Catalog Number / Code">
+                                    <i class="fas fa-barcode"></i>
+                                    <strong class="tag-val">${esc(code)}</strong>
+                                </span>
+                            ` : ''}
+                            ${showCatGrpPills && catalogName ? renderCatalogPill(catalogName, catalogId) : ''}
+                            ${showCatGrpPills && groupName ? renderGroupPill(groupName, groupId, catalogId) : ''}
                         </div>
                     </div>
                 </div>
@@ -4785,7 +5012,17 @@
 
     function openGroupContextMenu(groupId, button) {
         if (!requireWrite()) return false;
+        if (groupId instanceof Element && typeof button === 'string') {
+            const tmp = groupId;
+            groupId = button;
+            button = tmp;
+        }
+        closeLayerModal();
         let menu = $('takeoffGroupContextMenu');
+        if (menu && menu.style.display !== 'none' && takeoffState.contextGroupId === groupId) {
+            closeGroupContextMenu();
+            return;
+        }
         if (!menu) {
             menu = document.createElement('div');
             menu.id = 'takeoffGroupContextMenu';
@@ -5264,7 +5501,7 @@
                         deleteGroup(groupId);
                     }
                 } else if (action === 'more') {
-                    openGroupContextMenu(groupBtn, groupId);
+                    openGroupContextMenu(groupId, groupBtn);
                 }
                 return;
             }
@@ -7291,8 +7528,14 @@
             localStorage.setItem('takeoff_sidebar_collapsed', willCollapse ? '1' : '0');
         } catch (e) { }
 
-        requestAnimationFrame(syncWorkspaceDensity);
-        setTimeout(notifyEditorVisible, 80);
+        requestAnimationFrame(() => {
+            syncWorkspaceDensity();
+            repositionLayerModal();
+        });
+        setTimeout(() => {
+            notifyEditorVisible();
+            repositionLayerModal();
+        }, 120);
     }
 
     function initTakeoffSidebarResizer() {
@@ -7346,6 +7589,7 @@
             const delta = (e.clientX - startX) / zoom;
             const newWidth = Math.max(220, Math.min(650, Math.round(startWidth + delta)));
             workspace.style.setProperty('--tk-sidebar-width', `${newWidth}px`);
+            if (typeof repositionLayerModal === 'function') repositionLayerModal();
         });
 
         const stopDragging = (e) => {
@@ -7535,7 +7779,7 @@
         document.addEventListener('click', (event) => {
             document.querySelectorAll('.pro-menu, .pro-row-menu').forEach(menu => menu.classList.remove('open'));
             document.querySelectorAll('[data-takeoff-menu-toggle]').forEach(button => button.setAttribute('aria-expanded', 'false'));
-            activeRowMenuAnchor = null;
+            if (typeof window.closeAllOpenPopouts === 'function') window.closeAllOpenPopouts();
             closeScalePanel();
             closeDrawingDropdown();
             closeGroupContextMenu();
@@ -7556,6 +7800,7 @@
             refreshOpenRowMenu();
             syncWorkspaceDensity();
             syncTakeoffSubheadAlignment();
+            repositionLayerModal();
         });
         setTimeout(syncTakeoffSubheadAlignment, 200);
         document.querySelector('[data-tab="takeoff"]')?.addEventListener('click', () => {
@@ -7563,7 +7808,10 @@
             updateSubheadSelectedItem();
         });
         if (typeof ResizeObserver === 'function') {
-            const observer = new ResizeObserver(syncWorkspaceDensity);
+            const observer = new ResizeObserver(() => {
+                syncWorkspaceDensity();
+                repositionLayerModal();
+            });
             const viewer = document.querySelector('.pro-takeoff-viewer');
             if (viewer) observer.observe(viewer);
         }
@@ -7583,10 +7831,14 @@
         $('takeoffScalePanel')?.addEventListener('click', event => event.stopPropagation());
         $('takeoffComparePanel')?.addEventListener('click', event => event.stopPropagation());
         $('takeoffMoreToolsPanel')?.addEventListener('click', event => event.stopPropagation());
-        $('takeoffLayerModal')?.addEventListener('click', event => {
-            if (event.target.id === 'takeoffLayerModal') closeLayerModal();
-        });
+
         document.addEventListener('keydown', event => {
+            const layerModal = $('takeoffLayerModal');
+            if (layerModal && !layerModal.hidden && event.key === 'Escape') {
+                event.preventDefault();
+                closeLayerModal();
+                return;
+            }
             const groupModal = $('takeoffGroupModal');
             if (groupModal && !groupModal.hidden) {
                 if (event.key === 'Escape') {
