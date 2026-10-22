@@ -49,7 +49,11 @@
         const quantity = numeric(row.quantity ?? row.originalQuantity);
         const itemType = text(row.itemType ?? row.item_type, row.isAssembly ? 'assembly' : 'part').toLowerCase();
         const childRows = row.children ?? row.assemblyItems ?? row.components;
+        // The workspace snapshot is the lossless source of truth. Start from a
+        // deep copy so forward-compatible fields (tags, multiplier, locks and
+        // calculation extensions) survive normalization and estimate copies.
         const normalized = {
+            ...clone(row),
             id: text(row.id) || uid('item'),
             takeoffLayerId: takeoffLayerId || null,
             copiedFromTakeoffLayerId: text(row.copiedFromTakeoffLayerId) || null,
@@ -77,6 +81,9 @@
             costCategory: category(row.costCategory ?? row.cost_type ?? row.item_type ?? row.type),
             uom: text(row.uom ?? row.unit_of_measure, 'ea'),
             quantity,
+            multiplier: numeric(row.multiplier, 1),
+            locked: row.locked === true || Number(row.locked ?? 0) === 1,
+            tags: Array.isArray(row.tags) ? clone(row.tags) : [],
             originalQuantity: numeric(row.originalQuantity, quantity),
             quantitySource: takeoffLayerId ? 'takeoff' : 'manual',
             quantitySyncStatus: takeoffLayerId ? 'synced' : 'manual',
@@ -125,7 +132,7 @@
             ? row.creationMode : (index ? 'all' : 'primary');
         const takeoffSyncMode = row.takeoffSyncMode === 'linked-only'
             || row.takeoffSync?.mode === 'linked-only' ? 'linked-only' : 'mirror';
-        const explicitPrimaryId = String(row.primary_estimate_id || window.ProjectState?.projectMeta?.primary_estimate_id || '');
+        const explicitPrimaryId = String(row.primary_estimate_id || global.ProjectState?.projectMeta?.primary_estimate_id || '');
         const isPrimary = explicitPrimaryId ? String(row.id) === explicitPrimaryId : Boolean(row.is_primary ?? row.isPrimary ?? (index === 0));
         return {
             id: text(row.id) || uid('estimate'),
