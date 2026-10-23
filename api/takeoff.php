@@ -89,7 +89,13 @@ function takeoff_add_column(PDO $pdo, string $table, string $column, string $sql
 function takeoff_table_exists(PDO $pdo, string $table): bool
 {
     try {
-        $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
+        $stmt = $pdo->prepare(
+            "SELECT 1
+             FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = ?
+             LIMIT 1"
+        );
         $stmt->execute([$table]);
         return (bool)$stmt->fetchColumn();
     } catch (Throwable $e) {
