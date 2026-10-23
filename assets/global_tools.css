@@ -2199,6 +2199,170 @@ body.theme-dark .cc-takeoff-selectors-row .pro-create-control-box select,
     padding: 0 24px 0 10px !important;
 }
 
+/* ==========================================================
+   UNIFIED PRO CUSTOM DROPDOWN / SELECT SYSTEM
+   Applied across Bid Board, Project Dashboard & Cost Catalog
+   ========================================================== */
+.pro-custom-dropdown.cc-custom-select,
+.pro-custom-dropdown.pro-custom-select {
+    position: relative;
+    width: 100%;
+    box-sizing: border-box;
+    display: block;
+}
+
+.pro-custom-dropdown.cc-custom-select .pro-custom-dropdown-trigger,
+.pro-custom-dropdown.pro-custom-select .pro-custom-dropdown-trigger {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    height: 32px;
+    padding: 0 10px;
+    background: var(--bg-panel, #ffffff);
+    color: var(--text-main, #0f172a);
+    border: 1px solid var(--border, #cbd5e1);
+    border-radius: 6px;
+    cursor: pointer;
+    box-sizing: border-box;
+    font-family: 'Inter', system-ui, -apple-system, sans-serif;
+    font-size: 12.5px;
+    font-weight: 500;
+    transition: border-color 0.15s ease, box-shadow 0.15s ease, background-color 0.15s ease;
+    user-select: none;
+    text-align: left;
+}
+
+.pro-custom-dropdown.cc-custom-select .pro-custom-dropdown-trigger:hover,
+.pro-custom-dropdown.pro-custom-select .pro-custom-dropdown-trigger:hover {
+    border-color: #94a3b8;
+}
+
+.pro-custom-dropdown.cc-custom-select.is-open .pro-custom-dropdown-trigger,
+.pro-custom-dropdown.pro-custom-select.is-open .pro-custom-dropdown-trigger,
+.pro-custom-dropdown.cc-custom-select .pro-custom-dropdown-trigger:focus,
+.pro-custom-dropdown.pro-custom-select .pro-custom-dropdown-trigger:focus {
+    border-color: #fb5a3a !important;
+    outline: none !important;
+    box-shadow: 0 0 0 3px rgba(251, 90, 58, 0.15) !important;
+}
+
+.pro-custom-dropdown .pcd-trigger-text {
+    flex: 1;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    padding-right: 6px;
+}
+
+.pro-custom-dropdown .pcd-caret {
+    width: 0;
+    height: 0;
+    border-left: 4px solid transparent;
+    border-right: 4px solid transparent;
+    border-top: 5px solid #64748b;
+    border-bottom: none;
+    transition: transform 0.15s ease;
+    flex-shrink: 0;
+}
+
+.pro-custom-dropdown.is-open .pcd-caret {
+    border-top: none;
+    border-bottom: 5px solid #fb5a3a;
+}
+
+.pro-custom-dropdown-menu.pcd-select-menu {
+    position: absolute;
+    top: calc(100% + 4px);
+    left: 0;
+    width: 100%;
+    min-width: 140px;
+    max-height: 250px;
+    overflow-y: auto;
+    background: var(--bg-panel, #ffffff);
+    border: 1px solid var(--border, #cbd5e1);
+    border-radius: 6px;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.18), 0 8px 10px -6px rgba(0, 0, 0, 0.1);
+    z-index: 9999;
+    padding: 4px;
+    display: none;
+    box-sizing: border-box;
+}
+
+.pro-custom-dropdown.is-open .pro-custom-dropdown-menu.pcd-select-menu {
+    display: block;
+}
+
+.pcd-select-item {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding: 7px 10px;
+    border-radius: 4px;
+    cursor: pointer;
+    font-size: 12.5px;
+    color: var(--text-main, #0f172a);
+    transition: background-color 0.12s ease, color 0.12s ease;
+    user-select: none;
+}
+
+.pcd-select-item:hover {
+    background: #f1f5f9;
+}
+
+.pcd-select-item.is-selected {
+    background: #fff1ee !important;
+    color: #fb5a3a !important;
+    font-weight: 600;
+}
+
+.pcd-select-item .pcd-check {
+    color: #fb5a3a;
+    font-size: 11px;
+}
+
+.pro-custom-dropdown.is-disabled .pro-custom-dropdown-trigger {
+    opacity: 0.6;
+    cursor: not-allowed;
+    background: var(--bg-disabled, #f1f5f9) !important;
+}
+
+/* Contextual overrides across modules */
+.bb-input-icon-wrap .cc-custom-select .pro-custom-dropdown-trigger {
+    height: 42px;
+    padding-left: 36px;
+}
+
+.bb-input-icon-wrap .bb-input-icon {
+    z-index: 2;
+}
+
+.pd-pricing-wrap .cc-custom-select .pro-custom-dropdown-trigger {
+    padding-left: 28px;
+}
+
+.pd-pricing-status-icon {
+    z-index: 2;
+    pointer-events: none;
+}
+
+.pro-scale-panel .cc-custom-select .pro-custom-dropdown-trigger {
+    height: 28px;
+    min-height: 28px;
+    font-size: 0.76rem;
+    padding: 0 8px;
+}
+
+.pro-scale-panel .cc-custom-select {
+    margin-bottom: 6px;
+}
+
+.pd-input-with-actions .pd-field-caret,
+.pd-pricing-wrap .pd-field-caret,
+.pro-create-control-box .pd-field-caret {
+    display: none !important;
+}
+
 /* Overview Dropdowns & Estimator Input Typography Standardization */
 .overview-field .pro-custom-dropdown-trigger,
 .overview-field .pro-custom-dropdown-trigger .pcd-trigger-text,
@@ -2235,16 +2399,13 @@ body.theme-dark .pro-custom-dropdown-trigger:hover {
 }
 
 [data-theme="dark"] .pro-custom-dropdown .pcd-caret,
-[data-theme="dark"] .cc-custom-select .pcd-caret,
-body.theme-dark .pro-custom-dropdown .pcd-caret,
-body.theme-dark .cc-custom-select .pcd-caret {
+body.theme-dark .pro-custom-dropdown .pcd-caret {
     border-top-color: #94a3b8;
 }
 
 [data-theme="dark"] .pro-custom-dropdown.is-open .pcd-caret,
 body.theme-dark .pro-custom-dropdown.is-open .pcd-caret {
-    border-top-color: transparent;
-    border-bottom-color: #3b82f6;
+    border-bottom-color: #fb5a3a;
 }
 
 [data-theme="dark"] .pro-custom-dropdown-menu.pcd-select-menu,
@@ -2268,7 +2429,7 @@ body.theme-dark .pcd-select-item:hover {
 
 [data-theme="dark"] .pcd-select-item.is-selected,
 body.theme-dark .pcd-select-item.is-selected {
-    background: rgba(251, 90, 58, 0.15) !important;
+    background: rgba(251, 90, 58, 0.2) !important;
     color: #fb5a3a !important;
 }
 
