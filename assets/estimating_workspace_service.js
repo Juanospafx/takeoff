@@ -15,7 +15,7 @@
     }
 
     function settings(input = {}) {
-        return {
+        const result = {
             assemblyExpansionPolicy: String(input.assemblyExpansionPolicy ?? input.assembly_expansion_policy ?? 'LEGACY').toUpperCase() === 'CANONICAL'
                 ? 'CANONICAL' : 'LEGACY',
             marginMode: input.marginMode === 'markup' ? 'markup' : 'margin',
@@ -30,6 +30,15 @@
             preTaxMarkups: Array.isArray(input.preTaxMarkups) ? input.preTaxMarkups.map(markup) : [],
             postTaxMarkups: Array.isArray(input.postTaxMarkups) ? input.postTaxMarkups.map(markup) : []
         };
+        if (input.materialMargin !== undefined && input.materialMargin !== null) result.materialMargin = numeric(input.materialMargin, 15);
+        if (input.equipmentMargin !== undefined && input.equipmentMargin !== null) result.equipmentMargin = numeric(input.equipmentMargin, 15);
+        if (input.laborWaste !== undefined && input.laborWaste !== null) result.laborWaste = numeric(input.laborWaste, 0);
+        if (input.materialWaste !== undefined && input.materialWaste !== null) result.materialWaste = numeric(input.materialWaste, 0);
+        if (input.equipmentWaste !== undefined && input.equipmentWaste !== null) result.equipmentWaste = numeric(input.equipmentWaste, 0);
+        if (input.laborDifficulty !== undefined && input.laborDifficulty !== null) result.laborDifficulty = numeric(input.laborDifficulty, 1);
+        if (input.squareFootage !== undefined && input.squareFootage !== null) result.squareFootage = numeric(input.squareFootage, 0);
+        if (input._markupsSeeded !== undefined) result._markupsSeeded = Boolean(input._markupsSeeded);
+        return result;
     }
 
     function markup(row = {}) {
@@ -78,9 +87,12 @@
             uom: text(row.uom ?? row.unit_of_measure, 'ea'),
             quantity,
             originalQuantity: numeric(row.originalQuantity, quantity),
+            quantityOverride: row.quantityOverride === true || String(row.quantitySyncStatus || '').toLowerCase() === 'overridden',
+            pendingTakeoffQuantity: row.pendingTakeoffQuantity === null || row.pendingTakeoffQuantity === undefined ? null : numeric(row.pendingTakeoffQuantity),
             quantitySource: takeoffLayerId ? 'takeoff' : 'manual',
-            quantitySyncStatus: takeoffLayerId ? 'synced' : 'manual',
-            lastSyncedTakeoffQuantity: numeric(row.lastSyncedTakeoffQuantity, takeoffLayerId ? quantity : 0),
+            quantitySyncStatus: (row.quantityOverride === true || String(row.quantitySyncStatus || '').toLowerCase() === 'overridden')
+                ? 'overridden' : (takeoffLayerId ? 'synced' : 'manual'),
+            lastSyncedTakeoffQuantity: numeric(row.lastSyncedTakeoffQuantity, takeoffLayerId ? numeric(row.originalQuantity, quantity) : 0),
             unitMaterialCost: numeric(row.unitMaterialCost ?? row.unitCost ?? row.unit_cost),
             waste: numeric(row.waste ?? row.waste_percentage),
             materialMargin: numeric(row.materialMargin ?? row.margin ?? row.margin_percentage),
