@@ -11,7 +11,15 @@
     }
 
     function takeoffItem(layer, group, previous) {
-        const quantity = number(layer.quantity);
+        const measuredQty = number(layer.lastSyncedTakeoffQuantity ?? layer.originalQuantity ?? layer.quantity);
+        const isOverridden = Boolean(
+            previous?.quantityOverride === true
+            || String(previous?.quantitySyncStatus || '').toLowerCase() === 'overridden'
+            || layer.quantityOverride === true
+        );
+        const quantity = isOverridden
+            ? number(previous?.quantity ?? layer.quantity)
+            : number(layer.quantity);
         const item = {
             ...(previous || {}),
             id: previous?.id || `takeoff_${stringId(layer.id)}`,
@@ -20,12 +28,12 @@
             name: layer.name || 'Takeoff item',
             description: layer.description || '',
             quantity,
-            originalQuantity: quantity,
-            lastSyncedTakeoffQuantity: quantity,
-            pendingTakeoffQuantity: null,
-            quantityOverride: false,
+            originalQuantity: measuredQty,
+            lastSyncedTakeoffQuantity: measuredQty,
+            pendingTakeoffQuantity: isOverridden ? measuredQty : null,
+            quantityOverride: isOverridden,
             quantitySource: 'takeoff',
-            quantitySyncStatus: 'synced',
+            quantitySyncStatus: isOverridden ? 'overridden' : 'synced',
             uom: layer.uom || layer.unit_of_measure || 'ea',
             unitMaterialCost: number(layer.unitMaterialCost ?? layer.unitCost ?? layer.unit_cost ?? previous?.unitMaterialCost),
             unitLabor: number(layer.unitLabor ?? layer.laborHours ?? layer.labor_hours ?? previous?.unitLabor),

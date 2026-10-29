@@ -1394,6 +1394,8 @@
                 locked: Number(layer.locked || 0) === 1,
                 quantity: Number(layer.quantity || 0),
                 baseQuantity: Number(layer.baseQuantity ?? layer.seedQuantity ?? 0),
+                quantityOverride: Boolean(layer.quantityOverride),
+                estimatingQuantity: layer.estimatingQuantity !== undefined ? Number(layer.estimatingQuantity) : undefined,
                 catalogItemId: layer.catalogItemId || layer.catalog_item_id || null,
                 catalog_item_id: layer.catalog_item_id || layer.catalogItemId || null,
                 unitCost: Number(layer.unitCost || layer.unit_cost || 0),
@@ -1647,9 +1649,13 @@
     function scopeLegacyTakeoffGroupsOnce() {
         const primaryId = primaryEstimateId();
         takeoffState.groups.forEach(group => {
-            if (!group.estimateId) group.estimateId = primaryId;
+            if (!group.estimateId || (group.estimateId === 'est_primary' && primaryId !== 'est_primary')) {
+                group.estimateId = primaryId;
+            }
             (group.layers || []).forEach(layer => {
-                if (!layer.estimateId) layer.estimateId = group.estimateId || primaryId;
+                if (!layer.estimateId || (layer.estimateId === 'est_primary' && primaryId !== 'est_primary')) {
+                    layer.estimateId = group.estimateId || primaryId;
+                }
             });
         });
     }
@@ -1659,7 +1665,8 @@
     }
 
     function syncEstimatingItemsToTakeoff(detail = {}) {
-        if (detail.projectId && String(detail.projectId) !== String(window.ProjectState?.projectId || '')) return;
+        if (detail.projectId && window.ProjectState?.projectId && String(detail.projectId) !== String(window.ProjectState.projectId)) return;
+        scopeLegacyTakeoffGroupsOnce();
         const estimateId = String(detail.activeEstimateId || '');
         if (!estimateId || estimateId !== activeEstimateId() || !Array.isArray(detail.groups)) return;
         ensureEstimateTakeoffWorkspace(estimateId);
@@ -1710,13 +1717,20 @@
                 };
                 let layer = allLayers().find(row => (String(row.estimateId || '') === estimateId || !row.estimateId)
                     && layerMatchesEstimatingItem(row));
+                const isItemOverridden = Boolean(item.quantityOverride || String(item.quantitySyncStatus || '') === 'overridden');
                 if (!layer) {
+                    const initialTakeoffQty = isItemOverridden
+                        ? Number(item.lastSyncedTakeoffQuantity ?? item.originalQuantity ?? 0)
+                        : Number(item.quantity || 0);
                     layer = {
                         id: layerId, groupId: group.id, estimateId, estimatingItemId: itemId,
                         name: item.name || 'Cost item', type: inferTakeoffTypeFromUom(item.uom) || 'Count',
                         uom: item.uom || 'ea', symbol: 'Solid Circle', size: 'Medium', color: '#2563eb',
-                        visible: true, locked: false, quantity: Number(item.quantity || 0),
-                        baseQuantity: Number(item.quantity || 0), catalogItemId: item.catalogItemId || null,
+                        visible: true, locked: false, quantity: initialTakeoffQty,
+                        baseQuantity: initialTakeoffQty,
+                        quantityOverride: isItemOverridden,
+                        estimatingQuantity: Number(item.quantity || 0),
+                        catalogItemId: item.catalogItemId || null,
                         catalog_item_id: item.catalogItemId || null, unitCost: Number(item.unitMaterialCost || 0),
                         unit_cost: Number(item.unitMaterialCost || 0), laborHours: Number(item.unitLabor || 0),
                         labor_hours: Number(item.unitLabor || 0), description: item.description || '',
@@ -1734,7 +1748,9 @@
                         uom: item.uom || layer.uom, catalogItemId: item.catalogItemId || null,
                         catalog_item_id: item.catalogItemId || null, unitCost: Number(item.unitMaterialCost || 0),
                         unit_cost: Number(item.unitMaterialCost || 0), laborHours: Number(item.unitLabor || 0),
-                        labor_hours: Number(item.unitLabor || 0), description: item.description || ''
+                        labor_hours: Number(item.unitLabor || 0), description: item.description || '',
+                        quantityOverride: isItemOverridden,
+                        estimatingQuantity: Number(item.quantity || 0)
                     });
                 }
                 seen.add(String(layer.id));
@@ -1869,6 +1885,14 @@
                     ? window.TakeoffEstimatingSyncService.takeoffItem({ ...line, id: layer.id },
                         { id: groupId, name: groupName }, existing)
                     : { ...(existing || {}), ...line };
+                const isOverridden = Boolean(
+                    synchronized.quantityOverride
+                    || existing?.quantityOverride
+                    || String(existing?.quantitySyncStatus || '') === 'overridden'
+                );
+                const effectiveQty = isOverridden
+                    ? Number(existing?.quantity ?? synchronized.quantity ?? line.quantity)
+                    : line.quantity;
                 return {
                     ...line,
                     ...synchronized,
@@ -1876,11 +1900,11 @@
                     groupId,
                     groupName,
                     originalQuantity: line.quantity,
-                    quantity: line.quantity,
-                    pendingTakeoffQuantity: null,
-                    quantityOverride: false,
+                    quantity: effectiveQty,
+                    pendingTakeoffQuantity: isOverridden ? line.quantity : null,
+                    quantityOverride: isOverridden,
                     quantitySource: 'takeoff',
-                    quantitySyncStatus: 'synced',
+                    quantitySyncStatus: isOverridden ? 'overridden' : 'synced',
                     lastSyncedTakeoffQuantity: line.quantity,
                     catalogSyncStatus: line.catalogItemId ? 'synced' : 'detached',
                     updatedAt: new Date().toISOString()
@@ -2027,6 +2051,37 @@
         return `${formatted} ${uom}`;
     }
 
+    function getLayerEstimatingOverride(layer, estimateId = activeEstimateId()) {
+        if (!layer) return { overridden: false, estimatingQuantity: 0 };
+        try {
+            const estState = loadEstimatingStateForSync();
+            const est = Array.isArray(estState?.estimates)
+                ? (estState.estimates.find(row => String(row.id) === String(estimateId)) || estState.estimates[0])
+                : null;
+            const groups = est?.groups || estState?.groups || [];
+            const lid = String(layer.id || '');
+            const estItemId = String(layer.estimatingItemId || '');
+            for (const grp of groups) {
+                for (const it of (grp.items || [])) {
+                    const itId = String(it.id || '');
+                    const itLayerId = String(it.takeoffLayerId || '');
+                    if ((estItemId && itId === estItemId)
+                        || (lid && (itLayerId === lid || itId === `takeoff_${lid}` || itLayerId === `takeoff_${lid}`))) {
+                        const overridden = Boolean(it.quantityOverride === true || String(it.quantitySyncStatus || '') === 'overridden');
+                        return {
+                            overridden,
+                            estimatingQuantity: Number(it.quantity ?? 0)
+                        };
+                    }
+                }
+            }
+        } catch (_) { }
+        return {
+            overridden: Boolean(layer.quantityOverride),
+            estimatingQuantity: Number(layer.estimatingQuantity ?? layer.quantity ?? 0)
+        };
+    }
+
     function toggleGroupLock(groupId) {
         if (!requireWrite()) return false;
         const group = findGroup(groupId);
@@ -2097,6 +2152,15 @@
                 const editorLockState = callEditor('projectTakeoffGetLayerLockState', layer.id) || {};
                 const isLocked = Boolean(layer.locked || editorLockState.locked);
                 const subText = itemQuantitySubtitle(layer);
+                const overrideInfo = getLayerEstimatingOverride(layer, estimateId);
+                const uom = layer.uom || typeToUom(layer.type) || 'ea';
+                const estQtyNum = Number(overrideInfo.estimatingQuantity || 0);
+                const estQtyFormatted = estQtyNum % 1 === 0 ? estQtyNum.toFixed(0) : estQtyNum.toFixed(2);
+                const tkQtyNum = Number(layer.quantity || 0);
+                const tkQtyFormatted = tkQtyNum % 1 === 0 ? tkQtyNum.toFixed(0) : tkQtyNum.toFixed(2);
+                const overrideBadgeHtml = overrideInfo.overridden
+                    ? `<span class="pro-tree-qty-override-badge" data-qty-override-badge="true" title="${esc(`Quantity altered in Estimating: ${estQtyFormatted} ${uom} (Takeoff measured: ${tkQtyFormatted} ${uom})`)}"><i class="fas fa-pen-to-square"></i><span>Est: ${esc(estQtyFormatted)} ${esc(uom)}</span></span>`
+                    : '';
                 const isLayerSelected = !isLocked && (String(takeoffState.activeLayerId || '') === String(layer.id) || selectionState.selectedLayerIds.includes(String(layer.id)));
                 return `<div class="pro-tree-row pro-tree-item ${isLayerSelected || groupSelected ? 'active' : ''} ${groupSelected ? 'group-selected' : ''} ${isVisible ? '' : 'is-hidden'} ${isLocked ? 'is-locked-item' : ''}" data-layer-row="${esc(layer.id)}" aria-selected="${groupSelected ? 'true' : 'false'}">
                             <button class="pro-visibility-btn ${isVisible ? '' : 'is-off'}" type="button" data-layer-visibility="${esc(layer.id)}" title="${isVisible ? 'Hide item' : 'Show item'}" aria-label="${isVisible ? 'Hide item' : 'Show item'}"><i class="fas ${isVisible ? 'fa-eye' : 'fa-eye-slash'}"></i></button>
@@ -2107,6 +2171,7 @@
                                 <div class="pro-tree-item-sub">
                                     ${renderLayerBadgeHtml(layer, 13)}
                                     <span class="pro-tree-qty">${esc(subText)}</span>
+                                    ${overrideBadgeHtml}
                                 </div>
                             </div>
                             <div class="pro-tree-row-actions">
@@ -2148,6 +2213,14 @@
             <section class="pro-property-card">
                 <h3>Takeoff metrics</h3>
                 <div class="pro-property-row"><span>Quantity</span><strong>${esc(quantityLabel(layer))}</strong></div>
+                ${(() => {
+                    const ov = getLayerEstimatingOverride(layer);
+                    if (!ov.overridden) return '';
+                    const uom = layer.uom || typeToUom(layer.type) || 'ea';
+                    const eq = Number(ov.estimatingQuantity || 0);
+                    const fmt = eq % 1 === 0 ? eq.toFixed(0) : eq.toFixed(2);
+                    return `<div class="pro-property-row"><span>Estimating qty</span><strong style="color:#d97706;"><i class="fas fa-pen-to-square"></i> ${esc(fmt)} ${esc(uom)}</strong></div>`;
+                })()}
                 <div class="pro-property-row"><span>Type</span><strong>${esc(layer.type)}</strong></div>
                 <div class="pro-property-row"><span>Unit</span><strong>${esc(layer.uom || typeToUom(layer.type))}</strong></div>
                 <div class="pro-property-row"><span>Selected</span><strong>${selectionCount} element${selectionCount === 1 ? '' : 's'}</strong></div>
@@ -3887,6 +3960,7 @@
             closeLayerModal();
             saveTakeoffState();
             renderTakeoffPanel();
+            window.dispatchEvent(new CustomEvent('takeoff:layer-visuals-updated', { detail: { projectId: String(window.ProjectState?.projectId || '') } }));
         } catch (error) {
             console.warn('Takeoff layer save failed', error);
             showPrepared('Unable to save Takeoff item changes. Please try again.');
@@ -7889,5 +7963,14 @@
                 }
             }
         });
+        window.takeoffState = takeoffState;
+        window.getTakeoffLayerById = function (layerId) {
+            if (!layerId) return null;
+            return typeof findLayer === 'function' ? findLayer(layerId) : null;
+        };
+        window.getTakeoffLayerByName = function (name) {
+            if (!name) return null;
+            return (typeof allLayers === 'function' ? allLayers() : []).find(l => l.name === name) || null;
+        };
     });
 })();
