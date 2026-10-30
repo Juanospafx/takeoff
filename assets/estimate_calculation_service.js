@@ -62,7 +62,9 @@
         const quantity = num(item.quantity);
         const wastePercent = Math.max(0, num(item.waste));
         const adjustedQuantity = quantity * (1 + wastePercent / 100);
-        const materialCost = adjustedQuantity * num(item.unitMaterialCost ?? item.unitCost);
+        const isEquipmentItem = String(item.itemType ?? item.item_type ?? item.costCategory ?? '')
+            .toLowerCase().includes('equip');
+        const materialCost = isEquipmentItem ? 0 : adjustedQuantity * num(item.unitMaterialCost ?? item.unitCost);
         const materialMargin = num(item.materialMargin ?? item.margin);
         const equipmentMargin = num(item.equipmentMargin);
         const laborMargin = num(item.laborMargin ?? settings.globalLaborMargin);
@@ -71,8 +73,6 @@
         if (equipmentMargin >= 100) validation.push({ field: 'equipmentMargin', code: 'margin_must_be_below_100' });
         if (laborMargin >= 100) validation.push({ field: 'laborMargin', code: 'margin_must_be_below_100' });
         const materialSales = salesFromCost(materialCost, materialMargin >= 100 ? 0 : clampMargin(materialMargin), settings.marginMode);
-        const isEquipmentItem = String(item.itemType ?? item.item_type ?? item.costCategory ?? '')
-            .toLowerCase().includes('equip');
         // Catalog/Takeoff equipment rows use the normal item quantity. The
         // separate equipmentQuantity field remains an optional explicit driver
         // for mixed/manual rows, but its normalized default of zero must not
@@ -80,7 +80,11 @@
         const explicitEquipmentQuantity = num(item.equipmentQuantity);
         const effectiveEquipmentQuantity = explicitEquipmentQuantity !== 0
             ? explicitEquipmentQuantity : (isEquipmentItem ? quantity : 0);
-        const equipmentCost = effectiveEquipmentQuantity * num(item.unitEquipmentCost);
+        const explicitEquipmentOverride = item.overrides?.equipmentUnitCost;
+        const equipmentUnitCost = explicitEquipmentOverride !== null && explicitEquipmentOverride !== undefined
+            ? num(explicitEquipmentOverride)
+            : (num(item.unitEquipmentCost) || (isEquipmentItem ? num(item.unitMaterialCost ?? item.unitCost) : 0));
+        const equipmentCost = effectiveEquipmentQuantity * equipmentUnitCost;
         const equipmentSales = salesFromCost(equipmentCost, equipmentMargin >= 100 ? 0 : clampMargin(equipmentMargin), settings.marginMode);
         // Waste is a material allowance. Labor follows the measured/base quantity
         // modified by difficulty and optional labor inefficiency / waste allowance.
