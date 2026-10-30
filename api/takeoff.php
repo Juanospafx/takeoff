@@ -807,6 +807,12 @@ try {
                 if (!is_array($layer)) continue;
                 $layerClientId = (string)($layer['client_uid'] ?? $layer['id'] ?? '');
                 $layerMetadata = is_array($layer['metadata_json'] ?? null) ? $layer['metadata_json'] : [];
+                if (isset($layer['difficulty'])) {
+                    $layerMetadata['difficulty'] = (float)$layer['difficulty'];
+                }
+                if (isset($layer['multiplier'])) {
+                    $layerMetadata['multiplier'] = (float)$layer['multiplier'];
+                }
                 $layerQty = n($layer['baseQuantity'] ?? $layer['base_quantity']
                     ?? $layer['seed_quantity'] ?? $layerMetadata['base_quantity'] ?? 0);
                 foreach ($markers as $markerRow) {
@@ -840,7 +846,7 @@ try {
                     !empty($layer['locked']) ? 1 : 0,
                     $layer['tag'] ?? null,
                     !empty($layer['estimate_item_id']) && is_numeric($layer['estimate_item_id']) ? (int)$layer['estimate_item_id'] : null,
-                    json_value($layer['metadata_json'] ?? null),
+                    json_value($layerMetadata),
                 ]);
                 $clientId = (string)($layer['client_uid'] ?? $layer['id'] ?? '');
                 if ($clientId !== '') $layerMap[$clientId] = (int)$pdo->lastInsertId();
