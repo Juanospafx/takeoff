@@ -5077,29 +5077,6 @@ body.theme-dark .est-col-resizer::after {
     overflow: hidden;
     text-overflow: ellipsis;
 }
-
-/* Preserve the full catalog label in the Cost Item column. The input keeps
-   its intrinsic `size` width so long names remain readable in the horizontal
-   table instead of being recolored and ellipsized. */
-.est-item-name-input,
-.pro-tree-item-title.est-item-name-input {
-    flex: 0 0 auto !important;
-    width: auto !important;
-    min-width: 100% !important;
-    max-width: none !important;
-    padding: 0 !important;
-    border: 0 !important;
-    outline: 0;
-    background: transparent !important;
-    color: var(--text-main, #0f172a) !important;
-    white-space: nowrap !important;
-    overflow: hidden !important;
-    text-overflow: clip !important;
-}
-[data-theme="dark"] .est-item-name-input,
-body.theme-dark .est-item-name-input {
-    color: #f8fafc !important;
-}
 [data-theme="dark"] .est-item-title,
 [data-theme="dark"] .pro-tree-item-title.est-item-title {
     color: #f8fafc !important;
