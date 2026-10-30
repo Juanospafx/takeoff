@@ -54,8 +54,61 @@
 
     if (!$('estTableHead')) {
         root.classList.add('est-v2');
-        root.innerHTML = `<div class="est-main"><section class="est-left"><div class="est-toolbar"><input id="estSearch" type="search" placeholder="Search cost item"><button type="button" data-est-action="create-group">Create group</button><button type="button" data-est-action="catalog-update">Update from Cost Catalog</button><button type="button" data-est-action="delete-selected" disabled>Delete</button></div><div class="est-table-wrap"><table class="est-table"><thead id="estTableHead"></thead><tbody id="estTableBody"></tbody></table></div></section><aside class="est-right"><div class="est-right-scroll"></div><div class="est-total-box"><div id="estimateTotal"></div><div id="estimateSqft"></div></div></aside></div><footer class="est-version-bar" id="versionBar"></footer>`;
+        root.innerHTML = `<div class="est-main">
+            <section class="est-left">
+                <div class="est-toolbar">
+                    <div class="bb-search-field-procore cc-search-procore est-search-box"><input id="estSearch" type="search" placeholder="Search estimate items..." autocomplete="off"></div>
+                    <span class="est-save-status" aria-live="polite"></span>
+                    <div class="est-toolbar-actions">
+                        <button class="est-icon-btn" type="button" data-est-action="create-group" title="Create Group"><i class="fas fa-folder-plus"></i></button>
+                        <button class="est-icon-btn" type="button" data-est-action="catalog-update" title="Update from Cost Catalog"><i class="fas fa-arrows-rotate"></i></button>
+                        <button class="est-icon-btn" type="button" data-est-action="delete-selected" title="Delete Selected" disabled><i class="fas fa-trash"></i></button>
+                        <div class="est-menu-wrap"><button class="est-icon-btn" id="estBtnMoreOptions" type="button" data-est-action="options" title="Options"><i class="fas fa-ellipsis-vertical"></i></button><div class="est-menu" id="optionsMenu">
+                            <button type="button" data-est-option="save"><i class="fas fa-floppy-disk"></i> Save estimate</button>
+                            <button type="button" data-est-option="copy"><i class="fas fa-copy"></i> Copy estimate</button>
+                            <button type="button" data-est-option="status"><i class="fas fa-circle-check"></i> Change project status</button>
+                            <button type="button" data-est-option="import"><i class="fas fa-file-import"></i> Import</button>
+                            <button type="button" data-est-option="export"><i class="fas fa-file-export"></i> Export</button>
+                            <button type="button" data-est-option="export-bom"><i class="fas fa-file-excel"></i> Export BOM (Excel)</button>
+                            <button type="button" data-est-option="delete-estimate" class="danger"><i class="fas fa-trash"></i> Delete estimate</button>
+                        </div></div>
+                        <button class="est-icon-btn" type="button" data-est-action="fullscreen" title="Full screen"><i class="fas fa-expand"></i></button>
+                        <button class="est-icon-btn est-toggle-right-btn" type="button" data-est-action="toggle-right" title="Hide summary panel"><i class="fas fa-chevron-right"></i></button>
+                    </div>
+                </div>
+                <div class="est-table-wrap bb-table-scroll"><table class="est-table bb-table" id="estMainTable"><thead id="estTableHead"></thead><tbody id="estTableBody"></tbody></table></div>
+            </section>
+            <div class="pro-sidebar-resizer est-sidebar-resizer" id="estSplitResizer" role="separator" aria-orientation="vertical"><div class="pro-resizer-handle"></div></div>
+            <aside class="est-right"><div class="est-right-scroll"></div><div class="est-total-box"><div id="estimateTotal" class="est-total-value"></div><div class="est-total-label">Estimate Total</div><div id="estimateSqft" class="est-total-sub"></div></div></aside>
+        </div><footer class="est-version-bar" id="versionBar"></footer>`;
     }
+
+    (function setupEstimatingLayout() {
+        const main = root.querySelector('.est-main');
+        const resizer = $('estSplitResizer');
+        try {
+            if (localStorage.getItem('takeoff.estimatingRightCollapsed') === '1') main?.classList.add('details-collapsed');
+            const savedWidth = Number(localStorage.getItem('takeoff.estimatingRightWidth'));
+            if (savedWidth >= 280 && savedWidth <= 720) main?.style.setProperty('--est-right-w', `${savedWidth}px`);
+        } catch (_) {}
+        if (!main || !resizer) return;
+        let dragging = false;
+        const move = event => {
+            if (!dragging) return;
+            const bounds = main.getBoundingClientRect();
+            const width = Math.max(280, Math.min(720, bounds.right - event.clientX));
+            main.style.setProperty('--est-right-w', `${width}px`);
+            try { localStorage.setItem('takeoff.estimatingRightWidth', String(Math.round(width))); } catch (_) {}
+        };
+        resizer.addEventListener('pointerdown', event => {
+            dragging = true;
+            resizer.setPointerCapture?.(event.pointerId);
+            main.classList.add('is-resizing');
+        });
+        resizer.addEventListener('pointermove', move);
+        resizer.addEventListener('pointerup', () => { dragging = false; main.classList.remove('is-resizing'); });
+        resizer.addEventListener('pointercancel', () => { dragging = false; main.classList.remove('is-resizing'); });
+    })();
 
     function readLocal() {
         let raw = null;
@@ -1548,6 +1601,16 @@
         }
         if (action === 'fullscreen') document.fullscreenElement ? document.exitFullscreen() : root.requestFullscreen?.();
         if (action === 'options') $('optionsMenu')?.classList.toggle('open');
+        if (action === 'toggle-right') {
+            const main = root.querySelector('.est-main');
+            const collapsed = main?.classList.toggle('details-collapsed');
+            const button = root.querySelector('[data-est-action="toggle-right"]');
+            if (button) {
+                button.title = collapsed ? 'Show summary panel' : 'Hide summary panel';
+                button.innerHTML = `<i class="fas fa-chevron-${collapsed ? 'left' : 'right'}"></i>`;
+            }
+            try { localStorage.setItem('takeoff.estimatingRightCollapsed', collapsed ? '1' : '0'); } catch (_) {}
+        }
         const option = target.closest('[data-est-option]')?.dataset.estOption;
         if (option === 'save') saveServer();
         if (option === 'copy') { ui.modal = 'new'; renderModal(); }
