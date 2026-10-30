@@ -928,7 +928,7 @@ $state = [
     <link rel="stylesheet" href="../assets/project_overview.css?v=<?= filemtime(__DIR__ . '/../assets/project_overview.css') ?>">
     <link rel="stylesheet" href="../assets/project_takeoff.css?v=<?= filemtime(__DIR__ . '/../assets/project_takeoff.css') ?>">
     <link rel="stylesheet" href="../assets/project_estimating.css?v=<?= filemtime(__DIR__ . '/../assets/project_estimating.css') ?>">
-    <link rel="stylesheet" href="../assets/project_proposal.css?v=unified-hierarchy-20260930-1">
+    <link rel="stylesheet" href="../assets/project_proposal.css?v=<?= filemtime(__DIR__ . '/../assets/project_proposal.css') ?>">
     <link rel="stylesheet" href="../assets/won_project_export.css?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.css') ?>">
 </head>
 
@@ -1872,7 +1872,7 @@ $state = [
                         <div class="proposal-settings-head">
                             <div>
                                 <h2>Detail Settings</h2>
-                                <span>Proposal</span>
+                                <span class="proposal-head-badge">Proposal</span>
                             </div>
                             <div class="proposal-export-wrap">
                                 <button class="proposal-export-btn" type="button" data-proposal-export-toggle>
@@ -1880,9 +1880,9 @@ $state = [
                                         class="fas fa-chevron-down"></i>
                                 </button>
                                 <div class="proposal-export-menu" id="proposalExportMenu">
-                                    <button type="button" data-proposal-export="pdf">Export PDF</button>
-                                    <button type="button" data-proposal-export="docx">Export DOCX</button>
-                                    <button type="button" data-proposal-export="preview">Export Preview</button>
+                                    <button type="button" data-proposal-export="pdf"><i class="fas fa-file-pdf" style="color:#ef4444; width:16px; margin-right:6px;"></i> Download PDF (.pdf)</button>
+                                    <button type="button" data-proposal-export="docx"><i class="fas fa-file-word" style="color:#2563eb; width:16px; margin-right:6px;"></i> Download Word (.doc)</button>
+                                    <button type="button" data-proposal-export="print"><i class="fas fa-print" style="color:#64748b; width:16px; margin-right:6px;"></i> Print / System Dialog</button>
                                 </div>
                             </div>
                         </div>
@@ -1890,22 +1890,16 @@ $state = [
                             <div id="proposalSettingsPanel"></div>
                         </div>
                     </aside>
-                    <main class="proposal-preview-area" aria-label="Proposal preview">
+                    <div class="proposal-preview-area" role="main" aria-label="Proposal preview">
                         <div class="proposal-builder-note" id="proposalBuilderNote" hidden>Proposal Builder is ready to
                             be connected.</div>
-                        <div class="proposal-feature-banner" id="proposalFeatureBanner">
-                            <span>Enhanced Itemization in Proposal tab - Easily update proposals with: itemized
-                                alternates &amp; assembly items, new customer/contact selection, and new toggles to
-                                setup proposal.</span>
-                            <button type="button" data-proposal-learn>Learn More</button>
-                            <button type="button" data-proposal-dismiss-banner aria-label="Dismiss">x</button>
-                        </div>
                         <div class="proposal-document" id="proposalDocument"></div>
-                    </main>
-                    <footer class="est-version-bar" id="proposalEstimateTypesFooter" aria-label="Available estimates">
+                    </div>
+                    <footer class="est-version-bar project-estimate-footer" id="proposalEstimateTypesFooter" aria-label="Available estimates">
                         <span class="est-pill">Loading estimates&hellip;</span>
                     </footer>
                 </div>
+            </section>
         </main>
     </div>
 
@@ -2502,7 +2496,7 @@ $state = [
     <script src="../assets/estimating_catalog_adapter.js?v=estimating-catalog-snapshot-20260827-1"></script>
     <script src="../assets/project_estimating.js?v=<?= filemtime(__DIR__ . '/../assets/project_estimating.js') ?>"></script>
     <script src="../assets/catalog_update_ui.js?v=<?= filemtime(__DIR__ . '/../assets/catalog_update_ui.js') ?>"></script>
-    <script src="../assets/project_proposal.js?v=quantity-context-format-20260831-1"></script>
+    <script src="../assets/project_proposal.js?v=<?= filemtime(__DIR__ . '/../assets/project_proposal.js') ?>"></script>
     <script src="../assets/won_project_export.js?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.js') ?>"></script>
     <script src="../assets/global_tools.js"></script>
 </body>

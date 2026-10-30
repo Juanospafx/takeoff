@@ -1,46 +1,92 @@
+/* ==========================================================
+   BRIGHTRONIX DESIGN SYSTEM & DNA: PROPOSAL WORKSPACE
+   Unified Floating Card Architecture & Dual Themes
+   ========================================================== */
+
+/* Main Tab Panel Frame */
+#tab-proposal,
 .proposal-page {
-    height: 100%;
-    min-height: 0;
-    padding: 0;
-    overflow: hidden;
-    background: #e7edf4;
+    height: 100% !important;
+    min-height: 0 !important;
+    padding: 0 16px 14px 16px !important;
+    box-sizing: border-box !important;
+    overflow: hidden !important;
+    background: var(--bg-body, var(--tk-bg-workspace, #edf2f7));
+    font-family: 'Outfit', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
 }
 
 .tab-panel.proposal-page.active {
     display: block;
 }
 
+/* Proposal Grid Shell */
 .proposal-shell {
     height: 100%;
     min-height: 0;
     display: grid;
-    grid-template-columns: minmax(300px, 340px) minmax(0, 1fr);
-    grid-template-rows: minmax(0, 1fr) auto;
-    background: #e7edf4;
-    color: #172033;
+    grid-template-columns: minmax(320px, 360px) minmax(0, 1fr);
+    grid-template-rows: minmax(0, 1fr) 40px;
+    row-gap: 8px;
+    column-gap: 12px;
+    background: transparent;
+    color: var(--text-main, #0f172a);
+    box-sizing: border-box;
 }
 
-.proposal-shell > .project-estimate-footer { grid-column: 1 / -1; }
+/* ==========================================================
+   ESTIMATE FOOTER (Synchronized with Takeoff & Estimating)
+   ========================================================== */
+.proposal-shell > .est-version-bar,
+.proposal-shell > #proposalEstimateTypesFooter,
+.proposal-shell > .project-estimate-footer {
+    grid-column: 1 / -1 !important;
+    grid-row: 2 !important;
+    min-width: 0;
+    min-height: 40px !important;
+    height: 40px !important;
+    max-height: 40px !important;
+    padding: 4px 12px !important;
+    display: flex !important;
+    align-items: center !important;
+    gap: 8px !important;
+    overflow-x: auto !important;
+    overflow-y: hidden !important;
+    background: var(--bg-panel, #ffffff) !important;
+    border: 1px solid var(--border, #cbd5e1) !important;
+    border-radius: 8px !important;
+    box-shadow: 0 1px 3px rgba(0, 0, 0, 0.03) !important;
+    color: var(--tk-text-main, #0f172a) !important;
+    z-index: 1000 !important;
+    scrollbar-width: thin !important;
+    box-sizing: border-box !important;
+}
 
+/* ==========================================================
+   LEFT SIDEBAR: PROPOSAL DETAIL SETTINGS (Floating Card Box)
+   ========================================================== */
 .proposal-settings {
     min-height: 0;
     display: flex;
     flex-direction: column;
-    background: #fff;
-    border-right: 1px solid #ccd6e2;
+    background: var(--bg-panel, #ffffff);
+    border: 1px solid var(--border-soft, #cbd5e1);
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+    overflow: hidden;
 }
 
+/* Settings Header */
 .proposal-settings-head {
-    height: 40px;
-    min-height: 40px;
-    max-height: 40px;
-    padding: 0 12px;
+    height: 44px;
+    min-height: 44px;
+    max-height: 44px;
+    padding: 0 14px;
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 10px;
-    border-bottom: 1px solid #d8e0ea;
-    background: #fff;
+    border-bottom: 1px solid var(--border-soft, #e2e8f0);
+    background: var(--bg-panel, #ffffff);
     box-sizing: border-box;
 }
 
@@ -52,7 +98,7 @@
 
 .proposal-settings-head h2 {
     margin: 0;
-    font-size: 13px !important;
+    font-size: 13.5px !important;
     font-weight: 700 !important;
     font-family: 'Outfit', sans-serif !important;
     color: var(--text-main, #0f172a) !important;
@@ -60,101 +106,268 @@
     line-height: 1.2 !important;
 }
 
-.proposal-settings-head span {
+.proposal-settings-head .proposal-head-badge {
     display: inline-block;
     margin: 0;
-    color: var(--text-muted, #64748b);
-    font-size: 11px;
-    font-weight: 500;
-    background: rgba(0, 0, 0, 0.05);
-    padding: 1px 6px;
-    border-radius: 4px;
+    color: var(--primary, #fb5a3a) !important;
+    background: rgba(251, 90, 58, 0.12) !important;
+    font-size: 10px !important;
+    font-weight: 700 !important;
+    padding: 2px 7px !important;
+    border-radius: 6px !important;
+    letter-spacing: 0.04em !important;
+    text-transform: uppercase !important;
 }
 
-.proposal-settings-scroll {
-    flex: 1;
-    min-height: 0;
-    overflow: auto;
-    padding: 10px 0 18px;
-}
-
+/* Export Dropdown in Header */
 .proposal-export-wrap {
     position: relative;
     flex: 0 0 auto;
 }
 
-.proposal-export-btn {
-    height: 28px;
-    border: 0;
-    border-radius: 5px;
-    padding: 0 10px;
-    display: inline-flex;
-    align-items: center;
-    gap: 6px;
-    background: var(--primary, #fb5a3a);
-    color: #fff;
-    font-size: 11.5px;
-    font-weight: 600;
-    box-shadow: 0 1px 2px rgba(15, 23, 42, .12);
-    cursor: pointer;
+.proposal-export-btn,
+button.proposal-export-btn {
+    height: 30px !important;
+    border: 0 !important;
+    border-radius: 7px !important;
+    padding: 0 12px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    gap: 6px !important;
+    background: var(--primary, #fb5a3a) !important;
+    color: #ffffff !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    font-family: 'Outfit', sans-serif !important;
+    box-shadow: 0 2px 6px rgba(251, 90, 58, 0.28) !important;
+    cursor: pointer !important;
+    transition: all 0.16s ease !important;
 }
 
-.proposal-export-btn:hover { background: var(--primary-hover, #e14e32); }
+.proposal-export-btn:hover {
+    background: var(--primary-hover, #e14e32) !important;
+    box-shadow: 0 4px 10px rgba(251, 90, 58, 0.38) !important;
+    transform: translateY(-1px);
+}
+
+/* Explicit WHITE text and icons for Export Button */
+.proposal-export-btn span,
+.proposal-export-btn i,
+button.proposal-export-btn span,
+button.proposal-export-btn i {
+    color: #ffffff !important;
+    background: transparent !important;
+    font-size: 12px !important;
+    font-weight: 700 !important;
+    text-transform: none !important;
+    letter-spacing: normal !important;
+    padding: 0 !important;
+    margin: 0 !important;
+    border-radius: 0 !important;
+    text-shadow: 0 1px 2px rgba(0, 0, 0, 0.25) !important;
+}
 
 .proposal-export-menu {
     position: absolute;
     top: calc(100% + 6px);
     right: 0;
-    z-index: 20;
-    width: 172px;
+    z-index: 1100;
+    width: 215px;
     padding: 6px;
     display: none;
-    background: #fff;
-    border: 1px solid #d8e0ea;
-    border-radius: 6px;
-    box-shadow: 0 12px 28px rgba(15, 23, 42, .18);
+    background: var(--bg-panel, #ffffff);
+    border: 1px solid var(--border-soft, #cbd5e1);
+    border-radius: 9px;
+    box-shadow: 0 12px 32px rgba(15, 23, 42, 0.18);
 }
 
-.proposal-export-menu.open { display: grid; gap: 2px; }
+.proposal-export-menu.open {
+    display: grid;
+    gap: 3px;
+}
 
 .proposal-export-menu button {
     width: 100%;
     border: 0;
-    border-radius: 5px;
-    padding: 9px 10px;
+    border-radius: 6px;
+    padding: 8px 12px;
     text-align: left;
     background: transparent;
-    color: #172033;
-    font-weight: 700;
+    color: var(--text-main, #1e293b);
+    font-size: 12.5px;
+    font-weight: 600;
+    font-family: 'Outfit', sans-serif;
+    cursor: pointer;
+    transition: background 0.12s ease;
 }
 
-.proposal-export-menu button:hover { background: #f2f5f9; }
+.proposal-export-menu button:hover {
+    background: var(--bg-hover, #f1f5f9);
+    color: var(--primary, #fb5a3a);
+}
 
+/* Settings Scrollable Body with Generous Spacing */
+.proposal-settings-scroll {
+    flex: 1;
+    min-height: 0;
+    overflow-y: auto;
+    overflow-x: hidden;
+    padding: 14px 14px 32px !important;
+    display: flex;
+    flex-direction: column;
+    gap: 14px !important;
+}
+
+.proposal-settings-scroll::-webkit-scrollbar {
+    width: 5px;
+}
+
+.proposal-settings-scroll::-webkit-scrollbar-track {
+    background: transparent;
+}
+
+.proposal-settings-scroll::-webkit-scrollbar-thumb {
+    background: rgba(148, 163, 184, 0.3);
+    border-radius: 999px;
+}
+
+/* Floating Card Box Sections with Explicit Margins */
 .proposal-section {
-    border-bottom: 1px solid #e4e9f0;
-    padding: 14px 16px;
+    margin-bottom: 14px !important;
+    background: var(--bg-surface, #f8fafc);
+    border: 1px solid var(--border-soft, #e2e8f0);
+    border-radius: 12px;
+    padding: 15px 16px;
+    transition: all 0.18s ease;
+    box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
+}
+
+.proposal-section:last-child {
+    margin-bottom: 24px !important;
+}
+
+.proposal-section:hover {
+    border-color: var(--border, #cbd5e1);
+    box-shadow: 0 4px 12px rgba(15, 23, 42, 0.06);
+}
+
+.proposal-card-header {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    margin-bottom: 12px;
+}
+
+.proposal-card-icon {
+    width: 22px;
+    height: 22px;
+    border-radius: 6px;
+    display: grid;
+    place-items: center;
+    background: rgba(251, 90, 58, 0.1);
+    color: var(--primary, #fb5a3a);
+    font-size: 10.5px;
+    flex-shrink: 0;
 }
 
 .proposal-section h3 {
-    margin: 0 0 10px;
-    font-size: 12px;
-    color: #344054;
-    font-weight: 800;
+    margin: 0;
+    font-size: 11.5px;
+    color: var(--text-muted, #475569);
+    font-weight: 700;
     text-transform: uppercase;
-    letter-spacing: .04em;
+    letter-spacing: .05em;
+    font-family: 'Outfit', sans-serif;
 }
 
-.proposal-control-list { display: grid; gap: 10px; }
+.proposal-control-list {
+    display: grid;
+    gap: 9px;
+}
 
-.proposal-toggle-row,
-.proposal-select-row {
+/* Form Inputs inside Card Boxes */
+.proposal-input-group {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    margin-bottom: 8px;
+}
+
+.proposal-input-group label {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--text-muted, #64748b);
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+    font-family: 'Outfit', sans-serif;
+}
+
+.proposal-text-input {
+    width: 100%;
+    height: 32px;
+    border: 1px solid var(--border, #cbd5e1);
+    border-radius: 7px;
+    padding: 0 10px;
+    background: var(--bg-panel, #ffffff);
+    color: var(--text-main, #0f172a);
+    font-family: 'Outfit', sans-serif;
+    font-size: 12px;
+    font-weight: 500;
+    transition: all 0.15s ease;
+    box-sizing: border-box;
+}
+
+.proposal-text-input:focus {
+    border-color: var(--primary, #fb5a3a);
+    box-shadow: 0 0 0 2px rgba(251, 90, 58, 0.18);
+    outline: none;
+}
+
+.proposal-reset-company-btn {
+    margin-top: 6px;
+    width: 100%;
+    height: 30px;
+    border: 1px dashed var(--border, #cbd5e1);
+    border-radius: 7px;
+    background: transparent;
+    color: var(--text-muted, #64748b);
+    font-size: 11.5px;
+    font-weight: 600;
+    font-family: 'Outfit', sans-serif;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    justify-content: center;
+    gap: 6px;
+    transition: all 0.14s ease;
+}
+
+.proposal-reset-company-btn:hover {
+    border-color: var(--primary, #fb5a3a);
+    color: var(--primary, #fb5a3a);
+    background: rgba(251, 90, 58, 0.05);
+}
+
+/* ==========================================================
+   TOGGLE SWITCHES (Smooth Animations & Exact Orange State)
+   ========================================================== */
+.proposal-toggle-row {
     display: flex;
     align-items: center;
     justify-content: space-between;
     gap: 12px;
-    color: #1f2937;
-    font-size: 13px;
-    font-weight: 700;
+    color: var(--text-main, #1e293b);
+    font-size: 12.5px;
+    font-weight: 600;
+    font-family: 'Outfit', sans-serif;
+    cursor: pointer;
+    user-select: none;
+    padding: 2px 0;
+    transition: color 0.12s ease;
+}
+
+.proposal-toggle-row:hover {
+    color: var(--primary, #fb5a3a);
 }
 
 .proposal-switch {
@@ -162,12 +375,17 @@
     height: 22px;
     position: relative;
     flex: 0 0 auto;
+    display: inline-block;
 }
 
 .proposal-switch input {
     position: absolute;
     opacity: 0;
-    inset: 0;
+    width: 0;
+    height: 0;
+    margin: 0;
+    cursor: pointer;
+    z-index: 2;
 }
 
 .proposal-slider {
@@ -175,7 +393,8 @@
     inset: 0;
     border-radius: 999px;
     background: #cbd5e1;
-    transition: background .18s ease;
+    transition: background 0.2s ease, box-shadow 0.2s ease;
+    cursor: pointer;
 }
 
 .proposal-slider::after {
@@ -186,362 +405,2461 @@
     width: 16px;
     height: 16px;
     border-radius: 50%;
-    background: #fff;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, .28);
-    transition: transform .18s ease;
+    background: #ffffff;
+    box-shadow: 0 1px 3px rgba(15, 23, 42, 0.28);
+    transition: transform 0.2s cubic-bezier(0.4, 0, 0.2, 1);
 }
 
-.proposal-switch input:checked + .proposal-slider { background: var(--primary, #fb5a3a); }
-.proposal-switch input:checked + .proposal-slider::after { transform: translateX(16px); }
+/* Checked (ON) State in Light Theme */
+.proposal-switch input:checked + .proposal-slider {
+    background: #fb5a3a !important;
+}
+
+.proposal-switch input:checked + .proposal-slider::after {
+    transform: translateX(16px);
+}
+
+/* Select Rows */
+.proposal-select-row {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    color: var(--text-main, #1e293b);
+    font-size: 12.5px;
+    font-weight: 600;
+    font-family: 'Outfit', sans-serif;
+}
 
 .proposal-select-row select {
-    min-width: 150px;
-    height: 34px;
-    border: 1px solid #cbd5e1;
-    border-radius: 6px;
-    padding: 0 10px;
-    background: #fff;
-    color: #172033;
-    font-weight: 700;
+    min-width: 130px;
+    max-width: 180px;
+    height: 32px;
+    border: 1px solid var(--border, #cbd5e1);
+    border-radius: 7px;
+    padding: 0 8px;
+    background: var(--bg-panel, #ffffff);
+    color: var(--text-main, #0f172a);
+    font-family: 'Outfit', sans-serif;
+    font-size: 11.5px;
+    font-weight: 600;
+    transition: all 0.15s ease;
+    cursor: pointer;
 }
 
+.proposal-select-row select:focus {
+    border-color: var(--primary, #fb5a3a);
+    box-shadow: 0 0 0 2px rgba(251, 90, 58, 0.18);
+    outline: none;
+}
+
+/* Standardized Custom Dropdowns inside Proposal Sidebar */
+.proposal-select-row .pro-custom-dropdown,
+.proposal-select-row .cc-custom-select,
+.proposal-select-row .pro-custom-select {
+    width: auto !important;
+    min-width: 135px !important;
+    max-width: 180px !important;
+    flex: 0 0 auto !important;
+}
+
+.proposal-select-row .pro-custom-dropdown-trigger {
+    height: 32px !important;
+    min-height: 32px !important;
+    padding: 0 10px !important;
+    font-size: 12px !important;
+    font-weight: 600 !important;
+    font-family: 'Outfit', sans-serif !important;
+    border-radius: 7px !important;
+}
+
+.proposal-select-row .pro-custom-dropdown-menu {
+    min-width: 175px !important;
+    z-index: 200 !important;
+}
+
+[data-theme="dark"] .proposal-select-row .pro-custom-dropdown-trigger,
+body.theme-dark .proposal-select-row .pro-custom-dropdown-trigger {
+    background: #242a38 !important;
+    border-color: #2f384a !important;
+    color: #ffffff !important;
+}
+
+[data-theme="dark"] .proposal-select-row .pro-custom-dropdown-menu,
+body.theme-dark .proposal-select-row .pro-custom-dropdown-menu {
+    background: #242a38 !important;
+    border-color: #2f384a !important;
+    box-shadow: 0 10px 25px -5px rgba(0, 0, 0, 0.5), 0 8px 10px -6px rgba(0, 0, 0, 0.3) !important;
+}
+
+/* Switch & Select Dependency Badges and Overridden States */
+.proposal-toggle-wrapper,
+.proposal-select-wrapper {
+    display: flex;
+    flex-direction: column;
+    width: 100%;
+}
+
+.proposal-toggle-label,
+.proposal-select-label {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-start;
+    gap: 3px;
+    flex: 1;
+    min-width: 0;
+}
+
+.proposal-toggle-title,
+.proposal-select-title {
+    font-size: 12.5px;
+    font-weight: 600;
+    line-height: 1.3;
+}
+
+.proposal-dep-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    font-size: 10.5px;
+    font-weight: 500;
+    line-height: 1.2;
+    padding: 2px 7px;
+    border-radius: 4px;
+    letter-spacing: 0.1px;
+    user-select: none;
+    margin-top: 2px;
+}
+
+.proposal-dep-badge.is-warning {
+    background: rgba(245, 158, 11, 0.14);
+    color: #b45309;
+    border: 1px solid rgba(245, 158, 11, 0.32);
+}
+
+[data-theme="dark"] .proposal-dep-badge.is-warning,
+body.theme-dark .proposal-dep-badge.is-warning {
+    background: rgba(245, 158, 11, 0.22);
+    color: #fbbf24;
+    border-color: rgba(245, 158, 11, 0.45);
+}
+
+.proposal-dep-badge.is-info {
+    background: rgba(59, 130, 246, 0.12);
+    color: #1d4ed8;
+    border: 1px solid rgba(59, 130, 246, 0.28);
+}
+
+[data-theme="dark"] .proposal-dep-badge.is-info,
+body.theme-dark .proposal-dep-badge.is-info {
+    background: rgba(59, 130, 246, 0.2);
+    color: #60a5fa;
+    border-color: rgba(59, 130, 246, 0.4);
+}
+
+.proposal-toggle-row.is-disabled,
+.proposal-select-row.is-disabled,
+.proposal-toggle-wrapper.is-disabled,
+.proposal-select-wrapper.is-disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.proposal-toggle-row.is-disabled:hover {
+    color: var(--text-main, #1e293b);
+}
+
+.proposal-toggle-row.is-disabled input,
+.proposal-select-row.is-disabled select {
+    pointer-events: none;
+    cursor: not-allowed;
+}
+
+.proposal-switch.is-disabled {
+    opacity: 0.55;
+    cursor: not-allowed;
+}
+
+.proposal-switch.is-disabled .proposal-slider {
+    cursor: not-allowed !important;
+}
+
+/* Customer Card Details */
 .proposal-customer-box {
     display: grid;
-    gap: 7px;
-    color: #475467;
-    font-size: 13px;
+    gap: 5px;
+    color: var(--text-muted, #475467);
+    font-size: 12px;
     line-height: 1.35;
 }
 
 .proposal-customer-title {
-    color: #172033;
-    font-weight: 800;
+    color: var(--text-main, #0f172a);
+    font-weight: 700;
+    font-size: 13px;
+    font-family: 'Outfit', sans-serif;
+}
+
+.proposal-customer-detail {
+    display: flex;
+    align-items: flex-start;
+    gap: 6px;
+    font-size: 11.5px;
+    color: var(--text-muted, #64748b);
+}
+
+.proposal-customer-detail i {
+    width: 14px;
+    margin-top: 2px;
+    color: var(--primary, #fb5a3a);
+    font-size: 10.5px;
 }
 
 .proposal-customer-actions {
     display: flex;
     gap: 8px;
-    margin-top: 6px;
+    margin-top: 8px;
 }
 
-.proposal-small-btn,
-.proposal-dot-btn {
-    border: 1px solid #cbd5e1;
+.proposal-small-btn {
+    border: 1px solid var(--border, #cbd5e1);
     border-radius: 6px;
-    min-height: 32px;
+    height: 28px;
     padding: 0 10px;
-    background: #fff;
-    color: #172033;
-    font-weight: 800;
+    background: var(--primary, #fb5a3a);
+    color: #fff;
+    font-size: 11.5px;
+    font-weight: 600;
+    font-family: 'Outfit', sans-serif;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.14s ease;
 }
 
-.proposal-dot-btn {
-    width: 32px;
-    padding: 0;
+.proposal-small-btn:hover {
+    background: var(--primary-hover, #e14e32);
+    box-shadow: 0 2px 6px rgba(251, 90, 58, 0.25);
 }
 
+.proposal-small-btn.secondary {
+    background: var(--bg-panel, #ffffff);
+    color: var(--text-main, #1e293b);
+}
+
+.proposal-small-btn.secondary:hover {
+    background: var(--bg-hover, #f1f5f9);
+    border-color: var(--border, #94a3b8);
+    box-shadow: none;
+}
+
+/* ==========================================================
+   RIGHT PREVIEW AREA (Full Extensible Workspace Canvas)
+   ========================================================== */
 .proposal-preview-area {
     min-width: 0;
     min-height: 0;
     position: relative;
-    overflow: auto;
-    padding: 28px 24px 40px;
-    background: #e7edf4;
+    overflow-y: scroll !important;
+    overflow-x: auto !important;
+    scrollbar-gutter: stable;
+    scrollbar-width: thin !important;
+    scrollbar-color: #94a3b8 #f1f5f9 !important;
+    padding: 20px 20px 60px !important;
+    background: var(--bg-body, var(--tk-bg-workspace, #edf2f7));
+    border: 1px solid var(--border-soft, #cbd5e1);
+    border-radius: 12px;
+    box-shadow: 0 4px 16px rgba(15, 23, 42, 0.04);
+    display: block !important;
 }
 
+.proposal-preview-area::-webkit-scrollbar {
+    display: block !important;
+    width: 10px !important;
+    height: 10px !important;
+}
+
+.proposal-preview-area::-webkit-scrollbar-track {
+    display: block !important;
+    background: #f1f5f9 !important;
+    border-radius: 8px !important;
+}
+
+.proposal-preview-area::-webkit-scrollbar-thumb {
+    display: block !important;
+    background: #cbd5e1 !important;
+    border-radius: 8px !important;
+    border: 2px solid #f1f5f9 !important;
+}
+
+.proposal-preview-area::-webkit-scrollbar-thumb:hover {
+    background: #94a3b8 !important;
+}
+
+/* View Mode & Width Toolbar */
+.proposal-view-toolbar {
+    width: min(8.5in, 100%);
+    margin: 0 auto 16px auto;
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    justify-content: space-between;
+    gap: 10px;
+    padding: 7px 14px;
+    background: var(--bg-panel, #ffffff);
+    border: 1px solid var(--border-soft, #cbd5e1);
+    border-radius: 8px;
+    box-shadow: 0 1px 4px rgba(0, 0, 0, 0.04);
+    box-sizing: border-box;
+}
+
+.proposal-view-group {
+    display: flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.proposal-view-label {
+    font-size: 11px;
+    font-weight: 700;
+    color: var(--text-muted, #64748b);
+    display: flex;
+    align-items: center;
+    gap: 5px;
+    text-transform: uppercase;
+    letter-spacing: 0.04em;
+}
+
+.proposal-view-buttons {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.proposal-view-btn {
+    border: 1px solid var(--border, #cbd5e1);
+    border-radius: 6px;
+    height: 28px;
+    padding: 0 11px;
+    background: var(--bg-surface, #f8fafc);
+    color: var(--text-main, #334155);
+    font-size: 11.5px;
+    font-weight: 600;
+    font-family: 'Outfit', sans-serif;
+    cursor: pointer;
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+    transition: all 0.15s ease;
+}
+
+.proposal-view-btn:hover {
+    border-color: var(--primary, #fb5a3a);
+    color: var(--primary, #fb5a3a);
+}
+
+.proposal-view-btn.active {
+    background: var(--primary, #fb5a3a) !important;
+    border-color: var(--primary, #fb5a3a) !important;
+    color: #ffffff !important;
+    box-shadow: 0 2px 5px rgba(251, 90, 58, 0.28);
+}
+
+/* Banners */
 .proposal-builder-note {
-    max-width: 860px;
+    width: min(8.5in, 100%);
     margin: 0 auto 12px;
     padding: 10px 14px;
     border: 1px solid #bfdbfe;
-    border-radius: 6px;
+    border-radius: 8px;
     background: #eff6ff;
     color: #1d4ed8;
-    font-weight: 800;
-}
-
-.proposal-document {
-    width: min(8.5in, calc(100% - 16px));
-    min-height: 11in;
-    margin: 0 auto;
-    padding: .58in .62in;
-    background: #fff;
-    color: #111827;
-    box-shadow: 0 18px 42px rgba(15, 23, 42, .18);
-    font-family: Arial, Helvetica, sans-serif;
+    font-weight: 700;
     font-size: 12px;
-    line-height: 1.42;
+    box-sizing: border-box;
 }
 
+/* ==========================================================
+   THE PDF DOCUMENT SHEETS (Continuous & Multi-Page Views)
+   ========================================================== */
+#proposalDocument,
+.proposal-document {
+    width: 100%;
+    margin: 0 auto;
+    display: block;
+}
+
+/* Continuous Extended Single Page Mode: Extends seamlessly to full length */
+.proposal-document-body {
+    width: min(8.5in, 100%);
+    min-height: 11in !important;
+    height: auto !important;
+    margin: 0 auto 30px auto;
+    padding: .55in .65in .65in .65in;
+    background: #ffffff;
+    color: #0f172a;
+    border-radius: 6px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.04);
+    font-family: 'Outfit', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 12px;
+    line-height: 1.5;
+    box-sizing: border-box !important;
+    overflow: visible !important;
+    transition: width 0.2s ease, max-width 0.2s ease;
+}
+
+/* Full Width Support */
+.proposal-document-body.is-full-width,
+.proposal-page-sheet.is-full-width {
+    width: 100% !important;
+    max-width: 1150px !important;
+}
+
+/* Multi-Page Paginated Sheets Mode */
+.proposal-paged-wrap {
+    width: 100%;
+    margin: 0 auto;
+    display: flex;
+    flex-direction: column;
+    align-items: center;
+}
+
+.proposal-page-sheet {
+    width: min(8.5in, 100%);
+    min-height: 11in !important;
+    height: auto !important;
+    margin: 0 auto 28px auto;
+    padding: .55in .65in .55in .65in;
+    background: #ffffff;
+    color: #0f172a;
+    border-radius: 6px;
+    box-shadow: 0 16px 48px rgba(0, 0, 0, 0.14), 0 2px 6px rgba(0, 0, 0, 0.04);
+    font-family: 'Outfit', system-ui, -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif;
+    font-size: 12px;
+    line-height: 1.5;
+    box-sizing: border-box !important;
+    position: relative;
+    overflow: visible !important;
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    transition: width 0.2s ease, max-width 0.2s ease;
+}
+
+.proposal-sheet-content {
+    flex: 1 1 auto;
+    display: flex;
+    flex-direction: column;
+}
+
+.proposal-sheet-footer {
+    flex-shrink: 0;
+    margin-top: 18px;
+    padding-top: 8px;
+    border-top: 1px solid #e2e8f0;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    font-size: 10.5px;
+    color: #94a3b8;
+}
+
+/* Editable Hover & Focus Effects on Document Sheet */
+#proposalDocument [contenteditable="true"] {
+    outline: none;
+    cursor: text;
+    border-radius: 4px;
+    padding: 1px 4px;
+    margin: -1px -4px;
+    transition: background 0.14s ease, box-shadow 0.14s ease;
+}
+
+#proposalDocument [contenteditable="true"]:hover {
+    background: rgba(251, 90, 58, 0.06);
+    box-shadow: 0 0 0 1px rgba(251, 90, 58, 0.35);
+}
+
+#proposalDocument [contenteditable="true"]:focus {
+    background: rgba(251, 90, 58, 0.09);
+    box-shadow: 0 0 0 2px var(--primary, #fb5a3a);
+}
+
+/* Document Header (Logo on top, company details stacked directly below it) */
 .proposal-doc-header {
     display: grid;
     grid-template-columns: 1fr auto;
-    gap: 24px;
+    gap: 20px;
     align-items: start;
-    padding-bottom: 18px;
-    border-bottom: 2px solid #111827;
+    padding-bottom: 16px;
+    border-bottom: 2px solid #0f172a;
+    width: 100% !important;
+    box-sizing: border-box !important;
 }
 
-.proposal-brand {
+.proposal-header-left {
     display: flex;
-    gap: 14px;
+    flex-direction: column;
     align-items: flex-start;
+    gap: 8px;
 }
 
-.proposal-logo {
-    width: 46px;
-    height: 46px;
-    border-radius: 6px;
+.proposal-brand-logo-wrap {
+    display: flex;
+    align-items: center;
+    min-height: 44px;
+}
+
+.proposal-brand-logo {
+    max-height: 48px;
+    max-width: 220px;
+    object-fit: contain;
+    display: block;
+}
+
+.proposal-logo-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 8px;
+}
+
+.proposal-logo-b {
+    width: 42px;
+    height: 42px;
+    border-radius: 9px;
     display: grid;
     place-items: center;
-    background: #0f172a;
-    color: #f97316;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    color: #fb5a3a;
     font-weight: 900;
-    font-size: 20px;
+    font-size: 22px;
+    box-shadow: 0 3px 8px rgba(15, 23, 42, 0.18);
 }
 
-.proposal-company-name {
-    font-size: 18px;
-    font-weight: 900;
-    color: #111827;
+.proposal-logo-text {
+    font-size: 19px;
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: -0.02em;
 }
 
-.proposal-muted { color: #667085; }
-.proposal-quote-meta { text-align: right; display: grid; gap: 5px; font-size: 12px; }
-.proposal-quote-meta strong { color: #111827; }
+.proposal-company-details {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+}
+
+.proposal-company-line {
+    color: #475569;
+    font-size: 11.5px;
+    line-height: 1.4;
+}
+
+.proposal-company-inline-field {
+    font-weight: 600;
+    color: #1e293b;
+}
+
+.proposal-quote-meta {
+    text-align: right;
+    display: grid;
+    gap: 4px;
+    font-size: 11.5px;
+    color: #475569;
+    white-space: nowrap;
+}
+
+.proposal-quote-meta strong {
+    color: #0f172a;
+    font-weight: 700;
+}
+
+.proposal-meta-field {
+    font-weight: 700;
+    color: #0f172a;
+}
+
+/* Document Title */
+.proposal-doc-title-row {
+    margin: 18px 0 14px;
+    width: 100% !important;
+}
 
 .proposal-doc-title {
-    margin: 22px 0 14px;
     font-size: 20px;
-    font-weight: 900;
-    color: #111827;
+    font-weight: 800;
+    color: #0f172a;
+    letter-spacing: -0.02em;
+    line-height: 1.25;
 }
 
+/* Customer Block (Floating Card Box on Paper) */
 .proposal-customer-block {
-    padding: 14px;
-    margin: 14px 0 18px;
-    border: 1px solid #d7dee8;
-    background: #f3f6fa;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    padding: 10px 14px;
+    margin: 6px 0 16px;
+    border: 1px solid #e2e8f0;
+    border-left: 3px solid var(--primary, #fb5a3a);
+    border-radius: 0 8px 8px 0;
+    background: #f8fafc;
 }
 
-.proposal-customer-block h4,
-.proposal-doc-section h4 {
-    margin: 0 0 8px;
-    font-size: 12px;
-    color: #344054;
-    font-weight: 900;
+.proposal-customer-prep-label {
+    font-size: 9.5px;
+    font-weight: 800;
     text-transform: uppercase;
-    letter-spacing: .04em;
+    letter-spacing: .08em;
+    color: var(--primary, #fb5a3a);
+    margin-bottom: 2px;
 }
 
+.proposal-doc-section h4 {
+    margin: 0 0 6px;
+    font-size: 11px;
+    color: #334155;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+}
+
+.proposal-customer-name {
+    font-size: 14px;
+    font-weight: 800;
+    color: #0f172a;
+    margin-bottom: 2px;
+}
+
+.proposal-customer-address {
+    font-size: 11.5px;
+    color: #475569;
+    line-height: 1.4;
+}
+
+.proposal-customer-contacts {
+    display: flex;
+    flex-wrap: wrap;
+    align-items: center;
+    gap: 14px;
+    font-size: 11px;
+    color: #64748b;
+    margin-top: 4px;
+}
+
+.proposal-customer-contacts span {
+    display: inline-flex;
+    align-items: center;
+    gap: 5px;
+}
+
+/* Document Sections */
 .proposal-doc-section {
+    width: 100% !important;
+    box-sizing: border-box !important;
     margin-top: 18px;
 }
 
-.proposal-doc-section p { margin: 0; }
-.proposal-doc-section ol { margin: 0; padding-left: 18px; }
-.proposal-doc-section li + li { margin-top: 4px; }
-
-.proposal-item-table,
-.proposal-summary-table {
-    width: 100%;
-    min-width: 0;
-    border-collapse: collapse;
-    margin-top: 8px;
+.proposal-doc-section p {
+    margin: 0;
+    color: #334155;
+    line-height: 1.5;
 }
 
-.proposal-item-table th,
-.proposal-item-table td,
-.proposal-summary-table td {
-    padding: 8px 9px;
-    border-bottom: 1px solid #e5e7eb;
-    color: #111827;
-    vertical-align: top;
+.proposal-bullets {
+    margin: 0;
+    padding-left: 18px;
+    color: #334155;
+}
+
+.proposal-bullets li + li {
+    margin-top: 3px;
+}
+
+/* Cost Items Table: Strictly Constrained to 100% of Sheet Width */
+.proposal-item-table {
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
+    table-layout: fixed !important;
+    border-collapse: separate !important;
+    border-spacing: 0 !important;
+    margin-top: 8px;
+    margin-bottom: 6px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    overflow: hidden;
+    box-sizing: border-box !important;
 }
 
 .proposal-item-table th {
-    background: #f3f6fa;
-    color: #344054;
-    font-size: 10px;
-    text-transform: uppercase;
-    letter-spacing: .04em;
+    background: #f1f5f9 !important;
+    color: #475569 !important;
+    font-size: 10.5px !important;
+    font-weight: 800 !important;
+    text-transform: uppercase !important;
+    letter-spacing: .04em !important;
+    padding: 6.5px 12px !important;
+    border-bottom: 1px solid #cbd5e1 !important;
+    text-align: left;
+    box-sizing: border-box !important;
 }
 
-.proposal-item-table .amount,
-.proposal-summary-table .amount { text-align: right; white-space: nowrap; }
-.proposal-group-row td { background: #f8fafc; font-weight: 900; }
-.proposal-empty-state { padding: 12px; border: 1px dashed #cbd5e1; background: #f8fafc; color: #667085; }
+.proposal-item-table td {
+    padding: 6px 12px !important; /* Optimized padding for maximum page height utilization */
+    border-bottom: 1px solid #f1f5f9;
+    background: transparent !important;
+    color: #1e293b;
+    font-size: 11.5px;
+    font-weight: 400 !important; /* Items without bold */
+    vertical-align: middle;
+    box-sizing: border-box !important;
+    word-break: break-word;
+    overflow-wrap: break-word;
+}
 
+.proposal-item-name {
+    font-weight: 400 !important; /* Regular font weight for item names */
+    color: #1e293b;
+}
+
+.proposal-item-table td.col-desc {
+    font-weight: 400 !important;
+}
+
+.proposal-item-table td.amount {
+    font-weight: 500 !important; /* Clean tabular numbers, not heavy bold */
+}
+
+.proposal-item-table th.col-desc,
+.proposal-item-table td.col-desc {
+    word-break: break-word;
+    overflow-wrap: break-word;
+}
+
+.proposal-item-table th.col-qty,
+.proposal-item-table td.col-qty {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.proposal-item-table th.col-unit-cost,
+.proposal-item-table td.col-unit-cost {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.proposal-item-table th.col-total,
+.proposal-item-table td.col-total {
+    text-align: right;
+    white-space: nowrap;
+}
+
+.proposal-item-table tr:last-child td {
+    border-bottom: 0;
+}
+
+.proposal-item-table .amount {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    font-weight: 600;
+}
+
+.proposal-item-table .amount.is-negative {
+    color: #dc2626;
+}
+
+.proposal-group-row td {
+    background: #f8fafc !important;
+    font-weight: 800;
+    color: #0f172a;
+    border-top: 1px solid #e2e8f0;
+    border-bottom: 1px solid #e2e8f0;
+    padding: 8px 12px;
+}
+
+.proposal-group-row-inner {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    width: 100%;
+    gap: 12px;
+}
+
+.proposal-group-name {
+    font-weight: 800;
+}
+
+.proposal-group-amount {
+    font-variant-numeric: tabular-nums;
+    font-weight: 800;
+}
+
+.proposal-item-table tr.is-child td {
+    background: transparent !important;
+    color: #475569;
+    font-size: 11.5px;
+}
+
+.proposal-td-child {
+    padding-left: 26px !important;
+}
+
+.proposal-item-child-indicator {
+    color: var(--primary, #fb5a3a);
+    font-weight: 700;
+    margin-right: 4px;
+}
+
+.proposal-item-child-name {
+    font-weight: 500;
+}
+
+.proposal-td-qty {
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+}
+
+.proposal-item-details {
+    margin-top: 3px;
+    font-size: 10.5px;
+    color: #64748b;
+    line-height: 1.35;
+}
+
+.proposal-empty-state {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    padding: 18px;
+    border: 1px dashed #cbd5e1;
+    border-radius: 8px;
+    background: #f8fafc;
+    color: #64748b;
+    text-align: center;
+    font-size: 12px;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    gap: 8px;
+}
+
+/* Summary Table: Full 100% Width Fitting with Matching Rounded Borders */
+.proposal-summary-table {
+    width: 100% !important;
+    min-width: 100% !important;
+    max-width: 100% !important;
+    table-layout: fixed !important;
+    border-collapse: separate !important;
+    border-spacing: 0 !important;
+    margin-top: 8px;
+    margin-bottom: 6px;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    overflow: hidden;
+    box-sizing: border-box !important;
+    background: #ffffff;
+}
+
+.proposal-summary-table td {
+    padding: 9px 12px;
+    border-bottom: 1px solid #f1f5f9;
+    color: #1e293b;
+    font-size: 12px;
+    box-sizing: border-box !important;
+    word-break: break-word;
+    overflow-wrap: break-word;
+    vertical-align: middle;
+}
+
+.proposal-summary-table tr:last-child td {
+    border-bottom: 0;
+}
+
+.proposal-summary-table td.summary-label {
+    font-weight: 600;
+    color: #334155;
+    text-align: left;
+}
+
+.proposal-summary-table .amount {
+    text-align: right;
+    white-space: nowrap;
+    font-variant-numeric: tabular-nums;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.proposal-summary-table .amount.is-negative {
+    color: #dc2626;
+    font-weight: 700;
+}
+
+/* Page Running Mini-Header for Multi-Page Sheets */
+.proposal-doc-page-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 10px;
+    margin-bottom: 14px;
+    border-bottom: 1px solid #e2e8f0;
+    font-size: 11px;
+    color: #64748b;
+    font-weight: 500;
+    width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+.proposal-doc-page-header-left {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.proposal-doc-page-header-left .brand-name {
+    font-weight: 800;
+    color: var(--primary, #fb5a3a);
+    text-transform: uppercase;
+    letter-spacing: 0.05em;
+    font-size: 10.5px;
+}
+
+.proposal-doc-page-header-left .doc-title {
+    font-weight: 600;
+    color: #1e293b;
+}
+
+.proposal-doc-page-header-right {
+    display: flex;
+    align-items: center;
+    gap: 6px;
+    color: #64748b;
+    font-variant-numeric: tabular-nums;
+    font-size: 10.5px;
+}
+
+.proposal-doc-page-header .sep {
+    color: #cbd5e1;
+}
+
+.proposal-group-cont {
+    font-size: 10.5px;
+    font-weight: 600;
+    color: var(--primary, #fb5a3a);
+    margin-left: 6px;
+    text-transform: lowercase;
+}
+
+/* Closing Section on Final Sheet: Pinned to Bottom */
+.proposal-last-sheet-closing {
+    margin-top: auto !important;
+    padding-top: 24px;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    display: flex;
+    flex-direction: column;
+}
+
+/* Grand Total Card Box */
 .proposal-total-box {
+    width: 100% !important;
+    box-sizing: border-box !important;
     margin-top: 18px;
-    padding: 16px 18px;
+    padding: 16px 20px;
     display: flex;
     justify-content: space-between;
     align-items: center;
     gap: 18px;
-    background: #111827;
+    background: linear-gradient(135deg, #0f172a 0%, #1e293b 100%);
+    border-radius: 10px;
     color: #fff;
+    box-shadow: 0 6px 20px rgba(15, 23, 42, 0.16);
 }
 
-.proposal-total-box .label { color: #d1d5db; font-size: 11px; text-transform: uppercase; letter-spacing: .05em; }
-.proposal-total-box .value { color: #fff; font-size: 28px; font-weight: 900; }
+.proposal-total-box .label {
+    color: #94a3b8;
+    font-size: 10.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+}
 
+.proposal-total-box .sub {
+    color: #64748b;
+    font-size: 10.5px;
+    margin-top: 2px;
+}
+
+.proposal-total-box .value {
+    color: #ffffff !important;
+    font-size: 26px;
+    font-weight: 900;
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+}
+
+/* Acceptance Block */
 .proposal-acceptance {
-    margin-top: 28px;
+    width: 100% !important;
+    box-sizing: border-box !important;
+    margin-top: 42px !important;
+    margin-bottom: 6px !important;
     display: grid;
     grid-template-columns: repeat(2, minmax(0, 1fr));
-    gap: 18px;
+    gap: 32px;
 }
 
 .proposal-sign-line {
-    border-top: 1px solid #111827;
-    padding-top: 8px;
-    color: #344054;
-    font-weight: 800;
+    border-top: 1px solid #0f172a;
+    padding-top: 6px;
+    color: #334155;
+    font-weight: 700;
+    font-size: 11px;
 }
 
+/* Toast Notifications */
 .proposal-toast {
     position: fixed;
     right: 24px;
     bottom: 24px;
-    z-index: 1200;
-    max-width: 340px;
-    padding: 12px 14px;
-    border-radius: 6px;
-    background: #111827;
+    z-index: 1500;
+    max-width: 380px;
+    padding: 12px 18px;
+    border-radius: 9px;
+    background: #0f172a;
     color: #fff;
-    font-weight: 800;
-    box-shadow: 0 16px 36px rgba(15, 23, 42, .24);
-}
-
-.proposal-feature-banner {
-    position: static;
-    max-width: 980px;
-    margin: 0 auto 18px;
-    padding: 12px 14px;
+    font-weight: 600;
+    font-size: 12.5px;
+    font-family: 'Outfit', sans-serif;
+    box-shadow: 0 16px 36px rgba(15, 23, 42, .26);
     display: flex;
     align-items: center;
-    gap: 12px;
-    border: 1px solid #d7dee8;
-    border-radius: 6px;
-    background: #fff;
-    box-shadow: 0 1px 3px rgba(15, 23, 42, .08);
-    color: #344054;
-    font-size: 13px;
-    font-weight: 700;
+    gap: 10px;
+    animation: proposalToastIn 0.2s cubic-bezier(0.16, 1, 0.3, 1);
 }
 
-.proposal-feature-banner span { flex: 1; min-width: 0; }
-.proposal-feature-banner button {
-    border: 1px solid #cbd5e1;
-    border-radius: 5px;
-    min-height: 30px;
-    padding: 0 10px;
-    background: #fff;
-    color: #172033;
-    font-weight: 800;
+@keyframes proposalToastIn {
+    from {
+        opacity: 0;
+        transform: translateY(10px) scale(0.96);
+    }
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
 }
 
-.proposal-feature-banner [data-proposal-learn] {
-    color: #0f5d9d;
-    border-color: #b7d4ee;
-    background: #f3f8fd;
-}
-
+/* Responsive adjustments */
 @media (max-width: 980px) {
-    .proposal-shell { grid-template-columns: 1fr; }
-    .proposal-settings { max-height: 44vh; border-right: 0; border-bottom: 1px solid #ccd6e2; }
-    .proposal-preview-area { padding: 18px 12px 80px; }
-    .proposal-document { width: 100%; padding: 28px 22px; }
+    .proposal-shell {
+        grid-template-columns: 1fr;
+        grid-template-rows: auto minmax(0, 1fr) 40px;
+    }
+    .proposal-settings {
+        max-height: 44vh;
+    }
+    .proposal-preview-area {
+        padding: 16px 10px 60px;
+    }
+    .proposal-document-body,
+    .proposal-page-sheet {
+        width: 100%;
+        padding: 24px 18px;
+    }
 }
 
 @media (max-width: 640px) {
-    .proposal-settings-head { align-items: flex-start; flex-direction: column; }
-    .proposal-export-wrap, .proposal-export-btn { width: 100%; }
-    .proposal-export-btn { justify-content: center; }
-    .proposal-doc-header, .proposal-acceptance { grid-template-columns: 1fr; }
-    .proposal-quote-meta { text-align: left; }
-    .proposal-feature-banner { align-items: stretch; flex-direction: column; }
+    .proposal-settings-head {
+        align-items: flex-start;
+        flex-direction: column;
+    }
+    .proposal-export-wrap, .proposal-export-btn {
+        width: 100%;
+    }
+    .proposal-export-btn {
+        justify-content: center;
+    }
+    .proposal-doc-header, .proposal-acceptance {
+        grid-template-columns: 1fr;
+    }
+    .proposal-quote-meta {
+        text-align: left;
+    }
+}
+
+/* ==========================================================
+   PRINT STYLESHEET (Clean High-Fidelity Multi-Page PDF Output)
+   ========================================================== */
+@page {
+    size: letter portrait;
+    margin: 0 !important; /* Zero margin removes browser native headers (date, title) and footers (URL, page numbers) */
 }
 
 @media print {
-    body { background: #fff; }
+    /* 1. Global Reset of html, body, and all wrappers so the browser paginates naturally */
+    html,
+    html body,
+    body,
+    body.theme-dark,
+    [data-theme="dark"] body {
+        zoom: 1 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        height: 100% !important;
+        min-height: 100% !important;
+        overflow: visible !important;
+        background: #ffffff !important;
+        color: #0f172a !important;
+        display: block !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+
+    /* 2. Hide ALL application chrome, global toolbars, navigation, modals, and extraneous elements */
+    .bt-global-header,
+    [data-global-tools-header],
     .global-tools-header,
+    .project-subhead-wrapper,
     .project-header,
     .top-tabs,
+    .takeoff-subhead-sheet-group,
+    .won-export-container,
+    .tab-panel:not(#tab-proposal),
     .proposal-settings,
+    .proposal-settings-head,
+    .proposal-view-toolbar,
     .proposal-builder-note,
-    .proposal-feature-banner { display: none !important; }
-    .workspace-shell, .workspace-main, .proposal-page, .proposal-shell, .proposal-preview-area { height: auto; overflow: visible; display: block; background: #fff; padding: 0; }
-    .proposal-document { width: 100%; min-height: 0; margin: 0; padding: .45in; box-shadow: none; }
+    .proposal-feature-banner,
+    .proposal-export-wrap,
+    .proposal-export-menu,
+    .proposal-toast,
+    .bb-brightronix-footer,
+    .pd-modal-backdrop,
+    .pd-modal,
+    .pd-presence-menu,
+    .proposal-shell > .est-version-bar,
+    .proposal-shell > #proposalEstimateTypesFooter,
+    .proposal-shell > .project-estimate-footer,
+    #takeoffEstimateTypesFooter,
+    #versionBar {
+        display: none !important;
+        height: 0 !important;
+        margin: 0 !important;
+        padding: 0 !important;
+    }
+
+    /* 3. Ensure the workspace shells and proposal containers are normal blocks without overflow clipping */
+    .workspace-shell,
+    .workspace-main,
+    .tab-panel#tab-proposal,
+    .tab-panel.proposal-page,
+    #tab-proposal,
+    .proposal-page,
+    .proposal-shell,
+    #proposalModule,
+    .proposal-preview-area,
+    #proposalDocument,
+    .proposal-document {
+        height: auto !important;
+        min-height: 0 !important;
+        max-height: none !important;
+        overflow: visible !important;
+        display: block !important;
+        background: #ffffff !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        border: 0 !important;
+        box-shadow: none !important;
+        width: 100% !important;
+        max-width: none !important;
+    }
+
+    /* 4. CRITICAL FIX: Turn .proposal-paged-wrap into display: block !important */
+    /* Chromium and WebKit IGNORE page-breaks inside display: flex! Turning it into block enables real multi-page fragmentation */
+    .proposal-paged-wrap {
+        display: block !important;
+        width: 100% !important;
+        max-width: 100% !important;
+        margin: 0 !important;
+        padding: 0 !important;
+        overflow: visible !important;
+    }
+
+    /* 5. Clean Page Sheet Styling for Print (Exact Letter 8.5in x 11in with internal padding) */
+    .proposal-page-sheet {
+        box-sizing: border-box !important;
+        width: 8.5in !important;
+        max-width: 8.5in !important;
+        min-height: 11in !important;
+        height: 11in !important;
+        margin: 0 auto !important;
+        padding: 0.55in 0.65in 0.45in 0.65in !important;
+        box-shadow: none !important;
+        border: none !important;
+        background: #ffffff !important;
+        color: #0f172a !important;
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: space-between !important;
+        page-break-after: always !important;
+        break-after: page !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+        overflow: hidden !important;
+    }
+
+    .proposal-page-sheet:last-child {
+        page-break-after: auto !important;
+        break-after: auto !important;
+    }
+
+    .proposal-sheet-content {
+        flex: 1 1 auto !important;
+        display: flex !important;
+        flex-direction: column !important;
+        justify-content: flex-start !important;
+        min-height: 0 !important;
+        width: 100% !important;
+    }
+
+    /* Pinned to bottom on the last page sheet */
+    .proposal-last-sheet-closing {
+        margin-top: auto !important;
+        padding-top: 24px !important;
+        width: 100% !important;
+        box-sizing: border-box !important;
+        display: flex !important;
+        flex-direction: column !important;
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+    }
+
+    .proposal-sheet-footer {
+        flex-shrink: 0 !important;
+        margin-top: 18px !important;
+        padding-top: 8px !important;
+        border-top: 1px solid #cbd5e1 !important;
+        display: flex !important;
+        justify-content: space-between !important;
+        font-size: 10px !important;
+        color: #64748b !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+
+    .proposal-doc-page-header {
+        display: flex !important;
+        justify-content: space-between !important;
+        padding-bottom: 8px !important;
+        margin-bottom: 12px !important;
+        border-bottom: 1px solid #cbd5e1 !important;
+        font-size: 10.5px !important;
+        color: #64748b !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+
+    /* Continuous document body fallback */
+    .proposal-document-body {
+        width: 100% !important;
+        max-width: 100% !important;
+        min-height: 0 !important;
+        height: auto !important;
+        margin: 0 !important;
+        padding: 0.55in 0.65in !important;
+        box-shadow: none !important;
+        border: none !important;
+        background: #ffffff !important;
+        display: block !important;
+    }
+
+    /* Tables & Rows Print Rules */
+    .proposal-item-table,
+    .proposal-summary-table {
+        width: 100% !important;
+        border-collapse: separate !important;
+        border: 1px solid #cbd5e1 !important;
+        page-break-inside: auto;
+        break-inside: auto;
+    }
+
+    .proposal-item-table thead {
+        display: table-header-group !important;
+    }
+
+    .proposal-item-table th {
+        background: #f1f5f9 !important;
+        color: #334155 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+
+    .proposal-group-row td {
+        background: #f8fafc !important;
+        color: #0f172a !important;
+        font-weight: 800 !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+
+    .proposal-item-table tr,
+    .proposal-summary-table tr {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+    }
+
+    .proposal-doc-section,
+    .proposal-doc-header,
+    .proposal-customer-block,
+    .proposal-total-box,
+    .proposal-acceptance {
+        page-break-inside: avoid !important;
+        break-inside: avoid !important;
+    }
+
+    .proposal-total-box {
+        background: #0f172a !important;
+        color: #ffffff !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+        border-radius: 8px !important;
+        padding: 14px 18px !important;
+    }
+
+    .proposal-total-box .value {
+        color: #ffffff !important;
+        -webkit-print-color-adjust: exact !important;
+        print-color-adjust: exact !important;
+    }
+
+    .proposal-total-box .label {
+        color: #cbd5e1 !important;
+    }
+
+    .proposal-total-box .sub {
+        color: #94a3b8 !important;
+    }
+
+    .proposal-acceptance {
+        margin-top: 42px !important;
+        margin-bottom: 4px !important;
+        gap: 32px !important;
+    }
+
+    #proposalDocument [contenteditable="true"] {
+        box-shadow: none !important;
+        background: transparent !important;
+        padding: 0 !important;
+        margin: 0 !important;
+        outline: none !important;
+    }
+
+    body.theme-dark #tab-proposal,
+    [data-theme="dark"] #tab-proposal,
+    body.theme-dark .proposal-document-body,
+    [data-theme="dark"] .proposal-document-body,
+    body.theme-dark .proposal-page-sheet,
+    [data-theme="dark"] .proposal-page-sheet {
+        background: #ffffff !important;
+        color: #0f172a !important;
+    }
+
+    body.theme-dark .proposal-item-table td,
+    [data-theme="dark"] .proposal-item-table td,
+    body.theme-dark .proposal-summary-table td,
+    [data-theme="dark"] .proposal-summary-table td {
+        color: #1e293b !important;
+        background: transparent !important;
+    }
 }
 
+/* ==========================================================
+   DARK THEME SYSTEM: EXACT BRIGHTRONIX COLORS
+   Workspace: #141822 | Panel: #242a38 | Surface: #1f2633
+   Border: #2f384a | Soft Border: #283040 | Text: #ffffff
+   ========================================================== */
 @media screen {
-[data-theme="dark"] .proposal-page,
-[data-theme="dark"] .proposal-shell,
-[data-theme="dark"] .proposal-preview-area {
-    background: #111827;
-    color: #f8fafc;
+    [data-theme="dark"] .proposal-page,
+    body.theme-dark .proposal-page,
+    [data-theme="dark"] #tab-proposal,
+    body.theme-dark #tab-proposal {
+        background: var(--bg-body, #141822) !important;
+        color: #ffffff;
+    }
+
+    [data-theme="dark"] .proposal-settings,
+    body.theme-dark .proposal-settings {
+        background: var(--bg-panel, #242a38) !important;
+        border-color: var(--border, #2f384a) !important;
+        box-shadow: 0 4px 18px rgba(0, 0, 0, 0.45);
+    }
+
+    [data-theme="dark"] .proposal-settings-head,
+    body.theme-dark .proposal-settings-head {
+        background: var(--bg-panel, #242a38) !important;
+        border-bottom-color: var(--border-soft, #283040) !important;
+    }
+
+    [data-theme="dark"] .proposal-settings-head h2,
+    body.theme-dark .proposal-settings-head h2 {
+        color: #ffffff !important;
+    }
+
+    [data-theme="dark"] .proposal-settings-head .proposal-head-badge,
+    body.theme-dark .proposal-settings-head .proposal-head-badge {
+        background: rgba(251, 90, 58, 0.18) !important;
+        color: #fb5a3a !important;
+    }
+
+    [data-theme="dark"] .proposal-section,
+    body.theme-dark .proposal-section {
+        background: var(--bg-surface, #1f2633) !important;
+        border-color: var(--border, #2f384a) !important;
+        box-shadow: 0 2px 8px rgba(0, 0, 0, 0.25);
+    }
+
+    [data-theme="dark"] .proposal-section:hover,
+    body.theme-dark .proposal-section:hover {
+        border-color: #384254 !important;
+        box-shadow: 0 4px 14px rgba(0, 0, 0, 0.35);
+    }
+
+    [data-theme="dark"] .proposal-section h3,
+    body.theme-dark .proposal-section h3 {
+        color: #94a3b8 !important;
+    }
+
+    [data-theme="dark"] .proposal-toggle-row,
+    body.theme-dark .proposal-toggle-row {
+        color: #ffffff !important;
+    }
+
+    [data-theme="dark"] .proposal-toggle-row:hover,
+    body.theme-dark .proposal-toggle-row:hover {
+        color: #fb5a3a !important;
+    }
+
+    [data-theme="dark"] .proposal-select-row,
+    body.theme-dark .proposal-select-row {
+        color: #ffffff !important;
+    }
+
+    [data-theme="dark"] .proposal-select-row select,
+    body.theme-dark .proposal-select-row select,
+    [data-theme="dark"] .proposal-text-input,
+    body.theme-dark .proposal-text-input {
+        background: #242a38 !important;
+        border-color: #2f384a !important;
+        color: #ffffff !important;
+    }
+
+    [data-theme="dark"] .proposal-select-row select:focus,
+    body.theme-dark .proposal-select-row select:focus,
+    [data-theme="dark"] .proposal-text-input:focus,
+    body.theme-dark .proposal-text-input:focus {
+        border-color: #fb5a3a !important;
+        box-shadow: 0 0 0 2px rgba(251, 90, 58, 0.28) !important;
+    }
+
+    [data-theme="dark"] .proposal-reset-company-btn,
+    body.theme-dark .proposal-reset-company-btn {
+        border-color: #2f384a !important;
+        color: #94a3b8 !important;
+    }
+
+    [data-theme="dark"] .proposal-reset-company-btn:hover,
+    body.theme-dark .proposal-reset-company-btn:hover {
+        border-color: #fb5a3a !important;
+        color: #fb5a3a !important;
+        background: rgba(251, 90, 58, 0.12) !important;
+    }
+
+    [data-theme="dark"] .proposal-customer-title,
+    body.theme-dark .proposal-customer-title {
+        color: #ffffff !important;
+    }
+
+    [data-theme="dark"] .proposal-customer-detail,
+    body.theme-dark .proposal-customer-detail {
+        color: #94a3b8 !important;
+    }
+
+    [data-theme="dark"] .proposal-customer-box,
+    body.theme-dark .proposal-customer-box {
+        background: var(--bg-surface, #1f2633) !important;
+        border-color: transparent !important;
+    }
+
+    [data-theme="dark"] .proposal-small-btn.secondary,
+    body.theme-dark .proposal-small-btn.secondary {
+        background: #242a38 !important;
+        border-color: #2f384a !important;
+        color: #ffffff !important;
+    }
+
+    [data-theme="dark"] .proposal-small-btn.secondary:hover,
+    body.theme-dark .proposal-small-btn.secondary:hover {
+        background: #1f2633 !important;
+        border-color: #384254 !important;
+    }
+
+    [data-theme="dark"] .proposal-export-menu,
+    body.theme-dark .proposal-export-menu {
+        background: #242a38 !important;
+        border-color: #2f384a !important;
+        box-shadow: 0 16px 36px rgba(0, 0, 0, 0.55);
+    }
+
+    [data-theme="dark"] .proposal-export-menu button,
+    body.theme-dark .proposal-export-menu button {
+        color: #ffffff !important;
+    }
+
+    [data-theme="dark"] .proposal-export-menu button:hover,
+    body.theme-dark .proposal-export-menu button:hover {
+        background: #1f2633 !important;
+        color: #fb5a3a !important;
+    }
+
+    [data-theme="dark"] .proposal-preview-area,
+    body.theme-dark .proposal-preview-area {
+        background: var(--bg-body, #141822) !important;
+        border-color: var(--border, #2f384a) !important;
+        box-shadow: 0 4px 20px rgba(0, 0, 0, 0.4);
+    }
+
+    [data-theme="dark"] .proposal-view-toolbar,
+    body.theme-dark .proposal-view-toolbar {
+        background: #242a38 !important;
+        border-color: #2f384a !important;
+        color: #ffffff !important;
+    }
+
+    [data-theme="dark"] .proposal-view-label,
+    body.theme-dark .proposal-view-label {
+        color: #94a3b8 !important;
+    }
+
+    [data-theme="dark"] .proposal-view-btn,
+    body.theme-dark .proposal-view-btn {
+        background: transparent !important;
+        border-color: #2f384a !important;
+        color: #94a3b8 !important;
+    }
+
+    [data-theme="dark"] .proposal-view-btn:hover,
+    body.theme-dark .proposal-view-btn:hover {
+        border-color: #fb5a3a !important;
+        color: #fb5a3a !important;
+    }
+
+    [data-theme="dark"] .proposal-view-btn.active,
+    body.theme-dark .proposal-view-btn.active {
+        background: #fb5a3a !important;
+        border-color: #fb5a3a !important;
+        color: #ffffff !important;
+    }
+
+
+    /* DARK THEME SWITCH RULES */
+    /* When OFF (to the left): dark grey background */
+    [data-theme="dark"] .proposal-slider,
+    body.theme-dark .proposal-slider,
+    [data-theme="dark"] .proposal-switch input:not(:checked) + .proposal-slider,
+    body.theme-dark .proposal-switch input:not(:checked) + .proposal-slider {
+        background: #384254 !important;
+    }
+
+    /* When ON (moved to the right): ALWAYS VIBRANT BRIGHTRONIX ORANGE #fb5a3a */
+    [data-theme="dark"] .proposal-switch input:checked + .proposal-slider,
+    body.theme-dark .proposal-switch input:checked + .proposal-slider {
+        background: #fb5a3a !important;
+    }
+
+    [data-theme="dark"] .proposal-switch input:checked + .proposal-slider::after,
+    body.theme-dark .proposal-switch input:checked + .proposal-slider::after {
+        transform: translateX(16px) !important;
+    }
+
+    [data-theme="dark"] .proposal-document-body,
+    [data-theme="dark"] .proposal-page-sheet,
+    body.theme-dark .proposal-document-body,
+    body.theme-dark .proposal-page-sheet {
+        box-shadow: 0 24px 70px rgba(0, 0, 0, 0.65), 0 0 0 1px rgba(255, 255, 255, 0.06);
+    }
+
+    [data-theme="dark"] .proposal-shell > .est-version-bar,
+    [data-theme="dark"] .proposal-shell > #proposalEstimateTypesFooter,
+    [data-theme="dark"] .proposal-shell > .project-estimate-footer,
+    body.theme-dark .proposal-shell > .est-version-bar,
+    body.theme-dark .proposal-shell > #proposalEstimateTypesFooter,
+    body.theme-dark .proposal-shell > .project-estimate-footer {
+        background: var(--bg-panel, #242a38) !important;
+        border-color: var(--border, #2f384a) !important;
+        box-shadow: 0 1px 3px rgba(0, 0, 0, 0.3) !important;
+    }
 }
 
-[data-theme="dark"] .proposal-settings,
-[data-theme="dark"] .proposal-settings-head,
-[data-theme="dark"] .proposal-section,
-[data-theme="dark"] .proposal-export-menu,
-[data-theme="dark"] .proposal-feature-banner,
-[data-theme="dark"] .proposal-builder-note,
-[data-theme="dark"] .proposal-small-btn,
-[data-theme="dark"] .proposal-dot-btn,
-[data-theme="dark"] .proposal-select-row select {
+
+/* ==========================================================
+   BUILDER MODE: HIGHLIGHT EDITABLE FIELDS WITH ORANGE DASHED BOXES
+   ========================================================== */
+.is-builder-mode [contenteditable="true"] {
+    outline: 2px dashed #fb5a3a !important;
+    outline-offset: 3px !important;
+    background-color: rgba(251, 90, 58, 0.08) !important;
+    border-radius: 4px !important;
+    position: relative !important;
+    cursor: text !important;
+    transition: all 0.2s ease !important;
+}
+
+.is-builder-mode [contenteditable="true"]:hover {
+    outline: 2px solid #ea580c !important;
+    background-color: rgba(251, 90, 58, 0.16) !important;
+}
+
+.is-builder-mode [contenteditable="true"]:focus {
+    outline: 2px solid #fb5a3a !important;
+    background-color: rgba(251, 90, 58, 0.22) !important;
+    box-shadow: 0 0 0 3px rgba(251, 90, 58, 0.25) !important;
+}
+
+/* ==========================================================
+   FINANCIAL INVESTMENT SUMMARY: EXECUTIVE ITEMIZED LIST
+   ========================================================== */
+.proposal-financial-summary-section {
+    margin-top: 20px;
+    margin-bottom: 16px;
+    width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+.proposal-fin-head {
+    display: flex;
+    align-items: flex-end;
+    justify-content: space-between;
+    gap: 16px;
+    margin-bottom: 12px;
+    padding-bottom: 8px;
+    border-bottom: 2px solid #0f172a;
+}
+
+.proposal-fin-head h4 {
+    margin: 0;
+    font-size: 13.5px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: #0f172a;
+}
+
+.proposal-fin-head-sub {
+    font-size: 11px;
+    color: #64748b;
+    margin: 3px 0 0 0;
+}
+
+.proposal-fin-unit-rate {
+    display: inline-flex;
+    align-items: baseline;
+    gap: 6px;
+    background: #f1f5f9;
+    padding: 4px 10px;
+    border-radius: 6px;
+    font-size: 11.5px;
+    color: #334155;
+    border: 1px solid #e2e8f0;
+    white-space: nowrap;
+}
+
+.proposal-fin-unit-rate .rate-val {
+    font-weight: 800;
+    color: var(--primary, #fb5a3a);
+    font-size: 13px;
+}
+
+/* Financial Itemized List Shell */
+.proposal-fin-list-shell {
+    width: 100% !important;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    overflow: hidden;
+    background: #ffffff;
+    box-sizing: border-box !important;
+    margin-bottom: 16px;
+}
+
+.proposal-fin-list-header {
+    display: grid;
+    grid-template-columns: 1fr 140px 140px;
+    align-items: center;
+    background: #f1f5f9;
+    padding: 8px 16px;
+    border-bottom: 1px solid #cbd5e1;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: #475569;
+}
+
+.proposal-fin-list-header .col-cost-amount {
+    text-align: right;
+}
+
+.proposal-fin-list-header .col-cost-type {
+    text-align: center;
+}
+
+.proposal-fin-list-body {
+    display: flex;
+    flex-direction: column;
+}
+
+.proposal-fin-list-row {
+    display: grid;
+    grid-template-columns: 1fr 140px 140px;
+    align-items: center;
+    padding: 10px 16px;
+    border-bottom: 1px solid #f1f5f9;
+    box-sizing: border-box !important;
+    transition: background 0.12s ease;
+}
+
+.proposal-fin-list-row:last-child {
+    border-bottom: none;
+}
+
+.proposal-fin-row-main {
+    display: flex;
+    align-items: center;
+    gap: 12px;
+}
+
+.proposal-fin-icon-bubble {
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: rgba(251, 90, 58, 0.1);
+    color: var(--primary, #fb5a3a);
+    display: grid;
+    place-items: center;
+    font-size: 11px;
+    flex-shrink: 0;
+}
+
+.proposal-fin-row-texts {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.proposal-fin-row-label {
+    font-size: 12.5px;
+    font-weight: 700;
+    color: #0f172a;
+}
+
+.proposal-fin-row-desc {
+    font-size: 10.5px;
+    color: #64748b;
+    line-height: 1.35;
+}
+
+.proposal-fin-row-badge {
+    text-align: center;
+}
+
+.fin-badge-pill {
+    display: inline-block;
+    font-size: 9.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: #475569;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    padding: 2px 8px;
+    border-radius: 999px;
+}
+
+.proposal-fin-row-val {
+    font-size: 15px;
+    font-weight: 800;
+    color: #0f172a;
+    font-variant-numeric: tabular-nums;
+    letter-spacing: -0.01em;
+    text-align: right;
+}
+
+.proposal-fin-row-val.is-negative {
+    color: #dc2626;
+}
+
+/* ==========================================================
+   HERO TOTAL PROPOSAL BOX: PROTAGONIZING THE INVESTMENT
+   ========================================================== */
+.proposal-hero-total-box,
+.proposal-total-box {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    margin-top: 14px !important;
+    margin-bottom: 24px !important;
+    background: #ffffff !important; /* Clean white background */
+    border: 2px solid #0f172a !important; /* Crisp contrast definition */
+    border-radius: 12px;
+    color: #0f172a !important;
+    box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08) !important;
+    position: relative;
+    overflow: hidden;
+}
+
+.proposal-hero-total-accent-bar {
+    position: absolute;
+    top: 0;
+    left: 0;
+    right: 0;
+    height: 4px;
+    background: linear-gradient(90deg, #fb5a3a 0%, #ea580c 50%, #f97316 100%);
+}
+
+.proposal-hero-total-inner {
+    padding: 20px 24px;
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    gap: 24px;
+    box-sizing: border-box !important;
+}
+
+.proposal-hero-total-left {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+    flex: 1 1 auto;
+}
+
+.proposal-hero-tag {
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+    font-size: 10px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #fb5a3a;
+}
+
+.proposal-hero-title {
+    font-size: 16px;
+    font-weight: 800;
+    color: #0f172a; /* Dark charcoal text */
+    letter-spacing: -0.01em;
+}
+
+.proposal-hero-sub {
+    font-size: 11px;
+    color: #64748b; /* Readable slate text */
+    line-height: 1.4;
+    max-width: 520px;
+}
+
+.proposal-hero-badges {
+    display: flex;
+    flex-wrap: wrap;
+    gap: 8px;
+    margin-top: 6px;
+}
+
+.hero-micro-badge {
+    display: inline-flex;
+    align-items: center;
+    gap: 4px;
+    font-size: 9.5px;
+    font-weight: 600;
+    color: #334155;
+    background: #f1f5f9;
+    border: 1px solid #e2e8f0;
+    padding: 2px 7px;
+    border-radius: 4px;
+}
+
+.proposal-hero-total-right {
+    display: flex;
+    flex-direction: column;
+    align-items: flex-end;
+    text-align: right;
+    flex-shrink: 0;
+}
+
+.proposal-hero-val-label {
+    font-size: 9.5px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .08em;
+    color: #64748b;
+    margin-bottom: 2px;
+}
+
+.proposal-hero-amount-val {
+    font-size: 34px;
+    font-weight: 900;
+    color: #0f172a !important; /* High-contrast hero amount in dark charcoal */
+    letter-spacing: -0.02em;
+    font-variant-numeric: tabular-nums;
+    line-height: 1.1;
+    white-space: nowrap;
+}
+
+.proposal-hero-val-sub {
+    font-size: 10px;
+    color: #64748b;
+    margin-top: 3px;
+}
+
+/* ==========================================================
+   SHORTENED COMPACT PROPOSAL AUTHORIZATION & FORMAL ACCEPTANCE
+   ========================================================== */
+.proposal-acceptance-wrap.proposal-acceptance-compact {
+    width: 100% !important;
+    box-sizing: border-box !important;
+    margin-top: auto !important; /* Pinned to the very bottom of the page! */
+    padding-top: 14px;
+    border-top: 2px solid #0f172a;
+}
+
+.proposal-acceptance-compact-head {
+    display: flex;
+    flex-direction: column;
+    gap: 2px;
+    margin-bottom: 10px;
+}
+
+.compact-head-title {
+    font-size: 12px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: #0f172a;
+    display: inline-flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.compact-head-title i {
+    color: var(--primary, #fb5a3a);
+}
+
+.compact-head-sub {
+    font-size: 10.5px;
+    color: #64748b;
+}
+
+.proposal-signatures-compact-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px;
+    width: 100% !important;
+    box-sizing: border-box !important;
+}
+
+.proposal-sign-compact-col {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 10px 14px;
+    display: flex;
+    flex-direction: column;
+    gap: 8px;
+    box-sizing: border-box !important;
+}
+
+.proposal-sign-compact-label {
+    display: flex;
+    align-items: baseline;
+    justify-content: space-between;
+    gap: 8px;
+    padding-bottom: 4px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.sign-party-tag {
+    font-size: 9px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--primary, #fb5a3a);
+}
+
+.sign-party-name {
+    font-size: 11px;
+    font-weight: 700;
+    color: #0f172a;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+.proposal-sign-draw-zone {
+    margin-top: 0;
+}
+
+.proposal-sign-draw-line {
+    border-bottom: 1px solid #94a3b8;
+    height: 26px;
+}
+
+.proposal-sign-line-text {
+    font-size: 8.5px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: #64748b;
+    margin-top: 2px;
+    display: block;
+}
+
+.proposal-sign-meta-compact-row {
+    display: grid;
+    grid-template-columns: 1fr 1fr;
+    gap: 10px;
+}
+
+.proposal-sign-meta-cell {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+}
+
+.meta-cell-label {
+    font-size: 8px;
+    font-weight: 700;
+    text-transform: uppercase;
+    letter-spacing: .04em;
+    color: #94a3b8;
+}
+
+.meta-cell-value {
+    font-size: 10px;
+    font-weight: 600;
+    color: #1e293b;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+}
+
+/* ==========================================================
+   COVER PAGE & APPENDIX PAGES
+   ========================================================== */
+.proposal-cover-page {
+    display: flex;
+    flex-direction: column;
+    justify-content: space-between;
+    min-height: 9.6in;
+    padding: .2in 0;
+    box-sizing: border-box !important;
+}
+
+.proposal-cover-top-accent {
+    height: 6px;
+    background: linear-gradient(90deg, #fb5a3a 0%, #ea580c 100%);
+    border-radius: 3px;
+    margin-bottom: 28px;
+}
+
+.proposal-cover-header {
+    display: flex;
+    align-items: center;
+    justify-content: space-between;
+    padding-bottom: 20px;
+    border-bottom: 1px solid #e2e8f0;
+}
+
+.proposal-cover-tagline {
+    font-size: 11px;
+    font-weight: 600;
+    color: #64748b;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+}
+
+.proposal-cover-center {
+    margin: 40px 0;
+}
+
+.proposal-cover-badge {
+    display: inline-block;
+    background: rgba(251, 90, 58, 0.1);
+    color: var(--primary, #fb5a3a);
+    font-size: 11px;
+    font-weight: 800;
+    letter-spacing: .1em;
+    padding: 4px 10px;
+    border-radius: 4px;
+    margin-bottom: 16px;
+}
+
+.proposal-cover-title {
+    font-size: 30px;
+    font-weight: 900;
+    color: #0f172a;
+    line-height: 1.15;
+    letter-spacing: -0.02em;
+    margin-bottom: 12px;
+}
+
+.proposal-cover-subtitle {
+    font-size: 14.5px;
+    color: #475569;
+    line-height: 1.4;
+}
+
+.proposal-cover-divider {
+    width: 60px;
+    height: 4px;
+    background: var(--primary, #fb5a3a);
+    margin-top: 22px;
+    border-radius: 2px;
+}
+
+.proposal-cover-meta-grid {
+    display: grid;
+    grid-template-columns: repeat(3, minmax(0, 1fr));
+    gap: 16px;
+    margin: 30px 0;
+}
+
+.proposal-cover-meta-card {
+    background: #f8fafc;
+    border: 1px solid #e2e8f0;
+    border-radius: 8px;
+    padding: 14px 16px;
+    box-sizing: border-box !important;
+}
+
+.proposal-cover-meta-label {
+    font-size: 9.5px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .06em;
+    color: var(--primary, #fb5a3a);
+    margin-bottom: 8px;
+    display: flex;
+    align-items: center;
+    gap: 6px;
+}
+
+.proposal-cover-meta-val {
+    font-size: 13.5px;
+    font-weight: 800;
+    color: #0f172a;
+    margin-bottom: 4px;
+}
+
+.proposal-cover-meta-sub {
+    font-size: 11px;
+    color: #64748b;
+    line-height: 1.4;
+}
+
+.proposal-cover-bottom {
+    padding-top: 18px;
+    border-top: 1px solid #e2e8f0;
+}
+
+.proposal-cover-confidential {
+    font-size: 9.5px;
+    color: #94a3b8;
+    line-height: 1.4;
+}
+
+.proposal-continuous-page-divider {
+    height: 2px;
+    background: #e2e8f0;
+    margin: 40px 0;
+    border-radius: 1px;
+}
+
+/* Appendix Sheet */
+.proposal-appendix-sheet {
+    display: flex;
+    flex-direction: column;
+    height: 100%;
+}
+
+.proposal-appendix-content {
+    margin-top: 18px;
+}
+
+.proposal-appendix-header h4 {
+    font-size: 14px;
+    font-weight: 800;
+    text-transform: uppercase;
+    letter-spacing: .05em;
+    color: #0f172a;
+    margin: 0;
+}
+
+.proposal-appendix-sub {
+    font-size: 11.5px;
+    color: #64748b;
+    margin: 4px 0 20px 0;
+}
+
+.proposal-terms-grid {
+    display: grid;
+    grid-template-columns: repeat(2, minmax(0, 1fr));
+    gap: 16px 20px;
+}
+
+.proposal-term-item {
+    display: flex;
+    gap: 12px;
+    align-items: flex-start;
+}
+
+.proposal-term-num {
+    flex-shrink: 0;
+    width: 28px;
+    height: 28px;
+    border-radius: 6px;
+    background: rgba(251, 90, 58, 0.1);
+    color: var(--primary, #fb5a3a);
+    font-size: 11.5px;
+    font-weight: 800;
+    display: grid;
+    place-items: center;
+}
+
+.proposal-term-body h5 {
+    font-size: 11.5px;
+    font-weight: 800;
+    color: #0f172a;
+    margin: 0 0 3px 0;
+}
+
+.proposal-term-body p {
+    font-size: 10.5px;
+    color: #475569;
+    line-height: 1.45;
+    margin: 0;
+}
+
+/* ==========================================================
+   CUSTOMER CONTACT WAITING MODAL
+   ========================================================== */
+.proposal-contact-modal-backdrop {
+    position: fixed;
+    inset: 0;
+    background: rgba(15, 23, 42, 0.65);
+    z-index: 99999;
+    display: flex;
+    align-items: center;
+    justify-content: center;
+    backdrop-filter: blur(4px);
+    animation: propFadeIn 0.2s ease;
+}
+
+.proposal-contact-modal-card {
+    background: #ffffff;
+    border-radius: 16px;
+    padding: 28px 32px;
+    width: 380px;
+    max-width: 90vw;
+    text-align: center;
+    box-shadow: 0 20px 50px rgba(0, 0, 0, 0.25);
+    border: 1px solid #e2e8f0;
+}
+
+.proposal-contact-modal-spinner {
+    font-size: 34px;
+    color: var(--primary, #fb5a3a);
+    margin-bottom: 14px;
+}
+
+.proposal-contact-modal-title {
+    font-size: 16px;
+    font-weight: 800;
+    color: #0f172a;
+    margin-bottom: 6px;
+}
+
+.proposal-contact-modal-desc {
+    font-size: 12.5px;
+    color: #64748b;
+    line-height: 1.45;
+}
+
+.proposal-contact-email {
+    color: var(--primary, #fb5a3a);
+    font-weight: 700;
+}
+
+.proposal-contact-progress-bar {
+    height: 4px;
+    background: #e2e8f0;
+    border-radius: 999px;
+    overflow: hidden;
+    margin: 18px 0 16px;
+}
+
+.proposal-contact-progress-fill {
+    height: 100%;
+    width: 0%;
+    background: linear-gradient(90deg, #fb5a3a, #ea580c);
+    border-radius: 999px;
+    animation: propProgressFill 0.9s cubic-bezier(0.4, 0, 0.2, 1) forwards;
+}
+
+@keyframes propProgressFill {
+    0% { width: 0%; }
+    100% { width: 100%; }
+}
+
+.proposal-contact-modal-cancel {
+    background: transparent;
+    border: 1px solid #cbd5e1;
+    color: #64748b;
+    padding: 6px 18px;
+    border-radius: 6px;
+    font-size: 12px;
+    font-weight: 600;
+    cursor: pointer;
+    transition: all 0.15s ease;
+}
+
+.proposal-contact-modal-cancel:hover {
+    background: #f1f5f9;
+    color: #0f172a;
+}
+
+/* Dark Theme Overrides for New Components */
+[data-theme="dark"] .proposal-contact-modal-card,
+body.theme-dark .proposal-contact-modal-card {
     background: #1e293b;
-    color: #f8fafc;
     border-color: #334155;
+    color: #f8fafc;
 }
 
-[data-theme="dark"] .proposal-settings-head h2,
-[data-theme="dark"] .proposal-toggle-row,
-[data-theme="dark"] .proposal-select-row,
-[data-theme="dark"] .proposal-customer-title,
-[data-theme="dark"] .proposal-export-menu button,
-[data-theme="dark"] .proposal-feature-banner button {
-    color: var(--text-main, #ffffff) !important;
+[data-theme="dark"] .proposal-contact-modal-title,
+body.theme-dark .proposal-contact-modal-title {
+    color: #f8fafc;
 }
 
-[data-theme="dark"] .proposal-settings-head span {
-    background: rgba(255, 255, 255, 0.08);
-    color: #94a3b8 !important;
+[data-theme="dark"] .proposal-contact-modal-desc,
+body.theme-dark .proposal-contact-modal-desc {
+    color: #94a3b8;
 }
 
-[data-theme="dark"] .proposal-settings-head span,
-[data-theme="dark"] .proposal-section h3,
-[data-theme="dark"] .proposal-customer-box,
-[data-theme="dark"] .proposal-feature-banner,
-[data-theme="dark"] .proposal-builder-note {
+[data-theme="dark"] .proposal-contact-progress-bar,
+body.theme-dark .proposal-contact-progress-bar {
+    background: #334155;
+}
+
+[data-theme="dark"] .proposal-contact-modal-cancel,
+body.theme-dark .proposal-contact-modal-cancel {
+    border-color: #475569;
     color: #cbd5e1;
 }
 
-[data-theme="dark"] .proposal-export-menu button:hover,
-[data-theme="dark"] .proposal-feature-banner button:hover,
-[data-theme="dark"] .proposal-small-btn:hover,
-[data-theme="dark"] .proposal-dot-btn:hover {
-    background: #273449;
+[data-theme="dark"] .proposal-contact-modal-cancel:hover,
+body.theme-dark .proposal-contact-modal-cancel:hover {
+    background: #334155;
+    color: #ffffff;
 }
 
-[data-theme="dark"] .proposal-slider {
-    background: #475569;
+[data-theme="dark"] .proposal-preview-area,
+body.theme-dark .proposal-preview-area {
+    scrollbar-color: #475569 #1f2633 !important;
 }
 
-[data-theme="dark"] .proposal-switch input:checked + .proposal-slider {
-    background: #2563eb;
+[data-theme="dark"] .proposal-preview-area::-webkit-scrollbar-track,
+body.theme-dark .proposal-preview-area::-webkit-scrollbar-track {
+    background: #1f2633 !important;
 }
 
-[data-theme="dark"] .proposal-document {
-    box-shadow: 0 24px 70px rgba(0, 0, 0, .48);
+[data-theme="dark"] .proposal-preview-area::-webkit-scrollbar-thumb,
+body.theme-dark .proposal-preview-area::-webkit-scrollbar-thumb {
+    background: #475569 !important;
+    border: 2px solid #1f2633 !important;
 }
 
-[data-theme="dark"] .proposal-feature-banner [data-proposal-learn] {
-    background: rgba(96, 165, 250, .16);
-    border-color: rgba(96, 165, 250, .42);
-    color: #bfdbfe;
+[data-theme="dark"] .proposal-preview-area::-webkit-scrollbar-thumb:hover,
+body.theme-dark .proposal-preview-area::-webkit-scrollbar-thumb:hover {
+    background: #64748b !important;
 }
+
+.proposal-fin-list-row.is-deduction-row {
+    background: rgba(254, 242, 242, 0.4);
+}
+
+.proposal-fin-icon-bubble.is-negative {
+    background: rgba(220, 38, 38, 0.1) !important;
+    color: #dc2626 !important;
+}
+
+.fin-badge-pill.is-negative {
+    background: #fef2f2 !important;
+    color: #dc2626 !important;
+    border-color: #fecaca !important;
+}
+
+
+/* ==========================================================
+   ISOLATED DIRECT PDF EXPORT ENGINE (EXACT 8.5" x 11" LETTER)
+   Guarantees 1:1 parity with Chromium Print Output
+   ========================================================== */
+.proposal-pdf-export-sandbox,
+.proposal-pdf-export-sandbox * {
+    -webkit-print-color-adjust: exact !important;
+    print-color-adjust: exact !important;
+    box-sizing: border-box !important;
+}
+
+.proposal-pdf-export-sandbox .proposal-page-sheet {
+    box-sizing: border-box !important;
+    width: 816px !important;
+    min-width: 816px !important;
+    max-width: 816px !important;
+    height: 1056px !important;
+    min-height: 1056px !important;
+    max-height: 1056px !important;
+    margin: 0 !important;
+    padding: 0.55in 0.65in 0.45in 0.65in !important;
+    border: none !important;
+    border-radius: 0 !important;
+    box-shadow: none !important;
+    background: #ffffff !important;
+    color: #0f172a !important;
+    display: flex !important;
+    flex-direction: column !important;
+    justify-content: space-between !important;
+    overflow: hidden !important;
+}
+
+.proposal-pdf-export-sandbox .proposal-sheet-content {
+    flex: 1 1 auto !important;
+    display: flex !important;
+    flex-direction: column !important;
+}
+
+.proposal-pdf-export-sandbox .proposal-item-table td,
+.proposal-pdf-export-sandbox .proposal-summary-table td {
+    color: #0f172a !important;
+    border-bottom: 1px solid #e2e8f0 !important;
+}
+
+.proposal-pdf-export-sandbox .proposal-hero-total-box {
+    background: #ffffff !important;
+    border: 2px solid #0f172a !important;
+}
+
+.proposal-pdf-export-sandbox .proposal-hero-amount-val {
+    color: #0f172a !important;
+}
+
+.proposal-pdf-export-sandbox .proposal-acceptance-wrap {
+    margin-top: auto !important;
+    padding-top: 10px !important;
+    border-top: 1.5px solid #0f172a !important;
 }

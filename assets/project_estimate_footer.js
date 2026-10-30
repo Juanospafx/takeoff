@@ -131,7 +131,7 @@
 
     function getContainerBoundary(el) {
         const margin = 10;
-        const boundaryEl = el?.closest?.('.workspace-shell, .pro-takeoff-workspace, .estimating-page, .proposal-workspace, body') || document.body;
+        const boundaryEl = el?.closest?.('.workspace-shell, .pro-takeoff-workspace, .estimating-page, .proposal-workspace, .proposal-page, .proposal-shell, body') || document.body;
         if (!boundaryEl || boundaryEl === document.body || boundaryEl === document.documentElement) {
             return {
                 left: margin,
