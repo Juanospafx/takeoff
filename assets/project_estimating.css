@@ -4450,41 +4450,6 @@ body.theme-dark .est-table-wrap.bb-table-scroll::-webkit-scrollbar-corner {
     background: #1f2633 !important;
 }
 
-/* Stable-runtime bridge for the rebuilt Estimating toolbar. */
-.est-v2 .est-toolbar-actions {
-    display: flex !important;
-    align-items: center !important;
-    justify-content: flex-end;
-    gap: 6px !important;
-    margin-left: auto;
-    flex: 0 0 auto;
-}
-.est-v2 .est-search-box { flex: 1 1 280px; max-width: 340px; min-width: 160px; }
-.est-v2 .est-save-status { min-width: 0; color: var(--est-muted); font-size: 11px; white-space: nowrap; }
-.est-v2 .est-toolbar-actions .est-icon-btn {
-    display: inline-flex !important;
-    align-items: center !important;
-    justify-content: center !important;
-    width: 30px !important;
-    min-width: 30px !important;
-    height: 30px !important;
-    padding: 0 !important;
-    color: var(--est-text-soft) !important;
-    background: var(--est-surface) !important;
-    border: 1px solid var(--est-line) !important;
-    border-radius: 6px !important;
-}
-.est-v2 .est-toolbar-actions .est-icon-btn:hover {
-    color: var(--est-primary) !important;
-    border-color: var(--est-primary-border) !important;
-    background: var(--est-primary-soft) !important;
-}
-@media (max-width: 860px) {
-    .est-v2 .est-toolbar { overflow-x: auto; overflow-y: hidden; }
-    .est-v2 .est-save-status { display: none; }
-    .est-v2 .est-search-box { flex-basis: 210px; min-width: 180px; }
-}
-
 .est-table.bb-table {
     width: max-content;
     min-width: 1300px;
