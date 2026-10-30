@@ -175,6 +175,8 @@
             project_layer_id: layer.metadata_json?.project_layer_id || layer.client_uid,
             unit_cost: num(layer.unit_cost || 0),
             unit_labor_time: num(layer.unit_labor_time || layer.labor_hours || 0),
+            difficulty: num(layer.difficulty ?? layer.metadata_json?.difficulty ?? 1),
+            multiplier: num(layer.multiplier ?? layer.metadata_json?.multiplier ?? 1),
             cost_code: layer.cost_code || '',
             catalog_item_id: layer.catalog_item_id || null
         };
@@ -189,6 +191,8 @@
             ...layer,
             unit_cost: num(hasSnapshotCost ? metadata.unit_cost : (layer.unit_cost ?? 0)),
             unit_labor_time: num(hasSnapshotLabor ? metadata.unit_labor_time : (layer.unit_labor_time ?? layer.labor_hours ?? 0)),
+            difficulty: num(metadata.difficulty ?? layer.difficulty ?? 1),
+            multiplier: num(metadata.multiplier ?? layer.multiplier ?? 1),
             cost_code: metadata.cost_code || layer.cost_code || '',
             catalog_item_id: layer.catalog_item_id || metadata.catalog_item_id || null,
             catalogMetadata: window.CatalogMetadata.clone(metadata.catalog_item || layer.catalogMetadata || null),

@@ -656,10 +656,16 @@
                 b.setAttribute('aria-expanded', 'false');
             }
         });
-        const estPillMenu = document.querySelector('[data-est-pill-menu]');
-        if (estPillMenu && isElementVisible(estPillMenu) && !shouldKeep(estPillMenu)) {
-            estPillMenu.hidden = true;
-        }
+        document.querySelectorAll('[data-est-pill-menu]').forEach(estPillMenu => {
+            if (estPillMenu && isElementVisible(estPillMenu) && !shouldKeep(estPillMenu)) {
+                estPillMenu.hidden = true;
+            }
+        });
+        document.querySelectorAll('[data-est-pill-toggle][aria-expanded="true"]').forEach(b => {
+            if (!shouldKeep(b)) {
+                b.setAttribute('aria-expanded', 'false');
+            }
+        });
 
         // 7. Takeoff tool panels & popovers
         const toolsPanel = document.getElementById('takeoffMoreToolsPanel');

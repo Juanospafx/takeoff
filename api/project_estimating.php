@@ -272,6 +272,10 @@ function pew_relational_groups(PDO $pdo, $estimateId) {
         if (!isset($item['unitMaterialCost'])) $item['unitMaterialCost'] = (float)$row['unit_cost'];
         if (!isset($item['quantitySource'])) $item['quantitySource'] = isset($row['source_type']) ? (string)$row['source_type'] : 'manual';
         if (!isset($item['takeoffLayerId']) && !empty($row['source_layer_key'])) $item['takeoffLayerId'] = (string)$row['source_layer_key'];
+        if (!isset($item['difficulty'])) $item['difficulty'] = isset($meta['workspace']['difficulty']) ? (float)$meta['workspace']['difficulty'] : (isset($meta['difficulty']) ? (float)$meta['difficulty'] : 1.0);
+        if (!isset($item['laborWaste'])) $item['laborWaste'] = isset($meta['workspace']['laborWaste']) ? (float)$meta['workspace']['laborWaste'] : (isset($meta['laborWaste']) ? (float)$meta['laborWaste'] : null);
+        if (!isset($item['factorOverride']) && isset($meta['workspace']['factorOverride'])) $item['factorOverride'] = (float)$meta['workspace']['factorOverride'];
+        if (!isset($item['ratio']) && isset($meta['workspace']['ratio'])) $item['ratio'] = (float)$meta['workspace']['ratio'];
         $groupName = trim((string)(isset($row['group_name']) ? $row['group_name'] : '')) ?: 'Default Group';
         if (!isset($groups[$groupName])) {
             $groups[$groupName] = array(
@@ -298,6 +302,14 @@ function pew_load_one(PDO $pdo, array $estimate) {
     if (!array_key_exists('groups', $snapshot) || !is_array($snapshot['groups'])) {
         $recoveredGroups = pew_relational_groups($pdo, (int)$estimate['id']);
         if ($recoveredGroups) $snapshot['groups'] = $recoveredGroups;
+    }
+    if ((empty($snapshot['settings']) || !is_array($snapshot['settings'])) && !empty($estimate['settings_json'])) {
+        $recoveredSettings = pew_decode($estimate['settings_json']);
+        if ($recoveredSettings) $snapshot['settings'] = $recoveredSettings;
+    }
+    if ((empty($snapshot['notes']) || !is_array($snapshot['notes'])) && !empty($estimate['notes_json'])) {
+        $recoveredNotes = pew_decode($estimate['notes_json']);
+        if ($recoveredNotes) $snapshot['notes'] = $recoveredNotes;
     }
     $snapshot['id'] = $state && $state['client_estimate_id'] !== '' ? $state['client_estimate_id'] : (string)$estimate['id'];
     $snapshot['estimateItemId'] = (int)$estimate['id'];

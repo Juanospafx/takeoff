@@ -82,10 +82,12 @@
             ? explicitEquipmentQuantity : (isEquipmentItem ? quantity : 0);
         const equipmentCost = effectiveEquipmentQuantity * num(item.unitEquipmentCost);
         const equipmentSales = salesFromCost(equipmentCost, equipmentMargin >= 100 ? 0 : clampMargin(equipmentMargin), settings.marginMode);
-        // Waste is a material allowance. Labor follows the measured/base quantity;
-        // difficulty is the only multiplier applied to required labor time.
+        // Waste is a material allowance. Labor follows the measured/base quantity
+        // modified by difficulty and optional labor inefficiency / waste allowance.
         const baseLaborHours = quantity * unitLaborHours(item);
-        const adjustedLaborHours = baseLaborHours * Math.max(0, num(item.difficulty, 1));
+        const itemLaborWaste = item.laborWaste ?? (item.itemType === 'labor' ? item.waste : undefined);
+        const laborWastePercent = Math.max(0, num(itemLaborWaste ?? settings.laborWaste, 0));
+        const adjustedLaborHours = baseLaborHours * Math.max(0, num(item.difficulty, 1)) * (1 + laborWastePercent / 100);
         const laborCost = adjustedLaborHours * num(item.laborRate ?? settings.globalLaborCost);
         const laborSales = salesFromCost(laborCost, laborMargin >= 100 ? 0 : clampMargin(laborMargin), settings.marginMode);
         const totalCost = materialCost + equipmentCost + laborCost;
@@ -103,6 +105,7 @@
             equipmentQuantity: effectiveEquipmentQuantity,
             baseLaborHours,
             adjustedLaborHours,
+            laborMargin,
             laborCost,
             laborSales,
             totalCost,
@@ -122,20 +125,51 @@
         const childRows = children.map(child => {
             // Catalog assembly component quantities are per assembly unit. A caller
             // may mark already-extended children to avoid applying the multiplier.
-            const quantity = item.childrenQuantitiesExtended ? num(child.quantity) : num(child.quantity) * assemblyQuantity;
-            const extended = { ...child, quantity };
+            // Also supports factorOverride for project-level custom component formulas.
+            const componentRatio = (child.factorOverride !== undefined && child.factorOverride !== null && child.factorOverride !== '')
+                ? num(child.factorOverride)
+                : (child.ratio !== undefined && child.ratio !== null ? num(child.ratio) : num(child.quantity));
+            const quantity = item.childrenQuantitiesExtended ? componentRatio : componentRatio * assemblyQuantity;
+            const extended = { ...child, quantity, ratio: componentRatio };
             const calc = calculateItem(extended, settings);
             validation.push(...(calc.validation || []).map(error => ({ ...error, childId: child.id || null })));
             totals = addTotals(totals, calc);
             return { item: extended, calc };
         });
+
+        // Compute unit material cost based on 1 unit if assemblyQuantity is 0
+        let unitMaterialCost = 0;
+        let unitMaterialSales = 0;
+        if (assemblyQuantity > 0) {
+            unitMaterialCost = totals.materialCost / assemblyQuantity;
+            unitMaterialSales = totals.materialSales / assemblyQuantity;
+        } else {
+            children.forEach(c => {
+                const ratio = (c.factorOverride !== undefined && c.factorOverride !== null && c.factorOverride !== '')
+                    ? num(c.factorOverride)
+                    : (c.ratio !== undefined && c.ratio !== null ? num(c.ratio) : num(c.quantity));
+                const cCost = num(c.unitMaterialCost ?? c.unitCost);
+                const cWaste = Math.max(0, num(c.waste));
+                unitMaterialCost += ratio * cCost * (1 + cWaste / 100);
+            });
+            children.forEach(c => {
+                const ratio = (c.factorOverride !== undefined && c.factorOverride !== null && c.factorOverride !== '')
+                    ? num(c.factorOverride)
+                    : (c.ratio !== undefined && c.ratio !== null ? num(c.ratio) : num(c.quantity));
+                const cCost = num(c.unitMaterialCost ?? c.unitCost) * (1 + Math.max(0, num(c.waste)) / 100);
+                const margin = num(c.materialMargin ?? c.margin);
+                unitMaterialSales += ratio * salesFromCost(cCost, margin >= 100 ? 0 : clampMargin(margin), settings.marginMode);
+            });
+        }
+
         return {
             ...totals,
             baseQuantity: assemblyQuantity,
             adjustedQuantity: assemblyQuantity,
             wasteQuantity: 0,
-            unitMaterialCost: assemblyQuantity > 0 ? totals.materialCost / assemblyQuantity : 0,
-            unitMaterialSales: assemblyQuantity > 0 ? totals.materialSales / assemblyQuantity : 0,
+            unitMaterialCost,
+            unitMaterialSales,
+            laborMargin: totals.laborSales > 0 ? ((totals.laborSales - totals.laborCost) / totals.laborSales) * 100 : num(item.laborMargin ?? settings.globalLaborMargin),
             isAssembly: true,
             childRows,
             validation
@@ -160,9 +194,36 @@
         });
         validation.push(...expansion.errors.map(error => ({ field: 'assembly', ...error })));
         const quantity = num(item.quantity);
+
+        // Compute unit material cost based on 1 unit if quantity is 0
+        let unitMaterialCost = 0;
+        let unitMaterialSales = 0;
+        if (quantity > 0) {
+            unitMaterialCost = totals.materialCost / quantity;
+            unitMaterialSales = totals.materialSales / quantity;
+        } else {
+            if (Array.isArray(expansion?.leaves) && expansion.leaves.length > 0) {
+                expansion.leaves.forEach(leaf => {
+                    const lCost = num(leaf.item?.unitMaterialCost ?? leaf.item?.unitCost);
+                    const lQty = num(leaf.ratio ?? leaf.quantity ?? 1);
+                    unitMaterialCost += lQty * lCost;
+                });
+            }
+            if (unitMaterialCost <= 0 && Array.isArray(item.children)) {
+                item.children.forEach(c => {
+                    const ratio = (c.factorOverride !== undefined && c.factorOverride !== null && c.factorOverride !== '')
+                        ? num(c.factorOverride)
+                        : (c.ratio !== undefined && c.ratio !== null ? num(c.ratio) : num(c.quantity));
+                    unitMaterialCost += ratio * num(c.unitMaterialCost ?? c.unitCost);
+                });
+            }
+            unitMaterialSales = unitMaterialCost;
+        }
+
         return { ...totals, baseQuantity: quantity, adjustedQuantity: quantity, wasteQuantity: 0,
-            unitMaterialCost: quantity > 0 ? totals.materialCost / quantity : 0,
-            unitMaterialSales: quantity > 0 ? totals.materialSales / quantity : 0,
+            unitMaterialCost,
+            unitMaterialSales,
+            laborMargin: totals.laborSales > 0 ? ((totals.laborSales - totals.laborCost) / totals.laborSales) * 100 : num(item.laborMargin ?? settings.globalLaborMargin),
             isAssembly: true, childRows, validation,
             expansion: { policy: 'CANONICAL', errors: expansion.errors, warnings: expansion.warnings, limitations: [] } };
     }
@@ -181,8 +242,11 @@
     function markupValue(markup, baseMap) {
         if (markup?.active === false) return 0;
         const base = num(baseMap?.[markup?.base || 'subtotal_sales'] ?? baseMap?.subtotal_sales);
-        if (markup?.type === 'fixed_amount') return num(markup.amount ?? markup.percent);
-        return base * num(markup?.percent) / 100;
+        let val = 0;
+        if (markup?.type === 'fixed_amount') val = num(markup.amount ?? markup.percent);
+        else val = base * num(markup?.percent) / 100;
+        const isSubtract = markup?.operator === 'subtract' || markup?.action === 'subtract' || markup?.isDiscount || (num(markup?.percent) < 0) || (num(markup?.amount) < 0);
+        return isSubtract ? -Math.abs(val) : Math.abs(val);
     }
 
     function componentTotals(calc, component) {
