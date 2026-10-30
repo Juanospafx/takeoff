@@ -114,10 +114,10 @@ test('Add Item opens Cost Catalog and the selected item persists with its catalo
     dom.window.document.querySelector('[data-add-item]').click();
     await new Promise(resolve => dom.window.setTimeout(resolve, 0));
     dom.window.document.querySelector('[data-est-catalog-item="77"]').click();
-    const name = dom.window.document.querySelector('[data-item-field="name"]');
+    const name = dom.window.document.querySelector('[data-item-id] .est-item-title');
     const state = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.draft'));
     const item = state.estimates.find(row => row.id === state.activeEstimateId).groups[0].items[0];
-    assert.equal(name.value, 'Catalog Disconnect');
+    assert.equal(name.textContent, 'Catalog Disconnect');
     assert.equal(item.name, 'Catalog Disconnect');
     assert.equal(item.catalogItemId, 77);
     assert.equal(item.costCode, '26-28-16');
@@ -147,8 +147,9 @@ test('typing a multi-digit item price keeps the same editor focused until change
 
 test('project notes persist while the user is typing without rerendering the editor', () => {
     const dom = runtime();
+    dom.window.document.querySelector('[data-collapse-card="notes"]').click();
     const editor = dom.window.document.querySelector('[data-note-field="projectNotes"]');
-    editor.value = 'Coordinate shutdown with the owner.';
+    editor.innerHTML = 'Coordinate shutdown with the owner.';
     editor.dispatchEvent(new dom.window.Event('input', { bubbles: true }));
     assert.equal(dom.window.document.activeElement === editor || dom.window.document.contains(editor), true);
     const state = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.draft'));

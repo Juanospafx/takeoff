@@ -32,12 +32,13 @@ function runtime() {
 
 test('full item and assembly component names are rendered', () => {
   const dom = runtime();
-  const longName = dom.window.document.querySelector('[data-item-id="long-item"] [data-item-field="name"]');
-  assert.equal(longName.value, 'Extremely Long Electrical Catalog Item Name That Must Remain Fully Visible');
-  assert.ok(Number(longName.getAttribute('size')) > 60);
+  const longName = dom.window.document.querySelector('[data-item-id="long-item"] .est-item-title');
+  assert.equal(longName.textContent, 'Extremely Long Electrical Catalog Item Name That Must Remain Fully Visible');
+  assert.equal(longName.tagName, 'SPAN');
   dom.window.document.querySelector('[data-toggle-assembly="assembly-a"]').click();
-  const component = dom.window.document.querySelector('[data-assembly-component-row] [data-item-field="name"]');
-  assert.equal(component.value, 'Three Quarter Inch EMT Compression Connector');
+  const component = dom.window.document.querySelector('[data-assembly-component-row] .est-item-title');
+  assert.equal(component.textContent, 'Three Quarter Inch EMT Compression Connector');
+  assert.equal(component.tagName, 'SPAN');
   dom.window.close();
 });
 

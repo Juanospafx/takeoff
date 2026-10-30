@@ -28,7 +28,7 @@
     const storageKey = `takeoff.estimating.module.${projectId || 'draft'}`;
     const apiUrl = '../api/project_estimating.php';
     const ui = { search: '', selected: new Set(), saving: false, saveRequested: false, saveTimer: null, pendingDeleteId: null, lastErrorCode: null, loadState: projectId ? 'loading' : 'local',
-        message: projectId ? 'Loading estimate' : 'Local draft', collapsed: { notes: false, audit: true }, expandedAssemblies: new Set(), modal: null,
+        message: projectId ? 'Loading estimate' : 'Local draft', collapsed: { notes: true, audit: true }, expandedAssemblies: new Set(), modal: null,
         notesLibraryModal: null, notesLibrarySearch: '', activeMarkupPopover: null, summaryColWidths: (()=>{ try { return JSON.parse(localStorage.getItem('takeoff.summaryColWidths')||'{}'); } catch(_){ return {}; } })(),
         catalogTargetGroupId: null, catalogData: null, catalogLoading: false, catalogError: '' };
     let state = readLocal();
@@ -56,7 +56,6 @@
     root.classList.add('est-v2');
     if (!$('estTableHead')) {
         root.innerHTML = `<div class="est-main"><aside class="est-table-settings-drawer" id="estTableSettingsDrawer" aria-label="Table Settings" hidden></aside><section class="est-left"><div class="est-toolbar"><div class="bb-search-field-procore cc-search-procore est-search-box"><input id="estSearch" type="search" placeholder="Search estimate items..." autocomplete="off"></div><div class="est-toolbar-actions" style="display: flex; align-items: center; gap: 8px; margin-left: auto;"><button class="est-icon-btn" id="estBtnCreateGroup" type="button" data-est-action="create-group" title="Create Group"><i class="fas fa-folder-plus"></i></button><button class="est-icon-btn" id="estBtnTableSettings" type="button" data-est-action="table-settings" title="Table Settings"><i class="fas fa-sliders"></i></button><button class="est-icon-btn" id="estBtnFullscreen" type="button" data-est-action="fullscreen" title="Full screen"><i class="fas fa-expand"></i></button><div class="est-menu-wrap"><button class="est-icon-btn" id="estBtnMoreOptions" type="button" data-est-action="options" title="Options"><i class="fas fa-ellipsis-vertical"></i></button><div class="est-menu" id="optionsMenu"><button type="button" data-est-action="catalog-update"><i class="fas fa-arrows-rotate"></i> Update from Cost Catalog</button><button type="button" data-est-action="reset-quantities"><i class="fas fa-rotate-left"></i> Reset Quantities</button><button type="button" data-est-action="delete-selected" id="estBtnDeleteSelected" disabled><i class="fas fa-trash"></i> Delete Selected</button><div class="est-menu-divider" style="height: 1px; background: var(--border, #e2e8f0); margin: 4px 0;"></div><button type="button" data-est-option="save"><i class="fas fa-floppy-disk"></i> Save estimate</button><button type="button" data-est-option="copy"><i class="fas fa-copy"></i> Copy estimate</button><button type="button" data-est-option="status"><i class="fas fa-circle-check"></i> Change project status</button><button type="button" data-est-option="import"><i class="fas fa-file-import"></i> Import</button><button type="button" data-est-option="export"><i class="fas fa-file-export"></i> Export</button><button type="button" data-est-option="export-bom"><i class="fas fa-file-excel"></i> Export BOM (Excel)</button><button type="button" data-est-option="delete-estimate" class="danger"><i class="fas fa-trash"></i> Delete estimate</button></div></div><button class="est-icon-btn est-toggle-right-btn" id="estToolbarToggleRight" type="button" data-est-action="toggle-right" title="Hide summary panel"><i class="fas fa-chevron-right"></i></button></div></div><div class="est-table-wrap bb-table-scroll"><table class="est-table bb-table" id="estMainTable"><thead id="estTableHead"></thead><tbody id="estTableBody"></tbody></table></div></section><div class="pro-sidebar-resizer est-sidebar-resizer" id="estSplitResizer" role="separator" aria-orientation="vertical" title="Drag to resize panels"><div class="pro-resizer-handle"></div></div><aside class="est-right"><div class="est-right-scroll"></div><div class="est-total-box"><div id="estimateTotal" class="est-total-value"></div><div class="est-total-label">Estimate Total</div><div id="estimateSqft" class="est-total-sub"></div></div></aside></div><footer class="est-version-bar" id="versionBar"></footer>`;
-        root.querySelector('.est-toolbar-actions')?.insertAdjacentHTML('beforeend', '<span class="est-save-status" role="status" aria-live="polite"></span>');
     }
 
     function readLocal() {
@@ -1184,19 +1183,19 @@
     }
 
     function resolveAssemblyComponentName(component, catalogItem = null) {
-        const explicitCandidates = [
+        const candidates = [
             component?.itemName, component?.item_name,
             component?.child_item_name, component?.childItemName, component?.child_name,
             component?.catalogItem?.name, component?.catalog_item?.name,
             component?.catalogSnapshot?.name,
             catalogItem?.itemName, catalogItem?.item_name, catalogItem?.name
         ];
-        const explicitName = explicitCandidates.find(value => String(value || '').trim());
-        if (explicitName) return String(explicitName).trim();
-        const genericNames = new Set(['assembly part', 'assembly component', 'cost item', 'item']);
-        const componentName = String(component?.name || '').trim();
-        return componentName && !genericNames.has(componentName.toLowerCase())
-            ? componentName
+        const resolved = candidates.find(value => String(value || '').trim());
+        if (resolved) return String(resolved).trim();
+        const currentName = String(component?.name || '').trim();
+        const placeholders = new Set(['assembly part', 'assembly component', 'cost item', 'item']);
+        return currentName && !placeholders.has(currentName.toLowerCase())
+            ? currentName
             : 'Assembly component';
     }
 
@@ -1737,14 +1736,7 @@
         const body = $('estTableBody');
         if (!head || !body) return;
 
-        const itemLabels = current().groups.flatMap(group => (group.items || []).flatMap(item => [
-            String(item.name || ''),
-            ...getItemChildren(item).map(child => resolveAssemblyComponentName(child))
-        ]));
-        const longestItemLabel = itemLabels.reduce((max, label) => Math.max(max, label.length), 0);
         const widths = getColumnWidths();
-        widths.cost_item = Math.max(Number(widths.cost_item || 340),
-            Math.min(1200, Math.ceil(longestItemLabel * 8.5 + 100)));
         const activeColumns = getOrderedActiveColumns();
         const costItemWidth = widths.cost_item || 340;
         const table = $('estMainTable');
@@ -1905,9 +1897,7 @@
 
     function renderItemRow(item, calc, activeColumns, totalSummaryCost, options = {}) {
         const component = options.component === true;
-        const rowDisplayName = component
-            ? resolveAssemblyComponentName(options.sourceChild, item)
-            : String(item.name || 'Unnamed item');
+        const displayName = component ? resolveAssemblyComponentName(options.sourceChild, item) : String(item.name || 'Unnamed item');
         const assembly = isAssemblyItem(item);
         const invalid = (calc.validation || []).length > 0;
         const rowId = component ? `${options.parent.id}:component:${options.sourceChild?.id || options.index}` : item.id;
@@ -1934,7 +1924,7 @@
                 <td class="col-cost-item">
                     <div class="est-item-cell-singleline is-component">
                         <span class="est-assembly-branch-line" aria-hidden="true">&#8627;</span>
-                        <input class="pro-tree-item-title est-item-title est-item-name-input" data-item-field="name" value="${esc(rowDisplayName)}" title="${esc(rowDisplayName)}" size="${Math.max(16, rowDisplayName.length + 1)}" aria-label="Item name">
+                        <span class="pro-tree-item-title est-item-title" title="${esc(displayName)}">${esc(displayName)}</span>
                     </div>
                 </td>
                 <td hidden aria-hidden="true"></td><td hidden aria-hidden="true"></td><td hidden aria-hidden="true"></td>
@@ -1971,7 +1961,7 @@
                         ${shapeSvg}
                     </div>
                     <div class="est-item-text-col ${itemTag ? 'has-tag' : 'no-tag'}">
-                        <input class="pro-tree-item-title est-item-title est-item-name-input" data-item-field="name" value="${esc(rowDisplayName)}" title="${esc(rowDisplayName)}" size="${Math.max(16, rowDisplayName.length + 1)}" aria-label="Item name">
+                        <span class="pro-tree-item-title est-item-title" title="${esc(item.name)}">${esc(item.name)}</span>
                         ${tagHtml}
                     </div>
                 </div>
@@ -2118,14 +2108,6 @@
         const estimate = current();
         const total = summary();
         aside.innerHTML = `${card('notes', 'Notes', notesHtml(estimate))}${card('summary', 'Summary', summaryHtml(total))}${card('audit', 'Audit', auditHtml(estimate))}`;
-        aside.querySelectorAll('.est-rich-editor-box').forEach(editor => {
-            if (Object.prototype.hasOwnProperty.call(editor, 'value')) return;
-            Object.defineProperty(editor, 'value', {
-                configurable: true,
-                get() { return this.innerHTML; },
-                set(value) { this.innerHTML = String(value ?? ''); }
-            });
-        });
         const totalElement = $('estimateTotal');
         if (totalElement) totalElement.textContent = money(total.estimateTotal);
         renderSqftDisplay(total);
@@ -2909,8 +2891,7 @@ function renderFooter() {
     function renderStatus() {
         let status = root.querySelector('.est-save-status');
         if (status) {
-            status.textContent = ui.message || '';
-            status.style.display = ui.message ? '' : 'none';
+            status.style.display = 'none';
         }
     }
 
@@ -3190,6 +3171,9 @@ function renderFooter() {
             event.target.classList.add('is-val-overridden');
             const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
             if (unitEl) unitEl.style.color = '#ea580c';
+            const liveCommit = new Event('change', { bubbles: true });
+            liveCommit.estimatingLiveInput = true;
+            event.target.dispatchEvent(liveCommit);
             return;
         }
         if (event.target.dataset.summaryRate) {
@@ -3635,15 +3619,6 @@ function renderFooter() {
             return;
         }
         updateMarkup(event.target);
-    });
-
-    // Keep the rebuilt table responsive while typing, matching the durable
-    // persistence contract used by the existing Estimating runtime.
-    root.addEventListener('input', event => {
-        if (!event.target.matches('[data-item-field]')) return;
-        const liveCommit = new Event('change', { bubbles: true });
-        liveCommit.estimatingLiveInput = true;
-        event.target.dispatchEvent(liveCommit);
     });
 
     root.addEventListener('focusout', event => {
