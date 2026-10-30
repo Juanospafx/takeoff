@@ -6526,6 +6526,24 @@
         showPrepared(action);
     }
 
+    // Bind mutation entry points through delegation as soon as this script is
+    // evaluated.  The Takeoff workspace can be rendered or refreshed after the
+    // initial DOMContentLoaded pass, so snapshotting the current buttons left
+    // Actions -> Create New Group without a listener in that state.
+    function bindTakeoffActionDelegation() {
+        document.addEventListener('click', event => {
+            const button = event.target?.closest?.('[data-takeoff-action]');
+            if (!button) return;
+            handleTakeoffAction(button.dataset.takeoffAction);
+        });
+        document.addEventListener('submit', event => {
+            if (event.target?.id !== 'takeoffGroupForm') return;
+            submitTakeoffGroupModal(event);
+        });
+    }
+
+    bindTakeoffActionDelegation();
+
     function toggleGlobalVisibility() {
         pushTakeoffHistory('toggle-global-visibility');
         takeoffState.globalVisible = !takeoffState.globalVisible;
@@ -7765,11 +7783,6 @@
             });
         });
 
-        document.querySelectorAll('[data-takeoff-action]').forEach(button => {
-            button.addEventListener('click', () => handleTakeoffAction(button.dataset.takeoffAction));
-        });
-
-        $('takeoffGroupForm')?.addEventListener('submit', submitTakeoffGroupModal);
         document.querySelectorAll('[data-group-modal-close]').forEach(button => button.addEventListener('click', closeTakeoffGroupModal));
         $('takeoffGroupName')?.addEventListener('input', event => {
             const input = event.currentTarget;
