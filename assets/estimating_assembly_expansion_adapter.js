@@ -74,11 +74,10 @@
             result.assemblyComponents = children.map(({ component, child }, componentIndex) => {
                 const childDto = child ? dto(child, nextPath) : null;
                 const childId = text(component?.catalogItemId) || childDto?.id || `missing-${id}-${componentIndex}`;
-                const rawQty = component?.factorOverride ?? child?.factorOverride
+                const rawQty = component?.factorOverride ?? child?.factorOverride ?? child?.ratio
                     ?? component?.quantity
-                    ?? child?.ratio
-                    ?? child?.quantity
-                    ?? 0;
+                    ?? (row?.childrenQuantitiesExtended ? child?.quantity : (child?.unitQuantity ?? child?.ratio ?? 1))
+                    ?? 1;
                 return {
                     id: text(component?.id) || `${id}:${componentIndex}`,
                     catalogItemId: childId,

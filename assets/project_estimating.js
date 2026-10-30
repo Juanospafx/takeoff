@@ -178,10 +178,22 @@
     function isAssemblyItem(item) {
         if (!item) return false;
         return item.isAssembly === true
+            || Number(item.is_assembly ?? 0) === 1
             || String(item.itemType ?? item.item_type ?? '').toLowerCase() === 'assembly'
+            || String(item.type ?? item.costCategory ?? item.cost_category ?? '').toLowerCase() === 'assembly'
             || String(item.catalogSnapshot?.type ?? item.catalogSnapshot?.item_type ?? '').toLowerCase() === 'assembly'
+            || String(item.catalogMetadata?.type ?? item.catalogMetadata?.item_type ?? '').toLowerCase() === 'assembly'
             || (Array.isArray(item.children) && item.children.length > 0)
+            || (Array.isArray(item.assemblyItems) && item.assemblyItems.length > 0)
+            || (Array.isArray(item.catalogSnapshot?.assemblyComponents) && item.catalogSnapshot.assemblyComponents.length > 0)
+            || (Array.isArray(item.catalogMetadata?.assemblyComponents) && item.catalogMetadata.assemblyComponents.length > 0)
             || ui.expandedAssemblies.has(String(item.id));
+    }
+    function isEquipmentItem(item) {
+        if (!item) return false;
+        return [item.itemType, item.item_type, item.type, item.costCategory, item.cost_category,
+            item.catalogSnapshot?.type, item.catalogMetadata?.type]
+            .some(value => String(value || '').toLowerCase().includes('equip'));
     }
     function duplicateAssembly(item) {
         const copyTree = (source, parentItemId = null) => {
@@ -1997,15 +2009,24 @@
             return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable ${isOverridden ? 'is-qty-overridden is-val-overridden' : ''}" data-item-field="quantity" type="number" step="0.01" value="${esc(formattedQty)}" style="width: ${Math.max(2, String(formattedQty).length)}ch; text-align: right;" title="${esc(qtyTooltip)}"><span class="est-editable-unit" style="font-size: 11px; color: ${isOverridden ? '#ea580c' : '#2563eb'}; margin-left: 3px; font-weight: 600;">${esc(uom)}</span></span></td>`;
         }
         if (colId === 'unit_cost') {
-            const itemBaseCost = Number(item.unitMaterialCost ?? item.unitCost ?? item.catalogSnapshot?.material_cost ?? item.catalogSnapshot?.unit_cost ?? 0);
-            const unitCost = (calc.unitMaterialCost !== undefined && calc.unitMaterialCost > 0)
-                ? calc.unitMaterialCost
-                : (itemBaseCost > 0 ? itemBaseCost : (calc.unitMaterialCost || 0));
+            const equipment = isEquipmentItem(item);
+            const itemBaseCost = equipment
+                ? Number(item.overrides?.equipmentUnitCost ?? item.unitEquipmentCost
+                    ?? item.catalogSnapshot?.pricing?.equipmentUnitCost ?? item.unitMaterialCost ?? item.unitCost ?? 0)
+                : Number(item.unitMaterialCost ?? item.unitCost ?? item.catalogSnapshot?.material_cost
+                    ?? item.catalogSnapshot?.pricing?.materialUnitCost ?? item.catalogSnapshot?.unit_cost ?? 0);
+            const unitCost = equipment
+                ? itemBaseCost
+                : ((calc.unitMaterialCost !== undefined && calc.unitMaterialCost > 0)
+                    ? calc.unitMaterialCost
+                    : (itemBaseCost > 0 ? itemBaseCost : (calc.unitMaterialCost || 0)));
             const formattedCost = Number(unitCost || 0).toFixed(2);
             if (readonly) return `<td class="text-right est-money"><span>${number(unitCost, 2)}</span></td>`;
             const isCostOverridden = Boolean(
-                (item.overrides?.materialUnitCost !== null && item.overrides?.materialUnitCost !== undefined)
-                || item._manualFields?.unitMaterialCost
+                (equipment
+                    ? (item.overrides?.equipmentUnitCost !== null && item.overrides?.equipmentUnitCost !== undefined)
+                    : (item.overrides?.materialUnitCost !== null && item.overrides?.materialUnitCost !== undefined))
+                || item._manualFields?.[equipment ? 'unitEquipmentCost' : 'unitMaterialCost']
             );
             return `<td class="text-right"><span class="est-editable-num-wrap"><span class="est-editable-unit" style="font-size: 11px; color: ${isCostOverridden ? '#ea580c' : '#2563eb'}; margin-right: 1px; font-weight: 600;">$</span><input class="est-cell-input is-editable est-cell-blue-input ${isCostOverridden ? 'is-val-overridden' : ''}" data-item-field="unitMaterialCost" type="number" step="0.01" value="${esc(formattedCost)}" style="width: ${Math.max(4, formattedCost.length)}ch; text-align: right;"></span></td>`;
         }
@@ -3424,6 +3445,8 @@ function renderFooter() {
         if (row && field) {
             const found = findItem(row.dataset.itemId);
             if (!found) return;
+            const equipmentUnitCostEdit = field === 'unitMaterialCost' && isEquipmentItem(found.item);
+            const effectiveField = equipmentUnitCostEdit ? 'unitEquipmentCost' : field;
             const prevRaw = getAuditPrevValue(event.target);
             const nextRaw = event.target.value;
             const catalogFields = {
@@ -3431,13 +3454,13 @@ function renderFooter() {
                 unitSubcontractorCost: 'subcontractorUnitCost', unitLabor: 'laborHoursPerUnit', laborRate: 'laborRate'
             };
             found.item._manualFields = found.item._manualFields || {};
-            if (event.target.type === 'number' && found.item.catalogSnapshot && catalogFields[field]
+            if (event.target.type === 'number' && found.item.catalogSnapshot && catalogFields[effectiveField]
                 && window.EstimatingCatalogSnapshotService) {
                 const parsedVal = Number(event.target.value);
                 window.EstimatingCatalogSnapshotService.setCatalogOverride(found.item,
-                    catalogFields[field], parsedVal);
-                found.item[field] = parsedVal;
-                found.item._manualFields[field] = true;
+                    catalogFields[effectiveField], parsedVal);
+                found.item[effectiveField] = parsedVal;
+                found.item._manualFields[effectiveField] = true;
                 event.target.classList.add('is-val-overridden');
                 const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
                 if (unitEl) unitEl.style.color = '#ea580c';
@@ -3471,7 +3494,7 @@ function renderFooter() {
                         if (unitEl) unitEl.style.color = '#ea580c';
                     }
                 } else {
-                    found.item._manualFields[field] = true;
+                    found.item._manualFields[effectiveField] = true;
                     event.target.classList.add('is-val-overridden');
                     const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
                     if (unitEl) unitEl.style.color = '#ea580c';
@@ -3481,7 +3504,7 @@ function renderFooter() {
                         }));
                     }
                 }
-                found.item[field] = parsedVal;
+                found.item[effectiveField] = parsedVal;
                 if (!isLiveTypingCommit && event.target.type === 'number' && !isNaN(parsedVal)) event.target.value = parsedVal.toFixed(2);
                 if (field === 'quantity' && isAssemblyItem(found.item)) {
                     const newParentQty = Workspace.numeric(parsedVal);
