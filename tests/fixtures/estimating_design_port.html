@@ -1,0 +1,26 @@
+<!doctype html>
+<html lang="en">
+<head>
+  <meta charset="utf-8">
+  <meta name="viewport" content="width=device-width,initial-scale=1">
+  <title>Estimating Design Port</title>
+  <link rel="stylesheet" href="../../assets/project_estimating.css">
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.2/css/all.min.css">
+  <style>html,body{height:100%;margin:0;background:#eef1f5;font-family:Inter,Arial,sans-serif}#estimatingModule{height:100vh;padding:12px;box-sizing:border-box}</style>
+</head>
+<body>
+<div id="estimatingModule" data-project-id="0"></div>
+<script>
+window.ProjectState={projectId:0,estimateItems:[],projectMeta:{square_footage:12500}};
+localStorage.setItem('takeoff.estimating.module.draft',JSON.stringify({activeEstimateId:'estimate-demo',estimates:[{id:'estimate-demo',name:'Electrical Estimate',status:'draft',groups:[{id:'g1',name:'26 05 00 — Common Work Results',expanded:true,items:[{id:'i1',name:'3/4 in. EMT Conduit',quantity:420,uom:'ft',unitMaterialCost:1.48,waste:5,materialMargin:24,unitLabor:0.04,laborRate:42},{id:'a1',name:'Branch Circuit Assembly',itemType:'assembly',isAssembly:true,quantity:18,uom:'ea',children:[{id:'c1',name:'Junction Box',quantity:1,uom:'ea',unitMaterialCost:8.2},{id:'c2',name:'Connector',quantity:2,uom:'ea',unitMaterialCost:1.15}]}]}],notes:{scope:'Complete electrical installation per plans.',included:['Material and labor'],excluded:['Utility fees'],projectNotes:'Coordinate shutdown.'},settings:{globalLaborCost:42,globalLaborMargin:30,taxes:{Materials:7, Labor:0, Equipment:7},preTaxMarkups:[],postTaxMarkups:[]}}]}));
+</script>
+<script src="../../assets/quantity_format_service.js"></script>
+<script src="../../assets/assembly_expansion_service.js"></script>
+<script src="../../assets/estimating_assembly_expansion_adapter.js"></script>
+<script src="../../assets/estimate_calculation_service.js"></script>
+<script src="../../assets/project_estimate_footer.js"></script>
+<script src="../../assets/takeoff_estimating_sync_service.js"></script>
+<script src="../../assets/estimating_workspace_service.js"></script>
+<script src="../../assets/project_estimating.js"></script>
+</body>
+</html>
