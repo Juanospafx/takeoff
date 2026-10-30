@@ -45,7 +45,9 @@ body.theme-dark {
 }
 
 #tab-takeoff,
-#tab-estimating {
+#tab-estimating,
+#tab-proposal,
+.proposal-page {
     padding: 0 16px 14px 16px !important;
     height: 100% !important;
     min-height: 0 !important;
