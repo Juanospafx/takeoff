@@ -49,26 +49,30 @@ $isDraftProject = $projectId <= 0 && isset($_GET['draft']);
 $activeTab = $_GET['tab'] ?? 'overview';
 $selectedDocumentId = (int) ($_GET['file_id'] ?? $_GET['document_id'] ?? 0);
 
-function dash_table_exists(PDO $pdo, string $table): bool
-{
-    try {
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?");
-        $stmt->execute([$table]);
-        return (int) $stmt->fetchColumn() > 0;
-    } catch (Throwable $e) {
-        return false;
+if (!function_exists('dash_table_exists')) {
+    function dash_table_exists(PDO $pdo, string $table): bool
+    {
+        try {
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?");
+            $stmt->execute([$table]);
+            return (int) $stmt->fetchColumn() > 0;
+        } catch (Throwable $e) {
+            return false;
+        }
     }
 }
 
-function dash_column_exists(PDO $pdo, string $table, string $column): bool
-{
-    try {
+if (!function_exists('dash_column_exists')) {
+    function dash_column_exists(PDO $pdo, string $table, string $column): bool
+    {
+        try {
         $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");
         $stmt->execute([$column]);
         return (bool) $stmt->fetch(PDO::FETCH_ASSOC);
     } catch (Throwable $e) {
         return false;
     }
+}
 }
 
 function dash_public_path(?string $path): string
@@ -291,7 +295,20 @@ if ($projectId > 0 && dash_table_exists($pdo, 'takeoff_layers')) {
         ORDER BY tl.sort_order ASC, tl.id DESC
     ");
     $stmt->execute([$projectId]);
-    $takeoffLayers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $takeoffLayers = array_map(function ($tl) {
+        if (!empty($tl['metadata_json'])) {
+            $meta = is_array($tl['metadata_json']) ? $tl['metadata_json'] : json_decode($tl['metadata_json'], true);
+            if (is_array($meta)) {
+                if (isset($meta['difficulty']) && !isset($tl['difficulty'])) {
+                    $tl['difficulty'] = (float)$meta['difficulty'];
+                }
+                if (isset($meta['multiplier']) && !isset($tl['multiplier'])) {
+                    $tl['multiplier'] = (float)$meta['multiplier'];
+                }
+            }
+        }
+        return $tl;
+    }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 }
 
 $takeoffLocations = [];
@@ -390,7 +407,33 @@ if ($projectId > 0 && dash_table_exists($pdo, 'estimate_items') && dash_table_ex
         ORDER BY ei.sort_order ASC, ei.id DESC
     ");
     $stmt->execute([$projectId]);
-    $estimateItems = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $estimateItems = array_map(function ($ei) {
+        if (!empty($ei['metadata_json'])) {
+            $meta = is_array($ei['metadata_json']) ? $ei['metadata_json'] : json_decode($ei['metadata_json'], true);
+            if (is_array($meta)) {
+                $ws = isset($meta['workspace']) && is_array($meta['workspace']) ? $meta['workspace'] : $meta;
+                if (isset($ws['difficulty']) && !isset($ei['difficulty'])) {
+                    $ei['difficulty'] = (float)$ws['difficulty'];
+                }
+                if (isset($ws['laborWaste']) && !isset($ei['laborWaste'])) {
+                    $ei['laborWaste'] = (float)$ws['laborWaste'];
+                }
+                if (isset($ws['laborMargin']) && !isset($ei['laborMargin'])) {
+                    $ei['laborMargin'] = (float)$ws['laborMargin'];
+                }
+                if (isset($ws['factorOverride']) && !isset($ei['factorOverride'])) {
+                    $ei['factorOverride'] = (float)$ws['factorOverride'];
+                }
+                if (isset($ws['ratio']) && !isset($ei['ratio'])) {
+                    $ei['ratio'] = (float)$ws['ratio'];
+                }
+                if (isset($ws['children']) && !isset($ei['children'])) {
+                    $ei['children'] = $ws['children'];
+                }
+            }
+        }
+        return $ei;
+    }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 }
 
 $proposals = [];
@@ -1812,160 +1855,7 @@ $state = [
                             <div class="pro-resizer-handle"></div>
                         </div>
                         <aside class="est-right" aria-label="Estimate notes and summary">
-                            <div class="est-right-scroll">
-                                <section class="est-card" id="notesCard">
-                                    <button class="est-card-header" type="button"
-                                        data-collapse-card="notesCollapsed"><span><i class="fas fa-chevron-down"></i>
-                                            Notes</span></button>
-                                    <div class="est-card-body">
-                                        <div class="est-field-block">
-                                            <div class="est-label">Scope of Work</div>
-                                            <div class="est-editor-toolbar" data-toolbar="scope"><button type="button"
-                                                    data-editor-cmd="undo" title="Undo"><i
-                                                        class="fas fa-rotate-left"></i></button><button type="button"
-                                                    data-editor-cmd="redo" title="Redo"><i
-                                                        class="fas fa-rotate-right"></i></button><select
-                                                    data-editor-format="formatBlock" aria-label="Text style">
-                                                    <option value="P">Paragraph</option>
-                                                    <option value="H3">Heading</option>
-                                                </select><button type="button" data-editor-cmd="bold" title="Bold"><i
-                                                        class="fas fa-bold"></i></button><button type="button"
-                                                    data-editor-cmd="italic" title="Italic"><i
-                                                        class="fas fa-italic"></i></button><button type="button"
-                                                    data-editor-cmd="insertHorizontalRule" title="Line"><i
-                                                        class="fas fa-minus"></i></button><button type="button"
-                                                    data-editor-cmd="backColor" data-editor-value="#dbeafe"
-                                                    title="Highlight"><i class="fas fa-fill-drip"></i></button><button
-                                                    type="button" data-editor-cmd="justifyLeft" title="Align left"><i
-                                                        class="fas fa-align-left"></i></button><button type="button"
-                                                    data-editor-cmd="justifyCenter" title="Align center"><i
-                                                        class="fas fa-align-center"></i></button><button type="button"
-                                                    data-editor-cmd="justifyRight" title="Align right"><i
-                                                        class="fas fa-align-right"></i></button><button type="button"
-                                                    data-editor-cmd="justifyFull" title="Justify"><i
-                                                        class="fas fa-align-justify"></i></button><button type="button"
-                                                    data-editor-cmd="insertUnorderedList" title="Bullets"><i
-                                                        class="fas fa-list-ul"></i></button><button type="button"
-                                                    data-editor-cmd="insertOrderedList" title="Numbers"><i
-                                                        class="fas fa-list-ol"></i></button><button type="button"
-                                                    data-editor-cmd="outdent" title="Outdent"><i
-                                                        class="fas fa-outdent"></i></button><button type="button"
-                                                    data-editor-cmd="indent" title="Indent"><i
-                                                        class="fas fa-indent"></i></button><button type="button"
-                                                    data-editor-cmd="removeFormat" title="Clear"><i
-                                                        class="fas fa-eraser"></i></button></div>
-                                            <div id="scopeEditor" class="est-rich-editor" contenteditable="true"
-                                                data-editor="scope"></div>
-                                        </div>
-                                        <div class="est-field-block">
-                                            <div class="est-list-head">
-                                                <div class="est-label">Included</div>
-                                                <div><button class="est-small-btn" type="button"
-                                                        data-est-action="browse-library">Browse library</button><button
-                                                        class="est-small-btn" type="button"
-                                                        data-est-action="add-included"><i
-                                                            class="fas fa-plus"></i></button></div>
-                                            </div>
-                                            <div id="includedList" class="est-free-list"></div>
-                                        </div>
-                                        <div class="est-field-block">
-                                            <div class="est-list-head">
-                                                <div class="est-label">Excluded</div>
-                                                <div><button class="est-small-btn" type="button"
-                                                        data-est-action="browse-library">Browse library</button><button
-                                                        class="est-small-btn" type="button"
-                                                        data-est-action="add-excluded"><i
-                                                            class="fas fa-plus"></i></button></div>
-                                            </div>
-                                            <div id="excludedList" class="est-free-list"></div>
-                                        </div>
-                                        <div class="est-field-block">
-                                            <div class="est-label">Project Notes</div>
-                                            <div class="est-editor-toolbar" data-toolbar="projectNotes"><button
-                                                    type="button" data-editor-cmd="undo" title="Undo"><i
-                                                        class="fas fa-rotate-left"></i></button><button type="button"
-                                                    data-editor-cmd="redo" title="Redo"><i
-                                                        class="fas fa-rotate-right"></i></button><select
-                                                    data-editor-format="formatBlock" aria-label="Text style">
-                                                    <option value="P">Paragraph</option>
-                                                    <option value="H3">Heading</option>
-                                                </select><button type="button" data-editor-cmd="bold" title="Bold"><i
-                                                        class="fas fa-bold"></i></button><button type="button"
-                                                    data-editor-cmd="italic" title="Italic"><i
-                                                        class="fas fa-italic"></i></button><button type="button"
-                                                    data-editor-cmd="insertHorizontalRule" title="Line"><i
-                                                        class="fas fa-minus"></i></button><button type="button"
-                                                    data-editor-cmd="backColor" data-editor-value="#dbeafe"
-                                                    title="Highlight"><i class="fas fa-fill-drip"></i></button><button
-                                                    type="button" data-editor-cmd="justifyLeft" title="Align left"><i
-                                                        class="fas fa-align-left"></i></button><button type="button"
-                                                    data-editor-cmd="justifyCenter" title="Align center"><i
-                                                        class="fas fa-align-center"></i></button><button type="button"
-                                                    data-editor-cmd="justifyRight" title="Align right"><i
-                                                        class="fas fa-align-right"></i></button><button type="button"
-                                                    data-editor-cmd="justifyFull" title="Justify"><i
-                                                        class="fas fa-align-justify"></i></button><button type="button"
-                                                    data-editor-cmd="insertUnorderedList" title="Bullets"><i
-                                                        class="fas fa-list-ul"></i></button><button type="button"
-                                                    data-editor-cmd="insertOrderedList" title="Numbers"><i
-                                                        class="fas fa-list-ol"></i></button><button type="button"
-                                                    data-editor-cmd="outdent" title="Outdent"><i
-                                                        class="fas fa-outdent"></i></button><button type="button"
-                                                    data-editor-cmd="indent" title="Indent"><i
-                                                        class="fas fa-indent"></i></button><button type="button"
-                                                    data-editor-cmd="removeFormat" title="Clear"><i
-                                                        class="fas fa-eraser"></i></button></div>
-                                            <div id="projectNotesEditor" class="est-rich-editor" contenteditable="true"
-                                                data-editor="projectNotes"></div>
-                                        </div>
-                                    </div>
-                                </section>
-                                <section class="est-card" id="summaryCard"><button class="est-card-header" type="button"
-                                        data-collapse-card="summaryCollapsed"><span><i class="fas fa-chevron-down"></i>
-                                            Summary</span></button>
-                                    <div class="est-card-body">
-                                        <div class="est-rate-grid"><label>Global labor cost <input id="globalLaborCost"
-                                                    type="number" min="0" step="0.01"></label><label>Global labor sales
-                                                rate <input id="globalLaborSales" type="number" min="0"
-                                                    step="0.01"></label><button class="est-small-btn" type="button"
-                                                data-labor-unit>mins</button></div>
-                                        <div class="est-summary-table-wrap">
-                                            <table class="est-summary-table">
-                                                <thead>
-                                                    <tr>
-                                                        <th>Catalog Item Type</th>
-                                                        <th>Total Labor</th>
-                                                        <th>Difficulty</th>
-                                                        <th>Waste</th>
-                                                        <th>Total Cost</th>
-                                                        <th>Margin</th>
-                                                        <th>Total Sales</th>
-                                                        <th>Profit</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody id="summaryTypes"></tbody>
-                                            </table>
-                                        </div>
-                                        <div class="est-summary-section">
-                                            <div class="est-summary-title"><span>Pre-Tax Markups</span><button
-                                                    type="button" data-est-action="add-pre-markup"><i
-                                                        class="fas fa-plus"></i></button></div>
-                                            <div id="preMarkupRows" class="est-markup-list"></div>
-                                        </div>
-                                        <div class="est-summary-section">
-                                            <div class="est-summary-title"><span>Taxes</span><button type="button"
-                                                    data-est-option="taxes"><i class="fas fa-pen"></i></button></div>
-                                            <div id="taxRows" class="est-markup-list"></div>
-                                        </div>
-                                        <div class="est-summary-section">
-                                            <div class="est-summary-title"><span>Post-Tax Markups</span><button
-                                                    type="button" data-est-action="add-post-markup"><i
-                                                        class="fas fa-plus"></i></button></div>
-                                            <div id="postMarkupRows" class="est-markup-list"></div>
-                                        </div>
-                                    </div>
-                                </section>
-                            </div>
+                            <div class="est-right-scroll" id="estRightScroll"></div>
                             <div class="est-total-box">
                                 <div id="estimateTotal" class="est-total-value">$0.00</div>
                                 <div class="est-total-label">Estimate Total</div>
@@ -2611,7 +2501,7 @@ $state = [
     <script src="../assets/catalog_update_application_service.js?v=catalog-update-application-20260827-2"></script>
     <script src="../assets/estimating_catalog_adapter.js?v=estimating-catalog-snapshot-20260827-1"></script>
     <script src="../assets/project_estimating.js?v=<?= filemtime(__DIR__ . '/../assets/project_estimating.js') ?>"></script>
-    <script src="../assets/catalog_update_ui.js?v=catalog-update-ui-20260827-1"></script>
+    <script src="../assets/catalog_update_ui.js?v=<?= filemtime(__DIR__ . '/../assets/catalog_update_ui.js') ?>"></script>
     <script src="../assets/project_proposal.js?v=quantity-context-format-20260831-1"></script>
     <script src="../assets/won_project_export.js?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.js') ?>"></script>
     <script src="../assets/global_tools.js"></script>

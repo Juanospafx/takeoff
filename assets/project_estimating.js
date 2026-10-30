@@ -70,16 +70,16 @@
         if (!estimate.settings._markupsSeeded) {
             if (!Array.isArray(estimate.settings.preTaxMarkups) || estimate.settings.preTaxMarkups.length === 0) {
                 estimate.settings.preTaxMarkups = [
-                    { id: Workspace.uid('m'), name: 'Overhead', type: 'percent', percent: 6, amount: 0, base: 'subtotal_sales', active: true },
-                    { id: Workspace.uid('m'), name: 'Discount', type: 'percent', percent: 0, amount: 0, base: 'subtotal_sales', active: true }
+                    { id: Workspace.uid('m'), name: 'Overhead', type: 'percent', percent: 6, amount: 0, base: 'subtotal_sales', operator: 'add', active: true },
+                    { id: Workspace.uid('m'), name: 'Discount', type: 'percent', percent: 0, amount: 0, base: 'subtotal_sales', operator: 'subtract', active: true }
                 ];
             }
             if (!Array.isArray(estimate.settings.postTaxMarkups) || estimate.settings.postTaxMarkups.length === 0) {
                 estimate.settings.postTaxMarkups = [
-                    { id: Workspace.uid('m'), name: 'Bonding', type: 'percent', percent: 0, amount: 0, base: 'subtotal_sales', active: true },
-                    { id: Workspace.uid('m'), name: 'Permit Impact Fee', type: 'percent', percent: 0, amount: 0, base: 'subtotal_sales', active: true },
-                    { id: Workspace.uid('m'), name: 'Low Voltage Box', type: 'percent', percent: 0, amount: 0, base: 'subtotal_sales', active: true },
-                    { id: Workspace.uid('m'), name: 'Discount', type: 'percent', percent: 0, amount: 0, base: 'subtotal_sales', active: true }
+                    { id: Workspace.uid('m'), name: 'Bonding', type: 'percent', percent: 0, amount: 0, base: 'subtotal_sales', operator: 'add', active: true },
+                    { id: Workspace.uid('m'), name: 'Permit Impact Fee', type: 'percent', percent: 0, amount: 0, base: 'subtotal_sales', operator: 'add', active: true },
+                    { id: Workspace.uid('m'), name: 'Low Voltage Box', type: 'percent', percent: 0, amount: 0, base: 'subtotal_sales', operator: 'add', active: true },
+                    { id: Workspace.uid('m'), name: 'Discount', type: 'percent', percent: 0, amount: 0, base: 'subtotal_sales', operator: 'subtract', active: true }
                 ];
             }
             estimate.settings._markupsSeeded = true;
@@ -98,6 +98,65 @@
         return parseFloat(cleaned) || 0;
     }
 
+        function openSquareFootageModal() {
+        const currentSqft = resolveSquareFootage();
+        document.querySelector('[data-est-sqft-portal]')?.remove();
+        const portal = document.createElement('div');
+        portal.className = 'pd-modal-backdrop open';
+        portal.dataset.estSqftPortal = 'true';
+        portal.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(4px); z-index: 999999;';
+        portal.innerHTML = `
+            <div class="pd-modal bb-create-project-modal bb-studio-modal notes-lib-modal" style="width: min(440px, 100%); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true">
+                <div class="bb-studio-modal-header" style="padding: 16px 20px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <div class="notes-lib-badge" style="width: 36px; height: 36px; border-radius: 8px; background: rgba(37,99,235,0.1); color: #2563eb; display: flex; align-items: center; justify-content: center; font-size: 16px;">
+                            <i class="fas fa-ruler-combined"></i>
+                        </div>
+                        <div>
+                            <h3 style="margin: 0; font-size: 15px; font-weight: 600; color: var(--text-main, #0f172a);">Project Square Footage</h3>
+                            <p style="margin: 2px 0 0; font-size: 12px; color: var(--text-muted, #64748b);">Gross area for $/sq ft cost and sales metrics</p>
+                        </div>
+                    </div>
+                    <button type="button" data-close-sqft-modal style="border: none; background: transparent; font-size: 20px; line-height: 1; cursor: pointer; color: var(--text-muted, #94a3b8);">&times;</button>
+                </div>
+                <div style="padding: 20px;">
+                    <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-muted, #475569); margin-bottom: 6px;">Total Gross Area (sq ft)</label>
+                    <div style="position: relative; display: flex; align-items: center;">
+                        <input id="estSqftModalInput" type="number" step="any" min="0" value="${currentSqft > 0 ? currentSqft : ''}" placeholder="e.g. 5000" style="width: 100%; height: 42px; border: 1.5px solid var(--border, #cbd5e1); border-radius: 8px; padding: 0 54px 0 12px; font-size: 15px; font-weight: 600; background: var(--bg-surface, #f8fafc); color: var(--text-main, #0f172a); outline: none;">
+                        <span style="position: absolute; right: 12px; font-size: 12px; font-weight: 600; color: #2563eb; background: rgba(37,99,235,0.1); padding: 2px 6px; border-radius: 4px;">sq ft</span>
+                    </div>
+                    <div style="margin-top: 10px; font-size: 11.5px; color: var(--text-muted, #64748b);">
+                        Updating this value recalculates the price per square foot across the entire estimate summary without altering item costs.
+                    </div>
+                </div>
+                <div style="padding: 12px 20px; border-top: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: flex-end; gap: 8px; background: var(--bg-surface, #f8fafc);">
+                    <button type="button" class="pd-btn pd-btn-secondary" data-close-sqft-modal style="padding: 7px 14px; font-size: 13px; border-radius: 6px;">Cancel</button>
+                    <button type="button" class="pd-btn pd-btn-primary orange" id="estSaveSqftBtn" style="padding: 7px 16px; font-size: 13px; border-radius: 6px; background: #ea580c; color: #fff; border: none; font-weight: 600; cursor: pointer;">Save Area</button>
+                </div>
+            </div>`;
+        document.body.appendChild(portal);
+        const input = portal.querySelector('#estSqftModalInput');
+        input?.focus();
+        input?.select();
+
+        const close = () => portal.remove();
+        portal.querySelectorAll('[data-close-sqft-modal]').forEach(b => b.addEventListener('click', close));
+        portal.addEventListener('click', e => { if (e.target === portal) close(); });
+        input?.addEventListener('keydown', e => { if (e.key === 'Enter') portal.querySelector('#estSaveSqftBtn')?.click(); });
+        portal.querySelector('#estSaveSqftBtn')?.addEventListener('click', () => {
+            const rawVal = input?.value || '0';
+            const parsed = parseFloat(String(rawVal).replace(/[^0-9.]/g, '')) || 0;
+            current().settings.squareFootage = parsed;
+            if (window.ProjectState) {
+                if (!window.ProjectState.projectMeta) window.ProjectState.projectMeta = {};
+                window.ProjectState.projectMeta.square_footage = parsed > 0 ? String(parsed) : '';
+            }
+            const poInput = document.getElementById('poSquareFootage');
+            if (poInput) poInput.value = parsed > 0 ? String(parsed) : '';
+            close();
+            changed(`Updated Project Square Footage (${number(currentSqft, 0)} sq ft -> ${number(parsed, 0)} sq ft)`);
+        });
+    }
     function renderSqftDisplay(total) {
         const sqftElement = $('estimateSqft');
         if (!sqftElement) return;
@@ -258,6 +317,11 @@
                 laborMarginInput.value = gMargin.toFixed(1);
                 laborMarginInput.dataset.auditPrevValue = laborMarginInput.value;
             }
+            const laborWasteInput = aside.querySelector('[data-summary-type="Labor"][data-field="waste"]');
+            if (laborWasteInput && document.activeElement !== laborWasteInput) {
+                laborWasteInput.value = String(Number(settings.laborWaste ?? 0));
+                laborWasteInput.dataset.auditPrevValue = laborWasteInput.value;
+            }
             setLive('labor-hrs', `${number(byCat.Labor?.adjustedLaborHours || 0, 2)} hrs`);
             setLive('labor-cost', money(byCat.Labor?.totalCost || 0));
             setLive('labor-sales', money(byCat.Labor?.totalSales || 0));
@@ -399,7 +463,47 @@
         return result;
     }
 
-    async function saveServer() {
+        function showSaveProgressModal(step = 1, message = 'Saving...') {
+        let portal = document.querySelector('[data-est-save-progress-portal]');
+        if (step === 0 || step === 4) {
+            if (portal) {
+                if (step === 4) {
+                    const icon = portal.querySelector('.est-save-spinner');
+                    if (icon) icon.innerHTML = '<i class="fas fa-circle-check" style="font-size: 32px; color: #10b981;"></i>';
+                    const text = portal.querySelector('#estSaveProgressStep');
+                    if (text) text.textContent = 'All changes saved successfully!';
+                    const bar = portal.querySelector('#estSaveProgressBar');
+                    if (bar) bar.style.width = '100%';
+                    setTimeout(() => portal?.remove(), 650);
+                } else {
+                    portal.remove();
+                }
+            }
+            return;
+        }
+        if (!portal) {
+            portal = document.createElement('div');
+            portal.className = 'pd-modal-backdrop open';
+            portal.dataset.estSaveProgressPortal = 'true';
+            portal.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); z-index: 9999999;';
+            portal.innerHTML = `
+                <div class="pd-modal bb-studio-modal" style="width: min(380px, 92vw); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); padding: 24px 20px; text-align: center;" role="dialog" aria-modal="true">
+                    <div class="est-save-spinner" style="margin-bottom: 12px;"><i class="fas fa-circle-notch fa-spin" style="font-size: 30px; color: #2563eb;"></i></div>
+                    <h3 style="margin: 0 0 6px; font-size: 16px; font-weight: 600; color: var(--text-main, #0f172a);">Saving Project</h3>
+                    <div id="estSaveProgressStep" style="font-size: 13px; color: var(--text-muted, #64748b); min-height: 20px;">${esc(message)}</div>
+                    <div style="margin-top: 16px; background: rgba(0,0,0,0.08); height: 5px; border-radius: 3px; overflow: hidden;">
+                        <div id="estSaveProgressBar" style="width: ${step === 1 ? '30%' : (step === 2 ? '65%' : '90%')}; height: 100%; background: #2563eb; transition: width 0.35s ease;"></div>
+                    </div>
+                </div>`;
+            document.body.appendChild(portal);
+        } else {
+            const text = portal.querySelector('#estSaveProgressStep');
+            if (text) text.textContent = message;
+            const bar = portal.querySelector('#estSaveProgressBar');
+            if (bar) bar.style.width = step === 1 ? '30%' : (step === 2 ? '65%' : '90%');
+        }
+    }
+    async function saveServer(options = {}) {
         if (!projectId) return;
         if (ui.saving) {
             ui.saveRequested = true;
@@ -431,8 +535,11 @@
         ui.lastErrorCode = null;
         ui.saveRequested = false;
         ui.loadState = 'saving';
-        ui.message = 'Savingâ€¦';
+        ui.message = 'Saving...';
         renderStatus();
+        const showModal = Boolean(options.showModal || ui.explicitSaveRequested);
+        ui.explicitSaveRequested = false;
+        if (showModal) showSaveProgressModal(1, 'Saving Estimating workspace...');
         const sentGenerations = new Map(sentIds.map(id => [id, dirtyGenerations.get(id) || 0]));
         const sent = {
             schemaVersion: state.schemaVersion,
@@ -492,7 +599,12 @@
             ui.loadState = dirtyEstimateIds.size ? 'pending' : 'saved';
             ui.message = dirtyEstimateIds.size ? 'Unsaved changes' : 'Saved';
             saveLocal({ publish: !activeEditingElement() });
+            if (showModal) {
+                showSaveProgressModal(3, 'Updating Audit & Summaryâ€¦');
+                setTimeout(() => showSaveProgressModal(4, 'Saved!'), 200);
+            }
         } catch (error) {
+            if (showModal) showSaveProgressModal(0);
             ui.lastErrorCode = error.code || 'request_failed';
             ui.loadState = 'error';
             ui.message = error.code === 'revision_conflict'
@@ -557,6 +669,25 @@
             const remote = applyDeletedEstimateTombstones(Workspace.workspace(remoteSource, projectId));
             const local = state;
             const changedDuringLoad = local.clientUiUpdatedAt !== requestLocalTimestamp;
+
+            // If local draft is empty but remote server has full estimates, adopt remote immediately
+            const localHasContent = (state.estimates || []).some(est =>
+                (est.groups || []).some(g => (g.items || []).length > 0)
+            );
+            const remoteHasContent = (remote.estimates || []).some(est =>
+                (est.groups || []).some(g => (g.items || []).length > 0)
+            );
+            if (!localHasContent && remoteHasContent) {
+                dirtyEstimateIds.clear();
+                state = remote;
+                restoreDirtyTracking();
+                saveLocal();
+                ui.loadState = 'saved';
+                ui.message = 'Loaded from server';
+                render();
+                drainPendingTakeoff();
+                return;
+            }
             // A newer local timestamp alone does not prove there are unsaved edits:
             // localStorage can retain a successfully saved snapshot from an older
             // browser session while another client has advanced the DB revision.
@@ -667,32 +798,38 @@
     }
 
     function preserveQuantityOverrides(existingGroups, nextGroups) {
-        const overriddenByKey = new Map();
+        const preservedByKey = new Map();
         (existingGroups || []).forEach(grp => {
             (grp.items || []).forEach(it => {
-                if (it.quantityOverride === true || String(it.quantitySyncStatus || '') === 'overridden') {
-                    if (it.id) overriddenByKey.set(`id:${it.id}`, it);
-                    if (it.takeoffLayerId) overriddenByKey.set(`layer:${it.takeoffLayerId}`, it);
+                if (it.quantityOverride === true || String(it.quantitySyncStatus || '') === 'overridden' || (Array.isArray(it.children) && it.children.length > 0) || it.factorOverride !== undefined) {
+                    if (it.id) preservedByKey.set(`id:${it.id}`, it);
+                    if (it.takeoffLayerId) preservedByKey.set(`layer:${it.takeoffLayerId}`, it);
                 }
             });
         });
-        if (!overriddenByKey.size) return nextGroups;
+        if (!preservedByKey.size) return nextGroups;
         return (nextGroups || []).map(grp => ({
             ...grp,
             items: (grp.items || []).map(it => {
-                const match = (it.takeoffLayerId && overriddenByKey.get(`layer:${it.takeoffLayerId}`))
-                    || (it.id && overriddenByKey.get(`id:${it.id}`));
+                const match = (it.takeoffLayerId && preservedByKey.get(`layer:${it.takeoffLayerId}`))
+                    || (it.id && preservedByKey.get(`id:${it.id}`));
                 if (!match) return it;
+                const isOverridden = Boolean(match.quantityOverride === true || String(match.quantitySyncStatus || '') === 'overridden');
                 const measured = Workspace.numeric(it.lastSyncedTakeoffQuantity ?? it.originalQuantity ?? it.quantity);
-                return {
+                const updated = {
                     ...it,
-                    quantity: Workspace.numeric(match.quantity),
-                    originalQuantity: measured,
-                    lastSyncedTakeoffQuantity: measured,
-                    pendingTakeoffQuantity: measured,
-                    quantityOverride: true,
-                    quantitySyncStatus: 'overridden'
+                    ...(Array.isArray(match.children) && match.children.length > 0 ? { children: Workspace.clone(match.children), isAssembly: true } : {}),
+                    ...(match.factorOverride !== undefined && match.factorOverride !== null ? { factorOverride: match.factorOverride } : {})
                 };
+                if (isOverridden) {
+                    updated.quantity = Workspace.numeric(match.quantity);
+                    updated.originalQuantity = measured;
+                    updated.lastSyncedTakeoffQuantity = measured;
+                    updated.pendingTakeoffQuantity = measured;
+                    updated.quantityOverride = true;
+                    updated.quantitySyncStatus = 'overridden';
+                }
+                return updated;
             })
         }));
     }
@@ -764,9 +901,11 @@
         { id: 'budget_code', label: 'Budget Code', align: 'left', minWidth: '120px' },
         { id: 'quantity', label: 'Quantity', align: 'right', minWidth: '95px' },
         { id: 'unit_cost', label: 'Unit Cost ($)', align: 'right', minWidth: '105px' },
-        { id: 'waste', label: 'Waste (%)', align: 'right', minWidth: '90px' },
+        { id: 'waste', label: 'Material Waste (%)', align: 'right', minWidth: '95px' },
+        { id: 'labor_waste', label: 'Labor Waste (%)', align: 'right', minWidth: '95px' },
         { id: 'subtotal_item_cost', label: 'Subtotal Item Cost ($)', align: 'right', minWidth: '135px' },
         { id: 'margin', label: 'Margin (%)', align: 'right', minWidth: '95px' },
+        { id: 'labor_margin', label: 'Labor Margin (%)', align: 'right', minWidth: '110px' },
         { id: 'unit_sales', label: 'Unit Sales ($)', align: 'right', minWidth: '105px' },
         { id: 'subtotal_item_sales', label: 'Subtotal Item Sales ($)', align: 'right', minWidth: '135px' },
         { id: 'profit', label: 'Profit ($)', align: 'right', minWidth: '105px' },
@@ -810,9 +949,11 @@
             budget_code: 120,
             quantity: 105,
             unit_cost: 110,
-            waste: 90,
+            waste: 95,
+            labor_waste: 95,
             subtotal_item_cost: 135,
             margin: 95,
+            labor_margin: 105,
             unit_sales: 110,
             subtotal_item_sales: 135,
             profit: 105,
@@ -1216,12 +1357,113 @@
         });
     }
 
+        function handleActionPopoverClick(event) {
+        const target = event.target;
+        const popGroupAction = target.closest('[data-popover-group-action]');
+        if (popGroupAction) {
+            const act = popGroupAction.dataset.popoverGroupAction;
+            const grpId = popGroupAction.dataset.groupId;
+            hideActionPopover();
+            if (act === 'create-item') {
+                addItem(grpId);
+            } else if (act === 'reset-quantity') {
+                const grp = current().groups.find(g => String(g.id) === String(grpId));
+                if (grp) {
+                    grp.items.forEach(item => {
+                        item.quantity = item.takeoffLayerId ? Workspace.numeric(item.lastSyncedTakeoffQuantity ?? item.originalQuantity) : Workspace.numeric(item.originalQuantity);
+                        item.quantityOverride = false;
+                        item.pendingTakeoffQuantity = null;
+                        item.quantitySyncStatus = item.takeoffLayerId ? 'synced' : 'manual';
+                    });
+                    changed(`Reset quantities for group "${grp.name}"`);
+                }
+            } else if (act === 'rename-group') {
+                const input = root.querySelector(`input[data-group-name="${selectorValue(grpId)}"]`);
+                input?.focus();
+                input?.select();
+            } else if (act === 'copy-group') {
+                const grp = current().groups.find(g => String(g.id) === String(grpId));
+                if (grp) {
+                    const copy = Workspace.clone(grp);
+                    copy.id = Workspace.uid('group');
+                    copy.name = `${grp.name} (Copy)`;
+                    copy.items = (grp.items || []).map(it => {
+                        const itemCopy = Workspace.clone(it);
+                        itemCopy.id = Workspace.uid('item');
+                        return itemCopy;
+                    });
+                    const idx = current().groups.indexOf(grp);
+                    current().groups.splice(idx + 1, 0, copy);
+                    changed(`Copied ${grp.name}`);
+                }
+            } else if (act === 'export-bom') {
+                exportEstimate('bom-excel');
+            } else if (act === 'delete-group') {
+                if (confirm('Delete this group and its items?')) {
+                    current().groups = current().groups.filter(row => String(row.id) !== String(grpId));
+                    changed('Deleted group');
+                }
+            }
+            return true;
+        }
+        const popItemAction = target.closest('[data-popover-item-action]');
+        if (popItemAction) {
+            const act = popItemAction.dataset.popoverItemAction;
+            const itId = popItemAction.dataset.itemId;
+            hideActionPopover();
+            const found = findItem(itId);
+            if (!found) return true;
+            if (act === 'edit-item') {
+                openProjectItemEditModal(found.item, found.group);
+            } else if (act === 'copy-item') {
+                if (isAssemblyItem(found.item)) {
+                    const index = found.group.items.indexOf(found.item);
+                    const duplicate = duplicateAssembly(found.item);
+                    found.group.items.splice(index + 1, 0, duplicate);
+                    changed(`Duplicated ${found.item.name}`);
+                } else {
+                    const index = found.group.items.indexOf(found.item);
+                    const duplicate = Workspace.clone(found.item);
+                    duplicate.id = Workspace.uid('item');
+                    duplicate.name = `${found.item.name} (Copy)`;
+                    found.group.items.splice(index + 1, 0, duplicate);
+                    changed(`Copied ${found.item.name}`);
+                }
+            } else if (act === 'replace-item') {
+                ui.catalogTargetGroupId = found.group.id;
+                ui.replaceTargetItemId = found.item.id;
+                ui.modal = 'catalog';
+                renderModal();
+            } else if (act === 'reset-quantity') {
+                const prevQty = found.item.quantity;
+                const nextQty = found.item.takeoffLayerId
+                    ? Workspace.numeric(found.item.lastSyncedTakeoffQuantity ?? found.item.originalQuantity)
+                    : Workspace.numeric(found.item.originalQuantity);
+                found.item.quantity = nextQty;
+                found.item.quantityOverride = false;
+                found.item.pendingTakeoffQuantity = null;
+                found.item.quantitySyncStatus = found.item.takeoffLayerId ? 'synced' : 'manual';
+                changed(`Reset quantity for "${found.item.name}" (${formatAuditVal(prevQty, 'qty', found.item.uom)} -> ${formatAuditVal(nextQty, 'qty', found.item.uom)})`);
+            } else if (act === 'reset-budget-code') {
+                found.item.costCode = '16-1...';
+                found.item.budgetCode = '16-1...';
+                changed(`Reset budget code for "${found.item.name}"`);
+            } else if (act === 'delete-item') {
+                found.group.items = found.group.items.filter(row => String(row.id) !== String(itId));
+                ui.expandedAssemblies.delete(String(itId));
+                changed(`Deleted ${found.item.name}`);
+            }
+            return true;
+        }
+        return false;
+    }
     function showActionPopover(triggerBtn, htmlContent, triggerKey = '') {
         let pop = $('estActionPopover');
         if (!pop) {
             pop = document.createElement('div');
             pop.id = 'estActionPopover';
             pop.className = 'est-popover-menu';
+            pop.addEventListener('click', handleActionPopoverClick);
             document.body.appendChild(pop);
         }
         if (!pop.hidden && triggerKey && pop.dataset.activeTriggerKey === triggerKey) {
@@ -1554,6 +1796,10 @@
                     if (col.id === 'subtotal_item_cost') {
                         return `<td class="text-right est-money" style="font-weight: 700;" data-live-group-subtotal="${esc(group.id)}">${number(groupSubtotalCost, 2)}</td>`;
                     }
+                    if (col.id === 'labor_margin') {
+                        const gMargin = Number(current()?.settings?.globalLaborMargin ?? 34.6);
+                        return `<td class="text-right" style="color: #64748b; font-size: 11.5px; font-weight: 500;">${gMargin.toFixed(1)}%</td>`;
+                    }
                     return `<td></td>`;
                 }).join('')}
                 <td class="col-actions-sticky">
@@ -1634,7 +1880,7 @@
         const widths = getColumnWidths();
 
         const colCells = activeColumns.map(col => {
-            return renderItemCell(item, calc, col.id, totalSummaryCost, component);
+            return renderItemCell(item, calc, col.id, totalSummaryCost, component, options);
         }).join('');
 
         const actions = component
@@ -1693,7 +1939,7 @@
         </tr>`;
     }
 
-    function renderItemCell(item, calc, colId, totalSummaryCost, readonly = false) {
+    function renderItemCell(item, calc, colId, totalSummaryCost, readonly = false, options = {}) {
         if (colId === 'budget_code') {
             const code = item.costCode || item.budgetCode || item.cost_code || '16-1...';
             return `<td><span class="est-budget-code-pill">${esc(code)} <span class="est-budget-code-clear">âœ•</span></span></td>`;
@@ -1702,25 +1948,48 @@
             const qty = calc.baseQuantity !== undefined ? calc.baseQuantity : item.quantity;
             const uom = item.uom || 'ea';
             const formattedQty = Number(qty || 0).toFixed(2);
+            if (options.component && options.sourceChild) {
+                const sourceChild = options.sourceChild;
+                const parentAssembly = options.parent;
+                const hasFormulaOverride = sourceChild.factorOverride !== undefined && sourceChild.factorOverride !== null && sourceChild.factorOverride !== '';
+                const ratioDisplay = hasFormulaOverride ? sourceChild.factorOverride : (sourceChild.ratio !== undefined ? sourceChild.ratio : (sourceChild.quantity || 1));
+                const calcBtnHtml = `<button type="button" class="est-assembly-calc-btn ${hasFormulaOverride ? 'has-override' : ''}" data-assembly-calc-btn="${esc(sourceChild.id || '')}" data-parent-assembly-id="${esc(parentAssembly?.id || '')}" title="${hasFormulaOverride ? `Custom formula: ${ratioDisplay} per ${parentAssembly?.uom || 'assembly unit'}` : 'Edit component formula for this estimate'}"><i class="fas fa-calculator"></i></button>`;
+                return `<td class="text-right"><div class="est-component-qty-wrap" style="display:inline-flex;align-items:center;justify-content:flex-end;gap:4px;">${calcBtnHtml}<span class="est-editable-num-wrap"><input class="est-cell-input is-component-qty-locked" readonly type="text" value="${esc(formattedQty)}" style="width: ${Math.max(2, String(formattedQty).length)}ch; text-align: right; background: transparent; border: 1px dashed transparent; cursor: default;" title="Formula calculated quantity: ${number(qty, 2)} ${esc(uom)} (${ratioDisplay} per ${esc(parentAssembly?.uom || 'unit')}). Click calculator to change ratio."><span class="est-editable-unit" style="font-size: 11px; color: #2563eb; margin-left: 3px; font-weight: 600;">${esc(uom)}</span></span></div></td>`;
+            }
             if (readonly) return `<td class="text-right"><span>${number(qty, 2)} ${esc(uom)}</span></td>`;
-            const isOverridden = Boolean(item.quantityOverride || item.quantitySyncStatus === 'overridden');
             const takeoffQty = Number(item.lastSyncedTakeoffQuantity ?? item.originalQuantity ?? qty ?? 0);
+            const isOverridden = Boolean(item.quantityOverride || item.quantitySyncStatus === 'overridden');
             const qtyTooltip = isOverridden
                 ? `Custom quantity override: ${number(qty, 2)} ${uom} (Takeoff: ${number(takeoffQty, 2)} ${uom})`
                 : (item.takeoffLayerId ? `Synced from Takeoff (${number(takeoffQty, 2)} ${uom}) — edit to override` : 'Enter item quantity');
-            return `<td class="text-right"><input class="est-cell-input is-editable ${isOverridden ? 'is-qty-overridden' : ''}" data-item-field="quantity" type="number" step="0.01" value="${esc(formattedQty)}" style="width: 55px; text-align: center;" title="${esc(qtyTooltip)}"> <span style="font-size: 11px; color: #64748b; margin-left: 2px;">${esc(uom)}</span></td>`;
+            return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable ${isOverridden ? 'is-qty-overridden is-val-overridden' : ''}" data-item-field="quantity" type="number" step="0.01" value="${esc(formattedQty)}" style="width: ${Math.max(2, String(formattedQty).length)}ch; text-align: right;" title="${esc(qtyTooltip)}"><span class="est-editable-unit" style="font-size: 11px; color: ${isOverridden ? '#ea580c' : '#2563eb'}; margin-left: 3px; font-weight: 600;">${esc(uom)}</span></span></td>`;
         }
         if (colId === 'unit_cost') {
-            const unitCost = calc.unitMaterialCost !== undefined ? calc.unitMaterialCost : (item.unitMaterialCost ?? item.unitCost ?? 0);
+            const itemBaseCost = Number(item.unitMaterialCost ?? item.unitCost ?? item.catalogSnapshot?.material_cost ?? item.catalogSnapshot?.unit_cost ?? 0);
+            const unitCost = (calc.unitMaterialCost !== undefined && calc.unitMaterialCost > 0)
+                ? calc.unitMaterialCost
+                : (itemBaseCost > 0 ? itemBaseCost : (calc.unitMaterialCost || 0));
             const formattedCost = Number(unitCost || 0).toFixed(2);
             if (readonly) return `<td class="text-right est-money"><span>${number(unitCost, 2)}</span></td>`;
-            return `<td class="text-right"><input class="est-cell-input is-editable" data-item-field="unitMaterialCost" type="number" step="0.01" value="${esc(formattedCost)}" style="width: 62px; text-align: center;"></td>`;
+            const isCostOverridden = Boolean(
+                (item.overrides?.materialUnitCost !== null && item.overrides?.materialUnitCost !== undefined)
+                || item._manualFields?.unitMaterialCost
+            );
+            return `<td class="text-right"><span class="est-editable-num-wrap"><span class="est-editable-unit" style="font-size: 11px; color: ${isCostOverridden ? '#ea580c' : '#2563eb'}; margin-right: 1px; font-weight: 600;">$</span><input class="est-cell-input is-editable est-cell-blue-input ${isCostOverridden ? 'is-val-overridden' : ''}" data-item-field="unitMaterialCost" type="number" step="0.01" value="${esc(formattedCost)}" style="width: ${Math.max(4, formattedCost.length)}ch; text-align: right;"></span></td>`;
         }
         if (colId === 'waste') {
             const waste = item.waste ?? 0;
             const formattedWaste = Number(waste || 0).toFixed(2);
             if (readonly) return `<td class="text-right"><span>${number(waste, 2)}</span></td>`;
-            return `<td class="text-right"><input class="est-cell-input is-editable" data-item-field="waste" type="number" step="0.01" value="${esc(formattedWaste)}" style="width: 48px; text-align: center;"></td>`;
+            const isWasteOverridden = Boolean(item._manualFields?.waste);
+            return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isWasteOverridden ? 'is-val-overridden' : ''}" data-item-field="waste" type="number" step="0.01" value="${esc(formattedWaste)}" style="width: ${Math.max(3, formattedWaste.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isWasteOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">%</span></span></td>`;
+        }
+        if (colId === 'labor_waste') {
+            const laborWaste = item.laborWaste ?? (item.itemType === 'labor' ? item.waste : 0);
+            const formattedLaborWaste = Number(laborWaste || 0).toFixed(2);
+            if (readonly) return `<td class="text-right"><span>${number(laborWaste, 2)}</span></td>`;
+            const isLaborWasteOverridden = Boolean(item._manualFields?.laborWaste);
+            return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isLaborWasteOverridden ? 'is-val-overridden' : ''}" data-item-field="laborWaste" type="number" step="0.01" value="${esc(formattedLaborWaste)}" style="width: ${Math.max(3, formattedLaborWaste.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isLaborWasteOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">%</span></span></td>`;
         }
         if (colId === 'subtotal_item_cost') {
             return `<td class="text-right est-money" data-live-item-cell="subtotal_item_cost">${number(calc.materialCost || 0, 2)}</td>`;
@@ -1728,8 +1997,20 @@
         if (colId === 'margin') {
             const margin = item.materialMargin ?? calc.marginPercent ?? 0;
             const formattedMargin = Number(margin || 0).toFixed(2);
+            const invalid = Number(margin) >= 100;
             if (readonly) return `<td class="text-right"><span>${number(margin, 2)}</span></td>`;
-            return `<td class="text-right"><input class="est-cell-input is-editable" data-item-field="materialMargin" type="number" step="0.01" max="99.99" value="${esc(formattedMargin)}" style="width: 48px; text-align: center;"></td>`;
+            const isMarginOverridden = Boolean(item._manualFields?.materialMargin);
+            return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isMarginOverridden ? 'is-val-overridden' : ''}" data-item-field="materialMargin" type="number" step="0.01" max="99.99" value="${esc(formattedMargin)}" ${invalid ? 'aria-invalid="true" title="Margin must be below 100%"' : ''} style="width: ${Math.max(3, formattedMargin.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isMarginOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">%</span></span></td>`;
+        }
+        if (colId === 'labor_margin') {
+            const laborMargin = item.laborMargin !== undefined && item.laborMargin !== null && item.laborMargin !== ''
+                ? Number(item.laborMargin)
+                : Number(current().settings.globalLaborMargin ?? 34.6);
+            const formattedLaborMargin = laborMargin.toFixed(1);
+            const invalid = laborMargin >= 100;
+            if (readonly) return `<td class="text-right"><span>${formattedLaborMargin}%</span></td>`;
+            const isLaborMarginOverridden = Boolean(item._manualFields?.laborMargin);
+            return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isLaborMarginOverridden ? 'is-val-overridden' : ''}" data-item-field="laborMargin" type="number" step="0.1" max="99.99" value="${esc(formattedLaborMargin)}" ${invalid ? 'aria-invalid="true" title="Margin must be below 100%"' : ''} style="width: ${Math.max(3, formattedLaborMargin.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isLaborMarginOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">%</span></span></td>`;
         }
         if (colId === 'unit_sales') {
             return `<td class="text-right est-money" data-live-item-cell="unit_sales">${number(calc.unitMaterialSales || 0, 2)}</td>`;
@@ -1745,13 +2026,18 @@
             const ul = item.unitLabor ?? 0;
             const formattedUl = Number(ul || 0).toFixed(2);
             if (readonly) return `<td class="text-right"><span>${number(ul, 2)}</span></td>`;
-            return `<td class="text-right"><input class="est-cell-input is-editable" data-item-field="unitLabor" type="number" step="0.01" value="${esc(formattedUl)}" style="width: 52px; text-align: center;"></td>`;
+            const isUlOverridden = Boolean(
+                (item.overrides?.laborHoursPerUnit !== null && item.overrides?.laborHoursPerUnit !== undefined)
+                || item._manualFields?.unitLabor
+            );
+            return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isUlOverridden ? 'is-val-overridden' : ''}" data-item-field="unitLabor" type="number" step="0.01" value="${esc(formattedUl)}" style="width: ${Math.max(3, formattedUl.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isUlOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">hrs</span></span></td>`;
         }
         if (colId === 'difficulty_factor') {
             const diff = item.difficulty ?? 1;
             const formattedDiff = Number(diff || 1).toFixed(2);
             if (readonly) return `<td class="text-right"><span>${number(diff, 2)}</span></td>`;
-            return `<td class="text-right"><input class="est-cell-input is-editable" data-item-field="difficulty" type="number" step="0.01" value="${esc(formattedDiff)}" style="width: 48px; text-align: center;"></td>`;
+            const isDiffOverridden = Boolean(item._manualFields?.difficulty || (item.difficulty !== undefined && Math.abs(Number(item.difficulty) - 1.0) > 0.001));
+            return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isDiffOverridden ? 'is-val-overridden' : ''}" data-item-field="difficulty" type="number" step="0.01" value="${esc(formattedDiff)}" style="width: ${Math.max(3, formattedDiff.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isDiffOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">x</span></span></td>`;
         }
         if (colId === 'total_labor_hrs') {
             return `<td class="text-right" data-live-item-cell="total_labor_hrs">${number(calc.adjustedLaborHours || 0, 2)}</td>`;
@@ -1979,6 +2265,7 @@
                     </button>
                 </div>
             </div>
+
         `;
     }
 
@@ -2006,8 +2293,20 @@
         return `
             <!-- Top Global Labor Rates Bar (Stacked vertically: Cost on top, Sales Rate below) -->
             <div class="est-summary-rates-bar">
-                <div class="est-summary-rate-line">Global labor cost <input class="est-rate-inline-input" data-summary-rate="globalLaborCost" type="number" step="0.01" min="0" value="${globalLaborCost.toFixed(2)}"> $/hr</div>
-                <div class="est-summary-rate-line">Global labor sales rate <input class="est-rate-inline-input" data-summary-rate="globalLaborSales" type="number" step="0.01" min="0" value="${globalLaborSales.toFixed(2)}"> $/hr</div>
+                <div class="est-summary-rate-line">
+                    <span class="est-summary-rate-label">Global labor cost</span>
+                    <div class="est-summary-rate-val-wrap">
+                        <span class="est-rate-num-col"><input class="est-rate-inline-input" data-summary-rate="globalLaborCost" type="number" step="0.01" min="0" value="${globalLaborCost.toFixed(2)}"></span>
+                        <span class="est-rate-unit-col">$/hr</span>
+                    </div>
+                </div>
+                <div class="est-summary-rate-line">
+                    <span class="est-summary-rate-label">Global labor sales rate</span>
+                    <div class="est-summary-rate-val-wrap">
+                        <span class="est-rate-num-col"><span class="est-rate-readonly-val">${globalLaborSales.toFixed(2)}</span></span>
+                        <span class="est-rate-unit-col est-rate-unit-readonly">$/hr</span>
+                    </div>
+                </div>
             </div>
 
             <!-- Table 1: Catalog Item Type Table (Fixed columns + Horizontal Scroll + Sticky Col 1) -->
@@ -2133,7 +2432,7 @@
                                     <span class="est-markup-drag" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
                                 </td>
                                 <td class="est-markup-name-col">
-                                    <span class="est-markup-title">${esc(row.name)}</span>
+                                    <span class="est-markup-title">${esc(row.name)}${row.operator === 'subtract' ? ' <span style="font-size: 10px; color: #ef4444; font-weight: 600;">(-)</span>' : ''}</span>
                                 </td>
                                 <td class="est-markup-rate-col">
                                     <span class="est-blue-cell-box">
@@ -2211,7 +2510,7 @@
                                     <span class="est-markup-drag" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
                                 </td>
                                 <td class="est-markup-name-col">
-                                    <span class="est-markup-title">${esc(row.name)}</span>
+                                    <span class="est-markup-title">${esc(row.name)}${row.operator === 'subtract' ? ' <span style="font-size: 10px; color: #ef4444; font-weight: 600;">(-)</span>' : ''}</span>
                                 </td>
                                 <td class="est-markup-rate-col">
                                     <span class="est-blue-cell-box">
@@ -2240,7 +2539,9 @@
     }
 
     function auditHtml(estimate) {
-        const logs = (estimate.auditLog || []).slice().reverse();
+        const allLogs = (estimate.auditLog || []).slice().reverse();
+        const maxVisible = ui.showAllAudit ? allLogs.length : 20;
+        const logs = allLogs.slice(0, maxVisible);
         const getBadgeInfo = (action = '') => {
             const lower = action.toLowerCase();
             if (lower.includes('add') || lower.includes('create') || lower.includes('copy')) {
@@ -2257,7 +2558,7 @@
         const formatAuditDate = (iso) => {
             try {
                 const d = new Date(iso);
-                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ' ? ' +
+                return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ' • ' +
                        d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
             } catch (_) {
                 return String(iso || '');
@@ -2303,6 +2604,12 @@
                         </div>
                     `}
                 </div>
+                ${allLogs.length > 20 ? `
+                <div class="est-audit-footer" style="padding-top: 10px; text-align: center; border-top: 1px solid var(--border, #e2e8f0); margin-top: 8px;">
+                    <button type="button" class="est-small-btn" data-toggle-audit-limit style="font-size: 11px; padding: 4px 12px; cursor: pointer; border-radius: 4px; background: var(--bg-surface, #f1f5f9); border: 1px solid var(--border, #cbd5e1); color: var(--text-main, #334155);">
+                        <i class="fas ${ui.showAllAudit ? 'fa-chevron-up' : 'fa-chevron-down'}"></i> ${ui.showAllAudit ? 'Show less (recent 20)' : `Show all (${allLogs.length} events)`}
+                    </button>
+                </div>` : ''}
             </div>
         `;
     }
@@ -2320,66 +2627,73 @@
         const backdrop = document.createElement('div');
         backdrop.id = 'notesLibraryModalBackdrop';
         backdrop.className = 'pd-modal-backdrop open';
-        backdrop.style.cssText = 'position: fixed; inset: 0; z-index: 1050; display: flex; align-items: center; justify-content: center; background: rgba(15, 23, 42, 0.45); backdrop-filter: blur(2px);';
         backdrop.innerHTML = `
-            <div class="pd-modal" style="width: min(680px, 95vw); max-height: 85vh; display: flex; flex-direction: column; background: var(--bg-surface, #ffffff); border-radius: 8px; box-shadow: 0 20px 40px rgba(0,0,0,0.2); overflow: hidden;">
-                <div class="pd-modal-header" style="display: flex; align-items: center; justify-content: space-between; padding: 14px 18px; border-bottom: 1px solid var(--border-color, #e2e8f0); background: #ecedee;">
-                    <div style="display: flex; align-items: center; gap: 8px; font-weight: 700; font-size: 13.5px; color: #334155;">
-                        <i class="fas fa-clipboard-list" style="color: #2563eb;"></i>
-                        <span>Notes Library & Clipboard</span>
+            <div class="bb-create-project-modal bb-studio-modal pd-modal notes-lib-modal" style="width: min(720px, 95vw); max-height: min(84vh, 740px); border-radius: 12px; overflow: hidden; background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); box-shadow: 0 24px 80px rgba(15, 23, 42, 0.35); display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="notesLibModalTitle">
+                <div class="pd-modal-head bb-modal-head" style="padding: 14px 22px; border-bottom: 1px solid var(--border-soft, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff); flex-shrink: 0;">
+                    <div style="display: flex; align-items: center; gap: 12px;">
+                        <div class="bb-modal-icon-badge" style="width: 36px; height: 36px; border-radius: 8px; background: rgba(37, 99, 235, 0.1); border: 1px solid rgba(37, 99, 235, 0.25); color: #2563eb; display: grid; place-items: center; font-size: 16px; flex: 0 0 36px;">
+                            <i class="fas fa-clipboard-list"></i>
+                        </div>
+                        <div>
+                            <h3 id="notesLibModalTitle" style="margin: 0; font-size: 15px; font-weight: 700; color: var(--text-main, #0f172a); line-height: 1.3;">Notes Library & Presets</h3>
+                            <span style="font-size: 12px; color: var(--text-muted, #64748b);">Manage and insert reusable note templates for inclusions and exclusions</span>
+                        </div>
                     </div>
-                    <button type="button" class="est-icon-action-btn" data-close-notes-lib style="font-size: 18px; border: none; background: transparent; cursor: pointer; color: #64748b;">&times;</button>
+                    <button class="pd-modal-head-close" type="button" data-close-notes-lib aria-label="Close" style="border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--text-muted, #64748b);">&times;</button>
                 </div>
                 
-                <!-- Category switch & Search bar -->
-                <div style="padding: 12px 18px; background: var(--bg-surface-2, #f8fafc); border-bottom: 1px solid var(--border-color, #e2e8f0); display: flex; flex-direction: column; gap: 10px;">
-                    <div style="display: flex; gap: 8px;">
-                        <button type="button" class="est-btn ${!isExcluded ? 'primary' : 'secondary'}" data-notes-lib-tab="included" style="padding: 6px 14px; font-size: 12px; font-weight: 600; border-radius: 4px; cursor: pointer;">
-                            <i class="fas fa-check"></i> Included Presets (${getInclusionPresets().length})
-                        </button>
-                        <button type="button" class="est-btn ${isExcluded ? 'primary' : 'secondary'}" data-notes-lib-tab="excluded" style="padding: 6px 14px; font-size: 12px; font-weight: 600; border-radius: 4px; cursor: pointer;">
-                            <i class="fas fa-ban"></i> Excluded Presets (${getExclusionPresets().length})
-                        </button>
+                <!-- Category switch & Search bar (Matching Procore / Bid Board) -->
+                <div class="notes-lib-subhead" style="padding: 12px 22px; background: var(--bg-subtle, #f8fafc); border-bottom: 1px solid var(--border-soft, #e2e8f0); display: flex; flex-direction: column; gap: 10px; flex-shrink: 0;">
+                    <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
+                        <div class="bb-filter-pills" style="display: inline-flex; gap: 6px; padding: 3px; background: var(--bg-input, #f1f5f9); border: 1px solid var(--border, #cbd5e1); border-radius: 8px;">
+                            <button type="button" class="notes-lib-pill ${!isExcluded ? 'is-active' : ''}" data-notes-lib-tab="included">
+                                <i class="fas fa-check-circle" style="color: ${!isExcluded ? '#2563eb' : '#64748b'};"></i> Included Presets <span class="notes-lib-count-badge">${getInclusionPresets().length}</span>
+                            </button>
+                            <button type="button" class="notes-lib-pill ${isExcluded ? 'is-active' : ''}" data-notes-lib-tab="excluded">
+                                <i class="fas fa-ban" style="color: ${isExcluded ? '#ef4444' : '#64748b'};"></i> Excluded Presets <span class="notes-lib-count-badge">${getExclusionPresets().length}</span>
+                            </button>
+                        </div>
                     </div>
-                    <div style="position: relative;">
-                        <input type="search" id="notesLibSearchInput" class="est-rate-inline-input" placeholder="Search library presets..." value="${esc(ui.notesLibrarySearch || '')}" style="width: 100%; text-align: left; padding: 7px 12px; background: #ffffff; border: 1px solid #cbd5e1; border-radius: 6px; font-size: 12.5px; font-weight: normal; color: inherit; box-sizing: border-box;">
+                    <div class="bb-search-field-procore cc-search-procore" style="position: relative; width: 100%;">
+                        <i class="fas fa-magnifying-glass" style="position: absolute; left: 12px; top: 50%; transform: translateY(-50%); color: var(--text-muted, #64748b); font-size: 13px;"></i>
+                        <input type="search" id="notesLibSearchInput" placeholder="Search preset notes..." value="${esc(ui.notesLibrarySearch || '')}" style="width: 100%; box-sizing: border-box; height: 36px; padding: 0 12px 0 34px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; font-size: 12.5px; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a);">
                     </div>
                 </div>
 
                 <!-- Presets list -->
-                <div class="notes-lib-list" style="flex: 1; overflow-y: auto; padding: 14px 18px; display: flex; flex-direction: column; gap: 10px;">
+                <div class="notes-lib-list" style="flex: 1 1 auto; overflow-y: auto; padding: 14px 22px; display: flex; flex-direction: column; gap: 10px; background: var(--bg-panel, #ffffff);">
                     ${filtered.map((preset, idx) => `
-                        <div class="notes-lib-card" style="display: flex; gap: 12px; align-items: flex-start; padding: 12px; background: var(--bg-surface, #ffffff); border: 1px solid var(--border-color, #e2e8f0); border-radius: 6px; transition: all .15s ease;">
-                            <div style="font-weight: 700; color: #64748b; font-size: 12px; min-width: 20px; margin-top: 2px;">${idx + 1}.</div>
-                            <div style="flex: 1; font-size: 12.5px; line-height: 1.5; color: var(--text-color, #1e293b); white-space: pre-wrap;">${esc(preset)}</div>
+                        <div class="notes-lib-card" style="display: flex; gap: 12px; align-items: flex-start; padding: 12px 14px; background: var(--bg-panel, #ffffff); border: 1px solid var(--border-soft, #e2e8f0); border-radius: 8px; box-shadow: 0 1px 3px rgba(0,0,0,0.04); transition: border-color 0.15s ease, box-shadow 0.15s ease;">
+                            <span class="notes-lib-num-badge" style="width: 24px; height: 24px; border-radius: 6px; background: var(--bg-subtle, #f1f5f9); color: var(--text-muted, #64748b); font-size: 11px; font-weight: 700; display: grid; place-items: center; flex: 0 0 24px; margin-top: 2px;">${idx + 1}</span>
+                            <div style="flex: 1; font-size: 12.5px; line-height: 1.5; color: var(--text-main, #1e293b); white-space: pre-wrap;">${esc(preset)}</div>
                             <div style="display: flex; gap: 6px; align-items: center; flex-shrink: 0;">
-                                <button type="button" class="est-btn primary" data-insert-preset="${targetKey}" data-preset-text="${esc(preset)}" title="Insert note into estimate ${label.toLowerCase()} list" style="padding: 5px 10px; font-size: 11.5px; font-weight: 600; border-radius: 4px; cursor: pointer;">
+                                <button type="button" class="btn-main orange small" data-insert-preset="${targetKey}" data-preset-text="${esc(preset)}" title="Insert note into estimate ${label.toLowerCase()} list" style="height: 28px; padding: 0 10px; font-size: 11.5px; font-weight: 700; border-radius: 5px; border: none; background: var(--tk-primary, #fb5a3a); color: #fff; cursor: pointer; display: inline-flex; align-items: center; gap: 5px; box-shadow: 0 1px 3px rgba(251,90,58,0.25);">
                                     <i class="fas fa-plus"></i> Insert
                                 </button>
-                                <button type="button" class="est-btn secondary" data-copy-preset="${esc(preset)}" title="Copy text to clipboard" style="padding: 5px 8px; font-size: 11.5px; border-radius: 4px; cursor: pointer;">
+                                <button type="button" class="btn-ghost small" data-copy-preset="${esc(preset)}" title="Copy text to clipboard" style="height: 28px; padding: 0 8px; font-size: 11.5px; border: 1px solid var(--border, #cbd5e1); border-radius: 5px; background: transparent; cursor: pointer; color: var(--text-muted, #64748b);">
                                     <i class="fas fa-copy"></i>
                                 </button>
-                                <button type="button" class="est-icon-action-btn danger" data-delete-lib-preset="${targetKey}" data-index="${idx}" title="Delete from library" style="color: #ef4444; border: none; background: transparent; cursor: pointer; padding: 5px;">
+                                <button type="button" class="btn-ghost small danger" data-delete-lib-preset="${targetKey}" data-index="${idx}" title="Delete from library" style="height: 28px; padding: 0 8px; border: 1px solid transparent; border-radius: 5px; background: transparent; cursor: pointer; color: #ef4444;">
                                     <i class="fas fa-trash-can"></i>
                                 </button>
                             </div>
                         </div>
-                    `).join('') || `<div style="text-align: center; padding: 30px; color: #94a3b8; font-size: 13px;">No presets found matching search.</div>`}
+                    `).join('') || `<div style="text-align: center; padding: 36px 20px; color: var(--text-muted, #94a3b8); font-size: 13px;">No presets found matching search.</div>`}
                 </div>
 
                 <!-- Add new preset footer section -->
-                <div style="padding: 12px 18px; border-top: 1px solid var(--border-color, #e2e8f0); background: var(--bg-surface-2, #f8fafc); display: flex; flex-direction: column; gap: 8px;">
-                    <div style="font-size: 11px; font-weight: 700; color: #64748b; text-transform: uppercase;">Add new preset to ${label} library</div>
-                    <div style="display: flex; gap: 8px;">
-                        <textarea id="newPresetTextInput" placeholder="Enter preset note text here..." rows="2" style="flex: 1; padding: 6px 10px; border: 1px solid #cbd5e1; border-radius: 5px; font-size: 12.5px; line-height: 1.4; resize: vertical; box-sizing: border-box;"></textarea>
-                        <button type="button" class="est-btn primary" data-save-new-preset="${targetKey}" style="align-self: flex-end; padding: 8px 14px; font-size: 12px; font-weight: 600; white-space: nowrap; border-radius: 4px; cursor: pointer;">
+                <div class="notes-lib-add-section" style="padding: 12px 22px; border-top: 1px solid var(--border-soft, #e2e8f0); background: var(--bg-subtle, #f8fafc); display: flex; flex-direction: column; gap: 8px; flex-shrink: 0;">
+                    <div style="font-size: 11px; font-weight: 700; color: var(--text-muted, #64748b); text-transform: uppercase; letter-spacing: 0.04em;">Add new preset to ${label} library</div>
+                    <div style="display: flex; gap: 10px; align-items: flex-start;">
+                        <textarea id="newPresetTextInput" placeholder="Enter preset note text here..." rows="2" style="flex: 1; padding: 8px 12px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; font-size: 12.5px; line-height: 1.45; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a); resize: vertical; box-sizing: border-box;"></textarea>
+                        <button type="button" class="btn-main orange" data-save-new-preset="${targetKey}" style="height: 34px; padding: 0 16px; font-size: 12px; font-weight: 700; border-radius: 6px; border: none; background: var(--tk-primary, #fb5a3a); color: #fff; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; flex-shrink: 0; box-shadow: 0 1px 3px rgba(251,90,58,0.3);">
                             <i class="fas fa-bookmark"></i> Save
                         </button>
                     </div>
                 </div>
 
-                <div class="pd-modal-footer" style="padding: 10px 18px; border-top: 1px solid var(--border-color, #e2e8f0); display: flex; justify-content: flex-end;">
-                    <button type="button" class="est-btn secondary" data-close-notes-lib style="padding: 6px 14px; border-radius: 4px; cursor: pointer;">Close</button>
+                <div class="pd-modal-foot bb-modal-foot" style="padding: 12px 22px; border-top: 1px solid var(--border-soft, #e2e8f0); display: flex; align-items: center; justify-content: flex-end; background: var(--bg-panel, #ffffff); flex-shrink: 0;">
+                    <button type="button" class="btn-ghost" data-close-notes-lib style="height: 32px; padding: 0 16px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--text-main, #0f172a);">Close</button>
                 </div>
             </div>
         `;
@@ -2443,13 +2757,20 @@
                     <input type="number" step="0.1" data-popover-markup-prop="val" value="${markup.type === 'fixed_amount' ? markup.amount : markup.percent}" style="width: 100%; text-align: left; padding: 5px 8px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; font-size: 12px; box-sizing: border-box;">
                 </label>
                 <label style="display: grid; gap: 3px; font-size: 11px; font-weight: 600; color: #475569;">
+                    <span>Operation / Effect</span>
+                    <select data-popover-markup-prop="operator" style="width: 100%; padding: 5px 8px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; font-size: 12px; box-sizing: border-box;">
+                        <option value="add" ${markup.operator !== 'subtract' ? 'selected' : ''}>Add (+ Markup)</option>
+                        <option value="subtract" ${markup.operator === 'subtract' ? 'selected' : ''}>Subtract (- Discount)</option>
+                    </select>
+                </label>
+                <label style="display: grid; gap: 3px; font-size: 11px; font-weight: 600; color: #475569;">
                     <span>Calculation Base</span>
-                    <select data-popover-markup-prop="base" style="width: 100%; padding: 5px 8px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; font-size: 12px; box-sizing: border-box;">
+                    <select data-popover-markup-prop="base" data-markup-base="${markup.id}" style="width: 100%; padding: 5px 8px; border: 1px solid #cbd5e1; border-radius: 4px; background: #fff; font-size: 12px; box-sizing: border-box;">
                         ${bases.map(b => `<option value="${b.id}" ${markup.base === b.id ? 'selected' : ''}>${b.label}</option>`).join('')}
                     </select>
                 </label>
                 <label style="display: flex; align-items: center; gap: 8px; font-size: 12px; color: #334155; cursor: pointer; margin-top: 4px;">
-                    <input type="checkbox" data-popover-markup-prop="active" ${markup.active !== false ? 'checked' : ''}>
+                    <input type="checkbox" data-popover-markup-prop="active" data-markup-active="${markup.id}" ${markup.active !== false ? 'checked' : ''}>
                     <span>Active in calculations</span>
                 </label>
                 <div style="border-top: 1px solid #f1f5f9; padding-top: 8px; margin-top: 4px;">
@@ -2550,7 +2871,7 @@ function renderFooter() {
         portal.className = 'pd-modal-backdrop open';
         portal.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(4px); z-index: 999999;';
         if (ui.modal === 'new') {
-            portal.innerHTML = `<div class="bb-create-project-modal bb-studio-modal pd-modal" style="width: min(480px, 92vw); border-radius: 12px; overflow: hidden; background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); box-shadow: 0 20px 60px rgba(15, 23, 42, 0.28); display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="copyEstimateTitle">
+            portal.innerHTML = `<div class="bb-create-project-modal bb-studio-modal pd-modal est-dialog est-copy-modal" style="width: min(480px, 92vw); border-radius: 12px; overflow: hidden; background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); box-shadow: 0 20px 60px rgba(15, 23, 42, 0.28); display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="copyEstimateTitle">
                 <div class="bb-modal-head" style="padding: 12px 18px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
                     <div style="display: flex; align-items: center; gap: 12px;">
                         <div class="bb-modal-icon-badge" style="width: 34px; height: 34px; border-radius: 8px; background: #fff7ed; border: 1px solid #fed7aa; color: #fb5a3a; display: grid; place-items: center; font-size: 15px; flex: 0 0 34px;">
@@ -2565,8 +2886,8 @@ function renderFooter() {
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
-                <div class="bb-modal-body" style="padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; background: var(--bg-panel, #ffffff);">
-                    <div class="bb-form-group" style="display: flex; flex-direction: column; gap: 4px;">
+                <div class="bb-modal-body" /* class="est-copy-body" */ style="padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; background: var(--bg-panel, #ffffff);">
+                    <div class="bb-form-group" /* class="est-copy-name" */ style="display: flex; flex-direction: column; gap: 4px;">
                         <label class="bb-form-label" for="copyEstimateName" style="font-size: 11.5px; font-weight: 600; color: var(--text-main, #0f172a); display: flex; align-items: center; gap: 4px;">
                             <span>Estimate Name</span>
                             <span style="color: #fb5a3a; font-weight: 700;">*</span>
@@ -2578,13 +2899,13 @@ function renderFooter() {
                         <div class="bb-input-hint" style="font-size: 10.5px; color: var(--text-muted, #64748b);">Unique name displayed across tabs, client summaries, and proposals.</div>
                     </div>
 
-                    <div class="bb-form-group" style="display: flex; flex-direction: column; gap: 6px;">
+                    <div class="est-copy-name" style="display:contents"></div><div class="bb-form-group" style="display: flex; flex-direction: column; gap: 6px;">
                         <label class="bb-form-label" style="font-size: 11.5px; font-weight: 600; color: var(--text-main, #0f172a); display: flex; align-items: center; gap: 5px;">
                             <i class="fas fa-shapes" style="color: #fb5a3a; font-size: 12px;"></i>
                             <span>Starting Configuration</span>
                         </label>
                         <div class="bb-studio-mode-stack" style="display: flex; flex-direction: column; gap: 7px;">
-                            <label class="est-copy-option bb-studio-card" style="position: relative; border: 1.5px solid var(--border, #cbd5e1); border-radius: 8px; padding: 8px 12px; background: var(--bg-panel, #ffffff); cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all .15s ease;">
+                            <label class="bb-studio-card" /* class="est-copy-option" */ style="position: relative; border: 1.5px solid var(--border, #cbd5e1); border-radius: 8px; padding: 8px 12px; background: var(--bg-panel, #ffffff); cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all .15s ease;">
                                 <input type="radio" name="copyEstimateMode" value="all" checked style="margin-top: 2px; accent-color: #fb5a3a; width: 14px; height: 14px;">
                                 <div style="flex: 1;">
                                     <div style="display: flex; align-items: center; gap: 7px;">
@@ -2705,8 +3026,30 @@ function renderFooter() {
     }
 
     async function addItem(groupId) {
-        if (!current().groups.some(row => row.id === groupId)) return;
+        const targetGroup = current().groups.find(row => String(row.id) === String(groupId));
+        if (!targetGroup) return;
         ui.catalogTargetGroupId = groupId;
+        if (typeof window.openTakeoffCatalogModal === 'function') {
+            window.openTakeoffCatalogModal({
+                groupId,
+                onSelect: (selectedItems) => {
+                    if (!Array.isArray(selectedItems) || !selectedItems.length) return;
+                    selectedItems.forEach(catItem => {
+                        const item = window.EstimatingCatalogAdapter.catalogItemDtoToEstimatingItem(catItem, {
+                            itemsById: new Map([[String(catItem.id), catItem]]),
+                            globalLaborRate: current().settings.globalLaborCost,
+                            workspaceItem: Workspace.item
+                        });
+                        item.addedFromEstimating = true;
+                        item.origin = 'estimating';
+                        targetGroup.items.push(item);
+                    });
+                    targetGroup.expanded = true;
+                    changed(`Added ${selectedItems.length} item(s) from Cost Catalog`);
+                }
+            });
+            return;
+        }
         ui.catalogLoading = true; ui.catalogError = ''; ui.modal = 'catalog'; renderModal();
         try {
             ui.catalogData = await window.CatalogService.getSnapshot({ enabledForProjectsOnly: true });
@@ -2716,11 +3059,14 @@ function renderFooter() {
 
     function catalogEstimateItem(catalog) {
         const itemsById = new Map((ui.catalogData?.items || []).map(item => [String(item.id), item]));
-        return window.EstimatingCatalogAdapter.catalogItemDtoToEstimatingItem(catalog, {
+        const item = window.EstimatingCatalogAdapter.catalogItemDtoToEstimatingItem(catalog, {
             itemsById,
             globalLaborRate: current().settings.globalLaborCost,
             workspaceItem: Workspace.item
         });
+        item.addedFromEstimating = true;
+        item.origin = 'estimating';
+        return item;
     }
 
     async function exportEstimate(mode = 'bom-excel') {
@@ -2785,45 +3131,18 @@ function renderFooter() {
         const itemRow = event.target.closest('[data-item-id]');
         const itemField = event.target.dataset.itemField;
         if (itemRow && itemField && event.target.type === 'number') {
-            const found = findItem(itemRow.dataset.itemId);
-            if (!found) return;
-            const catalogFields = {
-                unitMaterialCost: 'materialUnitCost',
-                unitEquipmentCost: 'equipmentUnitCost',
-                unitSubcontractorCost: 'subcontractorUnitCost',
-                unitLabor: 'laborHoursPerUnit',
-                laborRate: 'laborRate'
-            };
-            if (itemField === 'quantity') {
-                if (found.item.takeoffLayerId && (found.item.lastSyncedTakeoffQuantity === undefined || found.item.lastSyncedTakeoffQuantity === null)) {
-                    found.item.lastSyncedTakeoffQuantity = Workspace.numeric(found.item.originalQuantity ?? found.item.quantity);
-                }
-                found.item.quantity = Workspace.numeric(event.target.value);
-                found.item.quantityOverride = true;
-                found.item.quantitySyncStatus = 'overridden';
-                found.item.pendingTakeoffQuantity = Workspace.numeric(found.item.lastSyncedTakeoffQuantity ?? found.item.originalQuantity ?? 0);
-                event.target.classList.add('is-qty-overridden');
-            } else if (found.item.catalogSnapshot && catalogFields[itemField]
-                && window.EstimatingCatalogSnapshotService) {
-                window.EstimatingCatalogSnapshotService.setCatalogOverride(found.item,
-                    catalogFields[itemField], Workspace.numeric(event.target.value));
-            } else {
-                found.item[itemField] = Workspace.numeric(event.target.value);
+            // Adjust input width dynamically on input without premature recalculation or child re-rendering
+            const valLen = String(event.target.value || '').length;
+            if (event.target.style) {
+                event.target.style.width = `${Math.max(2, valLen)}ch`;
             }
-            found.item.updatedAt = Workspace.now();
-            reactiveChanged(event.target);
-            if (itemField === 'quantity' && isAssemblyItem(found.item) && ui.expandedAssemblies.has(String(found.item.id))) {
-                renderPreservingInput(event.target);
-            }
+            event.target.classList.add('is-val-overridden');
+            const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
+            if (unitEl) unitEl.style.color = '#ea580c';
             return;
         }
         if (event.target.dataset.summaryRate) {
-            const field = event.target.dataset.summaryRate;
-            const val = Workspace.numeric(event.target.value);
-            applySummaryRateSetting(estimate, field, val);
-            reactiveChanged(event.target);
-            renderTable();
-            return;
+            return; // Wait for change/Enter event to recalculate
         }
         if (event.target.dataset.summaryType) {
             const type = event.target.dataset.summaryType;
@@ -2960,6 +3279,10 @@ function renderFooter() {
                 });
             } else if (type === 'Labor') {
                 estimate.settings.laborWaste = clamped;
+                forEachEstimateItem(estimate, it => {
+                    it.laborWaste = clamped;
+                    if (it.itemType === 'labor' || it.type === 'labor') it.waste = clamped;
+                });
             } else if (type === 'Equipment') {
                 estimate.settings.equipmentWaste = clamped;
             }
@@ -2969,6 +3292,9 @@ function renderFooter() {
             forEachEstimateItem(estimate, it => {
                 it.difficulty = clamped;
             });
+            window.dispatchEvent(new CustomEvent('estimating:global-difficulty-updated', {
+                detail: { difficulty: clamped }
+            }));
         }
     }
 
@@ -3001,10 +3327,62 @@ function renderFooter() {
             if (target.dataset.auditPrevValue === undefined) {
                 target.dataset.auditPrevValue = target.value;
             }
+            if (target.matches?.('input.is-editable, input.est-cell-input, input.est-rate-inline-input, input[data-item-field], input[data-summary-rate], input[data-field], input[data-markup-quick-val], input[data-group-name]')) {
+                setTimeout(() => {
+                    if (document.activeElement === target) {
+                        try { target.select(); } catch (_) {}
+                    }
+                }, 10);
+            }
         }
     });
 
     root.addEventListener('change', event => {
+        const compChildId = event.target.dataset.componentChildId;
+        const parentAssemblyId = event.target.dataset.parentAssemblyId;
+        const compField = event.target.dataset.itemField;
+        if (compChildId && parentAssemblyId && compField) {
+            const parentItem = current().groups.flatMap(g => g.items || []).find(it => String(it.id) === String(parentAssemblyId));
+            if (parentItem) {
+                const children = getItemChildren(parentItem);
+                const child = children.find(c => String(c.id) === String(compChildId) || String(c.catalogItemId || c.catalog_item_id) === String(compChildId)) || children[0];
+                if (child) {
+                    const newVal = Workspace.numeric(event.target.value);
+                    const prevVal = child[compField] ?? child.quantity;
+                    if (compField === 'quantity') {
+                        const parentQty = Number(parentItem.quantity || 1) || 1;
+                        child.quantity = newVal;
+                        child.ratio = newVal / parentQty;
+                        child.factorOverride = newVal / parentQty;
+                        if (Array.isArray(parentItem.catalogSnapshot?.assemblyComponents)) {
+                            const snapComp = parentItem.catalogSnapshot.assemblyComponents.find(sc => String(sc.id) === String(child.id) || String(sc.catalogItemId) === String(child.catalogItemId));
+                            if (snapComp) {
+                                snapComp.ratio = child.ratio;
+                                snapComp.factorOverride = child.factorOverride;
+                                snapComp.quantity = newVal;
+                            }
+                        }
+                    } else {
+                        child[compField] = newVal;
+                    }
+                    parentItem.children = children;
+                    parentItem.updatedAt = Workspace.now();
+                    changed(`Updated ${child.name || 'component'} (${prevVal} -> ${newVal})`);
+                    renderTable();
+                    publish();
+                    return;
+                }
+            }
+        }
+
+        if (event.target.dataset.summaryRate) {
+            const field = event.target.dataset.summaryRate;
+            const val = Workspace.numeric(event.target.value);
+            applySummaryRateSetting(current(), field, val);
+            changed(`Updated ${field === 'globalLaborCost' ? 'Global labor cost' : 'Global labor sales rate'} (${val.toFixed(2)})`);
+            return;
+        }
+
         const row = event.target.closest('[data-item-id]');
         const field = event.target.dataset.itemField;
         if (row && field) {
@@ -3016,24 +3394,70 @@ function renderFooter() {
                 unitMaterialCost: 'materialUnitCost', unitEquipmentCost: 'equipmentUnitCost',
                 unitSubcontractorCost: 'subcontractorUnitCost', unitLabor: 'laborHoursPerUnit', laborRate: 'laborRate'
             };
+            found.item._manualFields = found.item._manualFields || {};
             if (event.target.type === 'number' && found.item.catalogSnapshot && catalogFields[field]
                 && window.EstimatingCatalogSnapshotService) {
                 const parsedVal = Number(event.target.value);
                 window.EstimatingCatalogSnapshotService.setCatalogOverride(found.item,
                     catalogFields[field], parsedVal);
+                found.item._manualFields[field] = true;
+                event.target.classList.add('is-val-overridden');
+                const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
+                if (unitEl) unitEl.style.color = '#ea580c';
                 if (!isNaN(parsedVal)) event.target.value = parsedVal.toFixed(2);
             } else {
                 const parsedVal = event.target.type === 'number' ? Number(event.target.value) : event.target.value;
                 if (field === 'quantity') {
-                    if (found.item.takeoffLayerId && (found.item.lastSyncedTakeoffQuantity === undefined || found.item.lastSyncedTakeoffQuantity === null)) {
-                        found.item.lastSyncedTakeoffQuantity = Workspace.numeric(found.item.originalQuantity ?? prevRaw);
+                    const origQty = Workspace.numeric(found.item.lastSyncedTakeoffQuantity ?? found.item.originalQuantity ?? found.item.takeoffQuantity ?? 0);
+                    const numParsed = Workspace.numeric(parsedVal);
+                    if (Math.abs(numParsed - origQty) < 0.0001) {
+                        found.item.quantityOverride = false;
+                        found.item.quantitySyncStatus = found.item.takeoffLayerId ? 'synced' : 'manual';
+                        delete found.item.pendingTakeoffQuantity;
+                        delete found.item._manualFields.quantity;
+                        event.target.classList.remove('is-qty-overridden', 'is-val-overridden');
+                        const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
+                        if (unitEl) unitEl.style.color = '#2563eb';
+                    } else {
+                        if (found.item.lastSyncedTakeoffQuantity === undefined || found.item.lastSyncedTakeoffQuantity === null) {
+                            found.item.lastSyncedTakeoffQuantity = origQty;
+                        }
+                        if (found.item.originalQuantity === undefined || found.item.originalQuantity === null) {
+                            found.item.originalQuantity = origQty;
+                        }
+                        found.item.quantityOverride = true;
+                        found.item.quantitySyncStatus = 'overridden';
+                        found.item.pendingTakeoffQuantity = origQty;
+                        found.item._manualFields.quantity = true;
+                        event.target.classList.add('is-qty-overridden', 'is-val-overridden');
+                        const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
+                        if (unitEl) unitEl.style.color = '#ea580c';
                     }
-                    found.item.quantityOverride = true;
-                    found.item.quantitySyncStatus = 'overridden';
-                    found.item.pendingTakeoffQuantity = Workspace.numeric(found.item.lastSyncedTakeoffQuantity ?? found.item.originalQuantity ?? 0);
+                } else {
+                    found.item._manualFields[field] = true;
+                    event.target.classList.add('is-val-overridden');
+                    const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
+                    if (unitEl) unitEl.style.color = '#ea580c';
+                    if (field === 'difficulty' && found.item.takeoffLayerId) {
+                        window.dispatchEvent(new CustomEvent('estimating:item-difficulty-updated', {
+                            detail: { layerId: found.item.takeoffLayerId, difficulty: parsedVal }
+                        }));
+                    }
                 }
                 found.item[field] = parsedVal;
                 if (event.target.type === 'number' && !isNaN(parsedVal)) event.target.value = parsedVal.toFixed(2);
+                if (field === 'quantity' && isAssemblyItem(found.item)) {
+                    const newParentQty = Workspace.numeric(parsedVal);
+                    const children = getItemChildren(found.item);
+                    children.forEach(child => {
+                        const ratio = (child.factorOverride !== undefined && child.factorOverride !== null && child.factorOverride !== '')
+                            ? Number(child.factorOverride)
+                            : (child.ratio !== undefined && child.ratio !== null ? Number(child.ratio) : Number(child.unitQuantity ?? child.quantity ?? 1));
+                        child.ratio = ratio;
+                        child.quantity = ratio * newParentQty;
+                    });
+                    found.item.children = children;
+                }
             }
             found.item.updatedAt = Workspace.now();
             const fieldMeta = {
@@ -3041,7 +3465,8 @@ function renderFooter() {
                 unitMaterialCost: { label: 'Unit Cost', kind: 'money' },
                 unitEquipmentCost: { label: 'Equipment Cost', kind: 'money' },
                 unitSubcontractorCost: { label: 'Subcontractor Cost', kind: 'money' },
-                waste: { label: 'Waste', kind: 'percent' },
+                waste: { label: 'Material Waste', kind: 'percent' },
+                laborWaste: { label: 'Labor Waste', kind: 'percent' },
                 materialMargin: { label: 'Margin', kind: 'percent' },
                 equipmentMargin: { label: 'Equipment Margin', kind: 'percent' },
                 laborMargin: { label: 'Labor Margin', kind: 'percent' },
@@ -3052,7 +3477,10 @@ function renderFooter() {
             const oldFmt = formatAuditVal(prevRaw, fieldMeta.kind, found.item.uom);
             const newFmt = formatAuditVal(nextRaw, fieldMeta.kind, found.item.uom);
             commitAuditPrevValue(event.target);
-            changed(`Updated ${fieldMeta.label} for "${found.item.name}" (${oldFmt} -> ${newFmt})`);
+            Workspace.touch(state, `Updated ${fieldMeta.label} for "${found.item.name}" (${oldFmt} -> ${newFmt})`);
+            saveLocal({ publish: false });
+            scheduleSave();
+            renderLiveSummary();
             return;
         }
         if (event.target.matches('[data-item-check]')) {
@@ -3436,24 +3864,434 @@ function renderFooter() {
         }
     }
 
+
+    function showAssemblyFormulaPopover(sourceChild, parentAssembly, triggerBtn) {
+        let pop = $('estAssemblyFormulaPopover');
+        if (!pop) {
+            pop = document.createElement('div');
+            pop.id = 'estAssemblyFormulaPopover';
+            pop.className = 'est-assembly-formula-popover';
+            document.body.appendChild(pop);
+        }
+        if (!pop.hidden && pop.dataset.activeChildId === String(sourceChild.id)) {
+            pop.hidden = true;
+            pop.dataset.activeChildId = '';
+            return;
+        }
+
+        hideActionPopover();
+        closeMarkupPopovers();
+
+        const currentRatio = (sourceChild.factorOverride !== undefined && sourceChild.factorOverride !== null && sourceChild.factorOverride !== '')
+            ? Number(sourceChild.factorOverride)
+            : Number(sourceChild.quantity || 1);
+        const parentQty = Number(parentAssembly.quantity || 1) || 1;
+        const parentUom = parentAssembly.uom || 'assembly unit';
+        const compUom = sourceChild.uom || 'ea';
+
+        pop.dataset.activeChildId = String(sourceChild.id);
+        pop.innerHTML = `
+            <div class="formula-pop-head">
+                <span><i class="fas fa-calculator" style="color: #2563eb;"></i> Component Formula</span>
+                <button type="button" data-close-formula-pop style="border: none; background: transparent; font-size: 16px; cursor: pointer; color: var(--text-muted);">&times;</button>
+            </div>
+            <div style="font-size: 12px; font-weight: 600; color: var(--text-main); line-height: 1.3;">
+                ${esc(sourceChild.name)}
+            </div>
+            <div style="font-size: 11px; color: var(--text-muted);">
+                Parent Assembly: <strong>${esc(parentAssembly.name)}</strong> (${number(parentQty, 2)} ${esc(parentUom)})
+            </div>
+            <div>
+                <label for="assemblyFormulaInput" style="display: block; font-size: 11px; font-weight: 600; color: var(--text-main); margin-bottom: 4px;">
+                    Qty per ${esc(parentUom)}
+                </label>
+                <div style="position: relative; display: flex; align-items: center;">
+                    <input id="assemblyFormulaInput" type="number" step="0.001" min="0" value="${currentRatio}" style="width: 100%; box-sizing: border-box; height: 32px; padding: 4px 50px 4px 8px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; font-size: 12.5px; font-weight: 600; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a);">
+                    <span style="position: absolute; right: 8px; font-size: 11px; color: var(--text-muted); pointer-events: none;">${esc(compUom)}</span>
+                </div>
+            </div>
+            <div style="font-size: 11.5px; color: var(--text-muted); background: var(--bg-subtle, #f8fafc); border: 1px solid var(--border-soft, #e2e8f0); border-radius: 4px; padding: 6px 8px;">
+                Calculated: <strong id="assemblyFormulaLivePreview" style="color: #2563eb;">${number(currentRatio * parentQty, 2)} ${esc(compUom)}</strong>
+            </div>
+            <div class="formula-pop-foot">
+                <button type="button" class="btn-ghost small" data-reset-formula style="padding: 4px 10px; font-size: 11px; border: 1px solid var(--border, #cbd5e1); border-radius: 4px; background: transparent; cursor: pointer;">Reset Catalog</button>
+                <button type="button" class="btn-main orange small" data-apply-formula style="padding: 4px 12px; font-size: 11px; font-weight: 700; border: none; border-radius: 4px; background: var(--tk-primary, #fb5a3a); color: #fff; cursor: pointer;">Apply</button>
+            </div>
+        `;
+        pop.hidden = false;
+
+        const rect = triggerBtn.getBoundingClientRect();
+        const popW = 290;
+        let left = rect.left;
+        let top = rect.bottom + 6;
+        if (left + popW > window.innerWidth - 10) left = Math.max(10, window.innerWidth - popW - 10);
+        if (top + 280 > window.innerHeight - 10) top = Math.max(10, rect.top - 280);
+        pop.style.left = `${left}px`;
+        pop.style.top = `${top}px`;
+
+        const input = pop.querySelector('#assemblyFormulaInput');
+        const preview = pop.querySelector('#assemblyFormulaLivePreview');
+
+        input?.addEventListener('input', () => {
+            const val = Workspace.numeric(input.value);
+            if (preview) preview.textContent = `${number(val * parentQty, 2)} ${compUom}`;
+        });
+
+        pop.querySelector('[data-close-formula-pop]')?.addEventListener('click', () => {
+            pop.hidden = true;
+            pop.dataset.activeChildId = '';
+        });
+
+        pop.querySelector('[data-apply-formula]')?.addEventListener('click', () => {
+            const val = Workspace.numeric(input.value);
+            const parentQty = Number(parentAssembly.quantity || 1) || 1;
+            sourceChild.ratio = val;
+            sourceChild.factorOverride = val;
+            sourceChild.quantity = val * parentQty;
+            const children = getItemChildren(parentAssembly);
+            const match = children.find(c => String(c.id) === String(sourceChild.id) || String(c.catalogItemId) === String(sourceChild.catalogItemId));
+            if (match) {
+                match.ratio = val;
+                match.factorOverride = val;
+                match.quantity = val * parentQty;
+            }
+            if (Array.isArray(parentAssembly.catalogSnapshot?.assemblyComponents)) {
+                const snapComp = parentAssembly.catalogSnapshot.assemblyComponents.find(sc => String(sc.id) === String(sourceChild.id) || String(sc.catalogItemId) === String(sourceChild.catalogItemId));
+                if (snapComp) {
+                    snapComp.ratio = val;
+                    snapComp.factorOverride = val;
+                    snapComp.quantity = val * parentQty;
+                }
+            }
+            parentAssembly.children = children;
+            parentAssembly.updatedAt = Workspace.now();
+            pop.hidden = true;
+            pop.dataset.activeChildId = '';
+            changed(`Updated component formula for "${sourceChild.name}" to ${val} per ${parentUom}`);
+            renderTable();
+            publish();
+        });
+
+        pop.querySelector('[data-reset-formula]')?.addEventListener('click', () => {
+            delete sourceChild.factorOverride;
+            delete sourceChild.ratio;
+            const children = getItemChildren(parentAssembly);
+            const match = children.find(c => String(c.id) === String(sourceChild.id) || String(c.catalogItemId) === String(sourceChild.catalogItemId));
+            if (match) {
+                delete match.factorOverride;
+                delete match.ratio;
+            }
+            if (Array.isArray(parentAssembly.catalogSnapshot?.assemblyComponents)) {
+                const snapComp = parentAssembly.catalogSnapshot.assemblyComponents.find(sc => String(sc.id) === String(sourceChild.id) || String(sc.catalogItemId) === String(sourceChild.catalogItemId));
+                if (snapComp) {
+                    delete snapComp.factorOverride;
+                    delete snapComp.ratio;
+                }
+            }
+            parentAssembly.children = children;
+            parentAssembly.updatedAt = Workspace.now();
+            pop.hidden = true;
+            pop.dataset.activeChildId = '';
+            changed(`Reset component formula for "${sourceChild.name}" to catalog default`);
+            renderTable();
+            publish();
+        });
+    }
+
+    function openProjectItemEditModal(item, group) {
+        document.querySelector('[data-estimating-modal-portal]')?.remove();
+        const portal = document.createElement('div');
+        portal.dataset.estimatingModalPortal = '';
+        portal.className = 'pd-modal-backdrop open';
+
+        const unitCost = Number(item.unitMaterialCost ?? item.unitCost ?? 0).toFixed(2);
+        const laborHours = Number(item.unitLabor ?? item.laborHours ?? 0).toFixed(2);
+        const equipCost = Number(item.unitEquipmentCost ?? 0).toFixed(2);
+        const subCost = Number(item.unitSubcontractorCost ?? 0).toFixed(2);
+        const isAss = isAssemblyItem(item);
+        const children = isAss ? getItemChildren(item) : [];
+        children.forEach((c, idx) => { if (!c.id) c.id = Workspace.uid('comp'); });
+
+        let totalCompCost = 0;
+        let totalCompLabor = 0;
+        children.forEach(c => {
+            const ratio = (c.factorOverride !== undefined && c.factorOverride !== null && c.factorOverride !== '')
+                ? Number(c.factorOverride) : Number(c.quantity || 1);
+            const cCost = Number(c.unitMaterialCost ?? c.unitCost ?? 0);
+            const cLabor = Number(c.unitLabor ?? c.laborHours ?? 0);
+            totalCompCost += (ratio * cCost);
+            totalCompLabor += (ratio * cLabor);
+        });
+
+        const assemblyComponentsHtml = isAss && children.length > 0 ? `
+            <section class="cc-assembly-section full is-open" style="grid-column: 1 / -1; margin-top: 10px; border: 1px solid var(--border, #cbd5e1); border-radius: 10px; overflow: hidden; background: var(--bg-panel, #ffffff);">
+                <div class="cc-section-head" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; background: var(--bg-subtle, #f8fafc); border-bottom: 1px solid var(--border-soft, #e2e8f0);">
+                    <div class="cc-section-head-title" style="display: flex; align-items: center; gap: 8px;">
+                        <i class="fas fa-boxes-stacked" style="color: var(--primary, #fb5a3a);"></i>
+                        <strong style="font-size: 13px; color: var(--text-main, #0f172a);">Assembly Components Kit</strong>
+                    </div>
+                    <span id="projAssemblyTotals" class="cc-assembly-totals-pill" style="padding: 3px 12px; border-radius: 999px; background: rgba(37, 99, 235, 0.12); border: 1px solid rgba(37, 99, 235, 0.3); color: #2563eb; font-size: 11.5px; font-weight: 700;">
+                        Cost ${money(totalCompCost)} · Labor ${totalCompLabor.toFixed(2)} hr
+                    </span>
+                </div>
+
+                <div class="cc-assembly-selected-header" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 16px; border-bottom: 1px solid var(--border-soft, #e2e8f0); background: var(--bg-panel, #ffffff);">
+                    <div class="cc-assembly-selected-title" style="display: flex; align-items: center; gap: 8px;">
+                        <i class="fas fa-list-check" style="color: var(--primary, #fb5a3a);"></i>
+                        <strong style="font-size: 12px; color: var(--text-main, #0f172a);">Configured Components</strong>
+                        <span class="cc-selected-count-badge" id="projSelectedCount" style="background: #2563eb; color: #ffffff; padding: 2px 7px; border-radius: 999px; font-size: 11px; font-weight: 700;">${children.length}</span>
+                        <small style="color: var(--text-muted, #64748b); margin-left: 6px;">(Configured per 1 ${esc(item.uom || 'assembly unit')})</small>
+                    </div>
+                </div>
+
+                <div class="cc-assembly-table-wrap" style="max-height: 240px; overflow-y: auto;">
+                    <table class="cc-mini-table" style="width: 100%; border-collapse: separate; border-spacing: 0;">
+                        <thead>
+                            <tr style="background: var(--bg-subtle, #f1f5f9);">
+                                <th style="width: 34px; text-align: center; padding: 8px 10px; border-bottom: 1px solid var(--border, #cbd5e1);"><i class="fas fa-grip-vertical" style="opacity: 0.5;"></i></th>
+                                <th style="width: 95px; text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--border, #cbd5e1); font-size: 11.5px; font-weight: 600;">Quantity</th>
+                                <th style="text-align: left; padding: 8px 12px; border-bottom: 1px solid var(--border, #cbd5e1); font-size: 11.5px; font-weight: 600;">Item Name</th>
+                                <th style="width: 60px; text-align: center; padding: 8px 10px; border-bottom: 1px solid var(--border, #cbd5e1); font-size: 11.5px; font-weight: 600;">UoM</th>
+                                <th style="width: 95px; text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--border, #cbd5e1); font-size: 11.5px; font-weight: 600;">Unit Cost</th>
+                                <th style="width: 95px; text-align: right; padding: 8px 10px; border-bottom: 1px solid var(--border, #cbd5e1); font-size: 11.5px; font-weight: 600;">Labor Time</th>
+                                <th style="width: 50px; text-align: center; padding: 8px 10px; border-bottom: 1px solid var(--border, #cbd5e1); font-size: 11.5px; font-weight: 600;">Actions</th>
+                            </tr>
+                        </thead>
+                        <tbody>
+                            ${children.map((comp, idx) => {
+                                const compRatio = (comp.factorOverride !== undefined && comp.factorOverride !== null && comp.factorOverride !== '')
+                                    ? comp.factorOverride : (comp.quantity || 1);
+                                const compCost = Number(comp.unitMaterialCost ?? comp.unitCost ?? 0);
+                                const compLabor = Number(comp.unitLabor ?? comp.laborHours ?? 0);
+                                return `<tr data-proj-comp-row="${idx}" style="border-bottom: 1px solid var(--border-soft, #e2e8f0);">
+                                    <td style="text-align: center; color: var(--text-muted, #94a3b8); padding: 8px 10px;"><i class="fas fa-grip-vertical"></i></td>
+                                    <td style="text-align: right; padding: 8px 10px;">
+                                        <input type="number" step="0.001" min="0" class="cc-qty-input proj-comp-ratio-input" data-comp-idx="${idx}" data-comp-id="${esc(comp.id || '')}" data-unit-cost="${compCost}" data-labor-hours="${compLabor}" value="${Number(compRatio)}" style="width: 78px; height: 28px; padding: 0 6px; text-align: right; font-weight: 600; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; font-size: 12px; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a);">
+                                    </td>
+                                    <td style="padding: 8px 12px;">
+                                        <div style="font-weight: 600; font-size: 12.5px; color: var(--text-main, #0f172a);">${esc(comp.name || 'Component')}</div>
+                                        ${comp.description ? `<div style="font-size: 11px; color: var(--text-muted, #64748b);">${esc(comp.description)}</div>` : ''}
+                                    </td>
+                                    <td style="text-align: center; padding: 8px 10px;">
+                                        <span class="cc-uom-pill" style="padding: 2px 7px; border-radius: 4px; background: var(--bg-subtle, #f1f5f9); font-size: 11px; font-weight: 600; color: var(--text-muted, #64748b);">${esc(comp.uom || 'ea')}</span>
+                                    </td>
+                                    <td style="text-align: right; font-weight: 600; font-size: 12px; padding: 8px 10px; color: var(--text-main, #0f172a);">${money(compCost)}</td>
+                                    <td style="text-align: right; font-size: 12px; padding: 8px 10px; color: var(--text-muted, #64748b);">${compLabor.toFixed(2)} hr</td>
+                                    <td style="text-align: center; padding: 8px 10px;">
+                                        <button type="button" class="est-icon-action-btn danger" data-proj-remove-comp="${idx}" title="Remove component from this assembly" style="color: #ef4444; border: none; background: transparent; cursor: pointer; padding: 4px;">
+                                            <i class="fas fa-trash-can"></i>
+                                        </button>
+                                    </td>
+                                </tr>`;
+                            }).join('')}
+                        </tbody>
+                    </table>
+                </div>
+            </section>
+        ` : '';
+
+        portal.innerHTML = `
+            <div class="cc-modal pd-modal cc-item-modal-lg" style="width: min(840px, 95vw); max-height: min(80vh, 700px); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0,0,0,0.35); overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="projItemModalTitle">
+                <div class="pd-modal-head cc-modal-head" style="padding: 14px 24px; border-bottom: 1px solid var(--border-soft, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
+                    <div style="display: flex; align-items: center; gap: 10px;">
+                        <div style="width: 32px; height: 32px; border-radius: 8px; background: rgba(37, 99, 235, 0.1); border: 1px solid rgba(37, 99, 235, 0.25); color: #2563eb; display: grid; place-items: center; font-size: 14px; flex: 0 0 32px;">
+                            <i class="fas fa-${isAss ? 'boxes-stacked' : 'cube'}"></i>
+                        </div>
+                        <div>
+                            <h3 id="projItemModalTitle" style="margin: 0; font-size: 14.5px; font-weight: 700; color: var(--text-main, #0f172a); line-height: 1.25;">Edit ${isAss ? 'Assembly' : 'Item'} (Estimate Project Level)</h3>
+                            <span style="font-size: 11.5px; color: var(--text-muted, #64748b);">Group: <strong>${esc(group?.name || 'Group')}</strong></span>
+                        </div>
+                    </div>
+                    <button class="pd-modal-head-close" type="button" data-close-proj-item-modal aria-label="Close" style="border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--text-muted, #64748b);">&times;</button>
+                </div>
+                <div class="pd-modal-body cc-modal-body" style="padding: 18px 24px; display: flex; flex-direction: column; gap: 14px; overflow-y: auto; max-height: calc(80vh - 120px); background: var(--bg-panel, #ffffff);">
+                    
+                    <!-- Notice Banner required by user -->
+                    <div class="est-item-project-edit-banner" style="margin-bottom: 4px;">
+                        <i class="fas fa-info-circle"></i>
+                        <div>
+                            <strong>Project-Level Item Edit</strong>: You are modifying this ${isAss ? 'assembly' : 'item'} only for this project estimate (<strong>${esc(current().name || 'Estimate')}</strong>). These changes are local and will <strong>NOT</strong> modify or affect the global master catalog.
+                        </div>
+                    </div>
+
+                    <div style="display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 14px;">
+                        <div style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px;">
+                            <label for="projEditName" style="font-size: 11.5px; font-weight: 700; color: var(--text-main, #0f172a);">Item Name <span style="color:#ef4444;">*</span></label>
+                            <input id="projEditName" type="text" value="${esc(item.name || '')}" required style="width: 100%; box-sizing: border-box; height: 34px; padding: 6px 10px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; font-size: 13px; font-weight: 600; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a);">
+                        </div>
+
+                        <div style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px;">
+                            <label for="projEditDesc" style="font-size: 11.5px; font-weight: 700; color: var(--text-main, #0f172a);">Description</label>
+                            <textarea id="projEditDesc" rows="2" style="width: 100%; box-sizing: border-box; padding: 6px 10px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; font-size: 12.5px; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a); resize: vertical;">${esc(item.description || '')}</textarea>
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <label for="projEditUom" style="font-size: 11.5px; font-weight: 700; color: var(--text-main, #0f172a);">Unit of Measure (UoM)</label>
+                            <input id="projEditUom" type="text" value="${esc(item.uom || 'ea')}" style="width: 100%; box-sizing: border-box; height: 34px; padding: 6px 10px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; font-size: 12.5px; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a);">
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <label for="projEditCostCode" style="font-size: 11.5px; font-weight: 700; color: var(--text-main, #0f172a);">Cost Code / Budget Code</label>
+                            <input id="projEditCostCode" type="text" value="${esc(item.costCode || item.budgetCode || '')}" placeholder="e.g. 16-100" style="width: 100%; box-sizing: border-box; height: 34px; padding: 6px 10px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; font-size: 12.5px; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a);">
+                        </div>
+
+                        ${!isAss ? `
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <label for="projEditUnitCost" style="font-size: 11.5px; font-weight: 700; color: var(--text-main, #0f172a);">Unit Material Cost ($)</label>
+                            <input id="projEditUnitCost" type="number" step="0.01" min="0" value="${esc(unitCost)}" style="width: 100%; box-sizing: border-box; height: 34px; padding: 6px 10px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; font-size: 12.5px; font-weight: 600; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a);">
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <label for="projEditLaborHours" style="font-size: 11.5px; font-weight: 700; color: var(--text-main, #0f172a);">Labor Time (hrs / unit)</label>
+                            <input id="projEditLaborHours" type="number" step="0.01" min="0" value="${esc(laborHours)}" style="width: 100%; box-sizing: border-box; height: 34px; padding: 6px 10px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; font-size: 12.5px; font-weight: 600; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a);">
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <label for="projEditEquipCost" style="font-size: 11.5px; font-weight: 700; color: var(--text-main, #0f172a);">Equipment Cost ($)</label>
+                            <input id="projEditEquipCost" type="number" step="0.01" min="0" value="${esc(equipCost)}" style="width: 100%; box-sizing: border-box; height: 34px; padding: 6px 10px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; font-size: 12.5px; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a);">
+                        </div>
+
+                        <div style="display: flex; flex-direction: column; gap: 4px;">
+                            <label for="projEditSubCost" style="font-size: 11.5px; font-weight: 700; color: var(--text-main, #0f172a);">Subcontractor Cost ($)</label>
+                            <input id="projEditSubCost" type="number" step="0.01" min="0" value="${esc(subCost)}" style="width: 100%; box-sizing: border-box; height: 34px; padding: 6px 10px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; font-size: 12.5px; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a);">
+                        </div>
+                        ` : ''}
+
+                        ${assemblyComponentsHtml}
+
+                        <div style="grid-column: 1 / -1; display: flex; flex-direction: column; gap: 4px;">
+                            <label for="projEditNotes" style="font-size: 11.5px; font-weight: 700; color: var(--text-main, #0f172a);">Item Notes</label>
+                            <input id="projEditNotes" type="text" value="${esc(item.notes || '')}" placeholder="Estimate notes for this item..." style="width: 100%; box-sizing: border-box; height: 34px; padding: 6px 10px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; font-size: 12.5px; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a);">
+                        </div>
+                    </div>
+                </div>
+                <div class="pd-modal-foot cc-modal-foot" style="padding: 14px 24px; border-top: 1px solid var(--border-soft, #e2e8f0); display: flex; align-items: center; justify-content: flex-end; gap: 10px; background: var(--bg-card, #f8fafc);">
+                    <button type="button" class="btn-ghost" data-close-proj-item-modal style="height: 32px; padding: 0 16px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; cursor: pointer; font-size: 12px; font-weight: 600;">Cancel</button>
+                    <button type="button" class="btn-main orange" id="projSaveItemBtn" style="height: 32px; padding: 0 18px; border: none; border-radius: 6px; background: var(--tk-primary, #fb5a3a); color: #ffffff; font-size: 12px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(251, 90, 58, 0.3);">
+                        <i class="fas fa-check"></i> Save Project Changes
+                    </button>
+                </div>
+            </div>`;
+
+        document.body.appendChild(portal);
+
+        const closeModal = () => portal.remove();
+        portal.querySelectorAll('[data-close-proj-item-modal]').forEach(b => b.addEventListener('click', closeModal));
+        portal.addEventListener('click', e => { if (e.target === portal) closeModal(); });
+
+        portal.querySelectorAll('.proj-comp-ratio-input').forEach(input => {
+            input.addEventListener('input', () => {
+                let liveCost = 0;
+                let liveLabor = 0;
+                portal.querySelectorAll('.proj-comp-ratio-input').forEach(inp => {
+                    const r = Workspace.numeric(inp.value);
+                    const c = parseFloat(inp.dataset.unitCost || '0');
+                    const l = parseFloat(inp.dataset.laborHours || '0');
+                    liveCost += (r * c);
+                    liveLabor += (r * l);
+                });
+                const totalsEl = portal.querySelector('#projAssemblyTotals');
+                if (totalsEl) {
+                    totalsEl.textContent = `Cost ${money(liveCost)} · Labor ${liveLabor.toFixed(2)} hr`;
+                }
+            });
+        });
+
+        portal.querySelectorAll('[data-proj-remove-comp]').forEach(btn => {
+            btn.addEventListener('click', () => {
+                const idx = parseInt(btn.dataset.projRemoveComp, 10);
+                const tr = btn.closest('tr');
+                if (tr) tr.remove();
+                children.splice(idx, 1);
+                const countBadge = portal.querySelector('#projSelectedCount');
+                if (countBadge) countBadge.textContent = String(children.length);
+                let liveCost = 0;
+                let liveLabor = 0;
+                portal.querySelectorAll('.proj-comp-ratio-input').forEach(inp => {
+                    const r = Workspace.numeric(inp.value);
+                    const c = parseFloat(inp.dataset.unitCost || '0');
+                    const l = parseFloat(inp.dataset.laborHours || '0');
+                    liveCost += (r * c);
+                    liveLabor += (r * l);
+                });
+                const totalsEl = portal.querySelector('#projAssemblyTotals');
+                if (totalsEl) {
+                    totalsEl.textContent = `Cost ${money(liveCost)} · Labor ${liveLabor.toFixed(2)} hr`;
+                }
+            });
+        });
+
+        portal.querySelector('#projSaveItemBtn')?.addEventListener('click', () => {
+            const newName = portal.querySelector('#projEditName')?.value.trim() || item.name;
+            const newDesc = portal.querySelector('#projEditDesc')?.value.trim() || '';
+            const newUom = portal.querySelector('#projEditUom')?.value.trim() || item.uom || 'ea';
+            const newCostCode = portal.querySelector('#projEditCostCode')?.value.trim() || '';
+            const newNotes = portal.querySelector('#projEditNotes')?.value.trim() || '';
+
+            const oldName = item.name;
+            item.name = newName;
+            item.description = newDesc;
+            item.uom = newUom;
+            item.costCode = newCostCode;
+            item.budgetCode = newCostCode;
+            item.notes = newNotes;
+
+            if (isAss && children.length > 0) {
+                const parentQty = Number(item.quantity || 1) || 1;
+                portal.querySelectorAll('.proj-comp-ratio-input').forEach(inp => {
+                    const idx = Number(inp.dataset.compIdx);
+                    const comp = children[idx];
+                    if (comp) {
+                        const val = Workspace.numeric(inp.value);
+                        comp.ratio = val;
+                        comp.factorOverride = val;
+                        comp.quantity = val * parentQty;
+                        if (Array.isArray(item.catalogSnapshot?.assemblyComponents)) {
+                            const snapComp = item.catalogSnapshot.assemblyComponents.find(sc => String(sc.id) === String(comp.id) || String(sc.catalogItemId) === String(comp.catalogItemId)) || item.catalogSnapshot.assemblyComponents[idx];
+                            if (snapComp) {
+                                snapComp.ratio = val;
+                                snapComp.factorOverride = val;
+                                snapComp.quantity = val * parentQty;
+                            }
+                        }
+                    }
+                });
+                item.children = children;
+            } else {
+                const newUnitCost = Workspace.numeric(portal.querySelector('#projEditUnitCost')?.value);
+                const newLaborHours = Workspace.numeric(portal.querySelector('#projEditLaborHours')?.value);
+                const newEquipCost = Workspace.numeric(portal.querySelector('#projEditEquipCost')?.value);
+                const newSubCost = Workspace.numeric(portal.querySelector('#projEditSubCost')?.value);
+
+                item.unitMaterialCost = newUnitCost;
+                item.unitCost = newUnitCost;
+                item.unitLabor = newLaborHours;
+                item.laborHours = newLaborHours;
+                item.unitEquipmentCost = newEquipCost;
+                item.unitSubcontractorCost = newSubCost;
+
+                if (item.catalogSnapshot && window.EstimatingCatalogSnapshotService) {
+                    window.EstimatingCatalogSnapshotService.setCatalogOverride(item, 'materialUnitCost', newUnitCost);
+                    window.EstimatingCatalogSnapshotService.setCatalogOverride(item, 'laborHoursPerUnit', newLaborHours);
+                    window.EstimatingCatalogSnapshotService.setCatalogOverride(item, 'equipmentUnitCost', newEquipCost);
+                    window.EstimatingCatalogSnapshotService.setCatalogOverride(item, 'subcontractorUnitCost', newSubCost);
+                }
+            }
+
+            item.updatedAt = Workspace.now();
+            closeModal();
+            changed(`Edited ${isAss ? 'assembly' : 'item'} "${oldName}" (Project estimate level)`);
+            renderTable();
+            publish();
+        });
+    }
+
     root.addEventListener('click', event => {
         const target = event.target;
         
         const editSqft = target.closest('[data-edit-sqft]');
         if (editSqft) {
-            const currentSqft = resolveSquareFootage();
-            const input = prompt('Enter project area in Square Feet (sq ft):', currentSqft > 0 ? String(currentSqft) : '');
-            if (input !== null) {
-                const parsed = parseFloat(String(input).replace(/[^0-9.]/g, '')) || 0;
-                current().settings.squareFootage = parsed;
-                if (window.ProjectState) {
-                    if (!window.ProjectState.projectMeta) window.ProjectState.projectMeta = {};
-                    window.ProjectState.projectMeta.square_footage = parsed > 0 ? String(parsed) : '';
-                }
-                const poInput = document.getElementById('poSquareFootage');
-                if (poInput) poInput.value = parsed > 0 ? String(parsed) : '';
-                changed(`Updated Project Square Footage (${number(currentSqft, 0)} sq ft -> ${number(parsed, 0)} sq ft)`);
-            }
+            openSquareFootageModal();
             return;
         }
         const browseLib = target.closest('[data-browse-library]');
@@ -3651,9 +4489,10 @@ const estimateMenu = target.closest('[data-estimate-menu]');
             hideActionPopover();
             const found = findItem(itId);
             if (act === 'edit-item') {
-                const row = root.querySelector(`[data-item-id="${selectorValue(itId)}"]`);
-                const input = row?.querySelector('input:not([type="checkbox"])');
-                input?.focus();
+                if (found) {
+                    openProjectItemEditModal(found.item, found.group);
+                }
+                return;
             } else if (act === 'copy-item') {
                 if (found) {
                     if (isAssemblyItem(found.item)) {
@@ -3716,6 +4555,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                 item.quantityOverride = false;
                 item.pendingTakeoffQuantity = null;
                 item.quantitySyncStatus = item.takeoffLayerId ? 'synced' : 'manual';
+                if (item._manualFields) delete item._manualFields.quantity;
             });
             changed('Reset quantities');
         }
@@ -3736,7 +4576,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         }
         const option = target.closest('[data-est-option]')?.dataset.estOption;
         if (option) closeOptionsMenu();
-        if (option === 'save') saveServer();
+        if (option === 'save') { ui.explicitSaveRequested = true; saveServer({ showModal: true }); }
         if (option === 'copy') { ui.modal = 'new'; renderModal(); }
         if (option === 'export') { ui.modal = 'export'; renderModal(); }
         if (option === 'export-bom') exportEstimate('bom-excel');
@@ -3749,6 +4589,24 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         if (collapse) { ui.collapsed[collapse] = !ui.collapsed[collapse]; renderDetails(); }
         const toggle = target.closest('[data-toggle-group]')?.dataset.toggleGroup;
         if (toggle) { const group = current().groups.find(row => row.id === toggle); group.expanded = !group.expanded; changed(); }
+        const calcBtn = target.closest('[data-assembly-calc-btn]');
+        if (calcBtn) {
+            event.preventDefault();
+            event.stopPropagation();
+            const childId = calcBtn.dataset.assemblyCalcBtn;
+            const parentAssemblyId = calcBtn.dataset.parentAssemblyId;
+            const foundParent = findItem(parentAssemblyId);
+            const parentAssembly = foundParent?.item;
+            if (parentAssembly) {
+                const children = getItemChildren(parentAssembly);
+                const sourceChild = children.find(c => String(c.id) === String(childId) || String(c.catalogItemId || c.catalog_item_id) === String(childId)) || children[0];
+                if (sourceChild) {
+                    showAssemblyFormulaPopover(sourceChild, parentAssembly, calcBtn);
+                }
+            }
+            return;
+        }
+
         const assemblyToggle = target.closest('[data-toggle-assembly]')?.dataset.toggleAssembly;
         if (assemblyToggle) {
             toggleAssemblyExpansion(assemblyToggle);
@@ -3869,6 +4727,10 @@ const estimateMenu = target.closest('[data-estimate-menu]');
 
     document.addEventListener('click', async event => {
         const target = event.target;
+        if (!target.closest('#estAssemblyFormulaPopover') && !target.closest('[data-assembly-calc-btn]')) {
+            const pop = $('estAssemblyFormulaPopover');
+            if (pop) { pop.hidden = true; pop.dataset.activeChildId = ''; }
+        }
         if (!target.closest('.est-markup-popover') && !target.closest('[data-markup-menu-btn]')) {
             closeMarkupPopovers();
         }
@@ -3885,6 +4747,11 @@ const estimateMenu = target.closest('[data-estimate-menu]');
             current().settings.postTaxMarkups = (current().settings.postTaxMarkups || []).filter(m => String(m.id) !== String(mId));
             closeMarkupPopovers();
             changed('Deleted markup');
+            return;
+        }
+        if (target.closest('[data-toggle-audit-limit]')) {
+            ui.showAllAudit = !ui.showAllAudit;
+            renderDetails();
             return;
         }
         if (target.closest('[data-close-notes-lib]')) {
@@ -3938,7 +4805,9 @@ const estimateMenu = target.closest('[data-estimate-menu]');
 
         const pop = $('estActionPopover');
         if (pop && !pop.hidden) {
-            if (!pop.contains(event.target) && !event.target.closest('[data-group-menu-btn]') && !event.target.closest('[data-item-menu-btn]')) {
+            if (pop.contains(event.target)) {
+                if (handleActionPopoverClick(event)) return;
+            } else if (!event.target.closest('[data-group-menu-btn]') && !event.target.closest('[data-item-menu-btn]')) {
                 hideActionPopover();
             }
         }
@@ -3986,7 +4855,18 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         if (results) results.innerHTML = renderCatalogChoices(event.target.value);
     });
 
+    root.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && event.target.matches('input[data-item-field], input[data-summary-rate], .est-rate-inline-input')) {
+            event.target.blur();
+        }
+    });
+
     document.addEventListener('keydown', event => {
+        if (event.key === 'Escape') {
+            const formulaPop = $('estAssemblyFormulaPopover');
+            if (formulaPop) { formulaPop.hidden = true; formulaPop.dataset.activeChildId = ''; }
+        }
+        if (event.key === 'Escape' && ui.notesLibraryModal) { ui.notesLibraryModal = null; renderNotesLibraryModal(); }
         if (event.key === 'Escape' && ui.modal) { ui.modal = null; renderModal(); }
         if (event.key === 'Escape') {
             hideActionPopover();
@@ -4083,6 +4963,31 @@ const estimateMenu = target.closest('[data-estimate-menu]');
     });
     window.addEventListener('takeoff:layer-updated', () => {
         renderTable();
+    });
+    window.addEventListener('takeoff:layer-properties-updated', event => {
+        const detail = event.detail || {};
+        if (!detail.layerId) return;
+        const est = current();
+        if (!est) return;
+        let updated = 0;
+        (est.groups || []).forEach(group => {
+            (group.items || []).forEach(item => {
+                if (String(item.takeoffLayerId || '') === String(detail.layerId)) {
+                    if (detail.difficulty !== undefined) {
+                        const dVal = Workspace.numeric(detail.difficulty);
+                        if (dVal > 0 && item.difficulty !== dVal) {
+                            item.difficulty = dVal;
+                            updated++;
+                        }
+                    }
+                }
+            });
+        });
+        if (updated > 0) {
+            changed(`Updated difficulty factor from Takeoff layer (${detail.difficulty})`);
+            renderTable();
+            publish();
+        }
     });
     window.addEventListener('takeoff:estimating-groups-delete-requested', event => {
         const detail = event.detail || {};
@@ -4389,6 +5294,8 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                     const num = Workspace.numeric(target.value);
                     if (markup.type === 'fixed_amount') markup.amount = num;
                     else markup.percent = num;
+                } else if (prop === 'operator') {
+                    markup.operator = target.value;
                 }
                 reactiveChanged(target);
             }
@@ -4417,6 +5324,11 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                     const kind = markup.type === 'fixed_amount' ? 'money' : 'percent';
                     commitAuditPrevValue(target);
                     changed(`Updated "${markup.name}" (${formatAuditVal(prevRaw, kind)} -> ${formatAuditVal(nextVal, kind)})`);
+                    return;
+                } else if (prop === 'operator') {
+                    const prevOp = markup.operator || 'add';
+                    markup.operator = target.value;
+                    changed(`Updated "${markup.name}" operator (${prevOp} -> ${target.value})`);
                     return;
                 } else if (prop === 'type') {
                     markup.type = target.value;
@@ -4491,7 +5403,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
 function initEstimatingResizer() {
         const resizer = $('estSplitResizer');
         const estRight = root.querySelector('.est-right');
-        const collapseTab = $('estRightCollapseTab');
+        const estMain = root.querySelector('.est-main');
         const toolbarToggle = $('estToolbarToggleRight');
         if (!resizer || !estRight) return;
 
@@ -4499,7 +5411,7 @@ function initEstimatingResizer() {
             const saved = localStorage.getItem('takeoff.estimatingRightWidth');
             if (saved) {
                 const parsed = parseInt(saved, 10);
-                if (parsed >= 260 && parsed <= 800) {
+                if (parsed >= 260 && parsed <= 850) {
                     estRight.style.setProperty('--est-right-w', `${parsed}px`);
                     estRight.style.width = `${parsed}px`;
                     estRight.style.flexBasis = `${parsed}px`;
@@ -4520,8 +5432,7 @@ function initEstimatingResizer() {
         let startX = 0;
         let startWidth = 0;
 
-        resizer.addEventListener('pointerdown', e => {
-            const estMain = root.querySelector('.est-main');
+        const onPointerDown = e => {
             if (estMain?.classList.contains('details-collapsed')) return;
 
             isDragging = true;
@@ -4529,26 +5440,28 @@ function initEstimatingResizer() {
             const currentComputed = parseInt(getComputedStyle(estRight).width, 10) || 420;
             startWidth = currentComputed;
             resizer.classList.add('is-dragging');
+            estMain?.classList.add('is-resizing');
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
             try { resizer.setPointerCapture(e.pointerId); } catch (_) {}
             e.preventDefault();
-        });
+        };
 
-        resizer.addEventListener('pointermove', e => {
+        const onPointerMove = e => {
             if (!isDragging) return;
             const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
             const deltaX = (e.clientX - startX) / zoom;
-            const newWidth = Math.max(260, Math.min(800, Math.round(startWidth - deltaX)));
+            const newWidth = Math.max(260, Math.min(850, Math.round(startWidth - deltaX)));
             estRight.style.setProperty('--est-right-w', `${newWidth}px`);
             estRight.style.width = `${newWidth}px`;
             estRight.style.flexBasis = `${newWidth}px`;
-        });
+        };
 
         const stopDragging = e => {
             if (!isDragging) return;
             isDragging = false;
             resizer.classList.remove('is-dragging');
+            estMain?.classList.remove('is-resizing');
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
             try {
@@ -4561,8 +5474,10 @@ function initEstimatingResizer() {
             } catch (_) {}
         };
 
-        resizer.addEventListener('pointerup', stopDragging);
-        resizer.addEventListener('pointercancel', stopDragging);
+        resizer.addEventListener('pointerdown', onPointerDown);
+        window.addEventListener('pointermove', onPointerMove);
+        window.addEventListener('pointerup', stopDragging);
+        window.addEventListener('pointercancel', stopDragging);
     }
 
     saveLocal();

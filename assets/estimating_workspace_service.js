@@ -49,6 +49,7 @@
             percent: numeric(row.percent),
             amount: numeric(row.amount ?? row.percent),
             base: text(row.base, 'subtotal_sales'),
+            operator: row.operator === 'subtract' ? 'subtract' : 'add',
             active: row.active !== false
         };
     }
@@ -76,6 +77,8 @@
             childrenQuantitiesExtended: row.childrenQuantitiesExtended === true,
             assemblyExpansionPolicy: String(row.assemblyExpansionPolicy ?? row.assembly_expansion_policy ?? 'LEGACY').toUpperCase() === 'CANONICAL'
                 ? 'CANONICAL' : 'LEGACY',
+            ratio: row.ratio !== undefined && row.ratio !== null ? numeric(row.ratio) : null,
+            factorOverride: row.factorOverride !== undefined && row.factorOverride !== null ? numeric(row.factorOverride) : null,
             ratioType: text(row.ratioType ?? row.ratio_type, 'per_unit'),
             spacing: row.spacing === null || row.spacing === undefined ? null : numeric(row.spacing),
             componentWaste: numeric(row.componentWaste ?? row.wasteFactorPercent ?? row.waste_factor_percent),
@@ -104,9 +107,11 @@
             laborUnitType: text(row.laborUnitType ?? row.laborUnit, 'mins'),
             laborRate: numeric(row.laborRate ?? row.labor_rate, 85),
             difficulty: numeric(row.difficulty ?? row.difficulty_factor, 1),
+            laborWaste: row.laborWaste !== undefined && row.laborWaste !== null ? numeric(row.laborWaste) : null,
             laborMargin: row.laborMargin === '' || row.labor_margin_percentage === '' ? null
                 : (row.laborMargin ?? row.labor_margin_percentage ?? null),
             taxable: row.taxable !== false && Number(row.taxable ?? 1) !== 0,
+            _manualFields: (row._manualFields && typeof row._manualFields === 'object') ? { ...row._manualFields } : {},
             notes: text(row.notes),
             updatedAt: text(row.updatedAt ?? row.updated_at, now())
         };
@@ -137,7 +142,7 @@
             ? row.creationMode : (index ? 'all' : 'primary');
         const takeoffSyncMode = row.takeoffSyncMode === 'linked-only'
             || row.takeoffSync?.mode === 'linked-only' ? 'linked-only' : 'mirror';
-        const explicitPrimaryId = String(row.primary_estimate_id || window.ProjectState?.projectMeta?.primary_estimate_id || '');
+        const explicitPrimaryId = String(row.primary_estimate_id || global.ProjectState?.projectMeta?.primary_estimate_id || '');
         const isPrimary = explicitPrimaryId ? String(row.id) === explicitPrimaryId : Boolean(row.is_primary ?? row.isPrimary ?? (index === 0));
         return {
             id: text(row.id) || uid('estimate'),
@@ -286,13 +291,13 @@
         const created = estimate({ name: text(name).trim() || 'New Estimate', groups,
             creationMode,
             takeoffSyncMode: 'linked-only',
-            settings: creationMode === 'all' ? clone(source.settings) : {},
+            settings: source?.settings ? clone(source.settings) : {},
             notes: creationMode === 'all' ? clone(source.notes) : {} }, state.projectId, state.estimates.length);
         state.estimates.push(created);
         state.activeEstimateId = created.id;
         state.estimates.forEach(row => { row.isActive = row.id === created.id; });
         state.groups = created.groups;
-        return touch(state, `Created estimate “${created.name}”`);
+        return touch(state, `Created estimate "${created.name}"`);
     }
 
     function removeEstimate(state, estimateId) {

@@ -65,15 +65,23 @@
             const embedded = Array.isArray(row?.children) ? row.children
                 : (Array.isArray(row?.assemblyItems) ? row.assemblyItems : []);
             const children = Array.isArray(canonical) && canonical.length
-                ? canonical.map(component => ({ component, child: graph.byId.get(text(component.catalogItemId)) }))
+                ? canonical.map(component => ({
+                    component,
+                    child: graph.byId.get(text(component.catalogItemId))
+                        || embedded.find(emb => text(emb.catalogItemId) === text(component.catalogItemId) || text(emb.id) === text(component.catalogItemId))
+                  }))
                 : (embedded.length ? embedded : (graph.flatChildren.get(id) || [])).map(child => ({ child }));
             result.assemblyComponents = children.map(({ component, child }, componentIndex) => {
                 const childDto = child ? dto(child, nextPath) : null;
                 const childId = text(component?.catalogItemId) || childDto?.id || `missing-${id}-${componentIndex}`;
+                const rawQty = component?.factorOverride ?? child?.factorOverride ?? child?.ratio
+                    ?? component?.quantity
+                    ?? (row?.childrenQuantitiesExtended ? child?.quantity : (child?.unitQuantity ?? child?.ratio ?? 1))
+                    ?? 1;
                 return {
                     id: text(component?.id) || `${id}:${componentIndex}`,
                     catalogItemId: childId,
-                    quantity: component?.quantity ?? child?.quantity ?? 0,
+                    quantity: Number(rawQty),
                     ratioType: component?.ratioType ?? component?.ratio_type
                         ?? child?.ratioType ?? child?.ratio_type
                         ?? (row?.childrenQuantitiesExtended ? 'fixed' : 'per_unit'),
