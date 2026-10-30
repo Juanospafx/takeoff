@@ -92,9 +92,9 @@
             return `<span class="est-version-entry"><button type="button" class="est-version-tab${active ? ' active' : ''}" ${selectAttribute}="${esc(estimateId)}" aria-pressed="${active}"><span class="est-tab-body"><strong>${esc(estimate.name || 'Estimate')}</strong><span class="est-price-line"><small>${priceLabel}</small>${primaryStar}${pinBadge}</span></span>${estimate.isLocked ? '<i class="fas fa-lock" aria-label="Locked"></i>' : ''}</button>${menu}</span>`;
         }).join('');
         const empty = estimates.length ? '' : '<span class="est-muted">No estimates available</span>';
-        const compareBtn = options.showCompare === false
-            ? ''
-            : `<button type="button" class="est-btn" ${actionAttribute}="compare-estimates" ${estimates.length < 2 ? 'disabled' : ''}><i class="fas fa-code-compare"></i><span>Compare</span></button>`;
+        const compareBtn = options.showCompare === true
+            ? `<button type="button" class="est-btn" ${actionAttribute}="compare-estimates" ${estimates.length < 2 ? 'disabled' : ''}><i class="fas fa-code-compare"></i><span>Compare</span></button>`
+            : '';
 
         const pillMenuHtml = `
             <div class="est-pill-wrap">
@@ -234,8 +234,10 @@
                 if (dropdown) {
                     if (opening) {
                         positionMenu(dropdown, pillToggle);
+                        pillToggle.setAttribute('aria-expanded', 'true');
                     } else {
                         dropdown.hidden = true;
+                        pillToggle.setAttribute('aria-expanded', 'false');
                     }
                 }
                 return;
@@ -252,6 +254,7 @@
                 container.querySelectorAll(`[${menuAttribute}]`).forEach(row => row.setAttribute('aria-expanded', 'false'));
                 const pillMenu = container.querySelector('[data-est-pill-menu]');
                 if (pillMenu) pillMenu.hidden = true;
+                container.querySelector('[data-est-pill-toggle]')?.setAttribute('aria-expanded', 'false');
 
                 if (menu && opening) {
                     positionMenu(menu, toggle);
@@ -263,6 +266,7 @@
             if (pillItem) {
                 const pillMenu = container.querySelector('[data-est-pill-menu]');
                 if (pillMenu) pillMenu.hidden = true;
+                container.querySelector('[data-est-pill-toggle]')?.setAttribute('aria-expanded', 'false');
             }
 
             const action = event.target.closest(`[${actionAttribute}]`);
@@ -271,6 +275,7 @@
             container.querySelectorAll('[data-estimate-actions-menu]').forEach(row => { row.hidden = true; });
             const pillMenu = container.querySelector('[data-est-pill-menu]');
             if (pillMenu) pillMenu.hidden = true;
+            container.querySelector('[data-est-pill-toggle]')?.setAttribute('aria-expanded', 'false');
             config.onAction?.(action.getAttribute(actionAttribute), action.dataset.estimateId);
         });
         document.addEventListener('click', event => {
@@ -278,6 +283,7 @@
             if (!inPill) {
                 const pillMenu = container.querySelector('[data-est-pill-menu]');
                 if (pillMenu) pillMenu.hidden = true;
+                container.querySelector('[data-est-pill-toggle]')?.setAttribute('aria-expanded', 'false');
             }
             if (container.contains(event.target)) return;
             container.querySelectorAll('[data-estimate-actions-menu]').forEach(row => { row.hidden = true; });
@@ -287,6 +293,7 @@
             container.querySelectorAll('[data-estimate-actions-menu]').forEach(row => { row.hidden = true; });
             const pillMenu = container.querySelector('[data-est-pill-menu]');
             if (pillMenu) pillMenu.hidden = true;
+            container.querySelector('[data-est-pill-toggle]')?.setAttribute('aria-expanded', 'false');
         });
     }
 

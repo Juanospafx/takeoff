@@ -31,8 +31,9 @@ assert.equal(summary.rows.length, 1, 'flat assembly children are not also aggreg
 near(summary.direct.materialCost, 60, 'flat children are multiplied by assembly quantity once');
 near(summary.direct.materialSales, 75, 'flat child sales are counted once');
 
-const zero = Calc.calculateItem(Workspace.item({ isAssembly: true, quantity: 0, children: [{ quantity: 2, unitMaterialCost: 5 }] }));
-assert.equal(zero.unitMaterialCost, 0, 'zero quantity has safe unit cost');
+const zero = Calc.calculateItem(Workspace.item({ isAssembly: true, quantity: 0, children: [{ quantity: 2, unitMaterialCost: 5, materialMargin: 20 }] }));
+assert.equal(zero.unitMaterialCost, 10, 'zero quantity retains the assembly unit cost for estimating');
+assert.equal(zero.unitMaterialSales, 12.5, 'zero quantity unit sales retain the component margin');
 assert.ok(Number.isFinite(zero.totalCost), 'zero quantity never creates NaN/Infinity');
 
 console.log('estimate assembly calculation tests passed');

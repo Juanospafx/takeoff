@@ -313,13 +313,17 @@ function project_deep_clone(PDO $pdo, int $sourceId, int $newId): void
         }
 
         // 9. Estimate Items
-        if (project_table_exists($pdo, 'estimate_items')) {
-            $stmt = $pdo->prepare("SELECT * FROM estimate_items WHERE project_id = ? AND deleted_at IS NULL");
-            $stmt->execute([$sourceId]);
+        if (project_table_exists($pdo, 'estimate_items') && !empty($estimateMap)) {
+            $estIds = array_keys($estimateMap);
+            $inClause = implode(',', array_fill(0, count($estIds), '?'));
+            $stmt = $pdo->prepare("SELECT * FROM estimate_items WHERE estimate_id IN ($inClause) AND deleted_at IS NULL");
+            $stmt->execute($estIds);
             $estItems = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
             foreach ($estItems as $ei) {
                 unset($ei['id'], $ei['created_at'], $ei['updated_at'], $ei['deleted_at']);
-                $ei['project_id'] = $newId;
+                if (array_key_exists('project_id', $ei)) {
+                    $ei['project_id'] = $newId;
+                }
                 if (isset($ei['estimate_id']) && isset($estimateMap[(int)$ei['estimate_id']])) {
                     $ei['estimate_id'] = $estimateMap[(int)$ei['estimate_id']];
                 }
@@ -345,6 +349,38 @@ function project_deep_clone(PDO $pdo, int $sourceId, int $newId): void
                 $cols = array_keys($mkp);
                 $ins = $pdo->prepare("INSERT INTO estimate_markups (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")");
                 $ins->execute(array_values($mkp));
+            }
+        }
+
+        // 11. Estimate Workspace States (Preserves Summary rates, margins, markups, taxes, notes & groups)
+        if (project_table_exists($pdo, 'estimate_workspace_states') && !empty($estimateMap)) {
+            $estIds = array_keys($estimateMap);
+            $inClause = implode(',', array_fill(0, count($estIds), '?'));
+            $stmt = $pdo->prepare("SELECT * FROM estimate_workspace_states WHERE estimate_id IN ($inClause)");
+            $stmt->execute($estIds);
+            $wsRows = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+            foreach ($wsRows as $ws) {
+                $oldEstId = (int)$ws['estimate_id'];
+                $newEstId = $estimateMap[$oldEstId] ?? null;
+                if (!$newEstId) continue;
+                unset($ws['id'], $ws['created_at'], $ws['updated_at']);
+                $ws['estimate_id'] = $newEstId;
+                $ws['project_id'] = $newId;
+                $newClientId = 'estimate_' . substr(md5($newId . '_' . $newEstId . '_' . uniqid('', true)), 0, 14);
+                $ws['client_estimate_id'] = $newClientId;
+                if (!empty($ws['state_json'])) {
+                    $decoded = json_decode((string)$ws['state_json'], true);
+                    if (is_array($decoded)) {
+                        $decoded['id'] = $newClientId;
+                        $decoded['dbEstimateId'] = $newEstId;
+                        $decoded['estimateItemId'] = $newEstId;
+                        $decoded['projectId'] = $newId;
+                        $ws['state_json'] = json_encode($decoded, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                    }
+                }
+                $cols = array_keys($ws);
+                $ins = $pdo->prepare("INSERT INTO estimate_workspace_states (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")");
+                $ins->execute(array_values($ws));
             }
         }
 
@@ -501,6 +537,7 @@ try {
                 $stmt = $pdo->prepare("INSERT INTO projects (" . implode(', ', $columns) . ") VALUES (" . implode(', ', array_fill(0, count($columns), '?')) . ")");
                 $stmt->execute(array_values($filteredData));
                 $id = (int)$pdo->lastInsertId();
+
             }
 
             $payload = project_payload($pdo, $id);
