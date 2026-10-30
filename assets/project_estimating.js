@@ -1183,6 +1183,23 @@
         return [];
     }
 
+    function resolveAssemblyComponentName(component, catalogItem = null) {
+        const explicitCandidates = [
+            component?.itemName, component?.item_name,
+            component?.child_item_name, component?.childItemName, component?.child_name,
+            component?.catalogItem?.name, component?.catalog_item?.name,
+            component?.catalogSnapshot?.name,
+            catalogItem?.itemName, catalogItem?.item_name, catalogItem?.name
+        ];
+        const explicitName = explicitCandidates.find(value => String(value || '').trim());
+        if (explicitName) return String(explicitName).trim();
+        const genericNames = new Set(['assembly part', 'assembly component', 'cost item', 'item']);
+        const componentName = String(component?.name || '').trim();
+        return componentName && !genericNames.has(componentName.toLowerCase())
+            ? componentName
+            : 'Assembly component';
+    }
+
     async function hydrateAssemblyPartsFromCatalog(item, catalogId) {
         if (typeof fetch !== 'function') return false;
         if (!item) return;
@@ -1201,7 +1218,7 @@
                         return {
                             id: Workspace.uid('item'),
                             catalogItemId: comp.catalogItemId,
-                            name: partDto?.name || comp.name || 'Assembly part',
+                            name: resolveAssemblyComponentName(comp, partDto),
                             description: partDto?.description || comp.description || '',
                             quantity: Number(comp.quantity || 1),
                             uom: partDto?.uom || comp.uom || 'ea',
@@ -1230,10 +1247,11 @@
                 }
                 const matchingParts = assemblyParts.filter(p => String(p.assembly_catalog_item_id) === String(resolvedCatId));
                 if (matchingParts.length > 0) {
+                    const catalogItemsById = new Map(catalogItems.map(catalogItem => [String(catalogItem.id), catalogItem]));
                     item.children = matchingParts.map(p => ({
                         id: Workspace.uid('item'),
                         catalogItemId: p.part_catalog_item_id,
-                        name: p.child_item_name || 'Assembly part',
+                        name: resolveAssemblyComponentName(p, catalogItemsById.get(String(p.part_catalog_item_id))),
                         description: p.child_description || '',
                         quantity: Number(p.quantity || 1),
                         uom: p.child_unit_of_measure || 'ea',
@@ -1719,7 +1737,14 @@
         const body = $('estTableBody');
         if (!head || !body) return;
 
+        const itemLabels = current().groups.flatMap(group => (group.items || []).flatMap(item => [
+            String(item.name || ''),
+            ...getItemChildren(item).map(child => resolveAssemblyComponentName(child))
+        ]));
+        const longestItemLabel = itemLabels.reduce((max, label) => Math.max(max, label.length), 0);
         const widths = getColumnWidths();
+        widths.cost_item = Math.max(Number(widths.cost_item || 340),
+            Math.min(1200, Math.ceil(longestItemLabel * 8.5 + 100)));
         const activeColumns = getOrderedActiveColumns();
         const costItemWidth = widths.cost_item || 340;
         const table = $('estMainTable');
@@ -1880,6 +1905,9 @@
 
     function renderItemRow(item, calc, activeColumns, totalSummaryCost, options = {}) {
         const component = options.component === true;
+        const rowDisplayName = component
+            ? resolveAssemblyComponentName(options.sourceChild, item)
+            : String(item.name || 'Unnamed item');
         const assembly = isAssemblyItem(item);
         const invalid = (calc.validation || []).length > 0;
         const rowId = component ? `${options.parent.id}:component:${options.sourceChild?.id || options.index}` : item.id;
@@ -1906,7 +1934,7 @@
                 <td class="col-cost-item">
                     <div class="est-item-cell-singleline is-component">
                         <span class="est-assembly-branch-line" aria-hidden="true">&#8627;</span>
-                        <input class="pro-tree-item-title est-item-title est-item-name-input" data-item-field="name" value="${esc(item.name)}" title="${esc(item.name)}" aria-label="Item name">
+                        <input class="pro-tree-item-title est-item-title est-item-name-input" data-item-field="name" value="${esc(rowDisplayName)}" title="${esc(rowDisplayName)}" size="${Math.max(16, rowDisplayName.length + 1)}" aria-label="Item name">
                     </div>
                 </td>
                 <td hidden aria-hidden="true"></td><td hidden aria-hidden="true"></td><td hidden aria-hidden="true"></td>
@@ -1943,7 +1971,7 @@
                         ${shapeSvg}
                     </div>
                     <div class="est-item-text-col ${itemTag ? 'has-tag' : 'no-tag'}">
-                        <input class="pro-tree-item-title est-item-title est-item-name-input" data-item-field="name" value="${esc(item.name)}" title="${esc(item.name)}" aria-label="Item name">
+                        <input class="pro-tree-item-title est-item-title est-item-name-input" data-item-field="name" value="${esc(rowDisplayName)}" title="${esc(rowDisplayName)}" size="${Math.max(16, rowDisplayName.length + 1)}" aria-label="Item name">
                         ${tagHtml}
                     </div>
                 </div>
@@ -3361,6 +3389,7 @@ function renderFooter() {
     });
 
     root.addEventListener('change', event => {
+        const isLiveTypingCommit = event.estimatingLiveInput === true;
         const compChildId = event.target.dataset.componentChildId;
         const parentAssemblyId = event.target.dataset.parentAssemblyId;
         const compField = event.target.dataset.itemField;
@@ -3428,7 +3457,7 @@ function renderFooter() {
                 event.target.classList.add('is-val-overridden');
                 const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
                 if (unitEl) unitEl.style.color = '#ea580c';
-                if (!isNaN(parsedVal)) event.target.value = parsedVal.toFixed(2);
+                if (!isLiveTypingCommit && !isNaN(parsedVal)) event.target.value = parsedVal.toFixed(2);
             } else {
                 const parsedVal = event.target.type === 'number' ? Number(event.target.value) : event.target.value;
                 if (field === 'quantity') {
@@ -3469,7 +3498,7 @@ function renderFooter() {
                     }
                 }
                 found.item[field] = parsedVal;
-                if (event.target.type === 'number' && !isNaN(parsedVal)) event.target.value = parsedVal.toFixed(2);
+                if (!isLiveTypingCommit && event.target.type === 'number' && !isNaN(parsedVal)) event.target.value = parsedVal.toFixed(2);
                 if (field === 'quantity' && isAssemblyItem(found.item)) {
                     const newParentQty = Workspace.numeric(parsedVal);
                     const children = getItemChildren(found.item);
@@ -3612,7 +3641,9 @@ function renderFooter() {
     // persistence contract used by the existing Estimating runtime.
     root.addEventListener('input', event => {
         if (!event.target.matches('[data-item-field]')) return;
-        event.target.dispatchEvent(new Event('change', { bubbles: true }));
+        const liveCommit = new Event('change', { bubbles: true });
+        liveCommit.estimatingLiveInput = true;
+        event.target.dispatchEvent(liveCommit);
     });
 
     root.addEventListener('focusout', event => {
