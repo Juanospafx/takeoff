@@ -436,7 +436,7 @@ $readOnly = !$canWrite;
     </div>
 
     <script src="../assets/global_tools.js?v=<?= time() ?>"></script>
-    <script src="../assets/bid_board.js?v=brightronix-boundary-v5"></script>
+    <script src="../assets/bid_board.js?v=<?= filemtime(__DIR__ . '/../assets/bid_board.js') ?>"></script>
 </body>
 
 </html>

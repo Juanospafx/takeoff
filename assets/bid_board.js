@@ -773,7 +773,6 @@
                 <td class="bb-name-cell">
                     <div style="display:inline-flex; align-items:center; gap:8px; flex-wrap:wrap; max-width: 100%;">
                         <a class="bb-record-name" href="project_dashboard.php?id=${encodeURIComponent(project.id)}&tab=overview&stage=${encodeURIComponent(activeStatus)}">${esc(project.recordName)}</a>
-                        ${project.primaryQuoteValue > 0 ? `<span class="bb-primary-badge" title="Primary Quote: ${money(project.primaryQuoteValue)}">${money(project.primaryQuoteValue)}</span>` : ''}
                     </div>
                     ${project.category && project.category !== '--' ? `<div class="bb-subtext">${esc(project.category)}</div>` : ''}
                 </td>
@@ -1240,7 +1239,29 @@
             }
         }
         const apiAction = action === 'duplicate' ? 'copy' : action;
-        postProjectAction(apiAction, { id: Number(projectId) }).catch(err => showError(err.message));
+        postProjectAction(apiAction, { id: Number(projectId) })
+            .then(res => {
+                if (action === 'duplicate' && res?.id) {
+                    try {
+                        const srcRaw = localStorage.getItem(`takeoff.estimating.module.${projectId}`);
+                        if (srcRaw) {
+                            const parsed = JSON.parse(srcRaw);
+                            if (parsed && typeof parsed === 'object') {
+                                parsed.projectId = Number(res.id);
+                                if (Array.isArray(parsed.estimates)) {
+                                    parsed.estimates.forEach(est => {
+                                        est.projectId = Number(res.id);
+                                        delete est.dbEstimateId;
+                                        delete est.estimateItemId;
+                                    });
+                                }
+                                localStorage.setItem(`takeoff.estimating.module.${res.id}`, JSON.stringify(parsed));
+                            }
+                        }
+                    } catch (_) {}
+                }
+            })
+            .catch(err => showError(err.message));
     }
 
     function renderSortIcon() {

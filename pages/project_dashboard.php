@@ -49,26 +49,30 @@ $isDraftProject = $projectId <= 0 && isset($_GET['draft']);
 $activeTab = $_GET['tab'] ?? 'overview';
 $selectedDocumentId = (int) ($_GET['file_id'] ?? $_GET['document_id'] ?? 0);
 
-function dash_table_exists(PDO $pdo, string $table): bool
-{
-    try {
-        $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?");
-        $stmt->execute([$table]);
-        return (int) $stmt->fetchColumn() > 0;
-    } catch (Throwable $e) {
-        return false;
+if (!function_exists('dash_table_exists')) {
+    function dash_table_exists(PDO $pdo, string $table): bool
+    {
+        try {
+            $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?");
+            $stmt->execute([$table]);
+            return (int) $stmt->fetchColumn() > 0;
+        } catch (Throwable $e) {
+            return false;
+        }
     }
 }
 
-function dash_column_exists(PDO $pdo, string $table, string $column): bool
-{
-    try {
+if (!function_exists('dash_column_exists')) {
+    function dash_column_exists(PDO $pdo, string $table, string $column): bool
+    {
+        try {
         $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");
         $stmt->execute([$column]);
         return (bool) $stmt->fetch(PDO::FETCH_ASSOC);
     } catch (Throwable $e) {
         return false;
     }
+}
 }
 
 function dash_public_path(?string $path): string
@@ -291,7 +295,20 @@ if ($projectId > 0 && dash_table_exists($pdo, 'takeoff_layers')) {
         ORDER BY tl.sort_order ASC, tl.id DESC
     ");
     $stmt->execute([$projectId]);
-    $takeoffLayers = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $takeoffLayers = array_map(function ($tl) {
+        if (!empty($tl['metadata_json'])) {
+            $meta = is_array($tl['metadata_json']) ? $tl['metadata_json'] : json_decode($tl['metadata_json'], true);
+            if (is_array($meta)) {
+                if (isset($meta['difficulty']) && !isset($tl['difficulty'])) {
+                    $tl['difficulty'] = (float)$meta['difficulty'];
+                }
+                if (isset($meta['multiplier']) && !isset($tl['multiplier'])) {
+                    $tl['multiplier'] = (float)$meta['multiplier'];
+                }
+            }
+        }
+        return $tl;
+    }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 }
 
 $takeoffLocations = [];
@@ -390,7 +407,33 @@ if ($projectId > 0 && dash_table_exists($pdo, 'estimate_items') && dash_table_ex
         ORDER BY ei.sort_order ASC, ei.id DESC
     ");
     $stmt->execute([$projectId]);
-    $estimateItems = $stmt->fetchAll(PDO::FETCH_ASSOC);
+    $estimateItems = array_map(function ($ei) {
+        if (!empty($ei['metadata_json'])) {
+            $meta = is_array($ei['metadata_json']) ? $ei['metadata_json'] : json_decode($ei['metadata_json'], true);
+            if (is_array($meta)) {
+                $ws = isset($meta['workspace']) && is_array($meta['workspace']) ? $meta['workspace'] : $meta;
+                if (isset($ws['difficulty']) && !isset($ei['difficulty'])) {
+                    $ei['difficulty'] = (float)$ws['difficulty'];
+                }
+                if (isset($ws['laborWaste']) && !isset($ei['laborWaste'])) {
+                    $ei['laborWaste'] = (float)$ws['laborWaste'];
+                }
+                if (isset($ws['laborMargin']) && !isset($ei['laborMargin'])) {
+                    $ei['laborMargin'] = (float)$ws['laborMargin'];
+                }
+                if (isset($ws['factorOverride']) && !isset($ei['factorOverride'])) {
+                    $ei['factorOverride'] = (float)$ws['factorOverride'];
+                }
+                if (isset($ws['ratio']) && !isset($ei['ratio'])) {
+                    $ei['ratio'] = (float)$ws['ratio'];
+                }
+                if (isset($ws['children']) && !isset($ei['children'])) {
+                    $ei['children'] = $ws['children'];
+                }
+            }
+        }
+        return $ei;
+    }, $stmt->fetchAll(PDO::FETCH_ASSOC));
 }
 
 $proposals = [];
@@ -884,7 +927,7 @@ $state = [
     </style>
     <link rel="stylesheet" href="../assets/project_overview.css?v=<?= filemtime(__DIR__ . '/../assets/project_overview.css') ?>">
     <link rel="stylesheet" href="../assets/project_takeoff.css?v=<?= filemtime(__DIR__ . '/../assets/project_takeoff.css') ?>">
-    <link rel="stylesheet" href="../assets/project_estimating.css?v=unified-hierarchy-20260930-1">
+    <link rel="stylesheet" href="../assets/project_estimating.css?v=<?= filemtime(__DIR__ . '/../assets/project_estimating.css') ?>">
     <link rel="stylesheet" href="../assets/project_proposal.css?v=unified-hierarchy-20260930-1">
     <link rel="stylesheet" href="../assets/won_project_export.css?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.css') ?>">
 </head>
@@ -987,7 +1030,7 @@ $state = [
                                     </div>
                                     <div class="pd-presence-user-info">
                                         <span class="pd-presence-user-name"><?= htmlspecialchars($selfName) ?> (You)</span>
-                                        <span class="pd-presence-user-role"><?= htmlspecialchars($selfRole) ?> • Active now</span>
+                                        <span class="pd-presence-user-role"><?= htmlspecialchars($selfRole) ?> &bull; Active now</span>
                                     </div>
                                 </div>
                             </div>
@@ -1041,7 +1084,7 @@ $state = [
                                         <span class="pro-drawing-active-label">Item Activo:</span>
                                         <span class="pro-drawing-active-pill" id="takeoffDrawingActivePill">
                                             <span class="pro-drawing-active-dot" id="takeoffDrawingActiveDot"></span>
-                                            <span id="takeoffDrawingActiveText">Ningún item seleccionado</span>
+                                            <span id="takeoffDrawingActiveText">Ning&uacute;n item seleccionado</span>
                                         </span>
                                     </div>
                                     <div class="pro-drawing-filters">
@@ -1138,7 +1181,7 @@ $state = [
                                         style="cursor: pointer; user-select: none; font-size: 0.72rem; color: var(--tk-text-muted, #64748b); margin: 0; font-weight: 500; display: flex; align-items: center; gap: 7px;">
                                         <input type="checkbox" id="takeoffScaleApplyAll"
                                             style="cursor: pointer; width: 14px; height: 14px; accent-color: var(--tk-primary, #fb5a3a);">
-                                        <span>Aplicar a todas las páginas</span>
+                                        <span>Aplicar a todas las p&aacute;ginas</span>
                                     </label>
                                     <button type="button" id="takeoffScaleApplyBtn" class="pro-toolbar-btn"
                                         style="height: 25px; min-height: 25px; padding: 0 12px; font-size: 0.74rem; border-radius: 4px; background: var(--tk-primary, #fb5a3a); color: #fff; border: none; cursor: pointer; font-weight: 600;">Aplicar</button>
@@ -1373,7 +1416,7 @@ $state = [
                                 <?php else: ?>
                                     <div class="pd-list-month-header">September</div>
                                     <?php foreach ($projectNotes as $idx => $note):
-                                        $author = $note['user'] ?? 'Isaac De Jesús';
+                                        $author = $note['user'] ?? 'Isaac De Jesus';
                                         $initial = strtoupper(substr($author, 0, 1)) ?: 'I';
                                         ?>
                                         <div class="pd-note-item" data-note-index="<?= $idx ?>">
@@ -1440,7 +1483,7 @@ $state = [
                                                 <div class="pd-task-title"><?= htmlspecialchars($task['title'] ?? '') ?></div>
                                                 <div class="pd-task-meta-row">
                                                     <div class="pd-task-assignee">For
-                                                        <?= htmlspecialchars($task['responsible'] ?? 'Isaac De Jesús') ?>
+                                                        <?= htmlspecialchars($task['responsible'] ?? 'Isaac De Jesus') ?>
                                                     </div>
                                                     <?php if (!empty($task['due_date'])): ?>
                                                         <div class="pd-task-due-badge">Due <?= htmlspecialchars($task['due_date']) ?></div>
@@ -1559,7 +1602,7 @@ $state = [
                             </div>
                         </div>
 
-                        <!-- Toolbar: Custom ▾, Upload, Search, ⋮ -->
+                        <!-- Toolbar: Custom dropdown, Upload, Search, More -->
                         <div class="documents-toolbar">
                             <div class="doc-toolbar-left">
                                 <div class="doc-sort-dropdown-wrap">
@@ -1758,224 +1801,69 @@ $state = [
             <section id="tab-estimating" class="tab-panel fullscreen estimating-page">
                 <div id="estimatingModule" class="est-shell est-v2" data-project-id="<?= (int) $projectId ?>">
                     <div class="est-main">
+                        <!-- Table Settings Drawer (Aside sliding from left displacing table to right) -->
+                        <aside class="est-table-settings-drawer" id="estTableSettingsDrawer" aria-label="Table Settings" hidden></aside>
+
                         <section class="est-left" aria-label="Estimate cost items">
                             <div class="est-toolbar">
-                                <label class="est-search" for="estSearch">
-                                    <i class="fas fa-search"></i>
-                                    <input id="estSearch" type="search" placeholder="Search cost item">
-                                </label>
-                                <button class="est-btn est-btn-primary" type="button" data-est-action="create-group"
-                                    title="Create group"><i class="fas fa-folder-plus"></i><span>Create
-                                        group</span></button>
-                                <button class="est-btn est-catalog-update-trigger" type="button"
-                                    data-est-action="catalog-update"
-                                    title="Check this estimate against the Cost Catalog"><i class="fas fa-arrows-rotate"
-                                        aria-hidden="true"></i><span>Update from Cost Catalog</span></button>
-                                <div class="est-menu-wrap">
-                                    <button class="est-icon-btn" type="button" data-est-action="columns"
-                                        title="Adjust columns"><i class="fas fa-sliders"></i></button>
-                                    <div class="est-menu" id="columnMenu"></div>
+                                <div class="bb-search-field-procore cc-search-procore est-search-box">
+                                    <input id="estSearch" type="search" placeholder="Search estimate items..." autocomplete="off">
                                 </div>
-                                <button class="est-icon-btn" type="button" data-est-action="fullscreen"
-                                    title="Full screen"><i class="fas fa-expand"></i></button>
-                                <div class="est-menu-wrap">
-                                    <button class="est-icon-btn" type="button" data-est-action="options"
-                                        title="Options"><i class="fas fa-ellipsis-vertical"></i></button>
-                                    <div class="est-menu" id="optionsMenu">
-                                        <button type="button" data-est-option="save"><i class="fas fa-floppy-disk"></i>
-                                            Save estimate</button>
-                                        <button type="button" data-est-option="copy"><i class="fas fa-copy"></i> Copy
-                                            estimate</button>
-                                        <button type="button" data-est-option="status"><i
-                                                class="fas fa-circle-check"></i> Change project status</button>
-                                        <button type="button" data-est-option="import"><i
-                                                class="fas fa-file-import"></i> Import</button>
-                                        <button type="button" data-est-option="export"><i
-                                                class="fas fa-file-export"></i> Export</button>
-                                        <button type="button" data-est-option="export-bom"><i
-                                                class="fas fa-file-excel"></i> Export BOM (Excel)</button>
-                                        <button type="button" data-est-option="delete-estimate" class="danger"><i
-                                                class="fas fa-trash"></i> Delete estimate</button>
+                                <div class="est-toolbar-actions" style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+                                    <button class="est-icon-btn" id="estBtnCreateGroup" type="button" data-est-action="create-group"
+                                        title="Create Group"><i class="fas fa-folder-plus"></i></button>
+                                    <button class="est-icon-btn" id="estBtnTableSettings" type="button" data-est-action="table-settings"
+                                        title="Table Settings"><i class="fas fa-sliders"></i></button>
+                                    <button class="est-icon-btn" id="estBtnFullscreen" type="button" data-est-action="fullscreen"
+                                        title="Full screen"><i class="fas fa-expand"></i></button>
+                                    <div class="est-menu-wrap">
+                                        <button class="est-icon-btn" id="estBtnMoreOptions" type="button" data-est-action="options"
+                                            title="Options"><i class="fas fa-ellipsis-vertical"></i></button>
+                                        <div class="est-menu" id="optionsMenu">
+                                            <button type="button" data-est-action="catalog-update"><i class="fas fa-arrows-rotate"></i> Update from Cost Catalog</button>
+                                            <button type="button" data-est-action="reset-quantities"><i class="fas fa-rotate-left"></i> Reset Quantities</button>
+                                            <button type="button" data-est-action="delete-selected" id="estBtnDeleteSelected" disabled><i class="fas fa-trash"></i> Delete Selected</button>
+                                            <div class="est-menu-divider" style="height: 1px; background: var(--border, #e2e8f0); margin: 4px 0;"></div>
+                                            <button type="button" data-est-option="save"><i class="fas fa-floppy-disk"></i>
+                                                Save estimate</button>
+                                            <button type="button" data-est-option="copy"><i class="fas fa-copy"></i> Copy
+                                                estimate</button>
+                                            <button type="button" data-est-option="status"><i
+                                                    class="fas fa-circle-check"></i> Change project status</button>
+                                            <button type="button" data-est-option="import"><i
+                                                    class="fas fa-file-import"></i> Import</button>
+                                            <button type="button" data-est-option="export"><i
+                                                    class="fas fa-file-export"></i> Export</button>
+                                            <button type="button" data-est-option="export-bom"><i
+                                                    class="fas fa-file-excel"></i> Export BOM (Excel)</button>
+                                            <button type="button" data-est-option="delete-estimate" class="danger"><i
+                                                    class="fas fa-trash"></i> Delete estimate</button>
+                                        </div>
                                     </div>
+                                    <button class="est-icon-btn est-toggle-right-btn" id="estToolbarToggleRight" type="button" data-est-action="toggle-right"
+                                        title="Hide summary panel"><i class="fas fa-chevron-right"></i></button>
                                 </div>
-                                <button class="est-btn" type="button" data-est-action="reset-quantities"
-                                    title="Reset quantities"><i class="fas fa-rotate-left"></i><span>Reset
-                                        Quantities</span></button>
-                                <button class="est-btn est-btn-danger" type="button" data-est-action="delete-selected"
-                                    disabled><i class="fas fa-trash"></i><span>Delete</span></button>
                             </div>
-                            <div class="est-table-wrap">
-                                <table class="est-table" aria-label="Estimate items table">
+                            <div class="est-table-wrap bb-table-scroll">
+                                <table class="est-table bb-table" id="estMainTable" aria-label="Estimate items table">
                                     <thead id="estTableHead"></thead>
                                     <tbody id="estTableBody"></tbody>
                                 </table>
                             </div>
-                            <button class="est-create-bottom" type="button" data-est-action="create-group"><i
-                                    class="fas fa-folder-plus"></i> Create new group</button>
                         </section>
+                        <div class="pro-sidebar-resizer est-sidebar-resizer" id="estSplitResizer" role="separator" aria-orientation="vertical" title="Drag to resize panels">
+                            <div class="pro-resizer-handle"></div>
+                        </div>
                         <aside class="est-right" aria-label="Estimate notes and summary">
-                            <div class="est-right-scroll">
-                                <section class="est-card" id="notesCard">
-                                    <button class="est-card-header" type="button"
-                                        data-collapse-card="notesCollapsed"><span><i class="fas fa-chevron-down"></i>
-                                            Notes</span></button>
-                                    <div class="est-card-body">
-                                        <div class="est-field-block">
-                                            <div class="est-label">Scope of Work</div>
-                                            <div class="est-editor-toolbar" data-toolbar="scope"><button type="button"
-                                                    data-editor-cmd="undo" title="Undo"><i
-                                                        class="fas fa-rotate-left"></i></button><button type="button"
-                                                    data-editor-cmd="redo" title="Redo"><i
-                                                        class="fas fa-rotate-right"></i></button><select
-                                                    data-editor-format="formatBlock" aria-label="Text style">
-                                                    <option value="P">Paragraph</option>
-                                                    <option value="H3">Heading</option>
-                                                </select><button type="button" data-editor-cmd="bold" title="Bold"><i
-                                                        class="fas fa-bold"></i></button><button type="button"
-                                                    data-editor-cmd="italic" title="Italic"><i
-                                                        class="fas fa-italic"></i></button><button type="button"
-                                                    data-editor-cmd="insertHorizontalRule" title="Line"><i
-                                                        class="fas fa-minus"></i></button><button type="button"
-                                                    data-editor-cmd="backColor" data-editor-value="#dbeafe"
-                                                    title="Highlight"><i class="fas fa-fill-drip"></i></button><button
-                                                    type="button" data-editor-cmd="justifyLeft" title="Align left"><i
-                                                        class="fas fa-align-left"></i></button><button type="button"
-                                                    data-editor-cmd="justifyCenter" title="Align center"><i
-                                                        class="fas fa-align-center"></i></button><button type="button"
-                                                    data-editor-cmd="justifyRight" title="Align right"><i
-                                                        class="fas fa-align-right"></i></button><button type="button"
-                                                    data-editor-cmd="justifyFull" title="Justify"><i
-                                                        class="fas fa-align-justify"></i></button><button type="button"
-                                                    data-editor-cmd="insertUnorderedList" title="Bullets"><i
-                                                        class="fas fa-list-ul"></i></button><button type="button"
-                                                    data-editor-cmd="insertOrderedList" title="Numbers"><i
-                                                        class="fas fa-list-ol"></i></button><button type="button"
-                                                    data-editor-cmd="outdent" title="Outdent"><i
-                                                        class="fas fa-outdent"></i></button><button type="button"
-                                                    data-editor-cmd="indent" title="Indent"><i
-                                                        class="fas fa-indent"></i></button><button type="button"
-                                                    data-editor-cmd="removeFormat" title="Clear"><i
-                                                        class="fas fa-eraser"></i></button></div>
-                                            <div id="scopeEditor" class="est-rich-editor" contenteditable="true"
-                                                data-editor="scope"></div>
-                                        </div>
-                                        <div class="est-field-block">
-                                            <div class="est-list-head">
-                                                <div class="est-label">Included</div>
-                                                <div><button class="est-small-btn" type="button"
-                                                        data-est-action="browse-library">Browse library</button><button
-                                                        class="est-small-btn" type="button"
-                                                        data-est-action="add-included"><i
-                                                            class="fas fa-plus"></i></button></div>
-                                            </div>
-                                            <div id="includedList" class="est-free-list"></div>
-                                        </div>
-                                        <div class="est-field-block">
-                                            <div class="est-list-head">
-                                                <div class="est-label">Excluded</div>
-                                                <div><button class="est-small-btn" type="button"
-                                                        data-est-action="browse-library">Browse library</button><button
-                                                        class="est-small-btn" type="button"
-                                                        data-est-action="add-excluded"><i
-                                                            class="fas fa-plus"></i></button></div>
-                                            </div>
-                                            <div id="excludedList" class="est-free-list"></div>
-                                        </div>
-                                        <div class="est-field-block">
-                                            <div class="est-label">Project Notes</div>
-                                            <div class="est-editor-toolbar" data-toolbar="projectNotes"><button
-                                                    type="button" data-editor-cmd="undo" title="Undo"><i
-                                                        class="fas fa-rotate-left"></i></button><button type="button"
-                                                    data-editor-cmd="redo" title="Redo"><i
-                                                        class="fas fa-rotate-right"></i></button><select
-                                                    data-editor-format="formatBlock" aria-label="Text style">
-                                                    <option value="P">Paragraph</option>
-                                                    <option value="H3">Heading</option>
-                                                </select><button type="button" data-editor-cmd="bold" title="Bold"><i
-                                                        class="fas fa-bold"></i></button><button type="button"
-                                                    data-editor-cmd="italic" title="Italic"><i
-                                                        class="fas fa-italic"></i></button><button type="button"
-                                                    data-editor-cmd="insertHorizontalRule" title="Line"><i
-                                                        class="fas fa-minus"></i></button><button type="button"
-                                                    data-editor-cmd="backColor" data-editor-value="#dbeafe"
-                                                    title="Highlight"><i class="fas fa-fill-drip"></i></button><button
-                                                    type="button" data-editor-cmd="justifyLeft" title="Align left"><i
-                                                        class="fas fa-align-left"></i></button><button type="button"
-                                                    data-editor-cmd="justifyCenter" title="Align center"><i
-                                                        class="fas fa-align-center"></i></button><button type="button"
-                                                    data-editor-cmd="justifyRight" title="Align right"><i
-                                                        class="fas fa-align-right"></i></button><button type="button"
-                                                    data-editor-cmd="justifyFull" title="Justify"><i
-                                                        class="fas fa-align-justify"></i></button><button type="button"
-                                                    data-editor-cmd="insertUnorderedList" title="Bullets"><i
-                                                        class="fas fa-list-ul"></i></button><button type="button"
-                                                    data-editor-cmd="insertOrderedList" title="Numbers"><i
-                                                        class="fas fa-list-ol"></i></button><button type="button"
-                                                    data-editor-cmd="outdent" title="Outdent"><i
-                                                        class="fas fa-outdent"></i></button><button type="button"
-                                                    data-editor-cmd="indent" title="Indent"><i
-                                                        class="fas fa-indent"></i></button><button type="button"
-                                                    data-editor-cmd="removeFormat" title="Clear"><i
-                                                        class="fas fa-eraser"></i></button></div>
-                                            <div id="projectNotesEditor" class="est-rich-editor" contenteditable="true"
-                                                data-editor="projectNotes"></div>
-                                        </div>
-                                    </div>
-                                </section>
-                                <section class="est-card" id="summaryCard"><button class="est-card-header" type="button"
-                                        data-collapse-card="summaryCollapsed"><span><i class="fas fa-chevron-down"></i>
-                                            Summary</span></button>
-                                    <div class="est-card-body">
-                                        <div class="est-rate-grid"><label>Global labor cost <input id="globalLaborCost"
-                                                    type="number" min="0" step="0.01"></label><label>Global labor sales
-                                                rate <input id="globalLaborSales" type="number" min="0"
-                                                    step="0.01"></label><button class="est-small-btn" type="button"
-                                                data-labor-unit>mins</button></div>
-                                        <div class="est-summary-table-wrap">
-                                            <table class="est-summary-table">
-                                                <thead>
-                                                    <tr>
-                                                        <th>Catalog Item Type</th>
-                                                        <th>Total Labor</th>
-                                                        <th>Difficulty</th>
-                                                        <th>Waste</th>
-                                                        <th>Total Cost</th>
-                                                        <th>Margin</th>
-                                                        <th>Total Sales</th>
-                                                        <th>Profit</th>
-                                                    </tr>
-                                                </thead>
-                                                <tbody id="summaryTypes"></tbody>
-                                            </table>
-                                        </div>
-                                        <div class="est-summary-section">
-                                            <div class="est-summary-title"><span>Pre-Tax Markups</span><button
-                                                    type="button" data-est-action="add-pre-markup"><i
-                                                        class="fas fa-plus"></i></button></div>
-                                            <div id="preMarkupRows" class="est-markup-list"></div>
-                                        </div>
-                                        <div class="est-summary-section">
-                                            <div class="est-summary-title"><span>Taxes</span><button type="button"
-                                                    data-est-option="taxes"><i class="fas fa-pen"></i></button></div>
-                                            <div id="taxRows" class="est-markup-list"></div>
-                                        </div>
-                                        <div class="est-summary-section">
-                                            <div class="est-summary-title"><span>Post-Tax Markups</span><button
-                                                    type="button" data-est-action="add-post-markup"><i
-                                                        class="fas fa-plus"></i></button></div>
-                                            <div id="postMarkupRows" class="est-markup-list"></div>
-                                        </div>
-                                    </div>
-                                </section>
-                            </div>
+                            <div class="est-right-scroll" id="estRightScroll"></div>
                             <div class="est-total-box">
-                                <div class="est-total-label">Estimate Total</div>
                                 <div id="estimateTotal" class="est-total-value">$0.00</div>
+                                <div class="est-total-label">Estimate Total</div>
                                 <div id="estimateSqft" class="est-total-sub">--/sq ft</div>
                             </div>
                         </aside>
                     </div>
-                    <div class="est-version-bar" id="versionBar"></div>
+                    <footer class="est-version-bar" id="versionBar" aria-label="Available estimates"></footer>
                 </div>
             </section>
             <section id="tab-proposal" class="tab-panel proposal-page">
@@ -2019,9 +1907,6 @@ $state = [
                     </footer>
                 </div>
         </main>
-        <footer class="bb-brightronix-footer" <?= $activeTab === 'takeoff' ? 'style="display:none;"' : '' ?>>
-            <span>All Rights Reserved by Brightronix &copy; 2026</span>
-        </footer>
     </div>
 
     <input type="file" id="projectUploadInput" class="d-none">
@@ -2597,8 +2482,8 @@ $state = [
     <script src="../assets/project_overview.js?v=<?= filemtime(__DIR__ . '/../assets/project_overview.js') ?>"></script>
     <script src="../assets/estimating_catalog_snapshot_service.js?v=estimating-catalog-snapshot-20260827-1"></script>
     <script src="../assets/catalog_change_detection_service.js?v=catalog-change-detection-20260827-1"></script>
-    <script src="../assets/takeoff_estimating_sync_service.js?v=estimating-linked-part-20260831-1"></script>
-    <script src="../assets/project_estimate_footer.js?v=estimate-star-orange-20260929-6"></script>
+    <script src="../assets/takeoff_estimating_sync_service.js?v=estimating-qty-override-20261028-1"></script>
+    <script src="../assets/project_estimate_footer.js?v=<?= filemtime(__DIR__ . '/../assets/project_estimate_footer.js') ?>"></script>
     <script src="../assets/catalog_item_contract.js?v=catalog-item-contract-20260826-1"></script>
     <script src="../assets/catalog_metadata.js?v=catalog-metadata-20260826-1"></script>
     <script src="../assets/catalog_service.js?v=catalog-service-20260826-1"></script>
@@ -2612,11 +2497,11 @@ $state = [
     <script src="../assets/estimate_calculation_service.js?v=estimating-normal-item-quantity-20260831-1"></script>
     <script src="../assets/catalog_update_preview_service.js?v=catalog-update-preview-20260827-1"></script>
     <script src="../assets/estimating_export_service.js?v=estimating-boq-export-20260820-1"></script>
-    <script src="../assets/estimating_workspace_service.js?v=workspace-primary-20260929-1"></script>
+    <script src="../assets/estimating_workspace_service.js?v=workspace-primary-20261028-3"></script>
     <script src="../assets/catalog_update_application_service.js?v=catalog-update-application-20260827-2"></script>
     <script src="../assets/estimating_catalog_adapter.js?v=estimating-catalog-snapshot-20260827-1"></script>
-    <script src="../assets/project_estimating.js?v=estimating-all-modals-20260929-5"></script>
-    <script src="../assets/catalog_update_ui.js?v=catalog-update-ui-20260827-1"></script>
+    <script src="../assets/project_estimating.js?v=<?= filemtime(__DIR__ . '/../assets/project_estimating.js') ?>"></script>
+    <script src="../assets/catalog_update_ui.js?v=<?= filemtime(__DIR__ . '/../assets/catalog_update_ui.js') ?>"></script>
     <script src="../assets/project_proposal.js?v=quantity-context-format-20260831-1"></script>
     <script src="../assets/won_project_export.js?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.js') ?>"></script>
     <script src="../assets/global_tools.js"></script>

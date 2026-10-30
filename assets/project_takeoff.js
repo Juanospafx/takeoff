@@ -1352,6 +1352,8 @@
                 itemType: layer.item_type || layer.itemType || '',
                 catalogMetadata: window.CatalogMetadata.clone(metadata.catalog_item || null),
                 metadata_json: window.CatalogMetadata.clone(metadata),
+                difficulty: Number(layer.difficulty ?? metadata.difficulty ?? 1),
+                multiplier: Number(layer.multiplier ?? metadata.multiplier ?? 1),
                 dropLength: Number(layer.dropLength || layer.drop_length || 0),
                 spacing: Number(layer.spacing || 0),
                 height: Number(layer.height || 0),
@@ -1394,6 +1396,8 @@
                 locked: Number(layer.locked || 0) === 1,
                 quantity: Number(layer.quantity || 0),
                 baseQuantity: Number(layer.baseQuantity ?? layer.seedQuantity ?? 0),
+                quantityOverride: Boolean(layer.quantityOverride),
+                estimatingQuantity: layer.estimatingQuantity !== undefined ? Number(layer.estimatingQuantity) : undefined,
                 catalogItemId: layer.catalogItemId || layer.catalog_item_id || null,
                 catalog_item_id: layer.catalog_item_id || layer.catalogItemId || null,
                 unitCost: Number(layer.unitCost || layer.unit_cost || 0),
@@ -1404,6 +1408,9 @@
                 description: layer.description || '',
                 catalogNumber: layer.catalogNumber || layer.catalog_number || layer.costCode || layer.cost_code || '',
                 itemType: layer.itemType || layer.item_type || '',
+                difficulty: Number(layer.difficulty ?? layer.metadata_json?.difficulty ?? 1),
+                multiplier: Number(layer.multiplier ?? layer.metadata_json?.multiplier ?? 1),
+                metadata_json: layer.metadata_json ? (typeof layer.metadata_json === 'object' ? { ...layer.metadata_json } : {}) : {},
                 dropLength: Number(layer.dropLength || layer.drop_length || 0),
                 spacing: Number(layer.spacing || 0),
                 height: Number(layer.height || 0),
@@ -1647,9 +1654,13 @@
     function scopeLegacyTakeoffGroupsOnce() {
         const primaryId = primaryEstimateId();
         takeoffState.groups.forEach(group => {
-            if (!group.estimateId) group.estimateId = primaryId;
+            if (!group.estimateId || (group.estimateId === 'est_primary' && primaryId !== 'est_primary')) {
+                group.estimateId = primaryId;
+            }
             (group.layers || []).forEach(layer => {
-                if (!layer.estimateId) layer.estimateId = group.estimateId || primaryId;
+                if (!layer.estimateId || (layer.estimateId === 'est_primary' && primaryId !== 'est_primary')) {
+                    layer.estimateId = group.estimateId || primaryId;
+                }
             });
         });
     }
@@ -1659,7 +1670,8 @@
     }
 
     function syncEstimatingItemsToTakeoff(detail = {}) {
-        if (detail.projectId && String(detail.projectId) !== String(window.ProjectState?.projectId || '')) return;
+        if (detail.projectId && window.ProjectState?.projectId && String(detail.projectId) !== String(window.ProjectState.projectId)) return;
+        scopeLegacyTakeoffGroupsOnce();
         const estimateId = String(detail.activeEstimateId || '');
         if (!estimateId || estimateId !== activeEstimateId() || !Array.isArray(detail.groups)) return;
         ensureEstimateTakeoffWorkspace(estimateId);
@@ -1710,13 +1722,22 @@
                 };
                 let layer = allLayers().find(row => (String(row.estimateId || '') === estimateId || !row.estimateId)
                     && layerMatchesEstimatingItem(row));
+                const isItemOverridden = Boolean(item.quantityOverride || String(item.quantitySyncStatus || '') === 'overridden');
+                const isItemAddedFromEst = Boolean(item.addedFromEstimating || item.origin === 'estimating');
                 if (!layer) {
+                    const initialTakeoffQty = isItemOverridden
+                        ? Number(item.lastSyncedTakeoffQuantity ?? item.originalQuantity ?? 0)
+                        : Number(item.quantity || 0);
                     layer = {
                         id: layerId, groupId: group.id, estimateId, estimatingItemId: itemId,
                         name: item.name || 'Cost item', type: inferTakeoffTypeFromUom(item.uom) || 'Count',
                         uom: item.uom || 'ea', symbol: 'Solid Circle', size: 'Medium', color: '#2563eb',
-                        visible: true, locked: false, quantity: Number(item.quantity || 0),
-                        baseQuantity: Number(item.quantity || 0), catalogItemId: item.catalogItemId || null,
+                        visible: true, locked: false, quantity: initialTakeoffQty,
+                        baseQuantity: initialTakeoffQty,
+                        quantityOverride: isItemOverridden,
+                        estimatingQuantity: Number(item.quantity || 0),
+                        addedFromEstimating: isItemAddedFromEst,
+                        catalogItemId: item.catalogItemId || null,
                         catalog_item_id: item.catalogItemId || null, unitCost: Number(item.unitMaterialCost || 0),
                         unit_cost: Number(item.unitMaterialCost || 0), laborHours: Number(item.unitLabor || 0),
                         labor_hours: Number(item.unitLabor || 0), description: item.description || '',
@@ -1734,7 +1755,10 @@
                         uom: item.uom || layer.uom, catalogItemId: item.catalogItemId || null,
                         catalog_item_id: item.catalogItemId || null, unitCost: Number(item.unitMaterialCost || 0),
                         unit_cost: Number(item.unitMaterialCost || 0), laborHours: Number(item.unitLabor || 0),
-                        labor_hours: Number(item.unitLabor || 0), description: item.description || ''
+                        labor_hours: Number(item.unitLabor || 0), description: item.description || '',
+                        quantityOverride: isItemOverridden,
+                        estimatingQuantity: Number(item.quantity || 0),
+                        addedFromEstimating: isItemAddedFromEst || layer.addedFromEstimating
                     });
                 }
                 seen.add(String(layer.id));
@@ -1788,7 +1812,9 @@
             unitLabor: Number(layer.laborHours || layer.labor_hours || 0),
             laborRate: 85,
             laborUnitType: 'hrs',
-            difficulty: 1,
+            difficulty: (layer.difficulty !== undefined && layer.difficulty !== null)
+                ? Number(layer.difficulty)
+                : (layer.metadata_json?.difficulty !== undefined ? Number(layer.metadata_json.difficulty) : undefined),
             laborMargin: 0,
             notes: `Synced from Takeoff${group?.name ? ` / ${group.name}` : ''}`,
             taxable: true,
@@ -1869,6 +1895,14 @@
                     ? window.TakeoffEstimatingSyncService.takeoffItem({ ...line, id: layer.id },
                         { id: groupId, name: groupName }, existing)
                     : { ...(existing || {}), ...line };
+                const isOverridden = Boolean(
+                    synchronized.quantityOverride
+                    || existing?.quantityOverride
+                    || String(existing?.quantitySyncStatus || '') === 'overridden'
+                );
+                const effectiveQty = isOverridden
+                    ? Number(existing?.quantity ?? synchronized.quantity ?? line.quantity)
+                    : line.quantity;
                 return {
                     ...line,
                     ...synchronized,
@@ -1876,11 +1910,11 @@
                     groupId,
                     groupName,
                     originalQuantity: line.quantity,
-                    quantity: line.quantity,
-                    pendingTakeoffQuantity: null,
-                    quantityOverride: false,
+                    quantity: effectiveQty,
+                    pendingTakeoffQuantity: isOverridden ? line.quantity : null,
+                    quantityOverride: isOverridden,
                     quantitySource: 'takeoff',
-                    quantitySyncStatus: 'synced',
+                    quantitySyncStatus: isOverridden ? 'overridden' : 'synced',
                     lastSyncedTakeoffQuantity: line.quantity,
                     catalogSyncStatus: line.catalogItemId ? 'synced' : 'detached',
                     updatedAt: new Date().toISOString()
@@ -2027,6 +2061,43 @@
         return `${formatted} ${uom}`;
     }
 
+    function getLayerEstimatingOverride(layer, estimateId = activeEstimateId()) {
+        if (!layer) return { overridden: false, estimatingQuantity: 0, addedFromEstimating: false };
+        try {
+            const estState = loadEstimatingStateForSync();
+            const est = Array.isArray(estState?.estimates)
+                ? (estState.estimates.find(row => String(row.id) === String(estimateId)) || estState.estimates[0])
+                : null;
+            const groups = est?.groups || estState?.groups || [];
+            const lid = String(layer.id || '');
+            const estItemId = String(layer.estimatingItemId || '');
+            const tkQty = Number(layer.quantity || 0);
+            for (const grp of groups) {
+                for (const it of (grp.items || [])) {
+                    const itId = String(it.id || '');
+                    const itLayerId = String(it.takeoffLayerId || '');
+                    if ((estItemId && itId === estItemId)
+                        || (lid && (itLayerId === lid || itId === `takeoff_${lid}` || itLayerId === `takeoff_${lid}`))) {
+                        const estQty = Number(it.quantity ?? 0);
+                        const isSame = Math.abs(tkQty - estQty) < 0.0001;
+                        const overridden = Boolean(it.quantityOverride === true || String(it.quantitySyncStatus || '') === 'overridden') && !isSame;
+                        const addedFromEstimating = Boolean(it.addedFromEstimating === true || it.origin === 'estimating' || layer.addedFromEstimating === true);
+                        return {
+                            overridden,
+                            estimatingQuantity: estQty,
+                            addedFromEstimating
+                        };
+                    }
+                }
+            }
+        } catch (_) { }
+        return {
+            overridden: false,
+            estimatingQuantity: 0,
+            addedFromEstimating: Boolean(layer.addedFromEstimating === true)
+        };
+    }
+
     function toggleGroupLock(groupId) {
         if (!requireWrite()) return false;
         const group = findGroup(groupId);
@@ -2097,6 +2168,18 @@
                 const editorLockState = callEditor('projectTakeoffGetLayerLockState', layer.id) || {};
                 const isLocked = Boolean(layer.locked || editorLockState.locked);
                 const subText = itemQuantitySubtitle(layer);
+                const overrideInfo = getLayerEstimatingOverride(layer, estimateId);
+                const uom = layer.uom || typeToUom(layer.type) || 'ea';
+                const estQtyNum = Number(overrideInfo.estimatingQuantity || 0);
+                const estQtyFormatted = estQtyNum % 1 === 0 ? estQtyNum.toFixed(0) : estQtyNum.toFixed(2);
+                const tkQtyNum = Number(layer.quantity || 0);
+                const tkQtyFormatted = tkQtyNum % 1 === 0 ? tkQtyNum.toFixed(0) : tkQtyNum.toFixed(2);
+                const overrideBadgeHtml = overrideInfo.overridden
+                    ? `<span class="pro-tree-qty-override-badge" data-qty-override-badge="true" title="${esc(`Quantity altered in Estimating: ${estQtyFormatted} ${uom} (Takeoff measured: ${tkQtyFormatted} ${uom})`)}"><i class="fas fa-pen-to-square"></i><span>Est: ${esc(estQtyFormatted)} ${esc(uom)}</span></span>`
+                    : '';
+                const addedFromEstBadgeHtml = overrideInfo.addedFromEstimating
+                    ? `<span class="pro-tree-est-added-badge" title="Added from Estimating"><i class="fas fa-calculator"></i><span>Est</span></span>`
+                    : '';
                 const isLayerSelected = !isLocked && (String(takeoffState.activeLayerId || '') === String(layer.id) || selectionState.selectedLayerIds.includes(String(layer.id)));
                 return `<div class="pro-tree-row pro-tree-item ${isLayerSelected || groupSelected ? 'active' : ''} ${groupSelected ? 'group-selected' : ''} ${isVisible ? '' : 'is-hidden'} ${isLocked ? 'is-locked-item' : ''}" data-layer-row="${esc(layer.id)}" aria-selected="${groupSelected ? 'true' : 'false'}">
                             <button class="pro-visibility-btn ${isVisible ? '' : 'is-off'}" type="button" data-layer-visibility="${esc(layer.id)}" title="${isVisible ? 'Hide item' : 'Show item'}" aria-label="${isVisible ? 'Hide item' : 'Show item'}"><i class="fas ${isVisible ? 'fa-eye' : 'fa-eye-slash'}"></i></button>
@@ -2107,6 +2190,8 @@
                                 <div class="pro-tree-item-sub">
                                     ${renderLayerBadgeHtml(layer, 13)}
                                     <span class="pro-tree-qty">${esc(subText)}</span>
+                                    ${overrideBadgeHtml}
+                                    ${addedFromEstBadgeHtml}
                                 </div>
                             </div>
                             <div class="pro-tree-row-actions">
@@ -2148,6 +2233,14 @@
             <section class="pro-property-card">
                 <h3>Takeoff metrics</h3>
                 <div class="pro-property-row"><span>Quantity</span><strong>${esc(quantityLabel(layer))}</strong></div>
+                ${(() => {
+                    const ov = getLayerEstimatingOverride(layer);
+                    if (!ov.overridden) return '';
+                    const uom = layer.uom || typeToUom(layer.type) || 'ea';
+                    const eq = Number(ov.estimatingQuantity || 0);
+                    const fmt = eq % 1 === 0 ? eq.toFixed(0) : eq.toFixed(2);
+                    return `<div class="pro-property-row"><span>Estimating qty</span><strong style="color:#d97706;"><i class="fas fa-pen-to-square"></i> ${esc(fmt)} ${esc(uom)}</strong></div>`;
+                })()}
                 <div class="pro-property-row"><span>Type</span><strong>${esc(layer.type)}</strong></div>
                 <div class="pro-property-row"><span>Unit</span><strong>${esc(layer.uom || typeToUom(layer.type))}</strong></div>
                 <div class="pro-property-row"><span>Selected</span><strong>${selectionCount} element${selectionCount === 1 ? '' : 's'}</strong></div>
@@ -2415,7 +2508,7 @@
             }
         }
         scopeLegacyTakeoffGroupsOnce();
-        ensureEstimateTakeoffWorkspace(activeEstimateId(), false);
+        ensureEstimateTakeoffWorkspace();
         takeoffState.activeLayerId = null;
         takeoffState.canvasSnapshots = {};
         takeoffState.annotations = [];
@@ -2578,9 +2671,15 @@
                             </button>
                         </div>
                     </div>
-                    <div class="pro-field" id="layerMultiplierField">
-                        <label for="layerMultiplierInput">Multiplier</label>
-                        <input id="layerMultiplierInput" type="number" min="1" step="1" value="1">
+                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
+                        <div class="pro-field" id="layerMultiplierField">
+                            <label for="layerMultiplierInput">Multiplier</label>
+                            <input id="layerMultiplierInput" type="number" min="1" step="1" value="1">
+                        </div>
+                        <div class="pro-field" id="layerDifficultyField">
+                            <label for="layerDifficultyInput">Difficulty Factor</label>
+                            <input id="layerDifficultyInput" type="number" min="0.1" step="0.1" value="1.0" placeholder="1.0">
+                        </div>
                     </div>
                     <div class="pro-field" id="layerDropField">
                         <label for="layerDropInput">Default Drop Length (ft)</label>
@@ -3371,6 +3470,15 @@
         $('layerNameInput').value = layer?.name || '';
         if ($('layerTagInput')) $('layerTagInput').value = layer?.tag || '';
         if ($('layerMultiplierInput')) $('layerMultiplierInput').value = layer?.multiplier || 1;
+        if ($('layerDifficultyInput')) $('layerDifficultyInput').value = layer?.difficulty !== undefined ? layer.difficulty : (layer?.metadata_json?.difficulty !== undefined ? layer.metadata_json.difficulty : 1.0);
+        ['layerDifficultyInput', 'layerMultiplierInput'].forEach(id => {
+            const el = $(id);
+            if (el && !el._selectBound) {
+                el._selectBound = true;
+                el.addEventListener('focus', () => el.select());
+                el.addEventListener('click', () => el.select());
+            }
+        });
         $('layerTypeInput').value = layer?.type || 'Linear avg. with drop';
         if (!$('layerTypeInput').value) $('layerTypeInput').value = 'Count';
         if ($('layerTypeHelp')) $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[$('layerTypeInput').value] || TAKEOFF_TYPE_HELP.Count;
@@ -3831,11 +3939,13 @@
             const markerDiameter = calcRadius * 2;
             if ($('layerDiameterInput')) $('layerDiameterInput').value = markerDiameter;
             const strokeVal = parseFloat($('layerStrokeInput')?.value || '2.5') || 2.5;
+            const diffVal = parseFloat($('layerDifficultyInput')?.value || '1.0') || 1.0;
             const payload = {
                 name,
                 type,
                 tag: $('layerTagInput')?.value.trim() || '',
                 multiplier: Number($('layerMultiplierInput')?.value || 1),
+                difficulty: diffVal,
                 uom: $('layerUomInput')?.value || typeToUom(type),
                 symbol: $('layerSymbolInput')?.value || 'Solid Circle',
                 size: chosenSize,
@@ -3856,6 +3966,7 @@
                     payload.catalog_item_id = takeoffState.pendingCatalogItem.id;
                 }
             }
+            let savedLayerId = editingLayerId;
             if (editingLayerId) {
                 const layer = findLayer(editingLayerId);
                 if (layer) {
@@ -3866,6 +3977,14 @@
                     layer.metadata_json.tag = payload.tag;
                     if (payload.unitCost !== undefined) layer.unitCost = payload.unitCost;
                     if (payload.laborHours !== undefined) layer.laborHours = payload.laborHours;
+                    if (payload.difficulty !== undefined) {
+                        layer.difficulty = payload.difficulty;
+                        layer.metadata_json.difficulty = payload.difficulty;
+                    }
+                    if (payload.multiplier !== undefined) {
+                        layer.multiplier = payload.multiplier;
+                        layer.metadata_json.multiplier = payload.multiplier;
+                    }
                 }
                 callEditor('projectTakeoffUpdateLayerObjects', editingLayerId, {
                     symbol: payload.symbol,
@@ -3884,9 +4003,11 @@
                     quantity: 0,
                     tag: payload.tag,
                     costCode: payload.tag,
-                    metadata_json: { tag: payload.tag },
+                    metadata_json: { tag: payload.tag, difficulty: payload.difficulty || 1.0, multiplier: payload.multiplier || 1 },
+                    difficulty: payload.difficulty || 1.0,
                     ...payload
                 };
+                savedLayerId = layer.id;
                 group.layers.push(layer);
                 group.isExpanded = true;
                 takeoffState.activeGroupId = group.id;
@@ -3905,6 +4026,8 @@
             closeLayerModal();
             saveTakeoffState();
             renderTakeoffPanel();
+            window.dispatchEvent(new CustomEvent('takeoff:layer-visuals-updated', { detail: { projectId: String(window.ProjectState?.projectId || '') } }));
+            window.dispatchEvent(new CustomEvent('takeoff:layer-properties-updated', { detail: { layerId: savedLayerId, difficulty: payload.difficulty, multiplier: payload.multiplier } }));
         } catch (error) {
             console.warn('Takeoff layer save failed', error);
             showPrepared('Unable to save Takeoff item changes. Please try again.');
@@ -4203,6 +4326,13 @@
         $('proBrowseSelectBtn')?.addEventListener('click', () => {
             const selectedItems = getSelectedCatalogItems();
             if (selectedItems.length) {
+                if (typeof browseCatalogState.onSelect === 'function') {
+                    const callback = browseCatalogState.onSelect;
+                    browseCatalogState.onSelect = null;
+                    closeCatalogModal();
+                    callback(selectedItems);
+                    return;
+                }
                 applyCatalogItemsToLayerForm(selectedItems);
             }
         });
@@ -4253,10 +4383,12 @@
         });
     }
 
-    function openCatalogModal() {
+    function openCatalogModal(options = {}) {
         if (!requireWrite()) return false;
         ensureTakeoffModal();
         ensureCatalogModal();
+        browseCatalogState.onSelect = typeof options?.onSelect === 'function' ? options.onSelect : null;
+        browseCatalogState.targetGroupId = options?.groupId || null;
         const createModal = $('takeoffCreateLayerModal');
         if (createModal && !createModal.hidden) {
             createModal.classList.add('is-behind');
@@ -5863,7 +5995,8 @@
 
     function syncTakeoffFromCanvasSnapshot(snapshot, options = {}) {
         if (!snapshot || !Array.isArray(snapshot.layers)) return;
-        const estimateId = activeEstimateId();
+        const estimateId = String(snapshot.estimateId || snapshot.estimateKey || activeEstimateId());
+        if (estimateId && estimateId !== activeEstimateId()) return;
         const doc = activeDrawingDoc();
         const documentId = String(snapshot.drawingId || snapshot.drawing_id || doc?.id || 'active');
         takeoffState.canvasSnapshots[`${estimateId}:${documentId}`] = {
@@ -7768,6 +7901,27 @@
             syncEstimatingItemsToTakeoff(event.detail || {});
             renderTakeoffEstimateFooter();
         });
+        window.addEventListener('estimating:item-difficulty-updated', event => {
+            const detail = event.detail || {};
+            if (!detail.layerId) return;
+            const targetId = String(detail.layerId);
+            const layer = allLayers().find(l => String(l.id) === targetId || String(l.integration_key) === targetId || String(l.client_uid) === targetId);
+            if (layer) {
+                layer.difficulty = Number(detail.difficulty || 1);
+                if (!layer.metadata_json || typeof layer.metadata_json !== 'object') layer.metadata_json = {};
+                layer.metadata_json.difficulty = layer.difficulty;
+                saveTakeoffState();
+            }
+        });
+        window.addEventListener('estimating:global-difficulty-updated', event => {
+            const diff = Number(event.detail?.difficulty || 1);
+            allLayers().forEach(layer => {
+                layer.difficulty = diff;
+                if (!layer.metadata_json || typeof layer.metadata_json !== 'object') layer.metadata_json = {};
+                layer.metadata_json.difficulty = diff;
+            });
+            saveTakeoffState();
+        });
         ensureViewerLayersPopover();
         bindDrawingDropdown();
         bindScalePanel();
@@ -7906,6 +8060,22 @@
                     document.querySelector('.pro-canvas-shell')?.classList.remove('is-panning');
                 }
             }
+        });
+        window.takeoffState = takeoffState;
+        window.getTakeoffLayerById = function (layerId) {
+            if (!layerId) return null;
+            return typeof findLayer === 'function' ? findLayer(layerId) : null;
+        };
+        window.getTakeoffLayerByName = function (name) {
+            if (!name) return null;
+            return (typeof allLayers === 'function' ? allLayers() : []).find(l => l.name === name) || null;
+        };
+        window.openTakeoffCatalogModal = openCatalogModal;
+        window.addEventListener('takeoff:estimating-items-updated', () => {
+            if (typeof renderTakeoffPanel === 'function') renderTakeoffPanel();
+        });
+        window.addEventListener('takeoff:estimating-state-updated', () => {
+            if (typeof renderTakeoffPanel === 'function') renderTakeoffPanel();
         });
     });
 })();

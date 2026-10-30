@@ -15,7 +15,7 @@
     }
 
     function settings(input = {}) {
-        return {
+        const result = {
             assemblyExpansionPolicy: String(input.assemblyExpansionPolicy ?? input.assembly_expansion_policy ?? 'LEGACY').toUpperCase() === 'CANONICAL'
                 ? 'CANONICAL' : 'LEGACY',
             marginMode: input.marginMode === 'markup' ? 'markup' : 'margin',
@@ -30,6 +30,15 @@
             preTaxMarkups: Array.isArray(input.preTaxMarkups) ? input.preTaxMarkups.map(markup) : [],
             postTaxMarkups: Array.isArray(input.postTaxMarkups) ? input.postTaxMarkups.map(markup) : []
         };
+        if (input.materialMargin !== undefined && input.materialMargin !== null) result.materialMargin = numeric(input.materialMargin, 15);
+        if (input.equipmentMargin !== undefined && input.equipmentMargin !== null) result.equipmentMargin = numeric(input.equipmentMargin, 15);
+        if (input.laborWaste !== undefined && input.laborWaste !== null) result.laborWaste = numeric(input.laborWaste, 0);
+        if (input.materialWaste !== undefined && input.materialWaste !== null) result.materialWaste = numeric(input.materialWaste, 0);
+        if (input.equipmentWaste !== undefined && input.equipmentWaste !== null) result.equipmentWaste = numeric(input.equipmentWaste, 0);
+        if (input.laborDifficulty !== undefined && input.laborDifficulty !== null) result.laborDifficulty = numeric(input.laborDifficulty, 1);
+        if (input.squareFootage !== undefined && input.squareFootage !== null) result.squareFootage = numeric(input.squareFootage, 0);
+        if (input._markupsSeeded !== undefined) result._markupsSeeded = Boolean(input._markupsSeeded);
+        return result;
     }
 
     function markup(row = {}) {
@@ -40,6 +49,7 @@
             percent: numeric(row.percent),
             amount: numeric(row.amount ?? row.percent),
             base: text(row.base, 'subtotal_sales'),
+            operator: row.operator === 'subtract' ? 'subtract' : 'add',
             active: row.active !== false
         };
     }
@@ -71,6 +81,8 @@
             childrenQuantitiesExtended: row.childrenQuantitiesExtended === true,
             assemblyExpansionPolicy: String(row.assemblyExpansionPolicy ?? row.assembly_expansion_policy ?? 'LEGACY').toUpperCase() === 'CANONICAL'
                 ? 'CANONICAL' : 'LEGACY',
+            ratio: row.ratio !== undefined && row.ratio !== null ? numeric(row.ratio) : null,
+            factorOverride: row.factorOverride !== undefined && row.factorOverride !== null ? numeric(row.factorOverride) : null,
             ratioType: text(row.ratioType ?? row.ratio_type, 'per_unit'),
             spacing: row.spacing === null || row.spacing === undefined ? null : numeric(row.spacing),
             componentWaste: numeric(row.componentWaste ?? row.wasteFactorPercent ?? row.waste_factor_percent),
@@ -85,9 +97,12 @@
             locked: row.locked === true || Number(row.locked ?? 0) === 1,
             tags: Array.isArray(row.tags) ? clone(row.tags) : [],
             originalQuantity: numeric(row.originalQuantity, quantity),
+            quantityOverride: row.quantityOverride === true || String(row.quantitySyncStatus || '').toLowerCase() === 'overridden',
+            pendingTakeoffQuantity: row.pendingTakeoffQuantity === null || row.pendingTakeoffQuantity === undefined ? null : numeric(row.pendingTakeoffQuantity),
             quantitySource: takeoffLayerId ? 'takeoff' : 'manual',
-            quantitySyncStatus: takeoffLayerId ? 'synced' : 'manual',
-            lastSyncedTakeoffQuantity: numeric(row.lastSyncedTakeoffQuantity, takeoffLayerId ? quantity : 0),
+            quantitySyncStatus: (row.quantityOverride === true || String(row.quantitySyncStatus || '').toLowerCase() === 'overridden')
+                ? 'overridden' : (takeoffLayerId ? 'synced' : 'manual'),
+            lastSyncedTakeoffQuantity: numeric(row.lastSyncedTakeoffQuantity, takeoffLayerId ? numeric(row.originalQuantity, quantity) : 0),
             unitMaterialCost: numeric(row.unitMaterialCost ?? row.unitCost ?? row.unit_cost),
             waste: numeric(row.waste ?? row.waste_percentage),
             materialMargin: numeric(row.materialMargin ?? row.margin ?? row.margin_percentage),
@@ -99,9 +114,11 @@
             laborUnitType: text(row.laborUnitType ?? row.laborUnit, 'mins'),
             laborRate: numeric(row.laborRate ?? row.labor_rate, 85),
             difficulty: numeric(row.difficulty ?? row.difficulty_factor, 1),
+            laborWaste: row.laborWaste !== undefined && row.laborWaste !== null ? numeric(row.laborWaste) : null,
             laborMargin: row.laborMargin === '' || row.labor_margin_percentage === '' ? null
                 : (row.laborMargin ?? row.labor_margin_percentage ?? null),
             taxable: row.taxable !== false && Number(row.taxable ?? 1) !== 0,
+            _manualFields: (row._manualFields && typeof row._manualFields === 'object') ? { ...row._manualFields } : {},
             notes: text(row.notes),
             updatedAt: text(row.updatedAt ?? row.updated_at, now())
         };
@@ -281,13 +298,13 @@
         const created = estimate({ name: text(name).trim() || 'New Estimate', groups,
             creationMode,
             takeoffSyncMode: 'linked-only',
-            settings: creationMode === 'all' ? clone(source.settings) : {},
+            settings: source?.settings ? clone(source.settings) : {},
             notes: creationMode === 'all' ? clone(source.notes) : {} }, state.projectId, state.estimates.length);
         state.estimates.push(created);
         state.activeEstimateId = created.id;
         state.estimates.forEach(row => { row.isActive = row.id === created.id; });
         state.groups = created.groups;
-        return touch(state, `Created estimate “${created.name}”`);
+        return touch(state, `Created estimate "${created.name}"`);
     }
 
     function removeEstimate(state, estimateId) {
