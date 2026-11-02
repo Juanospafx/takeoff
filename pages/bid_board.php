@@ -1,5 +1,9 @@
 <?php
 require_once __DIR__ . '/../core/auth/session.php';
+$authRedirect = takeoff_require_page_auth($_SESSION ?? null);
+if ($authRedirect !== null) {
+    return;
+}
 $authUser = SessionGuard::getAuthenticatedUser($_SESSION ?? null);
 $authRole = $authUser['role'] ?? SessionGuard::ROLE_VIEWER;
 $isViewer = ($authRole === SessionGuard::ROLE_VIEWER);
