@@ -407,6 +407,38 @@ function takeoff_is_authenticated(?array $session = null): bool
     return SessionGuard::isAuthenticated($session);
 }
 
+/** Resolve the fixed SSO entry redirect for an unauthenticated browser session. */
+function takeoff_page_auth_redirect(?array $session = null): ?string
+{
+    return SessionGuard::isAuthenticated($session) ? null : '/pages/sso-login.php';
+}
+
+/**
+ * Require authentication before a browser page emits application content.
+ * API endpoints intentionally do not call this helper and retain JSON 401/403.
+ */
+function takeoff_require_page_auth(?array $session = null): ?string
+{
+    $redirect = takeoff_page_auth_redirect($session);
+    if ($redirect === null) {
+        return null;
+    }
+
+    $GLOBALS['__TAKEOFF_PAGE_AUTH_REDIRECT__'] = $redirect;
+    $handler = $GLOBALS['__TAKEOFF_PAGE_REDIRECT_HANDLER__'] ?? null;
+    if (is_callable($handler)) {
+        $handler($redirect);
+    } elseif (!headers_sent()) {
+        header('Location: ' . $redirect, true, 302);
+    }
+
+    if (PHP_SAPI !== 'cli') {
+        exit;
+    }
+
+    return $redirect;
+}
+
 /**
  * Reusable helper: check if session is authenticated admin.
  *
