@@ -53,7 +53,8 @@
         },
         proposalBuilder: false,
         coverPage: 'None',
-        appendixPage: 'Scope Appendix',
+        showAppendix: false,
+        appendixPage: 'None',
         company: {
             address: '',
             phone: '',
@@ -97,6 +98,12 @@
             }
             if (!migrated.pageWidth) {
                 migrated.pageWidth = 'letter';
+            }
+            if (typeof migrated.showAppendix !== 'boolean') {
+                migrated.showAppendix = Boolean(migrated.appendixPage && migrated.appendixPage !== 'None');
+            }
+            if (!migrated.appendixPage) {
+                migrated.appendixPage = migrated.showAppendix ? 'Scope Appendix' : 'None';
             }
             return migrated;
         } catch (error) {
@@ -518,6 +525,11 @@
             case 'costItems.estimateTotal':
                 if (isQtyOnly) return { disabled: true, warning: 'Costs hidden by Quantity Only' };
                 break;
+
+            // Appendix Configuration
+            case 'appendixPage':
+                if (!proposalSettings.showAppendix) return { disabled: true, info: 'Appendix disabled by switch' };
+                break;
         }
         return { disabled: false, warning: '', info: '' };
     }
@@ -659,7 +671,11 @@
             ].join('')),
             section('Cost Items Configuration', 'fas fa-table-list', renderToggle('Group Subtotals', 'costItems.groupSubtotals') + renderToggle('Financial Summary', 'costItems.summary') + renderToggle('Estimate Grand Total', 'costItems.estimateTotal')),
             section('Edit Mode & Tools', 'fas fa-pen-ruler', renderToggle('Proposal Builder Mode', 'proposalBuilder')),
-            section('Cover & Appendix Pages', 'fas fa-file-lines', renderSelect('Cover page', 'coverPage', ['None', 'Default Cover', 'Company Cover']) + renderSelect('Appendix page', 'appendixPage', ['None', 'Terms and Conditions', 'Scope Appendix']))
+            section('Cover & Appendix Pages', 'fas fa-file-lines', [
+                renderSelect('Cover page', 'coverPage', ['None', 'Default Cover', 'Company Cover']),
+                renderToggle('Include Appendix', 'showAppendix'),
+                renderSelect('Appendix page', 'appendixPage', ['None', 'Scope Appendix', 'Terms and Conditions'], ['None (Omit Appendix)', 'Scope & Technical Specifications', 'General Terms & Conditions'])
+            ].join(''))
         ].join('');
         // Initialize standardized system custom dropdowns
         if (typeof window.initCustomSelects === 'function') {
@@ -974,6 +990,7 @@
     }
 
     function renderAppendixPage(appendixType, quoteNum, docTitle, currentDate) {
+        if (!proposalSettings.showAppendix || !appendixType || appendixType === 'None') return '';
         if (appendixType === 'Terms and Conditions') {
             return `
                 <div class="proposal-appendix-sheet">
@@ -1296,15 +1313,10 @@
         const showDate = Boolean(proposalSettings.summary.date);
         if (!showAcceptedBy && !showDate) return '';
 
-        const clientCompany = (customer && (customer.company || customer.contact)) || 'Client / Owner';
-        const clientContact = (customer && customer.contact) || '';
-        const estimatorName = (company && company.preparedBy) || 'Brightronix Estimator';
-
         return `
             <div class="proposal-acceptance-wrap proposal-acceptance-compact">
                 <div class="proposal-acceptance-compact-head">
                     <span class="compact-head-title"><i class="fas fa-file-signature"></i> Proposal Authorization &amp; Formal Acceptance</span>
-                    <span class="compact-head-sub">By signing below, authorized parties approve the project scope, specifications, schedule, and total investment defined herein.</span>
                 </div>
 
                 <div class="proposal-signatures-grid proposal-signatures-compact-grid">
@@ -1312,7 +1324,6 @@
                     <div class="proposal-sign-column proposal-sign-compact-col">
                         <div class="proposal-sign-compact-label">
                             <span class="sign-party-tag">CLIENT ACCEPTANCE</span>
-                            <span class="sign-party-name">${esc(clientCompany)}</span>
                         </div>
                         ${showAcceptedBy ? `
                             <div class="proposal-sign-draw-zone">
@@ -1320,27 +1331,12 @@
                                 <span class="proposal-sign-line-text">Authorized Client Signature</span>
                             </div>
                         ` : ''}
-                        <div class="proposal-sign-meta-compact-row">
-                            ${showAcceptedBy ? `
-                                <div class="proposal-sign-meta-cell">
-                                    <span class="meta-cell-label">Printed Name</span>
-                                    <span class="meta-cell-value">${clientContact ? esc(clientContact) : '_____________________'}</span>
-                                </div>
-                            ` : ''}
-                            ${showDate ? `
-                                <div class="proposal-sign-meta-cell">
-                                    <span class="meta-cell-label">Date of Acceptance</span>
-                                    <span class="meta-cell-value">____ / ____ / 202___</span>
-                                </div>
-                            ` : ''}
-                        </div>
                     </div>
 
                     <!-- Contractor Authorization Column -->
                     <div class="proposal-sign-column proposal-sign-compact-col">
                         <div class="proposal-sign-compact-label">
                             <span class="sign-party-tag">CONTRACTOR AUTHORIZATION</span>
-                            <span class="sign-party-name">Brightronix Technologies</span>
                         </div>
                         ${showAcceptedBy ? `
                             <div class="proposal-sign-draw-zone">
@@ -1348,20 +1344,6 @@
                                 <span class="proposal-sign-line-text">Authorized Representative Signature</span>
                             </div>
                         ` : ''}
-                        <div class="proposal-sign-meta-compact-row">
-                            ${showAcceptedBy ? `
-                                <div class="proposal-sign-meta-cell">
-                                    <span class="meta-cell-label">Prepared By</span>
-                                    <span class="meta-cell-value">${esc(estimatorName)}</span>
-                                </div>
-                            ` : ''}
-                            ${showDate ? `
-                                <div class="proposal-sign-meta-cell">
-                                    <span class="meta-cell-label">Date of Issuance</span>
-                                    <span class="meta-cell-value">${esc(currentDate)}</span>
-                                </div>
-                            ` : ''}
-                        </div>
                     </div>
                 </div>
             </div>
@@ -1507,31 +1489,13 @@
 
         const summaryHtml = isQtyOnly ? '' : renderSummary(totalData);
 
-        // Improved Hero Total Proposal Box (Protagonist)
+        // Improved Hero Total Proposal Box (Centered Total Right only)
         const totalBoxHtml = (!isQtyOnly && proposalSettings.costItems.estimateTotal) ? `
             <div class="proposal-hero-total-box">
-                <div class="proposal-hero-total-accent-bar"></div>
-                <div class="proposal-hero-total-inner">
-                    <div class="proposal-hero-total-left">
-                        <div class="proposal-hero-tag">
-                            <span class="proposal-hero-tag-icon"><i class="fas fa-shield-check"></i></span>
-                            <span>TOTAL PROPOSAL INVESTMENT</span>
-                        </div>
-                        <div class="proposal-hero-title">Guaranteed Lump Sum Amount</div>
-                        <div class="proposal-hero-sub">
-                            Turnkey fixed investment inclusive of direct materials, trade labor, specialty equipment, administrative markups, and applicable taxes.
-                        </div>
-                        <div class="proposal-hero-badges">
-                            <span class="hero-micro-badge"><i class="fas fa-check-circle"></i> Fixed Price</span>
-                            <span class="hero-micro-badge"><i class="fas fa-clock"></i> 30-Day Guarantee</span>
-                            <span class="hero-micro-badge"><i class="fas fa-file-shield"></i> Turnkey Scope</span>
-                        </div>
-                    </div>
-                    <div class="proposal-hero-total-right">
-                        <div class="proposal-hero-val-label">TOTAL PROPOSAL AMOUNT</div>
-                        <div class="proposal-hero-amount-val">${money(totalData.total)}</div>
-                        <div class="proposal-hero-val-sub">USD &bull; Net Total Investment</div>
-                    </div>
+                <div class="proposal-hero-total-right">
+                    <div class="proposal-hero-val-label">TOTAL PROPOSAL AMOUNT</div>
+                    <div class="proposal-hero-amount-val">${money(totalData.total)}</div>
+                    <div class="proposal-hero-val-sub">USD &bull; Net Total Investment</div>
                 </div>
             </div>
         ` : '';
@@ -1540,8 +1504,10 @@
         const acceptanceHtml = renderAcceptance(company, currentDate, customer);
 
         const hasCover = proposalSettings.coverPage && proposalSettings.coverPage !== 'None';
-        const appendixType = proposalSettings.appendixPage || 'Scope Appendix';
-        const hasFinalAcceptanceSheet = (!isQtyOnly && (proposalSettings.summary.acceptedBy || proposalSettings.summary.date || proposalSettings.appendixPage !== 'None'));
+        const hasAppendix = Boolean(proposalSettings.showAppendix && proposalSettings.appendixPage && proposalSettings.appendixPage !== 'None');
+        const appendixType = hasAppendix ? proposalSettings.appendixPage : 'None';
+        const hasAcceptance = Boolean(acceptanceHtml && acceptanceHtml.trim());
+        const hasFinalAcceptanceSheet = (!isQtyOnly && (hasAcceptance || hasAppendix));
 
         if (proposalSettings.pageMode === 'paged') {
             const allGroupEntries = groupedItems(items);
@@ -1566,11 +1532,32 @@
             // Compute total page count
             const hasSummarySheet = (!isQtyOnly && (proposalSettings.costItems.summary || proposalSettings.costItems.estimateTotal));
 
+            // Determine if acceptance can fit at the bottom of the preceding page when appendix is omitted
+            let acceptanceOnPrecedingPage = false;
+            if (!hasAppendix && hasAcceptance) {
+                if (hasSummarySheet) {
+                    // Dedicated summary sheet has ample room for compact acceptance at the bottom
+                    acceptanceOnPrecedingPage = true;
+                } else if (itemChunks.length > 0) {
+                    const lastChunk = itemChunks[itemChunks.length - 1];
+                    if (lastChunk && lastChunk.entries.length <= 14) {
+                        acceptanceOnPrecedingPage = true;
+                    }
+                } else {
+                    // No item sheets and no summary sheet: fits on overview page
+                    acceptanceOnPrecedingPage = true;
+                }
+            }
+
+            const hasFinalAppendixSheet = hasAppendix;
+            const hasStandaloneAcceptanceSheet = (!isQtyOnly && hasAcceptance && !acceptanceOnPrecedingPage);
+            const hasFinalPageSheet = hasFinalAppendixSheet || hasStandaloneAcceptanceSheet;
+
             let totalPages = 1; // Overview page is always 1
             if (hasCover) totalPages += 1;
             totalPages += itemChunks.length;
             if (hasSummarySheet) totalPages += 1;
-            if (hasFinalAcceptanceSheet) totalPages += 1;
+            if (hasFinalPageSheet) totalPages += 1;
 
             let runningPageNum = 1;
             let sheetsHtml = '';
@@ -1600,6 +1587,7 @@
                         ${customerHtml}
                         ${scopeHtml}
                         ${notesHtml}
+                        ${(acceptanceOnPrecedingPage && !hasSummarySheet && itemChunks.length === 0) ? acceptanceHtml : ''}
                     </div>
                     <div class="proposal-sheet-footer">
                         <span>Brightronix Proposal &bull; Quote #${esc(quoteNum)}</span>
@@ -1610,7 +1598,7 @@
             runningPageNum++;
 
             // 3. Itemized Cost Sheets
-            itemChunks.forEach((chunk) => {
+            itemChunks.forEach((chunk, chunkIdx) => {
                 const pageRunningHeader = `
                     <div class="proposal-doc-page-header">
                         <div class="proposal-doc-page-header-left">
@@ -1633,6 +1621,7 @@
                                 <h4>Cost Items &amp; Specifications</h4>
                                 ${renderItemTableSlice(chunk.entries, items)}
                             </section>
+                            ${(acceptanceOnPrecedingPage && !hasSummarySheet && chunkIdx === itemChunks.length - 1) ? acceptanceHtml : ''}
                         </div>
                         <div class="proposal-sheet-footer">
                             <span>Brightronix Proposal &bull; Quote #${esc(quoteNum)}</span>
@@ -1665,6 +1654,7 @@
                             ${summaryRunningHeader}
                             ${summaryHtml}
                             ${totalBoxHtml}
+                            ${(acceptanceOnPrecedingPage && hasSummarySheet) ? acceptanceHtml : ''}
                         </div>
                         <div class="proposal-sheet-footer">
                             <span>Brightronix Proposal &bull; Quote #${esc(quoteNum)}</span>
@@ -1675,13 +1665,28 @@
                 runningPageNum++;
             }
 
-            // 5. Next Page: Scope Appendix & Formal Acceptance Sheet (together at the end of the next page)
-            if (hasFinalAcceptanceSheet) {
-                const appendixContent = renderAppendixPage(appendixType, quoteNum, docTitle, currentDate);
+            // 5. Next Page: Scope Appendix & Formal Acceptance Sheet (rendered only when needed)
+            if (hasFinalPageSheet) {
+                const appendixContent = hasAppendix ? renderAppendixPage(appendixType, quoteNum, docTitle, currentDate) : '';
+                const standaloneAcceptanceHeader = (!hasAppendix && hasAcceptance) ? `
+                    <div class="proposal-doc-page-header">
+                        <div class="proposal-doc-page-header-left">
+                            <span class="brand-name">Brightronix</span>
+                            <span class="sep">&bull;</span>
+                            <span class="doc-title">Proposal Authorization</span>
+                        </div>
+                        <div class="proposal-doc-page-header-right">
+                            <span>Quote #${esc(quoteNum)}</span>
+                            <span class="sep">&bull;</span>
+                            <span>${esc(currentDate)}</span>
+                        </div>
+                    </div>
+                ` : '';
                 sheetsHtml += `
                     <div class="proposal-page-sheet ${widthClass} proposal-appendix-sheet-wrap">
                         <div class="proposal-sheet-content">
                             ${appendixContent}
+                            ${standaloneAcceptanceHeader}
                             ${acceptanceHtml}
                         </div>
                         <div class="proposal-sheet-footer">
@@ -1703,13 +1708,17 @@
                 <div class="proposal-continuous-page-divider"></div>
             ` : '';
 
-            const continuousAppendix = hasFinalAcceptanceSheet ? `
+            const continuousAppendix = hasAppendix ? `
                 <div class="proposal-continuous-page-divider"></div>
                 <div class="proposal-continuous-appendix-section">
                     ${renderAppendixPage(appendixType, quoteNum, docTitle, currentDate)}
                     ${acceptanceHtml}
                 </div>
-            ` : '';
+            ` : (hasAcceptance ? `
+                <div class="proposal-continuous-acceptance-section" style="margin-top: 24px;">
+                    ${acceptanceHtml}
+                </div>
+            ` : '');
 
             documentNode.innerHTML = `
                 ${toolbarHtml}
@@ -1832,15 +1841,24 @@
                 proposalSettings.costItems.groupSubtotals = val;
             } else if (path === 'costItems.groupSubtotals') {
                 proposalSettings.material.groupSubtotals = val;
+            } else if (path === 'showAppendix') {
+                if (val && (!proposalSettings.appendixPage || proposalSettings.appendixPage === 'None')) {
+                    proposalSettings.appendixPage = 'Scope Appendix';
+                }
             }
         }
         if (select) {
-            setPath(proposalSettings, select.dataset.proposalSelect, select.value);
+            const path = select.dataset.proposalSelect;
+            const val = select.value;
+            setPath(proposalSettings, path, val);
+            if (path === 'appendixPage') {
+                proposalSettings.showAppendix = (val !== 'None');
+            }
         }
         if (checkbox || select) {
             saveSettings();
-            // Checkbox changes re-render settings to dynamically refresh dependency badges/disabled states
-            if (checkbox) {
+            // Refresh controls if dependencies or selects changed
+            if (checkbox || (select && (select.dataset.proposalSelect === 'appendixPage' || select.dataset.proposalSelect === 'coverPage'))) {
                 renderSettings();
             }
             // Always update preview
@@ -2117,6 +2135,11 @@
             padding: 14pt 18pt;
             margin: 16pt 0;
             background: #ffffff;
+            text-align: center;
+        }
+        .proposal-hero-total-right {
+            text-align: center;
+            margin: 0 auto;
         }
         .proposal-hero-amount-val { font-size: 22pt; font-weight: bold; color: #0f172a; }
         h4 { font-size: 12pt; text-transform: uppercase; color: #0f172a; margin-top: 14pt; }

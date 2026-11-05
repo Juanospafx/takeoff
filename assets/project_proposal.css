@@ -2212,6 +2212,11 @@ body.theme-dark .proposal-dep-badge.is-info {
     box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08) !important;
     position: relative;
     overflow: hidden;
+    padding: 24px 24px !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    text-align: center !important;
 }
 
 .proposal-hero-total-accent-bar {
@@ -2227,16 +2232,13 @@ body.theme-dark .proposal-dep-badge.is-info {
     padding: 20px 24px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
     gap: 24px;
     box-sizing: border-box !important;
 }
 
 .proposal-hero-total-left {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    flex: 1 1 auto;
+    display: none;
 }
 
 .proposal-hero-tag {
@@ -2287,34 +2289,38 @@ body.theme-dark .proposal-dep-badge.is-info {
 .proposal-hero-total-right {
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
-    text-align: right;
-    flex-shrink: 0;
+    align-items: center !important;
+    text-align: center !important;
+    margin: 0 auto !important;
+    width: 100%;
 }
 
 .proposal-hero-val-label {
-    font-size: 9.5px;
+    font-size: 10px;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: .08em;
     color: #64748b;
-    margin-bottom: 2px;
+    margin-bottom: 4px;
+    text-align: center;
 }
 
 .proposal-hero-amount-val {
-    font-size: 34px;
+    font-size: 36px;
     font-weight: 900;
     color: #0f172a !important; /* High-contrast hero amount in dark charcoal */
     letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
     line-height: 1.1;
     white-space: nowrap;
+    text-align: center;
 }
 
 .proposal-hero-val-sub {
     font-size: 10px;
     color: #64748b;
-    margin-top: 3px;
+    margin-top: 4px;
+    text-align: center;
 }
 
 /* ==========================================================
@@ -2376,8 +2382,8 @@ body.theme-dark .proposal-dep-badge.is-info {
 
 .proposal-sign-compact-label {
     display: flex;
-    align-items: baseline;
-    justify-content: space-between;
+    align-items: center;
+    justify-content: flex-start;
     gap: 8px;
     padding-bottom: 4px;
     border-bottom: 1px solid #e2e8f0;
