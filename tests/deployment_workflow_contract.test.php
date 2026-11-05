@@ -138,6 +138,7 @@ function runDeploymentWorkflowContractTests(): void
         'TAKEOFF_SSO_CLIENT_SECRET',
         'TAKEOFF_SSO_REDIRECT_URI',
         'TAKEOFF_SSO_TIMEOUT',
+        'TAKEOFF_DB_PRIVATE_CONFIG',
     ];
     $secretOccurrences = [];
     preg_match_all('/\${{\s*secrets\.([A-Z0-9_]+)\s*}}/', $deployYml, $secretMatches);
@@ -150,7 +151,7 @@ function runDeploymentWorkflowContractTests(): void
     }
 
     // SSO values must be materialized only into the ephemeral artifact, before checksums.
-    foreach (array_slice($approvedSecrets, 3) as $ssoSecret) {
+    foreach (array_slice($approvedSecrets, 3, 6) as $ssoSecret) {
         if (!str_contains($deployYml, 'secrets.' . $ssoSecret)) {
             throw new RuntimeException("FAIL: Missing approved SSO secret reference: {$ssoSecret}");
         }
@@ -162,6 +163,14 @@ function runDeploymentWorkflowContractTests(): void
     $checksumPosition = strpos($deployYml, 'find . -type f');
     if ($ssoMaterializationPosition === false || $checksumPosition === false || $ssoMaterializationPosition >= $checksumPosition) {
         throw new RuntimeException('FAIL: SSO configuration must be materialized before SHA256SUMS generation.');
+    }
+
+    if (!str_contains($deployYml, 'secrets.TAKEOFF_DB_PRIVATE_CONFIG')) {
+        throw new RuntimeException('FAIL: Private database configuration reference must come from GitHub Secrets.');
+    }
+    $dbMaterializationPosition = strpos($deployYml, 'SetEnv TAKEOFF_DB_PRIVATE_CONFIG');
+    if ($dbMaterializationPosition === false || $dbMaterializationPosition >= $checksumPosition) {
+        throw new RuntimeException('FAIL: Private database configuration reference must be materialized before SHA256SUMS generation.');
     }
 
     // 9. Acceptance criteria: .gitignore protections
