@@ -106,14 +106,25 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                     require_once dirname(__DIR__) . '/core/db/connection.php';
                 }
 
-                // Parameterized lookup against users table
-                $stmt = $pdo->prepare('SELECT id, username, password, role, active FROM users WHERE username = :username LIMIT 1');
-                $stmt->execute([':username' => $username]);
+                // Newer installations expose users.active, while the canonical
+                // legacy schema has only id, username, password and role.
+                try {
+                    $stmt = $pdo->prepare('SELECT id, username, password, role, active FROM users WHERE username = :username LIMIT 1');
+                    $stmt->execute([':username' => $username]);
+                } catch (\PDOException $queryError) {
+                    $sqlState = (string)($queryError->errorInfo[0] ?? $queryError->getCode());
+                    $driverCode = (int)($queryError->errorInfo[1] ?? $queryError->getCode());
+                    if ($sqlState !== '42S22' && $driverCode !== 1054) {
+                        throw $queryError;
+                    }
+                    $stmt = $pdo->prepare('SELECT id, username, password, role FROM users WHERE username = :username LIMIT 1');
+                    $stmt->execute([':username' => $username]);
+                }
                 $user = $stmt->fetch(\PDO::FETCH_ASSOC);
 
                 if (!$user || !password_verify($password, (string)$user['password'])) {
                     $error = 'Nombre de usuario o contraseña incorrectos.';
-                } elseif ((int)$user['active'] !== 1) {
+                } elseif (array_key_exists('active', $user) && (int)$user['active'] !== 1) {
                     $error = 'La cuenta de usuario se encuentra inactiva.';
                 } else {
                     $localRole = trim((string)$user['role']);
