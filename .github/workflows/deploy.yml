@@ -33,6 +33,7 @@ jobs:
           TAKEOFF_SSO_CLIENT_SECRET: ${{ secrets.TAKEOFF_SSO_CLIENT_SECRET }}
           TAKEOFF_SSO_REDIRECT_URI: ${{ secrets.TAKEOFF_SSO_REDIRECT_URI }}
           TAKEOFF_SSO_TIMEOUT: ${{ secrets.TAKEOFF_SSO_TIMEOUT }}
+          TAKEOFF_DB_PRIVATE_CONFIG: ${{ secrets.TAKEOFF_DB_PRIVATE_CONFIG }}
         run: |
           set -euo pipefail
           ARTIFACT_DIR="deploy_artifact"
@@ -49,6 +50,7 @@ jobs:
           [[ "$TAKEOFF_SSO_TIMEOUT" =~ ^[0-9]+$ ]]
           test "$TAKEOFF_SSO_TIMEOUT" -ge 1
           test "$TAKEOFF_SSO_TIMEOUT" -le 60
+          [[ "$TAKEOFF_DB_PRIVATE_CONFIG" =~ ^/[A-Za-z0-9._/-]+\.php$ ]]
 
           # Copy everything except excluded items into artifact directory
           # Using rsync to reliably exclude non-production and development assets
@@ -105,10 +107,12 @@ jobs:
             printf '    SetEnv TAKEOFF_SSO_CLIENT_SECRET %s\n' "$TAKEOFF_SSO_CLIENT_SECRET"
             printf '    SetEnv TAKEOFF_SSO_REDIRECT_URI %s\n' "$TAKEOFF_SSO_REDIRECT_URI"
             printf '    SetEnv TAKEOFF_SSO_TIMEOUT %s\n' "$TAKEOFF_SSO_TIMEOUT"
+            printf '    SetEnv TAKEOFF_DB_PRIVATE_CONFIG %s\n' "$TAKEOFF_DB_PRIVATE_CONFIG"
             printf '</IfModule>\n'
           } >> "$ARTIFACT_DIR/.htaccess"
 
           test "$(grep -c 'SetEnv TAKEOFF_SSO_' "$ARTIFACT_DIR/.htaccess")" -eq 6
+          test "$(grep -c 'SetEnv TAKEOFF_DB_PRIVATE_CONFIG' "$ARTIFACT_DIR/.htaccess")" -eq 1
 
           # Generate deterministic SHA256SUMS for runtime files avoiding recursive autochecksum
           # Sorting with LC_ALL=C ensures byte-order deterministic output across environments
