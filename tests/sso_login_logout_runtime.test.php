@@ -272,6 +272,7 @@ class IsolatedMockPdo extends PDO
     public array $links = [];
 
     public int $nextLinkId = 1;
+    public bool $supportsUserActiveColumn = true;
 
     public function __construct()
     {
@@ -348,6 +349,12 @@ class IsolatedMockPdoStatement extends PDOStatement
 
         // Local login query: SELECT id, username, password, role, active FROM users WHERE username = :username
         if (preg_match('/SELECT\s+.*FROM\s+users\s+WHERE\s+username\s*=\s*:username/i', $this->sql)) {
+            $selectsActive = preg_match('/SELECT\s+[^;]*\bactive\b[^;]*FROM\s+users/i', $this->sql) === 1;
+            if ($selectsActive && !$this->pdo->supportsUserActiveColumn) {
+                $exception = new PDOException("Unknown column 'active' in 'field list'", 1054);
+                $exception->errorInfo = ['42S22', 1054, "Unknown column 'active' in 'field list'"];
+                throw $exception;
+            }
             $username = (string)($params[':username'] ?? $params['username'] ?? '');
             foreach ($this->pdo->users as $u) {
                 if ($u['username'] === $username) {
@@ -356,8 +363,10 @@ class IsolatedMockPdoStatement extends PDOStatement
                         'username' => $u['username'],
                         'password' => $u['password'],
                         'role' => $u['role'],
-                        'active' => $u['active'],
                     ];
+                    if ($this->pdo->supportsUserActiveColumn) {
+                        $this->resultRow['active'] = $u['active'];
+                    }
                     return true;
                 }
             }
@@ -595,6 +604,22 @@ assertCondition($_SESSION['username'] === 'alice_admin', 'Local login: session u
 assertCondition($_SESSION['role'] === 'admin', 'Local login: session role populated (admin)');
 assertCondition($_SESSION['auth_source'] === 'local', 'Local login: session auth_source set to local');
 assertCondition($lastRedirect === '/pages/takeoff.php', 'Local login: redirects to /pages/takeoff.php');
+
+// Test 2.6: Canonical legacy users schema without active remains a valid rollback path
+$legacySchemaPdo = new IsolatedMockPdo();
+$legacySchemaPdo->supportsUserActiveColumn = false;
+$legacySchemaPdo->insertUser(6, 'legacy_admin', password_hash('LegacyPass333!', PASSWORD_DEFAULT), 'admin', 1);
+$GLOBALS['__TAKEOFF_TEST_PDO__'] = $legacySchemaPdo;
+$lastRedirect = null;
+$_SESSION = ['csrf_token' => 'legacy_schema_csrf_123'];
+$_POST = ['csrf_token' => 'legacy_schema_csrf_123', 'username' => 'legacy_admin', 'password' => 'LegacyPass333!'];
+ob_start();
+include dirname(__DIR__) . '/pages/login.php';
+$legacySchemaHtml = ob_get_clean();
+assertCondition(!str_contains($legacySchemaHtml, 'Error de conexión o base de datos'), 'Local login: legacy users schema does not surface a database error');
+assertCondition(($_SESSION['user_id'] ?? null) === 6, 'Local login: legacy users schema establishes the expected session');
+assertCondition($lastRedirect === '/pages/takeoff.php', 'Local login: legacy users schema redirects to Takeoff');
+$GLOBALS['__TAKEOFF_TEST_PDO__'] = $mockPdo;
 
 // -----------------------------------------------------------------------------
 // Section 3: SSO Enabled - Login Button, State, PKCE S256 & HTTPS Authorization URL
