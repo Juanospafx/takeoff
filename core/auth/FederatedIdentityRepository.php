@@ -28,6 +28,7 @@ class FederatedIdentityRepository
     private PDO $pdo;
     private string $tableName;
     private string $usersTable;
+    private ?bool $usersHaveActiveColumn = null;
 
     /**
      * @param PDO $pdo Active database connection
@@ -41,6 +42,37 @@ class FederatedIdentityRepository
         // Whitelist table identifiers to prevent identifier manipulation
         $this->tableName = preg_match('/^[a-zA-Z0-9_]+$/', $tableName) ? $tableName : 'sso_identity_links';
         $this->usersTable = preg_match('/^[a-zA-Z0-9_]+$/', $usersTable) ? $usersTable : 'users';
+    }
+
+    /**
+     * Detects the optional users.active column once per repository instance.
+     * The canonical legacy Takeoff schema has no active column; in that schema
+     * an existing user is treated as active, matching the local login boundary.
+     */
+    private function usersHaveActiveColumn(): bool
+    {
+        if ($this->usersHaveActiveColumn !== null) {
+            return $this->usersHaveActiveColumn;
+        }
+
+        try {
+            $statement = $this->pdo->prepare(
+                "SELECT active FROM {$this->usersTable} WHERE 1 = 0"
+            );
+            $statement->execute();
+            $this->usersHaveActiveColumn = true;
+        } catch (\PDOException $error) {
+            $sqlState = (string)($error->errorInfo[0] ?? $error->getCode());
+            $driverCode = (int)($error->errorInfo[1] ?? $error->getCode());
+            if ($sqlState !== '42S22' && $driverCode !== 1054) {
+                throw new RuntimeException('SSO user schema detection failed.');
+            }
+            $this->usersHaveActiveColumn = false;
+        } catch (\Throwable) {
+            throw new RuntimeException('SSO user schema detection failed.');
+        }
+
+        return $this->usersHaveActiveColumn;
     }
 
     /**
@@ -75,11 +107,14 @@ class FederatedIdentityRepository
         }
 
         try {
+            $hasUserActive = $this->usersHaveActiveColumn();
+            $userActiveSelect = $hasUserActive ? 'u.active AS user_active' : '1 AS user_active';
+            $userActiveFilter = $hasUserActive ? 'AND u.active = 1' : '';
             $sql = "SELECT
                         u.id AS user_id,
                         u.username,
                         u.role,
-                        u.active AS user_active,
+                        {$userActiveSelect},
                         l.id AS link_id,
                         l.provider,
                         l.hub_user_id,
@@ -89,7 +124,7 @@ class FederatedIdentityRepository
                     WHERE l.provider = :provider
                       AND l.hub_user_id = :hub_user_id
                       AND l.active = 1
-                      AND u.active = 1
+                      {$userActiveFilter}
                     LIMIT 1";
 
             $stmt = $this->pdo->prepare($sql);
@@ -204,11 +239,13 @@ class FederatedIdentityRepository
         }
 
         try {
+            $hasUserActive = $this->usersHaveActiveColumn();
+            $userActiveSelect = $hasUserActive ? 'u.active AS user_active' : '1 AS user_active';
             $sql = "SELECT
                         u.id AS user_id,
                         u.username,
                         u.role,
-                        u.active AS user_active,
+                        {$userActiveSelect},
                         l.id AS link_id,
                         l.provider,
                         l.hub_user_id,
@@ -358,11 +395,19 @@ class FederatedIdentityRepository
                 $inTransaction = true;
             }
 
-            // Insert active local shadow user
-            $userSql = "INSERT INTO {$this->usersTable}
-                        (username, password, role, active, created_at, updated_at)
-                        VALUES
-                        (:username, :password, :role, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)";
+            // Insert a shadow user using the installed users schema. The legacy
+            // schema has no active column and treats every existing user as active.
+            if ($this->usersHaveActiveColumn()) {
+                $userSql = "INSERT INTO {$this->usersTable}
+                            (username, password, role, active, created_at, updated_at)
+                            VALUES
+                            (:username, :password, :role, 1, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)";
+            } else {
+                $userSql = "INSERT INTO {$this->usersTable}
+                            (username, password, role, created_at, updated_at)
+                            VALUES
+                            (:username, :password, :role, CURRENT_TIMESTAMP, CURRENT_TIMESTAMP)";
+            }
             $userStmt = $this->pdo->prepare($userSql);
             $userStmt->execute([
                 ':username' => $derivedUsername,
