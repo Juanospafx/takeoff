@@ -456,46 +456,110 @@ include __DIR__ . '/../views/header.php';
     const gInput = document.getElementById('globalFileInput');
     if(gInput) gInput.addEventListener('change', function() { handleFiles(this.files); });
 
-    // Procesador de Subida
+    const MAX_FILE_BYTES = 10737418240;
+
+    function ensureGlobalUploadProgress() {
+        let host = document.getElementById('globalUploadProgress');
+        if (host) return host;
+        host = document.createElement('div');
+        host.id = 'globalUploadProgress';
+        host.style.cssText = 'position:fixed;right:24px;bottom:24px;z-index:10000;width:min(420px,calc(100vw - 48px));padding:16px;border-radius:12px;background:#111827;color:#fff;box-shadow:0 14px 40px rgba(0,0,0,.35)';
+        const label = document.createElement('div');
+        label.id = 'globalUploadLabel';
+        const count = document.createElement('div');
+        count.id = 'globalUploadCount';
+        count.style.cssText = 'font-size:12px;color:#cbd5e1;margin:5px 0';
+        const track = document.createElement('div');
+        track.style.cssText = 'height:8px;border-radius:999px;overflow:hidden;background:#334155';
+        const bar = document.createElement('div');
+        bar.id = 'globalUploadBar';
+        bar.style.cssText = 'width:0;height:100%;background:#3b82f6;transition:width .15s ease';
+        const results = document.createElement('div');
+        results.id = 'globalUploadResults';
+        results.style.cssText = 'font-size:12px;max-height:140px;overflow:auto;margin-top:8px';
+        track.appendChild(bar);
+        host.append(label, count, track, results);
+        document.body.appendChild(host);
+        return host;
+    }
+
+    function uploadGlobalFile(file, onProgress) {
+        return new Promise((resolve, reject) => {
+            const fd = new FormData();
+            fd.append('action', 'upload_file');
+            fd.append('file', file, file.name);
+            fd.append('project_id', pId);
+            if (fId) fd.append('folder_id', fId);
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '../api/api.php');
+            xhr.upload.onprogress = event => {
+                if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+            };
+            xhr.onload = () => {
+                let data = null;
+                try { data = JSON.parse(xhr.responseText); } catch (_) {}
+                if (xhr.status >= 200 && xhr.status < 300 && data?.status === 'success') resolve(data);
+                else reject(new Error(data?.msg || `Upload failed (HTTP ${xhr.status || 0}).`));
+            };
+            xhr.onerror = () => reject(new Error('Connection error.'));
+            xhr.send(fd);
+        });
+    }
+
     async function handleFiles(fileList) {
         if(fileList.length === 0) return;
         if(!pId) { alert("Error: No project selected."); return; }
 
-        const btnUp = document.querySelector('.btn-main'); 
+        const btnUp = document.querySelector('.btn-main');
         if(btnUp) { btnUp.disabled = true; btnUp.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Uploading...'; }
 
-        const MAX_SIZE = 1073741824; // 1GB
         const ALLOWED_TYPES = ['application/pdf', 'image/jpeg', 'image/png', 'image/gif', 'image/webp', 'image/bmp', 'image/tiff'];
-        
-        for (let i = 0; i < fileList.length; i++) {
-            const file = fileList[i];
-            
-            if (file.size > MAX_SIZE) {
-                alert(`Error: El archivo "${file.name}" supera el límite de 1GB.`);
-                continue; 
-            }
+        const files = Array.from(fileList);
+        const host = ensureGlobalUploadProgress();
+        const label = host.querySelector('#globalUploadLabel');
+        const count = host.querySelector('#globalUploadCount');
+        const bar = host.querySelector('#globalUploadBar');
+        const results = host.querySelector('#globalUploadResults');
+        const errors = [];
+        let completed = 0;
+        let succeeded = 0;
+        results.replaceChildren();
 
+        for (const file of files) {
+            label.textContent = file.name;
+            count.textContent = `${completed} / ${files.length} · 0%`;
+            if (file.size > MAX_FILE_BYTES) {
+                errors.push({ filename: file.name, message: 'File exceeds the 10 GB limit.' });
+                completed++;
+                continue;
+            }
             if (!ALLOWED_TYPES.includes(file.type) && !file.name.match(/\.(jpg|jpeg|png|gif|webp|pdf|bmp|tiff)$/i)) {
-                 alert(`Error: El archivo "${file.name}" no es válido. Solo se permiten PDF e Imágenes.`);
-                 continue; 
+                errors.push({ filename: file.name, message: 'Only PDF and image files are allowed.' });
+                completed++;
+                continue;
             }
-
-            const fd = new FormData(); 
-            fd.append('action', 'upload_file'); fd.append('file', file); fd.append('project_id', pId); 
-            if(fId) fd.append('folder_id', fId);
-            
-            try { 
-                let response = await fetch('../api/api.php', { method: 'POST', body: fd }); 
-                let data = await response.json();
-                if(data.status === 'error') {
-                    alert(`Error subiendo ${file.name}: ${data.msg}`);
-                }
-            } catch (e) { 
-                console.error(e); 
-                alert(`Error de conexión subiendo ${file.name}`);
+            try {
+                await uploadGlobalFile(file, percent => {
+                    count.textContent = `${completed} / ${files.length} · ${percent}%`;
+                    bar.style.width = `${Math.round(((completed + percent / 100) / files.length) * 100)}%`;
+                });
+                succeeded++;
+            } catch (error) {
+                errors.push({ filename: file.name, message: error.message || 'Upload failed.' });
             }
+            completed++;
         }
-        location.reload();
+        bar.style.width = '100%';
+        label.textContent = errors.length ? `${succeeded} uploaded, ${errors.length} failed` : `${succeeded} uploaded`;
+        count.textContent = `${completed} / ${files.length}`;
+        for (const error of errors) {
+            const row = document.createElement('div');
+            row.style.color = '#fca5a5';
+            row.textContent = `${error.filename}: ${error.message}`;
+            results.appendChild(row);
+        }
+        if(btnUp) { btnUp.disabled = false; btnUp.innerHTML = '<i class="fas fa-upload"></i> Upload'; }
+        if (!errors.length) location.reload();
     }
 
 
