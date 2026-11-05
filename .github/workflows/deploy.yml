@@ -26,10 +26,29 @@ jobs:
         run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
 
       - name: Build deployment artifact
+        env:
+          TAKEOFF_SSO_ENABLED: ${{ secrets.TAKEOFF_SSO_ENABLED }}
+          TAKEOFF_SSO_HUB_BASE_URL: ${{ secrets.TAKEOFF_SSO_HUB_BASE_URL }}
+          TAKEOFF_SSO_CLIENT_ID: ${{ secrets.TAKEOFF_SSO_CLIENT_ID }}
+          TAKEOFF_SSO_CLIENT_SECRET: ${{ secrets.TAKEOFF_SSO_CLIENT_SECRET }}
+          TAKEOFF_SSO_REDIRECT_URI: ${{ secrets.TAKEOFF_SSO_REDIRECT_URI }}
+          TAKEOFF_SSO_TIMEOUT: ${{ secrets.TAKEOFF_SSO_TIMEOUT }}
         run: |
-          set -e
+          set -euo pipefail
           ARTIFACT_DIR="deploy_artifact"
           mkdir -p "$ARTIFACT_DIR"
+
+          # Fail closed before deployment when private SSO configuration is absent or malformed.
+          test "$TAKEOFF_SSO_ENABLED" = "1"
+          [[ "$TAKEOFF_SSO_HUB_BASE_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/?$ ]]
+          [[ "$TAKEOFF_SSO_CLIENT_ID" =~ ^[A-Za-z0-9._-]{1,80}$ ]]
+          [[ "$TAKEOFF_SSO_CLIENT_SECRET" =~ ^[A-Za-z0-9_-]+$ ]]
+          test "${#TAKEOFF_SSO_CLIENT_SECRET}" -ge 32
+          test "${#TAKEOFF_SSO_CLIENT_SECRET}" -le 4096
+          [[ "$TAKEOFF_SSO_REDIRECT_URI" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9./_-]+$ ]]
+          [[ "$TAKEOFF_SSO_TIMEOUT" =~ ^[0-9]+$ ]]
+          test "$TAKEOFF_SSO_TIMEOUT" -ge 1
+          test "$TAKEOFF_SSO_TIMEOUT" -le 60
 
           # Copy everything except excluded items into artifact directory
           # Using rsync to reliably exclude non-production and development assets
@@ -75,6 +94,21 @@ jobs:
           test ! -d "$ARTIFACT_DIR/db"
           test ! -d "$ARTIFACT_DIR/migrations"
           test ! -d "$ARTIFACT_DIR/cache"
+
+          # Materialize private runtime values only in the ephemeral deployment artifact.
+          # Values are constrained above to Apache-safe, whitespace-free character sets.
+          {
+            printf '\n<IfModule mod_env.c>\n'
+            printf '    SetEnv TAKEOFF_SSO_ENABLED %s\n' "$TAKEOFF_SSO_ENABLED"
+            printf '    SetEnv TAKEOFF_SSO_HUB_BASE_URL %s\n' "$TAKEOFF_SSO_HUB_BASE_URL"
+            printf '    SetEnv TAKEOFF_SSO_CLIENT_ID %s\n' "$TAKEOFF_SSO_CLIENT_ID"
+            printf '    SetEnv TAKEOFF_SSO_CLIENT_SECRET %s\n' "$TAKEOFF_SSO_CLIENT_SECRET"
+            printf '    SetEnv TAKEOFF_SSO_REDIRECT_URI %s\n' "$TAKEOFF_SSO_REDIRECT_URI"
+            printf '    SetEnv TAKEOFF_SSO_TIMEOUT %s\n' "$TAKEOFF_SSO_TIMEOUT"
+            printf '</IfModule>\n'
+          } >> "$ARTIFACT_DIR/.htaccess"
+
+          test "$(grep -c 'SetEnv TAKEOFF_SSO_' "$ARTIFACT_DIR/.htaccess")" -eq 6
 
           # Generate deterministic SHA256SUMS for runtime files avoiding recursive autochecksum
           # Sorting with LC_ALL=C ensures byte-order deterministic output across environments
