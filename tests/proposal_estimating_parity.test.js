@@ -19,7 +19,7 @@ test('Proposal uses the canonical Estimating calculator for rows and final total
 
 test('Proposal formats customer quantities as whole numbers without changing raw totals', () => {
     assert.match(proposal, /QuantityFormatService\.proposal\(item\.quantity\)/);
-    assert.match(proposal, /const quantity = num\(item\.quantity \?\? item\.qty\)/);
+    assert.match(proposal, /const quantity = num\(item\.quantity \?\? item\.takeoff_quantity \?\? item\.qty\)/);
     assert.match(proposal, /quantity \* unitCost/);
     assert.ok(dashboard.indexOf('quantity_format_service.js') < dashboard.indexOf('project_proposal.js'));
 });

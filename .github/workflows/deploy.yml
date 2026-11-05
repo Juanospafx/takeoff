@@ -26,10 +26,31 @@ jobs:
         run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
 
       - name: Build deployment artifact
+        env:
+          TAKEOFF_SSO_ENABLED: ${{ secrets.TAKEOFF_SSO_ENABLED }}
+          TAKEOFF_SSO_HUB_BASE_URL: ${{ secrets.TAKEOFF_SSO_HUB_BASE_URL }}
+          TAKEOFF_SSO_CLIENT_ID: ${{ secrets.TAKEOFF_SSO_CLIENT_ID }}
+          TAKEOFF_SSO_CLIENT_SECRET: ${{ secrets.TAKEOFF_SSO_CLIENT_SECRET }}
+          TAKEOFF_SSO_REDIRECT_URI: ${{ secrets.TAKEOFF_SSO_REDIRECT_URI }}
+          TAKEOFF_SSO_TIMEOUT: ${{ secrets.TAKEOFF_SSO_TIMEOUT }}
+          TAKEOFF_DB_PRIVATE_CONFIG: ${{ secrets.TAKEOFF_DB_PRIVATE_CONFIG }}
         run: |
-          set -e
+          set -euo pipefail
           ARTIFACT_DIR="deploy_artifact"
           mkdir -p "$ARTIFACT_DIR"
+
+          # Fail closed before deployment when private SSO configuration is absent or malformed.
+          test "$TAKEOFF_SSO_ENABLED" = "1"
+          [[ "$TAKEOFF_SSO_HUB_BASE_URL" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/?$ ]]
+          [[ "$TAKEOFF_SSO_CLIENT_ID" =~ ^[A-Za-z0-9._-]{1,80}$ ]]
+          [[ "$TAKEOFF_SSO_CLIENT_SECRET" =~ ^[A-Za-z0-9_-]+$ ]]
+          test "${#TAKEOFF_SSO_CLIENT_SECRET}" -ge 32
+          test "${#TAKEOFF_SSO_CLIENT_SECRET}" -le 4096
+          [[ "$TAKEOFF_SSO_REDIRECT_URI" =~ ^https://[A-Za-z0-9.-]+(:[0-9]+)?/[A-Za-z0-9./_-]+$ ]]
+          [[ "$TAKEOFF_SSO_TIMEOUT" =~ ^[0-9]+$ ]]
+          test "$TAKEOFF_SSO_TIMEOUT" -ge 1
+          test "$TAKEOFF_SSO_TIMEOUT" -le 60
+          [[ "$TAKEOFF_DB_PRIVATE_CONFIG" =~ ^/[A-Za-z0-9._/-]+\.php$ ]]
 
           # Copy everything except excluded items into artifact directory
           # Using rsync to reliably exclude non-production and development assets
@@ -76,6 +97,23 @@ jobs:
           test ! -d "$ARTIFACT_DIR/migrations"
           test ! -d "$ARTIFACT_DIR/cache"
 
+          # Materialize private runtime values only in the ephemeral deployment artifact.
+          # Values are constrained above to Apache-safe, whitespace-free character sets.
+          {
+            printf '\n<IfModule mod_env.c>\n'
+            printf '    SetEnv TAKEOFF_SSO_ENABLED %s\n' "$TAKEOFF_SSO_ENABLED"
+            printf '    SetEnv TAKEOFF_SSO_HUB_BASE_URL %s\n' "$TAKEOFF_SSO_HUB_BASE_URL"
+            printf '    SetEnv TAKEOFF_SSO_CLIENT_ID %s\n' "$TAKEOFF_SSO_CLIENT_ID"
+            printf '    SetEnv TAKEOFF_SSO_CLIENT_SECRET %s\n' "$TAKEOFF_SSO_CLIENT_SECRET"
+            printf '    SetEnv TAKEOFF_SSO_REDIRECT_URI %s\n' "$TAKEOFF_SSO_REDIRECT_URI"
+            printf '    SetEnv TAKEOFF_SSO_TIMEOUT %s\n' "$TAKEOFF_SSO_TIMEOUT"
+            printf '    SetEnv TAKEOFF_DB_PRIVATE_CONFIG %s\n' "$TAKEOFF_DB_PRIVATE_CONFIG"
+            printf '</IfModule>\n'
+          } >> "$ARTIFACT_DIR/.htaccess"
+
+          test "$(grep -c 'SetEnv TAKEOFF_SSO_' "$ARTIFACT_DIR/.htaccess")" -eq 6
+          test "$(grep -c 'SetEnv TAKEOFF_DB_PRIVATE_CONFIG' "$ARTIFACT_DIR/.htaccess")" -eq 1
+
           # Generate deterministic SHA256SUMS for runtime files avoiding recursive autochecksum
           # Sorting with LC_ALL=C ensures byte-order deterministic output across environments
           (
@@ -103,6 +141,19 @@ jobs:
 
           echo "Deployment artifact generated successfully."
 
+      - name: Prepare one-shot SSO production diagnostic
+        run: |
+          set -euo pipefail
+          diagnostic_token="$(openssl rand -hex 32)"
+          echo "::add-mask::$diagnostic_token"
+          echo "TAKEOFF_DIAGNOSTIC_TOKEN=$diagnostic_token" >> "$GITHUB_ENV"
+          token_hash="$(printf '%s' "$diagnostic_token" | sha256sum | cut -d ' ' -f 1)"
+          diagnostic_file="sso-production-diagnostic-${GITHUB_RUN_ID}.php"
+          sed "s/__DIAGNOSTIC_TOKEN_SHA256__/$token_hash/g" \
+            harness/sso-production-diagnostic.php \
+            > "deploy_artifact/$diagnostic_file"
+          test "$(grep -c "$token_hash" "deploy_artifact/$diagnostic_file")" -eq 1
+
       # Security Note:
       # Port 21 (plain FTP) is retained due to lack of FTPS evidence from the hosting provider.
       # Plain FTP transmits credentials and code unencrypted over the network.
@@ -118,3 +169,13 @@ jobs:
           local-dir: ./deploy_artifact/
           server-dir: ./
           dangerous-clean-slate: false
+
+      - name: Run one-shot SSO production diagnostic
+        run: |
+          set -euo pipefail
+          response="$(curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "X-Takeoff-Diagnostic-Token: $TAKEOFF_DIAGNOSTIC_TOKEN" \
+            "https://takeoff.brightronix.net/sso-production-diagnostic-${GITHUB_RUN_ID}.php")"
+          printf '%s' "$response" | jq -c '{ok,config_loaded,oauth_client_accepted,oauth_classification,database_connected,users_table,users_active_column,users_timestamps,links_table,links_active_column,cleanup}'
+          printf '%s' "$response" | jq -e '.cleanup == true' >/dev/null

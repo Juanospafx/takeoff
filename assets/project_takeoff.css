@@ -9491,6 +9491,16 @@ body.theme-dark .pcd-add-custom-color-btn:hover {
     color: #38bdf8 !important;
 }
 
+/* Safeguard: Prevent generic dropdown wrappers from duplicating inside custom selector rows */
+.pro-create-selectors-row:not(.cc-takeoff-selectors-row) .pro-custom-dropdown.cc-custom-select,
+.pro-create-selectors-row:not(.cc-takeoff-selectors-row) .pro-custom-dropdown.pro-custom-select,
+.pro-create-selectors-row .pro-custom-dropdown .pro-custom-dropdown,
+.pro-edit-selectors-row .pro-custom-dropdown.cc-custom-select,
+.pro-edit-selectors-row .pro-custom-dropdown.pro-custom-select,
+.pro-edit-selectors-row .pro-custom-dropdown .pro-custom-dropdown {
+    display: none !important;
+}
+
 /* UoM Menu */
 .pcd-uom-menu {
     width: 250px;
@@ -9725,8 +9735,8 @@ body.theme-dark .pcd-add-custom-color-btn:hover {
 }
 
 /* Safeguard: Prevent generic dropdown wrappers from duplicating inside custom selector rows */
-.pro-create-selectors-row:not(.cc-takeoff-selectors-row) .pro-custom-dropdown.cc-custom-select,
-.pro-create-selectors-row:not(.cc-takeoff-selectors-row) .pro-custom-dropdown.pro-custom-select,
+.pro-create-selectors-row .pro-custom-dropdown.cc-custom-select,
+.pro-create-selectors-row .pro-custom-dropdown.pro-custom-select,
 .pro-create-selectors-row .pro-custom-dropdown .pro-custom-dropdown,
 .pro-edit-selectors-row .pro-custom-dropdown.cc-custom-select,
 .pro-edit-selectors-row .pro-custom-dropdown.pro-custom-select,

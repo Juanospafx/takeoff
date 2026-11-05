@@ -42,8 +42,3 @@ harness/scratch/
 *.sql.gz
 dumps/
 backups/
-
-# Scratch & temporary diagnostic files
-scratch/*
-!scratch/seed_cost_catalogs.php
-!scratch/seed_sample_projects.php

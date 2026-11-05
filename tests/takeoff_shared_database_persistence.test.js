@@ -35,7 +35,9 @@ test('sheet scale is shared by drawing and page while geometry remains estimate-
     assert.match(api, /case 'scale'/);
     assert.match(api, /case 'save_scale'/);
     assert.match(api, /function ensure_takeoff_scale_table/);
-    assert.match(api, /ensure_takeoff_scale_table\(\$pdo\)/);
+    assert.match(api, /assert_takeoff_runtime_schema\(\$pdo\)/);
+    const runtime = api.slice(api.indexOf('try {\n    \/\/ Production runtime credentials'));
+    assert.doesNotMatch(runtime, /ensure_takeoff_scale_table\(\$pdo\)/);
     assert.doesNotMatch(api, /Run db\/migrations\/2026-08-12_takeoff_shared_persistence\.sql/);
     assert.match(api, /ON DUPLICATE KEY UPDATE/);
     assert.match(api, /FROM takeoff_sheet_scales WHERE drawing_id = \? AND page_number = \?/);

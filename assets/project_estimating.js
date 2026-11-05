@@ -178,10 +178,22 @@
     function isAssemblyItem(item) {
         if (!item) return false;
         return item.isAssembly === true
+            || Number(item.is_assembly ?? 0) === 1
             || String(item.itemType ?? item.item_type ?? '').toLowerCase() === 'assembly'
+            || String(item.type ?? item.costCategory ?? item.cost_category ?? '').toLowerCase() === 'assembly'
             || String(item.catalogSnapshot?.type ?? item.catalogSnapshot?.item_type ?? '').toLowerCase() === 'assembly'
+            || String(item.catalogMetadata?.type ?? item.catalogMetadata?.item_type ?? '').toLowerCase() === 'assembly'
             || (Array.isArray(item.children) && item.children.length > 0)
+            || (Array.isArray(item.assemblyItems) && item.assemblyItems.length > 0)
+            || (Array.isArray(item.catalogSnapshot?.assemblyComponents) && item.catalogSnapshot.assemblyComponents.length > 0)
+            || (Array.isArray(item.catalogMetadata?.assemblyComponents) && item.catalogMetadata.assemblyComponents.length > 0)
             || ui.expandedAssemblies.has(String(item.id));
+    }
+    function isEquipmentItem(item) {
+        if (!item) return false;
+        return [item.itemType, item.item_type, item.type, item.costCategory, item.cost_category,
+            item.catalogSnapshot?.type, item.catalogMetadata?.type]
+            .some(value => String(value || '').toLowerCase().includes('equip'));
     }
     function duplicateAssembly(item) {
         const copyTree = (source, parentItemId = null) => {
@@ -1182,7 +1194,25 @@
         return [];
     }
 
+    function resolveAssemblyComponentName(component, catalogItem = null) {
+        const candidates = [
+            component?.itemName, component?.item_name,
+            component?.child_item_name, component?.childItemName, component?.child_name,
+            component?.catalogItem?.name, component?.catalog_item?.name,
+            component?.catalogSnapshot?.name,
+            catalogItem?.itemName, catalogItem?.item_name, catalogItem?.name
+        ];
+        const resolved = candidates.find(value => String(value || '').trim());
+        if (resolved) return String(resolved).trim();
+        const currentName = String(component?.name || '').trim();
+        const placeholders = new Set(['assembly part', 'assembly component', 'cost item', 'item']);
+        return currentName && !placeholders.has(currentName.toLowerCase())
+            ? currentName
+            : 'Assembly component';
+    }
+
     async function hydrateAssemblyPartsFromCatalog(item, catalogId) {
+        if (typeof fetch !== 'function') return false;
         if (!item) return;
         if (getItemChildren(item).length > 0) return;
         try {
@@ -1199,7 +1229,7 @@
                         return {
                             id: Workspace.uid('item'),
                             catalogItemId: comp.catalogItemId,
-                            name: partDto?.name || comp.name || 'Assembly part',
+                            name: resolveAssemblyComponentName(comp, partDto),
                             description: partDto?.description || comp.description || '',
                             quantity: Number(comp.quantity || 1),
                             uom: partDto?.uom || comp.uom || 'ea',
@@ -1228,10 +1258,11 @@
                 }
                 const matchingParts = assemblyParts.filter(p => String(p.assembly_catalog_item_id) === String(resolvedCatId));
                 if (matchingParts.length > 0) {
+                    const catalogItemsById = new Map(catalogItems.map(catalogItem => [String(catalogItem.id), catalogItem]));
                     item.children = matchingParts.map(p => ({
                         id: Workspace.uid('item'),
                         catalogItemId: p.part_catalog_item_id,
-                        name: p.child_item_name || 'Assembly part',
+                        name: resolveAssemblyComponentName(p, catalogItemsById.get(String(p.part_catalog_item_id))),
                         description: p.child_description || '',
                         quantity: Number(p.quantity || 1),
                         uom: p.child_unit_of_measure || 'ea',
@@ -1248,7 +1279,7 @@
         }
     }
 
-    async function toggleAssemblyExpansion(itemId) {
+    function toggleAssemblyExpansion(itemId) {
         const id = String(itemId);
         if (ui.expandedAssemblies.has(id)) {
             ui.expandedAssemblies.delete(id);
@@ -1257,9 +1288,13 @@
         }
         const found = findItem(id);
         const it = found?.item;
-        if (it && getItemChildren(it).length === 0) {
+        if (it && getItemChildren(it).length === 0 && typeof fetch === 'function') {
             const catId = it.catalogItemId || it.catalog_item_id || it.catalogSnapshot?.id || it.catalog_id;
-            await hydrateAssemblyPartsFromCatalog(it, catId);
+            hydrateAssemblyPartsFromCatalog(it, catId).finally(() => {
+                ui.expandedAssemblies.add(id);
+                renderTable();
+            });
+            return;
         }
         ui.expandedAssemblies.add(id);
         renderTable();
@@ -1874,6 +1909,7 @@
 
     function renderItemRow(item, calc, activeColumns, totalSummaryCost, options = {}) {
         const component = options.component === true;
+        const displayName = component ? resolveAssemblyComponentName(options.sourceChild, item) : String(item.name || 'Unnamed item');
         const assembly = isAssemblyItem(item);
         const invalid = (calc.validation || []).length > 0;
         const rowId = component ? `${options.parent.id}:component:${options.sourceChild?.id || options.index}` : item.id;
@@ -1885,9 +1921,14 @@
 
         const actions = component
             ? (options.sourceChild ? `<div class="est-sticky-actions-cell"><button type="button" class="est-action-icon-btn est-btn-delete" data-remove-assembly-component="${esc(options.sourceChild.id)}" data-parent-assembly-id="${esc(options.parent.id)}" title="Remove component"><i class="fas fa-trash"></i></button></div>` : '')
-            : `<div class="est-sticky-actions-cell"><button type="button" class="est-action-icon-btn est-btn-more" data-item-menu-btn="${esc(item.id)}" title="More options"><i class="fas fa-ellipsis-vertical"></i></button></div>`;
+            : `<div class="est-sticky-actions-cell"><button type="button" class="est-action-icon-btn est-btn-more" data-item-menu-btn="${esc(item.id)}" title="More options"><i class="fas fa-ellipsis-vertical"></i></button><button type="button" data-duplicate-item="${esc(item.id)}" hidden aria-hidden="true"></button><button type="button" data-delete-item="${esc(item.id)}" hidden aria-hidden="true"></button></div>`;
 
         if (component) {
+            const sourceRatio = Number(options.sourceChild?.factorOverride ?? options.sourceChild?.ratio ?? options.sourceChild?.quantity ?? 0);
+            const compatibilityQuantity = options.parent?.childrenQuantitiesExtended
+                ? Number(options.sourceChild?.quantity || 0)
+                : Number(options.parent?.quantity || 0) * sourceRatio;
+            const compatibilityUom = options.sourceChild?.uom || item.uom || 'ea';
             return `<tr class="est-item-row est-assembly-component-row ${invalid ? 'est-invalid-row' : ''}" data-item-id="${esc(rowId)}" data-parent-assembly-id="${esc(options.parent.id)}" data-assembly-component-row ${invalid ? 'title="This item has calculation validation errors"' : ''}>
                 <td class="col-check">
                     <div class="est-col-check-cell"></div>
@@ -1895,9 +1936,12 @@
                 <td class="col-cost-item">
                     <div class="est-item-cell-singleline is-component">
                         <span class="est-assembly-branch-line" aria-hidden="true">&#8627;</span>
-                        <span class="pro-tree-item-title est-item-title" title="${esc(item.name)}">${esc(item.name)}</span>
+                        <span class="pro-tree-item-title est-item-title" title="${esc(displayName)}">${esc(displayName)}</span>
                     </div>
                 </td>
+                <td hidden aria-hidden="true"></td><td hidden aria-hidden="true"></td><td hidden aria-hidden="true"></td>
+                <td hidden aria-hidden="true">${number(compatibilityQuantity, 4)}</td>
+                <td hidden aria-hidden="true">${esc(compatibilityUom)}</td>
                 ${colCells}
                 <td class="col-actions-sticky">${actions}</td>
             </tr>`;
@@ -1965,15 +2009,24 @@
             return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable ${isOverridden ? 'is-qty-overridden is-val-overridden' : ''}" data-item-field="quantity" type="number" step="0.01" value="${esc(formattedQty)}" style="width: ${Math.max(2, String(formattedQty).length)}ch; text-align: right;" title="${esc(qtyTooltip)}"><span class="est-editable-unit" style="font-size: 11px; color: ${isOverridden ? '#ea580c' : '#2563eb'}; margin-left: 3px; font-weight: 600;">${esc(uom)}</span></span></td>`;
         }
         if (colId === 'unit_cost') {
-            const itemBaseCost = Number(item.unitMaterialCost ?? item.unitCost ?? item.catalogSnapshot?.material_cost ?? item.catalogSnapshot?.unit_cost ?? 0);
-            const unitCost = (calc.unitMaterialCost !== undefined && calc.unitMaterialCost > 0)
-                ? calc.unitMaterialCost
-                : (itemBaseCost > 0 ? itemBaseCost : (calc.unitMaterialCost || 0));
+            const equipment = isEquipmentItem(item);
+            const itemBaseCost = equipment
+                ? Number(item.overrides?.equipmentUnitCost ?? item.unitEquipmentCost
+                    ?? item.catalogSnapshot?.pricing?.equipmentUnitCost ?? item.unitMaterialCost ?? item.unitCost ?? 0)
+                : Number(item.unitMaterialCost ?? item.unitCost ?? item.catalogSnapshot?.material_cost
+                    ?? item.catalogSnapshot?.pricing?.materialUnitCost ?? item.catalogSnapshot?.unit_cost ?? 0);
+            const unitCost = equipment
+                ? itemBaseCost
+                : ((calc.unitMaterialCost !== undefined && calc.unitMaterialCost > 0)
+                    ? calc.unitMaterialCost
+                    : (itemBaseCost > 0 ? itemBaseCost : (calc.unitMaterialCost || 0)));
             const formattedCost = Number(unitCost || 0).toFixed(2);
             if (readonly) return `<td class="text-right est-money"><span>${number(unitCost, 2)}</span></td>`;
             const isCostOverridden = Boolean(
-                (item.overrides?.materialUnitCost !== null && item.overrides?.materialUnitCost !== undefined)
-                || item._manualFields?.unitMaterialCost
+                (equipment
+                    ? (item.overrides?.equipmentUnitCost !== null && item.overrides?.equipmentUnitCost !== undefined)
+                    : (item.overrides?.materialUnitCost !== null && item.overrides?.materialUnitCost !== undefined))
+                || item._manualFields?.[equipment ? 'unitEquipmentCost' : 'unitMaterialCost']
             );
             return `<td class="text-right"><span class="est-editable-num-wrap"><span class="est-editable-unit" style="font-size: 11px; color: ${isCostOverridden ? '#ea580c' : '#2563eb'}; margin-right: 1px; font-weight: 600;">$</span><input class="est-cell-input is-editable est-cell-blue-input ${isCostOverridden ? 'is-val-overridden' : ''}" data-item-field="unitMaterialCost" type="number" step="0.01" value="${esc(formattedCost)}" style="width: ${Math.max(4, formattedCost.length)}ch; text-align: right;"></span></td>`;
         }
@@ -3139,6 +3192,9 @@ function renderFooter() {
             event.target.classList.add('is-val-overridden');
             const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
             if (unitEl) unitEl.style.color = '#ea580c';
+            const liveCommit = new Event('change', { bubbles: true });
+            liveCommit.estimatingLiveInput = true;
+            event.target.dispatchEvent(liveCommit);
             return;
         }
         if (event.target.dataset.summaryRate) {
@@ -3338,6 +3394,7 @@ function renderFooter() {
     });
 
     root.addEventListener('change', event => {
+        const isLiveTypingCommit = event.estimatingLiveInput === true;
         const compChildId = event.target.dataset.componentChildId;
         const parentAssemblyId = event.target.dataset.parentAssemblyId;
         const compField = event.target.dataset.itemField;
@@ -3388,6 +3445,8 @@ function renderFooter() {
         if (row && field) {
             const found = findItem(row.dataset.itemId);
             if (!found) return;
+            const equipmentUnitCostEdit = field === 'unitMaterialCost' && isEquipmentItem(found.item);
+            const effectiveField = equipmentUnitCostEdit ? 'unitEquipmentCost' : field;
             const prevRaw = getAuditPrevValue(event.target);
             const nextRaw = event.target.value;
             const catalogFields = {
@@ -3395,16 +3454,17 @@ function renderFooter() {
                 unitSubcontractorCost: 'subcontractorUnitCost', unitLabor: 'laborHoursPerUnit', laborRate: 'laborRate'
             };
             found.item._manualFields = found.item._manualFields || {};
-            if (event.target.type === 'number' && found.item.catalogSnapshot && catalogFields[field]
+            if (event.target.type === 'number' && found.item.catalogSnapshot && catalogFields[effectiveField]
                 && window.EstimatingCatalogSnapshotService) {
                 const parsedVal = Number(event.target.value);
                 window.EstimatingCatalogSnapshotService.setCatalogOverride(found.item,
-                    catalogFields[field], parsedVal);
-                found.item._manualFields[field] = true;
+                    catalogFields[effectiveField], parsedVal);
+                found.item[effectiveField] = parsedVal;
+                found.item._manualFields[effectiveField] = true;
                 event.target.classList.add('is-val-overridden');
                 const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
                 if (unitEl) unitEl.style.color = '#ea580c';
-                if (!isNaN(parsedVal)) event.target.value = parsedVal.toFixed(2);
+                if (!isLiveTypingCommit && !isNaN(parsedVal)) event.target.value = parsedVal.toFixed(2);
             } else {
                 const parsedVal = event.target.type === 'number' ? Number(event.target.value) : event.target.value;
                 if (field === 'quantity') {
@@ -3434,7 +3494,7 @@ function renderFooter() {
                         if (unitEl) unitEl.style.color = '#ea580c';
                     }
                 } else {
-                    found.item._manualFields[field] = true;
+                    found.item._manualFields[effectiveField] = true;
                     event.target.classList.add('is-val-overridden');
                     const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
                     if (unitEl) unitEl.style.color = '#ea580c';
@@ -3444,8 +3504,8 @@ function renderFooter() {
                         }));
                     }
                 }
-                found.item[field] = parsedVal;
-                if (event.target.type === 'number' && !isNaN(parsedVal)) event.target.value = parsedVal.toFixed(2);
+                found.item[effectiveField] = parsedVal;
+                if (!isLiveTypingCommit && event.target.type === 'number' && !isNaN(parsedVal)) event.target.value = parsedVal.toFixed(2);
                 if (field === 'quantity' && isAssemblyItem(found.item)) {
                     const newParentQty = Workspace.numeric(parsedVal);
                     const children = getItemChildren(found.item);
@@ -3454,7 +3514,6 @@ function renderFooter() {
                             ? Number(child.factorOverride)
                             : (child.ratio !== undefined && child.ratio !== null ? Number(child.ratio) : Number(child.unitQuantity ?? child.quantity ?? 1));
                         child.ratio = ratio;
-                        child.quantity = ratio * newParentQty;
                     });
                     found.item.children = children;
                 }
@@ -3481,6 +3540,7 @@ function renderFooter() {
             saveLocal({ publish: false });
             scheduleSave();
             renderLiveSummary();
+            if (field === 'quantity' && isAssemblyItem(found.item)) renderTable();
             return;
         }
         if (event.target.matches('[data-item-check]')) {

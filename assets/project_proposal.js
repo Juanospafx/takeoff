@@ -637,7 +637,7 @@
         ].map(([label, path]) => renderToggle(label, path)).join('');
 
         settingsPanel.innerHTML = [
-            section('Page Layout & Sizing', 'fas fa-copy', 
+            section('Page Layout & Sizing', 'fas fa-copy',
                 renderSelect('Page Mode', 'pageMode', ['continuous', 'paged'], ['Extended Continuous Page', 'Multi-Page Sheets (8.5" x 11")']) +
                 renderSelect('Page Width', 'pageWidth', ['letter', 'full'], ['8.5" Letter Sheet', 'Full Width (Fit Screen)'])
             ),
