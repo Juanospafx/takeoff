@@ -498,11 +498,21 @@ switch($action) {
         if($userRole !== 'admin') { echo json_encode(['status'=>'error', 'msg'=>'Access Denied']); exit; }
 
         if (!isset($_FILES['file'])) { echo json_encode(['status'=>'error', 'msg'=>'No file']); exit; }
-        
-        // 3.1 Validar Tamaño (1GB = 1,073,741,824 bytes)
-        $maxSize = 1073741824;
+
+        $uploadError = (int)($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE);
+        if ($uploadError !== UPLOAD_ERR_OK) {
+            http_response_code(in_array($uploadError, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true) ? 413 : 400);
+            $message = in_array($uploadError, [UPLOAD_ERR_INI_SIZE, UPLOAD_ERR_FORM_SIZE], true)
+                ? 'File exceeds the 10 GB limit'
+                : ($uploadError === UPLOAD_ERR_PARTIAL ? 'Upload was interrupted. Please try again.' : 'Upload failed before the file was received.');
+            echo json_encode(['status'=>'error', 'msg'=>$message]);
+            exit;
+        }
+
+        $maxSize = 10737418240;
         if ($_FILES['file']['size'] > $maxSize) {
-            echo json_encode(['status'=>'error', 'msg'=>'File exceeds 1GB limit']); 
+            http_response_code(413);
+            echo json_encode(['status'=>'error', 'msg'=>'File exceeds the 10 GB limit']);
             exit;
         }
 
@@ -565,18 +575,46 @@ switch($action) {
             }
         }
 
-        $fileName = time() . '_' . cleanName($origName);
         $targetDir = __DIR__ . "/../uploads/";
-        if (!file_exists($targetDir)) mkdir($targetDir, 0755, true);
-        $targetPath = $targetDir . $fileName;
-        $type = $ext; // Usamos la extensión validada
-        
+        if (!file_exists($targetDir) && !mkdir($targetDir, 0755, true)) {
+            echo json_encode(['status'=>'error', 'msg'=>'Upload storage is unavailable.']);
+            exit;
+        }
+        $safeName = cleanName($origName);
+        $targetPath = '';
+        $fileName = '';
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $fileName = bin2hex(random_bytes(12)) . '_' . $safeName;
+            $targetPath = $targetDir . $fileName;
+            $reservation = @fopen($targetPath, 'x');
+            if ($reservation !== false) {
+                fclose($reservation);
+                break;
+            }
+            $targetPath = '';
+        }
+        if ($targetPath === '') {
+            echo json_encode(['status'=>'error', 'msg'=>'Unable to reserve upload storage.']);
+            exit;
+        }
+        $type = $ext;
+
         if(move_uploaded_file($_FILES["file"]["tmp_name"], $targetPath)){
             $publicPath = "uploads/" . $fileName;
-            $stmt = $pdo->prepare("INSERT INTO files (project_id, folder_id, sub_folder_id, filename, filepath, file_type, uploaded_by, version_group_id, version_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
-            $stmt->execute([$projectId, $folderId, $subFolderId, $origName, $publicPath, $type, $userId, $versionGroup, $versionNum]);
-            echo json_encode(['status'=>'success']);
-        } else echo json_encode(['status'=>'error', 'msg'=>'Upload failed']);
+            try {
+                $stmt = $pdo->prepare("INSERT INTO files (project_id, folder_id, sub_folder_id, filename, filepath, file_type, uploaded_by, version_group_id, version_number) VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?)");
+                $stmt->execute([$projectId, $folderId, $subFolderId, $origName, $publicPath, $type, $userId, $versionGroup, $versionNum]);
+                echo json_encode(['status'=>'success']);
+            } catch (Throwable $e) {
+                @unlink($targetPath);
+                error_log('api.php upload_file insert failed: ' . $e->getMessage());
+                http_response_code(500);
+                echo json_encode(['status'=>'error', 'msg'=>'The uploaded file could not be saved.']);
+            }
+        } else {
+            @unlink($targetPath);
+            echo json_encode(['status'=>'error', 'msg'=>'Upload failed']);
+        }
         break;
 
     // --- 4. SOFT DELETE (PAPELERA) ---

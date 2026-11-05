@@ -31,6 +31,12 @@ $project_id_pre = $_GET['project_id'] ?? '';
         body { background-color: #0f172a; color: white; display: flex; align-items: center; justify-content: center; height: 100vh; }
         .upload-card { background: #1e293b; border: 1px solid #475569; padding: 40px; border-radius: 10px; width: 100%; max-width: 500px; }
         .form-control, .form-select { background: #0f172a; border: 1px solid #475569; color: white; }
+        .upload-progress { display: none; margin-bottom: 1rem; }
+        .upload-progress.is-active { display: block; }
+        .upload-progress-label { display: flex; justify-content: space-between; gap: 1rem; font-size: .85rem; margin-bottom: .35rem; }
+        .upload-progress-track { height: .55rem; overflow: hidden; border-radius: 999px; background: #334155; }
+        .upload-progress-bar { width: 0; height: 100%; background: #3b82f6; transition: width .15s ease; }
+        .upload-results { max-height: 9rem; overflow: auto; font-size: .85rem; }
     </style>
 </head>
 <body>
@@ -54,9 +60,15 @@ $project_id_pre = $_GET['project_id'] ?? '';
         </div>
 
         <div class="mb-4">
-            <label class="form-label text-muted small">File (PDF, Image)</label>
-            <input type="file" name="file" class="form-control" required>
+            <label class="form-label text-muted small">Files (PDF, Images)</label>
+            <input type="file" name="files[]" class="form-control" multiple required>
         </div>
+
+        <div id="uploadProgress" class="upload-progress" aria-live="polite">
+            <div class="upload-progress-label"><span id="uploadActiveFile">Preparing…</span><span id="uploadProgressText">0 / 0</span></div>
+            <div class="upload-progress-track"><div id="uploadProgressBar" class="upload-progress-bar"></div></div>
+        </div>
+        <div id="uploadResults" class="upload-results mb-3" aria-live="polite"></div>
 
         <div class="d-grid gap-2">
             <button type="submit" class="btn btn-primary fw-bold">Upload</button>
@@ -66,20 +78,81 @@ $project_id_pre = $_GET['project_id'] ?? '';
 </div>
 
 <script>
+const MAX_FILE_BYTES = 10737418240;
+
+function uploadOne(file, projectId, onProgress) {
+    return new Promise((resolve, reject) => {
+        const form = new FormData();
+        form.append('action', 'upload_file');
+        form.append('project_id', projectId);
+        form.append('file', file, file.name);
+        const xhr = new XMLHttpRequest();
+        xhr.open('POST', 'api.php');
+        xhr.upload.onprogress = event => {
+            if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+        };
+        xhr.onload = () => {
+            let result = null;
+            try { result = JSON.parse(xhr.responseText); } catch (_) {}
+            if (xhr.status >= 200 && xhr.status < 300 && result?.status === 'success') resolve(result);
+            else reject(new Error(result?.msg || `Upload failed (HTTP ${xhr.status || 0}).`));
+        };
+        xhr.onerror = () => reject(new Error('Connection error.'));
+        xhr.send(form);
+    });
+}
+
 document.getElementById('uploadForm').addEventListener('submit', async function(e) {
     e.preventDefault();
-    const fd = new FormData(this);
-    
-    try {
-        const r = await fetch('api.php', { method: 'POST', body: fd });
-        const res = await r.json();
-        if(res.status === 'success') {
-            alert('File uploaded successfully!');
-            window.location.href = '../pages/index.php?project_id=' + fd.get('project_id');
-        } else {
-            alert('Error: ' + res.msg);
+    const projectId = this.elements.project_id.value;
+    const files = Array.from(this.elements['files[]'].files || []);
+    if (!projectId || !files.length) return;
+
+    const progress = document.getElementById('uploadProgress');
+    const active = document.getElementById('uploadActiveFile');
+    const text = document.getElementById('uploadProgressText');
+    const bar = document.getElementById('uploadProgressBar');
+    const results = document.getElementById('uploadResults');
+    const submit = this.querySelector('button[type="submit"]');
+    const errors = [];
+    let completed = 0;
+    let succeeded = 0;
+    progress.classList.add('is-active');
+    results.replaceChildren();
+    submit.disabled = true;
+
+    for (const file of files) {
+        active.textContent = file.name;
+        text.textContent = `${completed} / ${files.length} · 0%`;
+        bar.style.width = `${Math.round((completed / files.length) * 100)}%`;
+        if (file.size > MAX_FILE_BYTES) {
+            errors.push({ filename: file.name, message: 'File exceeds the 10 GB limit.' });
+            completed++;
+            continue;
         }
-    } catch(err) { alert('Connection error'); }
+        try {
+            await uploadOne(file, projectId, percent => {
+                text.textContent = `${completed} / ${files.length} · ${percent}%`;
+                bar.style.width = `${Math.round(((completed + percent / 100) / files.length) * 100)}%`;
+            });
+            succeeded++;
+        } catch (error) {
+            errors.push({ filename: file.name, message: error.message || 'Upload failed.' });
+        }
+        completed++;
+    }
+
+    bar.style.width = '100%';
+    text.textContent = `${completed} / ${files.length}`;
+    active.textContent = errors.length ? `${succeeded} uploaded, ${errors.length} failed` : `${succeeded} uploaded`;
+    for (const error of errors) {
+        const row = document.createElement('div');
+        row.className = 'text-danger';
+        row.textContent = `${error.filename}: ${error.message}`;
+        results.appendChild(row);
+    }
+    submit.disabled = false;
+    if (!errors.length) window.location.href = '../pages/index.php?project_id=' + encodeURIComponent(projectId);
 });
 </script>
 </body>
