@@ -127,15 +127,41 @@ function runDeploymentWorkflowContractTests(): void
     if (stripos($deployYml, 'HMAC') !== false && !str_contains($deployYml, '#') && !str_contains($deployYml, 'test')) {
         throw new RuntimeException("FAIL: HMAC secret names should not appear in deploy.yml.");
     }
-    // Verify only FTP_SERVER, FTP_USERNAME, FTP_PASSWORD are used in action with block
+    // Verify only FTP and approved private SSO values are referenced.
+    $approvedSecrets = [
+        'FTP_SERVER',
+        'FTP_USERNAME',
+        'FTP_PASSWORD',
+        'TAKEOFF_SSO_ENABLED',
+        'TAKEOFF_SSO_HUB_BASE_URL',
+        'TAKEOFF_SSO_CLIENT_ID',
+        'TAKEOFF_SSO_CLIENT_SECRET',
+        'TAKEOFF_SSO_REDIRECT_URI',
+        'TAKEOFF_SSO_TIMEOUT',
+    ];
     $secretOccurrences = [];
     preg_match_all('/\${{\s*secrets\.([A-Z0-9_]+)\s*}}/', $deployYml, $secretMatches);
     if (!empty($secretMatches[1])) {
         foreach ($secretMatches[1] as $secretName) {
-            if (!in_array($secretName, ['FTP_SERVER', 'FTP_USERNAME', 'FTP_PASSWORD'], true)) {
+            if (!in_array($secretName, $approvedSecrets, true)) {
                 throw new RuntimeException("FAIL: Unexpected secret reference found: {$secretName}");
             }
         }
+    }
+
+    // SSO values must be materialized only into the ephemeral artifact, before checksums.
+    foreach (array_slice($approvedSecrets, 3) as $ssoSecret) {
+        if (!str_contains($deployYml, 'secrets.' . $ssoSecret)) {
+            throw new RuntimeException("FAIL: Missing approved SSO secret reference: {$ssoSecret}");
+        }
+        if (!str_contains($deployYml, 'SetEnv ' . $ssoSecret)) {
+            throw new RuntimeException("FAIL: Missing artifact SetEnv directive for: {$ssoSecret}");
+        }
+    }
+    $ssoMaterializationPosition = strpos($deployYml, "SetEnv TAKEOFF_SSO_ENABLED");
+    $checksumPosition = strpos($deployYml, 'find . -type f');
+    if ($ssoMaterializationPosition === false || $checksumPosition === false || $ssoMaterializationPosition >= $checksumPosition) {
+        throw new RuntimeException('FAIL: SSO configuration must be materialized before SHA256SUMS generation.');
     }
 
     // 9. Acceptance criteria: .gitignore protections
