@@ -137,6 +137,19 @@ jobs:
 
           echo "Deployment artifact generated successfully."
 
+      - name: Prepare one-shot SSO production diagnostic
+        run: |
+          set -euo pipefail
+          diagnostic_token="$(openssl rand -hex 32)"
+          echo "::add-mask::$diagnostic_token"
+          echo "TAKEOFF_DIAGNOSTIC_TOKEN=$diagnostic_token" >> "$GITHUB_ENV"
+          token_hash="$(printf '%s' "$diagnostic_token" | sha256sum | cut -d ' ' -f 1)"
+          diagnostic_file="sso-production-diagnostic-${GITHUB_RUN_ID}.php"
+          sed "s/__DIAGNOSTIC_TOKEN_SHA256__/$token_hash/g" \
+            harness/sso-production-diagnostic.php \
+            > "deploy_artifact/$diagnostic_file"
+          test "$(grep -c "$token_hash" "deploy_artifact/$diagnostic_file")" -eq 1
+
       # Security Note:
       # Port 21 (plain FTP) is retained due to lack of FTPS evidence from the hosting provider.
       # Plain FTP transmits credentials and code unencrypted over the network.
@@ -152,3 +165,13 @@ jobs:
           local-dir: ./deploy_artifact/
           server-dir: ./
           dangerous-clean-slate: false
+
+      - name: Run one-shot SSO production diagnostic
+        run: |
+          set -euo pipefail
+          response="$(curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "X-Takeoff-Diagnostic-Token: $TAKEOFF_DIAGNOSTIC_TOKEN" \
+            "https://takeoff.brightronix.net/sso-production-diagnostic-${GITHUB_RUN_ID}.php")"
+          printf '%s' "$response" | jq -c '{ok,config_loaded,oauth_client_accepted,oauth_classification,database_connected,users_table,users_active_column,users_timestamps,links_table,links_active_column,cleanup}'
+          printf '%s' "$response" | jq -e '.cleanup == true' >/dev/null
