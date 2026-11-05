@@ -89,11 +89,43 @@ function takeoff_add_column(PDO $pdo, string $table, string $column, string $sql
 function takeoff_table_exists(PDO $pdo, string $table): bool
 {
     try {
-        $stmt = $pdo->prepare("SHOW TABLES LIKE ?");
+        $stmt = $pdo->prepare(
+            "SELECT 1
+             FROM information_schema.TABLES
+             WHERE TABLE_SCHEMA = DATABASE()
+               AND TABLE_NAME = ?
+             LIMIT 1"
+        );
         $stmt->execute([$table]);
         return (bool)$stmt->fetchColumn();
     } catch (Throwable $e) {
         return false;
+    }
+}
+
+function assert_takeoff_runtime_schema(PDO $pdo): void
+{
+    $required = [
+        'takeoff_layers' => ['integration_key', 'drawing_id', 'estimate_key', 'metadata_json'],
+        'takeoff_count_markers' => ['client_uid', 'layer_id', 'multiplier', 'quantity', 'metadata_json'],
+        'takeoff_linear_segments' => ['client_uid', 'layer_id', 'points_json', 'measured_length', 'multiplier', 'total_length', 'metadata_json'],
+        'takeoff_measurement_summaries' => ['drawing_id', 'summary_json'],
+        'takeoff_sheet_scales' => ['drawing_id', 'page_number', 'pixels_per_unit'],
+        'takeoff_estimate_states' => ['estimate_key', 'drawing_id', 'state_json', 'revision'],
+        'takeoff_estimate_scales' => ['estimate_key', 'drawing_id', 'page_number', 'pixels_per_unit'],
+        'estimates' => ['id', 'project_id'],
+        'estimate_items' => ['id', 'estimate_id', 'takeoff_layer_id', 'source_layer_key'],
+    ];
+    foreach ($required as $table => $columns) {
+        if (!takeoff_table_exists($pdo, $table)) {
+            throw new RuntimeException('Takeoff storage schema is incomplete. Missing required table.');
+        }
+        $available = takeoff_columns($pdo, $table);
+        foreach ($columns as $column) {
+            if (!in_array($column, $available, true)) {
+                throw new RuntimeException('Takeoff storage schema is incomplete. Missing required column.');
+            }
+        }
     }
 }
 
@@ -663,11 +695,9 @@ function state_payload(PDO $pdo, int $drawingId, string $estimateKey = '', bool 
 }
 
 try {
-    ensure_takeoff_layer_columns($pdo);
-    ensure_takeoff_geometry_tables($pdo);
-    ensure_takeoff_scale_table($pdo);
-    ensure_takeoff_state_table($pdo);
-    ensure_estimate_schema($pdo);
+    // Production runtime credentials are DML-only. Schema changes belong to
+    // reviewed migrations; requests perform a read-only compatibility check.
+    assert_takeoff_runtime_schema($pdo);
 
     switch ($action) {
         case 'bootstrap':
@@ -1054,5 +1084,8 @@ try {
         'msg' => $e->getMessage(), 'conflicts' => $e->conflicts], 409);
 } catch (Throwable $e) {
     if ($pdo->inTransaction()) $pdo->rollBack();
-    out_json(['status' => 'error', 'msg' => $e->getMessage()], 500);
+    $message = $e instanceof RuntimeException && str_starts_with($e->getMessage(), 'Takeoff storage schema')
+        ? $e->getMessage()
+        : 'Takeoff storage is temporarily unavailable.';
+    out_json(['status' => 'error', 'code' => 'takeoff_storage_unavailable', 'msg' => $message], 500);
 }

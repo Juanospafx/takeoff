@@ -3132,8 +3132,20 @@
     }
 
     function submitCreateLayerModal() {
+
         if (!requireWrite()) return false;
+
+
+
+
+
+
+
+
+
+
         const items = takeoffState.pendingCatalogItems || [];
+
         const chosenGroupId = $('createLayerGroup')?.value || takeoffState.pendingCreateGroupId;
         let group = findGroupExact(chosenGroupId) || findGroup(chosenGroupId);
         if (!group) {
@@ -3235,8 +3247,8 @@
             }
             saveTakeoffState();
             renderTakeoffPanel();
-            showPrepared(createdLayers.length === 1 
-                ? `Takeoff layer "${createdLayers[0].name}" created.` 
+            showPrepared(createdLayers.length === 1
+                ? `Takeoff layer "${createdLayers[0].name}" created.`
                 : `${createdLayers.length} takeoff layers added to "${group.name}".`);
             return;
         }
@@ -3248,6 +3260,12 @@
         const uom = $('createLayerUom')?.value || typeToUom(type);
         const symbol = $('createLayerSymbol')?.value || 'Solid Circle';
         const size = $('createLayerSize')?.value || 'Medium';
+
+
+
+
+
+
         const color = $('createLayerColorSwatch')?.style.background || '#00d2ff';
         const strokeWidth = type.includes('Area') ? 2 : 2.5;
         const radius = takeoffSizeRadius(size);
@@ -3693,8 +3711,8 @@
         wrap.innerHTML = `
             <div class="pro-create-added-items-header">
                 <span class="pro-create-added-title">
-                    <i class="fas fa-boxes-stacked"></i> 
-                    Selected Items (${items.length}) 
+                    <i class="fas fa-boxes-stacked"></i>
+                    Selected Items (${items.length})
                     <span style="font-size:10.5px;font-weight:normal;opacity:0.85;margin-left:4px;">(Click an item to configure its color & properties)</span>
                 </span>
                 <button type="button" class="pro-create-clear-items-btn" id="createLayerClearItemsBtn">Clear all</button>
@@ -6508,6 +6526,24 @@
         showPrepared(action);
     }
 
+    // Bind mutation entry points through delegation as soon as this script is
+    // evaluated.  The Takeoff workspace can be rendered or refreshed after the
+    // initial DOMContentLoaded pass, so snapshotting the current buttons left
+    // Actions -> Create New Group without a listener in that state.
+    function bindTakeoffActionDelegation() {
+        document.addEventListener('click', event => {
+            const button = event.target?.closest?.('[data-takeoff-action]');
+            if (!button) return;
+            handleTakeoffAction(button.dataset.takeoffAction);
+        });
+        document.addEventListener('submit', event => {
+            if (event.target?.id !== 'takeoffGroupForm') return;
+            submitTakeoffGroupModal(event);
+        });
+    }
+
+    bindTakeoffActionDelegation();
+
     function toggleGlobalVisibility() {
         pushTakeoffHistory('toggle-global-visibility');
         takeoffState.globalVisible = !takeoffState.globalVisible;
@@ -7747,11 +7783,6 @@
             });
         });
 
-        document.querySelectorAll('[data-takeoff-action]').forEach(button => {
-            button.addEventListener('click', () => handleTakeoffAction(button.dataset.takeoffAction));
-        });
-
-        $('takeoffGroupForm')?.addEventListener('submit', submitTakeoffGroupModal);
         document.querySelectorAll('[data-group-modal-close]').forEach(button => button.addEventListener('click', closeTakeoffGroupModal));
         $('takeoffGroupName')?.addEventListener('input', event => {
             const input = event.currentTarget;

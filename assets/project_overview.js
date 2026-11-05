@@ -1393,91 +1393,175 @@
         return null;
     }
 
+    const MAX_DOCUMENT_BYTES = 10737418240;
+    const MAX_PDF_PREVIEW_BYTES = 67108864;
     let isAddingFiles = false;
+
+    function ensureDocumentUploadProgress() {
+        let host = document.querySelector('.multi-upload-progress');
+        if (host) return host;
+        host = document.createElement('div');
+        host.className = 'multi-upload-progress';
+        host.style.cssText = 'position:fixed;right:24px;bottom:24px;z-index:10000;width:min(420px,calc(100vw - 48px));padding:16px;border:1px solid rgba(148,163,184,.3);border-radius:12px;background:#111827;color:#fff;box-shadow:0 14px 40px rgba(0,0,0,.35)';
+        host.setAttribute('aria-live', 'polite');
+        const label = document.createElement('div');
+        label.className = 'multi-upload-progress-label';
+        label.style.cssText = 'overflow:hidden;font-weight:600;text-overflow:ellipsis;white-space:nowrap';
+        const count = document.createElement('div');
+        count.className = 'multi-upload-progress-count';
+        count.style.cssText = 'margin:5px 0;color:#cbd5e1;font-size:12px';
+        const track = document.createElement('div');
+        track.className = 'multi-upload-progress-track';
+        track.style.cssText = 'height:8px;overflow:hidden;border-radius:999px;background:#334155';
+        const bar = document.createElement('div');
+        bar.className = 'multi-upload-progress-bar';
+        bar.style.cssText = 'width:0;height:100%;background:#3b82f6;transition:width .15s ease';
+        const results = document.createElement('div');
+        results.className = 'multi-upload-progress-results';
+        results.style.cssText = 'max-height:140px;margin-top:8px;overflow:auto;font-size:12px';
+        track.appendChild(bar);
+        host.append(label, count, track, results);
+        (document.querySelector('.documents-page') || document.body).appendChild(host);
+        return host;
+    }
+
+    function uploadDocumentFile(file, projectId, onProgress) {
+        return new Promise((resolve, reject) => {
+            const form = new FormData();
+            form.append('project_id', projectId);
+            form.append('file', file, file.name);
+            const xhr = new XMLHttpRequest();
+            xhr.open('POST', '../api/project_document_takeoff.php');
+            xhr.setRequestHeader('Accept', 'application/json');
+            xhr.upload.onprogress = event => {
+                if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+            };
+            xhr.onload = () => {
+                let result = null;
+                try { result = JSON.parse(xhr.responseText); } catch (_) {}
+                if (xhr.status >= 200 && xhr.status < 300 && result?.success && result?.file?.id) resolve(result.file);
+                else reject(new Error(result?.message || `Upload failed (HTTP ${xhr.status || 0}).`));
+            };
+            xhr.onerror = () => reject(new Error('Connection error.'));
+            xhr.send(form);
+        });
+    }
 
     async function addFiles(files, category = null) {
         const rawIncoming = Array.from(files || []);
-        if (!rawIncoming.length) return;
-        if (isAddingFiles) return;
+        if (!rawIncoming.length || isAddingFiles) return;
         isAddingFiles = true;
 
         try {
-            // Deduplicate files in this incoming batch by name, size, and lastModified
             const incoming = [];
             const seenKeys = new Set();
-            for (const f of rawIncoming) {
-                const key = `${f.name}_${f.size}_${f.lastModified || 0}`;
+            for (const file of rawIncoming) {
+                const key = `${file.name}_${file.size}_${file.lastModified || 0}`;
                 if (!seenKeys.has(key)) {
                     seenKeys.add(key);
-                    incoming.push(f);
+                    incoming.push(file);
                 }
             }
-
             if (!incoming.length) return;
-            const now = new Date().toLocaleString();
+
+            const projectId = Number(window.ProjectState?.projectId || 0);
+            const progress = ensureDocumentUploadProgress();
+            const progressLabel = progress.querySelector('.multi-upload-progress-label');
+            const progressCount = progress.querySelector('.multi-upload-progress-count');
+            const progressBar = progress.querySelector('.multi-upload-progress-bar');
+            const progressResults = progress.querySelector('.multi-upload-progress-results');
+            const errors = [];
+            let completed = 0;
+            let succeeded = 0;
+            let firstAddedId = null;
+            progress.classList.add('is-active');
+            progressResults.replaceChildren();
 
             for (let index = 0; index < incoming.length; index++) {
                 const file = incoming[index];
+                progressLabel.textContent = file.name;
+                progressCount.textContent = `${completed} / ${incoming.length} · 0%`;
+                if (file.size > MAX_DOCUMENT_BYTES) {
+                    errors.push({ filename: file.name, message: 'File exceeds the 10 GB limit.' });
+                    completed++;
+                    continue;
+                }
+
                 const id = String(Date.now() + index + Math.random().toString(16).slice(2));
                 const ext = String(file.name.split('.').pop() || '').toLowerCase();
                 const inferredCategory = inferCategory(file, category);
                 const folderId = selectedDocumentsFolder.startsWith('custom:') ? selectedDocumentsFolder.replace('custom:', '') : '';
-
-                sessionFiles.set(id, file);
-                sessionFileUrls.set(id, URL.createObjectURL(file));
-
                 let pageCount = null;
                 let pages = [];
 
-                if (ext === 'pdf' && window.pdfjsLib) {
+                if (ext === 'pdf' && file.size <= MAX_PDF_PREVIEW_BYTES && window.pdfjsLib) {
                     try {
                         const arrayBuffer = await file.arrayBuffer();
-                        const typedData = new Uint8Array(arrayBuffer);
-                        const pdf = await window.pdfjsLib.getDocument({ data: typedData }).promise;
+                        const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
                         pdfDocumentCache.set(id, pdf);
                         pageCount = pdf.numPages;
-                        for (let p = 1; p <= pageCount; p++) {
-                            pages.push({
-                                id: `${id}-p${p}`,
-                                pageNumber: p,
-                                name: `Sheet ${p}`,
-                                title: `${file.name.replace(/\.pdf$/i, '')} - Page ${p}`
-                            });
-                        }
-                    } catch (err) {
-                        console.warn('Could not extract PDF page count:', err);
+                        pages = Array.from({ length: pageCount }, (_, pageIndex) => ({
+                            id: `${id}-p${pageIndex + 1}`,
+                            pageNumber: pageIndex + 1,
+                            name: `Sheet ${pageIndex + 1}`,
+                            title: `${file.name.replace(/\.pdf$/i, '')} - Page ${pageIndex + 1}`
+                        }));
+                    } catch (error) {
+                        console.warn('Could not extract PDF page count:', error);
                     }
                 }
 
-                localDocuments.push({
-                    id,
-                    name: file.name,
-                    filename: file.name,
-                    category: inferredCategory,
-                    folderId,
-                    size: file.size,
-                    uploadedAt: now,
-                    uploadedBy: $('poEstimator')?.value || 'Juan Estevez',
-                    type: file.type || '',
-                    extension: ext,
-                    source: 'local',
-                    pageCount: pageCount || (pages.length ? pages.length : null),
-                    pages,
-                    order: Date.now() + index
-                });
-            }
-
-            if (incoming.length) {
-                const firstId = localDocuments[localDocuments.length - incoming.length]?.id;
-                if (firstId) {
-                    selectedDocumentsId = firstId;
+                if (!projectId) {
+                    sessionFiles.set(id, file);
+                    sessionFileUrls.set(id, URL.createObjectURL(file));
+                    localDocuments.push({
+                        id, name: file.name, filename: file.name, category: inferredCategory, folderId,
+                        size: file.size, uploadedAt: new Date().toLocaleString(),
+                        uploadedBy: $('poEstimator')?.value || 'Juan Estevez', type: file.type || '',
+                        extension: ext, source: 'local', pageCount, pages, order: Date.now() + index
+                    });
+                    firstAddedId = firstAddedId || id;
+                    succeeded++;
+                    completed++;
+                    progressBar.style.width = `${Math.round((completed / incoming.length) * 100)}%`;
+                    continue;
                 }
+
+                try {
+                    const stored = await uploadDocumentFile(file, projectId, percent => {
+                        progressCount.textContent = `${completed} / ${incoming.length} · ${percent}%`;
+                        progressBar.style.width = `${Math.round(((completed + percent / 100) / incoming.length) * 100)}%`;
+                    });
+                    const storedId = Number(stored.id);
+                    window.ProjectState.documents.push({
+                        id: storedId, source: 'legacy_file', filename: stored.filename || file.name,
+                        title: stored.filename || file.name, path: `../${stored.filepath}`,
+                        extension: stored.file_type || ext, mime_type: file.type || '',
+                        uploaded_at: new Date().toISOString(), pageCount, page_count: pageCount, pages
+                    });
+                    firstAddedId = firstAddedId || `existing-legacy_file-${storedId}`;
+                    succeeded++;
+                } catch (error) {
+                    errors.push({ filename: file.name, message: error.message || 'Upload failed.' });
+                }
+                completed++;
             }
 
+            if (firstAddedId) selectedDocumentsId = firstAddedId;
             persistLocalDocuments();
             syncDocumentsToProjectState();
             renderDocumentsPage();
-            showToast(`${incoming.length} file${incoming.length === 1 ? '' : 's'} added.`);
+            progressBar.style.width = '100%';
+            progressLabel.textContent = errors.length ? `${succeeded} uploaded, ${errors.length} failed` : `${succeeded} uploaded`;
+            progressCount.textContent = `${completed} / ${incoming.length}`;
+            for (const error of errors) {
+                const row = document.createElement('div');
+                row.className = 'multi-upload-progress-error';
+                row.style.color = '#fca5a5';
+                row.textContent = `${error.filename}: ${error.message}`;
+                progressResults.appendChild(row);
+            }
+            showToast(errors.length ? `${succeeded} uploaded; ${errors.length} failed.` : `${succeeded} file${succeeded === 1 ? '' : 's'} added.`);
         } finally {
             isAddingFiles = false;
         }

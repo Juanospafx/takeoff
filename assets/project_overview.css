@@ -1199,17 +1199,15 @@ body.header-is-collapsed .project-subhead-wrapper,
 .overview-field input:focus,
 .overview-field select:focus,
 .overview-field textarea:focus {
-    border-color: var(--primary, #fb5a3a) !important;
-    box-shadow: none !important;
-    outline: none !important;
+    border-color: var(--primary, #fb5a3a);
+    box-shadow: 0 0 0 2px rgba(251, 90, 58, 0.15) !important;
 }
 
 [data-theme="dark"] .overview-field input:focus,
 [data-theme="dark"] .overview-field select:focus,
 [data-theme="dark"] .overview-field textarea:focus {
-    border-color: var(--primary, #fb5a3a) !important;
-    box-shadow: none !important;
-    outline: none !important;
+    border-color: var(--primary, #fb5a3a);
+    box-shadow: 0 0 0 2px rgba(251, 90, 58, 0.25) !important;
 }
 
 /* Input Icon Wrappers & Single Symbol Support */
@@ -1571,9 +1569,8 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 
 .pd-composer-textarea:focus,
 .pd-composer-input:focus {
-    border-color: var(--primary, #fb5a3a) !important;
-    box-shadow: none !important;
-    outline: none !important;
+    border-color: var(--primary, #fb5a3a);
+    box-shadow: 0 0 0 2px rgba(251, 90, 58, 0.15);
 }
 
 /* ==========================================================
@@ -2842,8 +2839,8 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 }
 
 .doc-list-item-row.active {
-    border-color: var(--primary, #fb5a3a) !important;
-    box-shadow: none !important;
+    border-color: var(--primary, #fb5a3a);
+    box-shadow: 0 0 0 1.5px rgba(251, 90, 58, 0.35);
 }
 
 /* Thumbnail Box (Left preview scam print) */
@@ -3770,4 +3767,4 @@ body.theme-dark .pd-input-icon-wrap input {
 .pd-floating-options-menu button.danger:hover {
     background: rgba(239, 68, 68, 0.12);
 }
-
+

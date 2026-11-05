@@ -1030,7 +1030,7 @@ $state = [
                                     </div>
                                     <div class="pd-presence-user-info">
                                         <span class="pd-presence-user-name"><?= htmlspecialchars($selfName) ?> (You)</span>
-                                        <span class="pd-presence-user-role"><?= htmlspecialchars($selfRole) ?> â€¢ Active now</span>
+                                        <span class="pd-presence-user-role"><?= htmlspecialchars($selfRole) ?> &bull; Active now</span>
                                     </div>
                                 </div>
                             </div>
@@ -1084,7 +1084,7 @@ $state = [
                                         <span class="pro-drawing-active-label">Item Activo:</span>
                                         <span class="pro-drawing-active-pill" id="takeoffDrawingActivePill">
                                             <span class="pro-drawing-active-dot" id="takeoffDrawingActiveDot"></span>
-                                            <span id="takeoffDrawingActiveText">NingÃºn item seleccionado</span>
+                                            <span id="takeoffDrawingActiveText">Ning&uacute;n item seleccionado</span>
                                         </span>
                                     </div>
                                     <div class="pro-drawing-filters">
@@ -1181,7 +1181,7 @@ $state = [
                                         style="cursor: pointer; user-select: none; font-size: 0.72rem; color: var(--tk-text-muted, #64748b); margin: 0; font-weight: 500; display: flex; align-items: center; gap: 7px;">
                                         <input type="checkbox" id="takeoffScaleApplyAll"
                                             style="cursor: pointer; width: 14px; height: 14px; accent-color: var(--tk-primary, #fb5a3a);">
-                                        <span>Aplicar a todas las pÃ¡ginas</span>
+                                        <span>Aplicar a todas las p&aacute;ginas</span>
                                     </label>
                                     <button type="button" id="takeoffScaleApplyBtn" class="pro-toolbar-btn"
                                         style="height: 25px; min-height: 25px; padding: 0 12px; font-size: 0.74rem; border-radius: 4px; background: var(--tk-primary, #fb5a3a); color: #fff; border: none; cursor: pointer; font-weight: 600;">Aplicar</button>
@@ -1416,7 +1416,7 @@ $state = [
                                 <?php else: ?>
                                     <div class="pd-list-month-header">September</div>
                                     <?php foreach ($projectNotes as $idx => $note):
-                                        $author = $note['user'] ?? 'Isaac De JesÃºs';
+                                        $author = $note['user'] ?? 'Isaac De Jesus';
                                         $initial = strtoupper(substr($author, 0, 1)) ?: 'I';
                                         ?>
                                         <div class="pd-note-item" data-note-index="<?= $idx ?>">
@@ -1483,7 +1483,7 @@ $state = [
                                                 <div class="pd-task-title"><?= htmlspecialchars($task['title'] ?? '') ?></div>
                                                 <div class="pd-task-meta-row">
                                                     <div class="pd-task-assignee">For
-                                                        <?= htmlspecialchars($task['responsible'] ?? 'Isaac De JesÃºs') ?>
+                                                        <?= htmlspecialchars($task['responsible'] ?? 'Isaac De Jesus') ?>
                                                     </div>
                                                     <?php if (!empty($task['due_date'])): ?>
                                                         <div class="pd-task-due-badge">Due <?= htmlspecialchars($task['due_date']) ?></div>
@@ -1602,7 +1602,7 @@ $state = [
                             </div>
                         </div>
 
-                        <!-- Toolbar: Custom â–¾, Upload, Search, â‹® -->
+                        <!-- Toolbar: Custom dropdown, Upload, Search, More -->
                         <div class="documents-toolbar">
                             <div class="doc-toolbar-left">
                                 <div class="doc-sort-dropdown-wrap">
@@ -1903,7 +1903,7 @@ $state = [
         </main>
     </div>
 
-    <input type="file" id="projectUploadInput" class="d-none">
+    <input type="file" id="projectUploadInput" class="d-none" multiple>
     <input type="file" id="documentsBrowseInput" class="d-none" multiple>
 
     <!-- Customer Information Modal -->
@@ -2434,19 +2434,82 @@ $state = [
                 .catch(() => alert('Create folder failed.'));
         }
 
-        document.getElementById('projectUploadInput')?.addEventListener('change', function () {
-            if (!this.files || !this.files.length) return;
-            const fd = new FormData();
-            fd.append('action', 'upload_file');
-            fd.append('project_id', ProjectState.projectId);
-            fd.append('file', this.files[0]);
-            fetch('../api/api.php', { method: 'POST', body: fd })
-                .then(r => r.json())
-                .then(res => {
-                    if (res.status === 'success') location.reload();
-                    else alert('Upload failed: ' + (res.msg || 'Unknown error'));
-                })
-                .catch(() => alert('Upload failed.'));
+        const MAX_PROJECT_FILE_BYTES = 10737418240;
+
+        function uploadProjectFile(file, onProgress) {
+            return new Promise((resolve, reject) => {
+                const fd = new FormData();
+                fd.append('action', 'upload_file');
+                fd.append('project_id', ProjectState.projectId);
+                fd.append('file', file, file.name);
+                const xhr = new XMLHttpRequest();
+                xhr.open('POST', '../api/api.php');
+                xhr.upload.onprogress = event => {
+                    if (event.lengthComputable) onProgress(Math.round((event.loaded / event.total) * 100));
+                };
+                xhr.onload = () => {
+                    let result = null;
+                    try { result = JSON.parse(xhr.responseText); } catch (_) {}
+                    if (xhr.status >= 200 && xhr.status < 300 && result?.status === 'success') resolve(result);
+                    else reject(new Error(result?.msg || `Upload failed (HTTP ${xhr.status || 0}).`));
+                };
+                xhr.onerror = () => reject(new Error('Connection error.'));
+                xhr.send(fd);
+            });
+        }
+
+        document.getElementById('projectUploadInput')?.addEventListener('change', async function () {
+            const files = Array.from(this.files || []);
+            this.value = '';
+            if (!files.length) return;
+
+            const host = document.createElement('div');
+            host.style.cssText = 'position:fixed;right:24px;bottom:24px;z-index:10000;width:min(420px,calc(100vw - 48px));padding:16px;border-radius:12px;background:#111827;color:#fff;box-shadow:0 14px 40px rgba(0,0,0,.35)';
+            const label = document.createElement('div');
+            const count = document.createElement('div');
+            count.style.cssText = 'font-size:12px;color:#cbd5e1;margin:5px 0';
+            const track = document.createElement('div');
+            track.style.cssText = 'height:8px;border-radius:999px;overflow:hidden;background:#334155';
+            const bar = document.createElement('div');
+            bar.style.cssText = 'width:0;height:100%;background:#3b82f6;transition:width .15s ease';
+            const results = document.createElement('div');
+            results.style.cssText = 'font-size:12px;max-height:140px;overflow:auto;margin-top:8px';
+            track.appendChild(bar);
+            host.append(label, count, track, results);
+            document.body.appendChild(host);
+
+            const errors = [];
+            let completed = 0;
+            let succeeded = 0;
+            for (const file of files) {
+                label.textContent = file.name;
+                count.textContent = `${completed} / ${files.length} · 0%`;
+                if (file.size > MAX_PROJECT_FILE_BYTES) {
+                    errors.push({ filename: file.name, message: 'File exceeds the 10 GB limit.' });
+                    completed++;
+                    continue;
+                }
+                try {
+                    await uploadProjectFile(file, percent => {
+                        count.textContent = `${completed} / ${files.length} · ${percent}%`;
+                        bar.style.width = `${Math.round(((completed + percent / 100) / files.length) * 100)}%`;
+                    });
+                    succeeded++;
+                } catch (error) {
+                    errors.push({ filename: file.name, message: error.message || 'Upload failed.' });
+                }
+                completed++;
+            }
+            bar.style.width = '100%';
+            label.textContent = errors.length ? `${succeeded} uploaded, ${errors.length} failed` : `${succeeded} uploaded`;
+            count.textContent = `${completed} / ${files.length}`;
+            for (const error of errors) {
+                const row = document.createElement('div');
+                row.style.color = '#fca5a5';
+                row.textContent = `${error.filename}: ${error.message}`;
+                results.appendChild(row);
+            }
+            if (!errors.length) location.reload();
         });
 
         function alignOverviewWonBtn() {

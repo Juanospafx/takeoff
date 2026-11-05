@@ -57,9 +57,19 @@
     function item(row = {}) {
         const takeoffLayerId = text(row.takeoffLayerId ?? row.takeoff_layer_id ?? row.sourceTakeoffId);
         const quantity = numeric(row.quantity ?? row.originalQuantity);
-        const itemType = text(row.itemType ?? row.item_type, row.isAssembly ? 'assembly' : 'part').toLowerCase();
-        const childRows = row.children ?? row.assemblyItems ?? row.components;
+        const persistedType = row.itemType ?? row.item_type ?? row.type
+            ?? row.catalogSnapshot?.type ?? row.catalogMetadata?.type;
+        const categoryType = String(row.costCategory ?? row.cost_category ?? '').toLowerCase() === 'assembly'
+            ? 'assembly' : null;
+        const itemType = text(persistedType ?? categoryType,
+            (row.isAssembly || row.is_assembly) ? 'assembly' : 'part').toLowerCase();
+        const childRows = row.children ?? row.assemblyItems ?? row.components
+            ?? row.catalogSnapshot?.assemblyComponents ?? row.catalogMetadata?.assemblyComponents;
+        // The workspace snapshot is the lossless source of truth. Start from a
+        // deep copy so forward-compatible fields (tags, multiplier, locks and
+        // calculation extensions) survive normalization and estimate copies.
         const normalized = {
+            ...clone(row),
             id: text(row.id) || uid('item'),
             takeoffLayerId: takeoffLayerId || null,
             copiedFromTakeoffLayerId: text(row.copiedFromTakeoffLayerId) || null,
@@ -70,7 +80,8 @@
             overrides: row.overrides ? clone(row.overrides) : null,
             lastCatalogRefresh: row.lastCatalogRefresh ? clone(row.lastCatalogRefresh) : null,
             itemType,
-            isAssembly: row.isAssembly === true || itemType === 'assembly',
+            isAssembly: row.isAssembly === true || Number(row.is_assembly ?? 0) === 1
+                || itemType === 'assembly' || (Array.isArray(childRows) && childRows.length > 0),
             parentItemId: text(row.parentItemId ?? row.parent_item_id ?? row.assemblyParentId) || null,
             assemblyComponentId: row.assemblyComponentId ?? row.assembly_component_id ?? null,
             children: Array.isArray(childRows) ? childRows.map(item) : [],
@@ -89,6 +100,9 @@
             costCategory: category(row.costCategory ?? row.cost_type ?? row.item_type ?? row.type),
             uom: text(row.uom ?? row.unit_of_measure, 'ea'),
             quantity,
+            multiplier: numeric(row.multiplier, 1),
+            locked: row.locked === true || Number(row.locked ?? 0) === 1,
+            tags: Array.isArray(row.tags) ? clone(row.tags) : [],
             originalQuantity: numeric(row.originalQuantity, quantity),
             quantityOverride: row.quantityOverride === true || String(row.quantitySyncStatus || '').toLowerCase() === 'overridden',
             pendingTakeoffQuantity: row.pendingTakeoffQuantity === null || row.pendingTakeoffQuantity === undefined ? null : numeric(row.pendingTakeoffQuantity),

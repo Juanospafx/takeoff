@@ -47,7 +47,7 @@ test('estimate selection intent is handled by the sole Estimating workspace owne
     assert.equal(saved.estimates.find(row => row.id === 'two').groups[0].items[0].name, 'Old two item');
     assert.equal(saved.estimates.find(row => row.id === 'one').groups[0].items[0].name, 'One item');
     assert.deepEqual(saved.estimates.map(row => row.isActive), [false, true]);
-    assert.equal(dom.window.document.querySelector('[data-item-id="i2"] [data-item-field="name"]')?.value, 'Old two item');
+    assert.equal(dom.window.document.querySelector('[data-item-id="i2"] .est-item-title')?.textContent, 'Old two item');
     dom.window.close();
 });
 

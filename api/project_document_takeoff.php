@@ -20,6 +20,8 @@ $userId = (int)$user['user_id'];
 require_once __DIR__ . '/../core/db/connection.php';
 require_once __DIR__ . '/../core/files/upload_storage.php';
 
+const MAX_DOCUMENT_BYTES = 10737418240;
+
 function takeoff_json_error(int $status, string $code, string $message): void
 {
     http_response_code($status);
@@ -79,18 +81,42 @@ try {
     }
 
     if (!empty($_FILES['file']) && is_uploaded_file($_FILES['file']['tmp_name'])) {
+        if ((int)($_FILES['file']['size'] ?? 0) > MAX_DOCUMENT_BYTES) {
+            takeoff_json_error(413, 'FILE_TOO_LARGE', 'The uploaded file exceeds the 10 GB limit.');
+        }
         $original = basename((string)$_FILES['file']['name']);
         $extension = strtolower(pathinfo($original, PATHINFO_EXTENSION));
         $allowedExtensions = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'dwg', 'dxf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt', 'rtf', 'ppt', 'pptx', 'zip'];
         if (!$extension || !in_array($extension, $allowedExtensions, true)) takeoff_json_error(415, 'UNSUPPORTED_DOCUMENT', 'Unsupported document format.');
         $targetDir = __DIR__ . '/../uploads/';
         if (!is_dir($targetDir) && !mkdir($targetDir, 0755, true)) throw new RuntimeException('Upload directory is unavailable.');
-        $storedName = bin2hex(random_bytes(8)) . '_' . preg_replace('/[^A-Za-z0-9._-]/', '_', $original);
-        if (!move_uploaded_file($_FILES['file']['tmp_name'], $targetDir . $storedName)) throw new RuntimeException('Unable to store drawing.');
+        $safeName = preg_replace('/[^A-Za-z0-9._-]/', '_', $original);
+        $targetPath = '';
+        $storedName = '';
+        for ($attempt = 0; $attempt < 5; $attempt++) {
+            $storedName = bin2hex(random_bytes(12)) . '_' . $safeName;
+            $targetPath = $targetDir . $storedName;
+            $reservation = @fopen($targetPath, 'x');
+            if ($reservation !== false) {
+                fclose($reservation);
+                break;
+            }
+            $targetPath = '';
+        }
+        if ($targetPath === '') throw new RuntimeException('Unable to reserve upload storage.');
+        if (!move_uploaded_file($_FILES['file']['tmp_name'], $targetPath)) {
+            @unlink($targetPath);
+            throw new RuntimeException('Unable to store drawing.');
+        }
         $uploadedBy = $userId;
         $path = 'uploads/' . $storedName;
-        $insert = $pdo->prepare('INSERT INTO files (project_id,folder_id,filename,filepath,file_type,uploaded_by,version_number) VALUES (?,NULL,?,?,?,?,1)');
-        $insert->execute([$projectId, $original, $path, $extension, $uploadedBy]);
+        try {
+            $insert = $pdo->prepare('INSERT INTO files (project_id,folder_id,filename,filepath,file_type,uploaded_by,version_number) VALUES (?,NULL,?,?,?,?,1)');
+            $insert->execute([$projectId, $original, $path, $extension, $uploadedBy]);
+        } catch (Throwable $e) {
+            @unlink($targetPath);
+            throw $e;
+        }
         echo json_encode(['success' => true, 'file' => ['id' => (int)$pdo->lastInsertId(), 'filename' => $original, 'filepath' => $path, 'file_type' => $extension]], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         exit;
     }

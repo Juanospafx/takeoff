@@ -67,6 +67,8 @@ class IsolatedMockPdo extends PDO
     public int $nextLinkId = 1;
     public int $lastInsertId = 0;
     public bool $inTransaction = false;
+    public bool $hasUsersActiveColumn = true;
+    public int $usersActiveSchemaProbeCount = 0;
 
     /** @var callable|null */
     public $onInsertUser = null;
@@ -197,6 +199,17 @@ class IsolatedMockPdoStatement extends PDOStatement
             ($this->pdo->onQuery)($this->sql, $params);
         }
 
+        // Optional users.active schema probe used by production compatibility.
+        if (preg_match('/SELECT\s+active\s+FROM\s+\S*users\s+WHERE\s+1\s*=\s*0/i', $this->sql)) {
+            $this->pdo->usersActiveSchemaProbeCount++;
+            if (!$this->pdo->hasUsersActiveColumn) {
+                $error = new PDOException('Unknown column active', 1054);
+                $error->errorInfo = ['42S22', 1054, 'Unknown column active'];
+                throw $error;
+            }
+            return true;
+        }
+
         // INSERT INTO users
         if (preg_match('/INSERT\s+INTO\s+\S*users/i', $this->sql)) {
             if ($this->pdo->onInsertUser !== null) {
@@ -287,11 +300,12 @@ class IsolatedMockPdoStatement extends PDOStatement
                         continue;
                     }
 
+                    $legacyActiveProjection = (bool)preg_match('/1\s+AS\s+user_active/i', $this->sql);
                     $this->resultRow = [
                         'user_id' => $user['id'],
                         'username' => $user['username'],
                         'role' => $user['role'],
-                        'user_active' => (int)$user['active'],
+                        'user_active' => $legacyActiveProjection ? 1 : (int)$user['active'],
                         'link_id' => (int)$link['id'],
                         'provider' => $link['provider'],
                         'hub_user_id' => $link['hub_user_id'],
@@ -786,6 +800,24 @@ $upgraded = $freshRepo->provisionOrSynchronize('hub', 'canonical_sub_alpha', 'ad
 assertCondition($upgraded['role'] === 'admin', 'Upgrade: returned role is admin');
 assertCondition($freshPdo->users[$userRecord['id']]['role'] === 'admin', 'Upgrade: DB user role updated to admin');
 assertCondition($upgraded['link_id'] === $linkRecord['id'], 'Upgrade: link ID is preserved (link unchanged)');
+
+// 13.4.1 Canonical legacy users schema without optional active column
+$legacyPdo = new IsolatedMockPdo();
+$legacyPdo->hasUsersActiveColumn = false;
+$legacyRepo = new FederatedIdentityRepository($legacyPdo);
+
+// Internal active=0 deliberately proves the repository uses the legacy SQL
+// projection (1 AS user_active), not a column that does not exist in that schema.
+$legacyPdo->insertUser(700, 'legacy_existing_user', 'viewer', 0);
+$legacyPdo->insertLink(700, 'hub', 'legacy_existing_sub', 1);
+$legacyResolved = $legacyRepo->provisionOrSynchronize('hub', 'legacy_existing_sub', 'viewer');
+assertCondition($legacyResolved['user_id'] === 700, 'Legacy schema resolves an existing linked user without users.active');
+assertCondition($legacyResolved['active'] === true, 'Legacy schema treats an existing linked user as active');
+
+$legacyProvisioned = $legacyRepo->provisionOrSynchronize('hub', 'legacy_new_sub', 'admin');
+assertCondition($legacyProvisioned['role'] === 'admin', 'Legacy schema provisions a new shadow user without users.active');
+assertCondition(count($legacyPdo->users) === 2, 'Legacy schema provisioning creates exactly one additional user');
+assertCondition($legacyPdo->usersActiveSchemaProbeCount === 1, 'Optional users.active detection is cached once per repository instance');
 
 // 13.5 Collision and concurrent race recovery
 $racePdo = new IsolatedMockPdo();

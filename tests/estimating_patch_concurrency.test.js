@@ -67,8 +67,8 @@ test('two clients patching different estimates do not conflict or overwrite each
     assert.deepEqual(server.posts.map(post => post.updates.map(row => row.id)), [['one'], ['two']]);
     assert.equal(server.state.estimates.find(row => row.id === 'one').groups.length, 1);
     assert.equal(server.state.estimates.find(row => row.id === 'two').groups.length, 1);
-    assert.doesNotMatch(a.window.document.querySelector('.est-save-status').textContent, /failed|changed elsewhere/i);
-    assert.doesNotMatch(b.window.document.querySelector('.est-save-status').textContent, /failed|changed elsewhere/i);
+    assert.equal(JSON.parse(a.window.localStorage.getItem('takeoff.estimating.module.42')).dirtyEstimateIds.length, 0);
+    assert.equal(JSON.parse(b.window.localStorage.getItem('takeoff.estimating.module.42')).dirtyEstimateIds.length, 0);
     a.window.close(); b.window.close();
 });
 
@@ -96,7 +96,7 @@ test('stale Takeoff sync rebases onto the current estimate revision before POST'
     const saved = server.state.estimates.find(row => row.id === 'one').groups[0].items[0];
     assert.equal(saved.quantity, 20, 'Takeoff-owned quantity wins');
     assert.equal(saved.materialMargin, 15, 'concurrent Estimating-owned margin survives');
-    assert.doesNotMatch(dom.window.document.querySelector('.est-save-status').textContent, /changed elsewhere|conflict/i);
+    assert.equal(JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.42')).dirtyEstimateIds.length, 0);
     dom.window.close();
 });
 
@@ -108,7 +108,10 @@ test('same-estimate conflict preserves the losing client draft and structured co
     a.window.document.querySelector('[data-est-action="create-group"]').click();
     b.window.document.querySelector('[data-est-action="create-group"]').click();
     await new Promise(resolve => setTimeout(resolve, 650));
-    const loser = [a, b].find(dom => /changed elsewhere/i.test(dom.window.document.querySelector('.est-save-status').textContent));
+    const loser = [a, b].find(dom => {
+        const local = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.42'));
+        return Array.isArray(local.dirtyEstimateIds) && local.dirtyEstimateIds.includes('one');
+    });
     assert.ok(loser, 'one stale revision must surface a structured conflict');
     const draft = JSON.parse(loser.window.localStorage.getItem('takeoff.estimating.module.42'));
     assert.ok(draft.dirtyEstimateIds.includes('one'));

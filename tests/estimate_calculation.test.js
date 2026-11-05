@@ -67,6 +67,11 @@ near(labor.adjustedLaborHours, 6, 'case D labor hours');
 near(labor.laborCost, 240, 'case D labor cost');
 near(labor.laborSales, 300, 'case D labor sales');
 
+const globalLaborWaste = Calc.calculateItem({ quantity: 10, unitLabor: 60, laborRate: 25 }, { laborWaste: 15 });
+near(globalLaborWaste.adjustedLaborHours, 11.5, 'global labor waste applies when the item has no override');
+const overriddenLaborWaste = Calc.calculateItem({ quantity: 10, unitLabor: 60, laborRate: 25, laborWaste: 5 }, { laborWaste: 15 });
+near(overriddenLaborWaste.adjustedLaborHours, 10.5, 'item labor waste overrides the global setting');
+
 const categorySummary = Calc.calculateSummary([{ items: [item] }]);
 near(categorySummary.byCategory.Materials.totalSales, calc.materialSales, 'material roll-up contains material only');
 near(categorySummary.byCategory.Labor.totalSales, calc.laborSales, 'labor roll-up contains labor only');

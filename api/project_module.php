@@ -538,63 +538,6 @@ try {
                 $stmt->execute(array_values($filteredData));
                 $id = (int)$pdo->lastInsertId();
 
-                // If created from a project_template_id, preserve Summary settings from the latest project using that template
-                $tplId = (int)($filteredData['project_template_id'] ?? 0);
-                if ($tplId > 0 && project_table_exists($pdo, 'estimates') && project_table_exists($pdo, 'estimate_workspace_states')) {
-                    try {
-                        $srcStmt = $pdo->prepare("
-                            SELECT e.id AS est_id, e.settings_json, e.notes_json, ews.state_json
-                            FROM projects p
-                            INNER JOIN estimates e ON e.project_id = p.id AND e.deleted_at IS NULL
-                            LEFT JOIN estimate_workspace_states ews ON ews.estimate_id = e.id
-                            WHERE p.project_template_id = ? AND p.id <> ? AND p.deleted_at IS NULL
-                            ORDER BY ews.updated_at DESC, e.updated_at DESC, e.id DESC
-                            LIMIT 1
-                        ");
-                        $srcStmt->execute([$tplId, $id]);
-                        $srcEst = $srcStmt->fetch(PDO::FETCH_ASSOC);
-                        if ($srcEst) {
-                            $srcSnap = !empty($srcEst['state_json']) ? json_decode((string)$srcEst['state_json'], true) : [];
-                            if (!is_array($srcSnap)) $srcSnap = [];
-                            $srcSettings = isset($srcSnap['settings']) && is_array($srcSnap['settings'])
-                                ? $srcSnap['settings']
-                                : (!empty($srcEst['settings_json']) ? json_decode((string)$srcEst['settings_json'], true) : []);
-                            if (is_array($srcSettings) && !empty($srcSettings)) {
-                                $estCols = $pdo->query("SHOW COLUMNS FROM estimates")->fetchAll(PDO::FETCH_COLUMN);
-                                $newEstData = [
-                                    'project_id' => $id,
-                                    'name' => 'Primary Estimate',
-                                    'status' => 'draft',
-                                ];
-                                if (in_array('settings_json', $estCols, true)) {
-                                    $newEstData['settings_json'] = json_encode($srcSettings, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-                                }
-                                $eCols = array_keys($newEstData);
-                                $insEst = $pdo->prepare("INSERT INTO estimates (" . implode(', ', $eCols) . ") VALUES (" . implode(', ', array_fill(0, count($eCols), '?')) . ")");
-                                $insEst->execute(array_values($newEstData));
-                                $newEstId = (int)$pdo->lastInsertId();
-                                $newClientId = 'estimate_' . substr(md5($id . '_' . $newEstId . '_' . uniqid('', true)), 0, 14);
-                                $newState = [
-                                    'id' => $newClientId,
-                                    'dbEstimateId' => $newEstId,
-                                    'estimateItemId' => $newEstId,
-                                    'projectId' => $id,
-                                    'name' => 'Primary Estimate',
-                                    'status' => 'draft',
-                                    'isActive' => true,
-                                    'isPrimary' => true,
-                                    'is_primary' => true,
-                                    'groups' => [],
-                                    'settings' => $srcSettings,
-                                    'notes' => isset($srcSnap['notes']) && is_array($srcSnap['notes']) ? $srcSnap['notes'] : ['scope' => '', 'included' => [], 'excluded' => [], 'projectNotes' => ''],
-                                    'auditLog' => []
-                                ];
-                                $insWs = $pdo->prepare("INSERT INTO estimate_workspace_states (estimate_id, project_id, client_estimate_id, state_json, revision) VALUES (?, ?, ?, ?, 1)");
-                                $insWs->execute([$newEstId, $id, $newClientId, json_encode($newState, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)]);
-                            }
-                        }
-                    } catch (Throwable $tplErr) {}
-                }
             }
 
             $payload = project_payload($pdo, $id);

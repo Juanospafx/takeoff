@@ -334,7 +334,7 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
         </div>
         <div class="g-announcement-body">
             <h2 class="g-announcement-title" id="globalAnnouncementTitle">System Announcements &amp; Release Notes</h2>
-            
+
             <!-- Category Tabs (Projects, Admins, Developers) -->
             <div class="g-ann-tabs" id="globalAnnouncementTabs" style="display: flex;">
                 <button type="button" class="g-ann-tab active" data-ann-tab="projects">
@@ -923,7 +923,6 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
                 showAnnouncement(opts);
             }
         };
-        window.showConfirmDialog = window.TakeoffAnnouncement.confirm;
     })();
 </script>
 <link rel="stylesheet" href="../assets/sso_readonly.css?v=20261020-1">
