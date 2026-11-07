@@ -721,9 +721,11 @@
         });
 
         // 11. Any other buttons with aria-expanded="true"
-        document.querySelectorAll('[data-takeoff-menu-toggle][aria-expanded="true"]').forEach(b => {
+        document.querySelectorAll('[data-takeoff-menu-toggle]').forEach(b => {
             if (!shouldKeep(b)) {
                 b.setAttribute('aria-expanded', 'false');
+                const menu = document.getElementById(b.dataset.takeoffMenuToggle);
+                if (menu && !shouldKeep(menu)) menu.classList.remove('open');
             }
         });
     }
@@ -743,7 +745,7 @@
         '[data-tree-more-group], .bb-row-menu-toggle, [data-row-menu], [data-status-trigger], ' +
         '[data-estimate-menu], .est-version-menu-toggle, [data-est-pill-toggle], ' +
         '#takeoffDrawingBtn, #takeoffScaleStatus, #takeoffMoreToolsBtn, [data-viewer-command="layers"], ' +
-        '.pro-row-menu-btn, .pd-row-dots-btn, .pro-custom-dropdown-trigger'
+        '[data-takeoff-menu-toggle], .pro-actions-btn, .pro-row-menu-btn, .pd-row-dots-btn, .pro-custom-dropdown-trigger'
     );
 
     function handleUniversalCapture(event) {
@@ -809,7 +811,15 @@
                 isDocMenuTrigger ||
                 (clickedToggle.id === 'takeoffDrawingBtn' && document.getElementById('takeoffDrawingDropdown')?.classList.contains('open')) ||
                 (clickedToggle.id === 'takeoffScaleStatus' && document.getElementById('takeoffScalePanel')?.classList.contains('open')) ||
-                (clickedToggle.id === 'takeoffMoreToolsBtn' && !document.getElementById('takeoffMoreToolsPanel')?.hasAttribute('hidden'))
+                (clickedToggle.id === 'takeoffMoreToolsBtn' && !document.getElementById('takeoffMoreToolsPanel')?.hasAttribute('hidden')) ||
+                (clickedToggle.matches && clickedToggle.matches('[data-takeoff-menu-toggle]') && (
+                    document.getElementById(clickedToggle.dataset.takeoffMenuToggle)?.classList.contains('open') ||
+                    clickedToggle.getAttribute('aria-expanded') === 'true'
+                )) ||
+                (clickedToggle.matches && clickedToggle.matches('[data-group-menu]') && (
+                    document.getElementById('takeoffGroupContextMenu')?.style.display !== 'none' ||
+                    clickedToggle.getAttribute('aria-expanded') === 'true'
+                ))
             );
 
             if (isAlreadyActiveToggle) {

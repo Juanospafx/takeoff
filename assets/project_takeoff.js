@@ -184,6 +184,7 @@
         selectedDocumentId: Number(window.ProjectState?.selectedDocumentId || 0),
         selectedPage: 1,
         browseDocumentId: Number(window.ProjectState?.selectedDocumentId || 0),
+        previewAttachmentDocId: null,
         query: '',
         filterMode: 'all',
         previewPage: 1,
@@ -196,13 +197,37 @@
     };
 
     function drawingExtensions() {
-        return ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'heic'];
+        return ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'svg', 'heic'];
+    }
+
+    function isImageDrawingDoc(doc) {
+        return Boolean(doc && String(doc.extension || '').toLowerCase() !== 'pdf');
+    }
+
+    function pdfDrawingDocs() {
+        return drawingState.documents.filter(doc => !isImageDrawingDoc(doc));
+    }
+
+    function attachmentImageDocs() {
+        return drawingState.documents.filter(doc => isImageDrawingDoc(doc));
+    }
+
+    function isBrowsingAttachmentFolder() {
+        if (drawingState.browseDocumentId === 'attachment') return true;
+        const browsed = drawingState.documents.find(doc => Number(doc.id) === Number(drawingState.browseDocumentId));
+        if (browsed && isImageDrawingDoc(browsed)) return true;
+        if (!browsed && pdfDrawingDocs().length === 0 && attachmentImageDocs().length > 0) return true;
+        return false;
     }
 
     function esc(text) {
-        const div = document.createElement('div');
-        div.textContent = text == null ? '' : String(text);
-        return div.innerHTML;
+        return String(text ?? '').replace(/[&<>"']/g, ch => ({
+            '&': '&amp;',
+            '<': '&lt;',
+            '>': '&gt;',
+            '"': '&quot;',
+            "'": '&#039;'
+        }[ch]));
     }
 
     function drawingDocs() {
@@ -213,7 +238,7 @@
                 name: doc.filename || doc.title || 'Untitled drawing',
                 source: doc.source,
                 folder: doc.folder_name || 'Documents',
-                pageCount: Number(doc.pageCount || 0) || null,
+                pageCount: Number(doc.pageCount || doc.page_count || 0) || null,
                 fileUrl: doc.path,
                 extension: String(doc.extension || '').toLowerCase(),
                 sheets: []
@@ -225,6 +250,13 @@
     }
 
     function browsingDrawingDoc() {
+        if (isBrowsingAttachmentFolder()) {
+            const imgs = attachmentImageDocs();
+            return imgs.find(doc => Number(doc.id) === Number(drawingState.previewAttachmentDocId)) ||
+                   imgs.find(doc => Number(doc.id) === Number(drawingState.selectedDocumentId)) ||
+                   imgs[0] ||
+                   null;
+        }
         return drawingState.documents.find(doc => Number(doc.id) === Number(drawingState.browseDocumentId)) || activeDrawingDoc();
     }
 
@@ -271,34 +303,81 @@
         return drawingState.pdfLoading;
     }
 
+    window.__SharedPdfDocCache = window.__SharedPdfDocCache || new Map();
+    window.__SharedPdfThumbCache = window.__SharedPdfThumbCache || new Map();
+    const sharedPdfDocCache = window.__SharedPdfDocCache;
+    const sharedPdfThumbCache = window.__SharedPdfThumbCache;
+    const pdfLoadingInFlight = new Map();
+
     async function getPdfDocument(doc) {
         if (!doc || doc.extension !== 'pdf') return null;
+        const docKey = String(doc.id);
         if (drawingState.pdfDocs.has(doc.id)) return drawingState.pdfDocs.get(doc.id);
-        const pdfjs = await loadPdfJs();
-        const task = pdfjs.getDocument({
-            url: doc.fileUrl,
-            rangeChunkSize: 262144,
-            disableStream: false,
-            disableAutoFetch: true
-        });
-        const pdf = await task.promise;
-        drawingState.pdfDocs.set(doc.id, pdf);
-        return pdf;
+        if (sharedPdfDocCache.has(docKey)) {
+            const cached = sharedPdfDocCache.get(docKey);
+            drawingState.pdfDocs.set(doc.id, cached);
+            return cached;
+        }
+        if (doc.fileUrl && sharedPdfDocCache.has(String(doc.fileUrl))) {
+            const cached = sharedPdfDocCache.get(String(doc.fileUrl));
+            drawingState.pdfDocs.set(doc.id, cached);
+            sharedPdfDocCache.set(docKey, cached);
+            return cached;
+        }
+        if (pdfLoadingInFlight.has(docKey)) return pdfLoadingInFlight.get(docKey);
+
+        const promise = (async () => {
+            try {
+                const pdfjs = await loadPdfJs();
+                const task = pdfjs.getDocument({
+                    url: doc.fileUrl,
+                    rangeChunkSize: 262144,
+                    disableStream: false,
+                    disableAutoFetch: true
+                });
+                const pdf = await task.promise;
+                drawingState.pdfDocs.set(doc.id, pdf);
+                sharedPdfDocCache.set(docKey, pdf);
+                if (doc.fileUrl) sharedPdfDocCache.set(String(doc.fileUrl), pdf);
+                return pdf;
+            } finally {
+                pdfLoadingInFlight.delete(docKey);
+            }
+        })();
+
+        pdfLoadingInFlight.set(docKey, promise);
+        return promise;
     }
 
     function sheetName(doc, pageNumber) {
         return `${doc.name} - Page ${pageNumber}`;
     }
 
-    function getSheetTakeoffSummary(docId, pageNumber) {
-        const activeId = String(takeoffState.activeLayerId || selectionState.activeLayerId || '');
+    const EMPTY_SHEET_SUMMARY = Object.freeze({
+        totalMarks: 0,
+        layers: [],
+        activeItemMarks: 0,
+        hasActiveItem: false,
+        hasAnyTakeoff: false
+    });
+    const docSummaryMemo = new Map();
+
+    function getDocTakeoffPageMap(docId) {
         const numDocId = Number(docId);
-        const numPage = Number(pageNumber);
-
-        const layerMap = new Map();
-
-        // 1. Check live snapshots for this drawing
+        const activeId = String(takeoffState.activeLayerId || selectionState.activeLayerId || '');
         const activeEst = typeof activeEstimateId === 'function' ? activeEstimateId() : '';
+        const now = performance.now();
+        const cached = docSummaryMemo.get(numDocId);
+        if (cached && cached.activeId === activeId && cached.activeEst === activeEst && (now - cached.ts) < 220) {
+            return cached;
+        }
+
+        const pageLayerMaps = new Map();
+        const ensurePageMap = (p) => {
+            if (!pageLayerMaps.has(p)) pageLayerMaps.set(p, new Map());
+            return pageLayerMaps.get(p);
+        };
+
         const snapshotKey = `${activeEst}:${numDocId}`;
         const liveSnapshot = (takeoffState.canvasSnapshots && takeoffState.canvasSnapshots[snapshotKey])
             || Object.values(takeoffState.canvasSnapshots || {}).find(s => Number(s.drawingId || s.drawing_id) === numDocId);
@@ -307,69 +386,115 @@
             liveSnapshot.layers.forEach(remote => {
                 const lid = String(remote.id || remote.layerId || '');
                 const layer = typeof findLayer === 'function' ? findLayer(lid) : null;
-                const shapes = (remote.shapes || remote.takeoffObjects || []).filter(s => Number(s.pageNumber) === numPage);
-                if (!shapes.length) return;
-                const markCount = shapes.length;
-                const quantity = shapes.reduce((sum, s) => sum + Number(s.quantityValue || s.quantity || 1), 0);
-                layerMap.set(lid, {
-                    layerId: lid,
-                    name: layer?.name || remote.name || 'Item de Takeoff',
-                    color: layer?.color || remote.color || '#2563eb',
-                    symbol: layer?.symbol || remote.symbol || 'Solid Circle',
-                    type: layer?.type || remote.type || 'Count',
-                    uom: layer?.uom || remote.unit_of_measure || remote.uom || 'ea',
-                    markCount,
-                    quantity,
-                    isActive: Boolean(activeId && lid === activeId)
+                const allShapes = remote.shapes || remote.takeoffObjects || [];
+                if (!allShapes.length) return;
+                const byPage = new Map();
+                for (let i = 0; i < allShapes.length; i++) {
+                    const s = allShapes[i];
+                    const pg = Number(s.pageNumber) || 1;
+                    const prev = byPage.get(pg);
+                    const q = Number(s.quantityValue || s.quantity || 1);
+                    if (prev) {
+                        prev.count++;
+                        prev.qty += q;
+                    } else {
+                        byPage.set(pg, { count: 1, qty: q });
+                    }
+                }
+                byPage.forEach((agg, pg) => {
+                    ensurePageMap(pg).set(lid, {
+                        layerId: lid,
+                        name: layer?.name || remote.name || 'Item de Takeoff',
+                        color: layer?.color || remote.color || '#2563eb',
+                        symbol: layer?.symbol || remote.symbol || 'Solid Circle',
+                        type: layer?.type || remote.type || 'Count',
+                        uom: layer?.uom || remote.unit_of_measure || remote.uom || 'ea',
+                        markCount: agg.count,
+                        quantity: agg.qty,
+                        isActive: Boolean(activeId && lid === activeId)
+                    });
                 });
             });
         } else {
-            // 2. Fall back to server-seeded takeoffLocations
             const locations = window.ProjectState?.takeoffLocations || {};
             Object.entries(locations).forEach(([lid, loc]) => {
                 const layer = typeof findLayer === 'function' ? findLayer(lid) : null;
                 const layerDocId = Number(loc.drawingId || loc.drawing_id || layer?.drawing_id || 0);
                 if (layerDocId !== 0 && layerDocId !== numDocId) return;
-
-                const pageData = loc.pages?.[numPage] || loc.pages?.[String(numPage)];
-                if (pageData && (Number(pageData.count || 0) > 0 || Number(pageData.quantity || 0) > 0)) {
-                    layerMap.set(String(lid), {
-                        layerId: String(lid),
-                        name: layer?.name || loc.name || 'Item de Takeoff',
-                        color: layer?.color || loc.color || '#2563eb',
-                        symbol: layer?.symbol || loc.symbol || 'Solid Circle',
-                        type: layer?.type || loc.type || 'Count',
-                        uom: layer?.uom || loc.uom || loc.unit_of_measure || 'ea',
-                        markCount: Number(pageData.count || 0),
-                        quantity: Number(pageData.quantity || 0),
-                        isActive: Boolean(activeId && String(lid) === activeId)
-                    });
-                }
+                const pagesObj = loc.pages || {};
+                Object.entries(pagesObj).forEach(([pgKey, pageData]) => {
+                    const numPage = Number(pgKey);
+                    if (!numPage || !pageData) return;
+                    const cnt = Number(pageData.count || 0);
+                    const qty = Number(pageData.quantity || 0);
+                    if (cnt > 0 || qty > 0) {
+                        ensurePageMap(numPage).set(String(lid), {
+                            layerId: String(lid),
+                            name: layer?.name || loc.name || 'Item de Takeoff',
+                            color: layer?.color || loc.color || '#2563eb',
+                            symbol: layer?.symbol || loc.symbol || 'Solid Circle',
+                            type: layer?.type || loc.type || 'Count',
+                            uom: layer?.uom || loc.uom || loc.unit_of_measure || 'ea',
+                            markCount: cnt,
+                            quantity: qty,
+                            isActive: Boolean(activeId && String(lid) === activeId)
+                        });
+                    }
+                });
             });
         }
 
-        const layers = Array.from(layerMap.values());
-        const totalMarks = layers.reduce((sum, l) => sum + l.markCount, 0);
-        const activeLayerEntry = activeId ? layerMap.get(activeId) : null;
-        const activeItemMarks = activeLayerEntry ? activeLayerEntry.markCount : 0;
+        const pages = new Map();
+        let docHasActiveItem = false;
+        let docHasAnyTakeoff = false;
 
-        return {
-            totalMarks,
-            layers,
-            activeItemMarks,
-            hasActiveItem: activeItemMarks > 0,
-            hasAnyTakeoff: layers.length > 0 || totalMarks > 0
+        pageLayerMaps.forEach((layerMap, numPage) => {
+            const layers = Array.from(layerMap.values());
+            const totalMarks = layers.reduce((sum, l) => sum + l.markCount, 0);
+            const activeLayerEntry = activeId ? layerMap.get(activeId) : null;
+            const activeItemMarks = activeLayerEntry ? activeLayerEntry.markCount : 0;
+            const hasActiveItem = activeItemMarks > 0;
+            const hasAnyTakeoff = layers.length > 0 || totalMarks > 0;
+            if (hasActiveItem) docHasActiveItem = true;
+            if (hasAnyTakeoff) docHasAnyTakeoff = true;
+            pages.set(numPage, {
+                totalMarks,
+                layers,
+                activeItemMarks,
+                hasActiveItem,
+                hasAnyTakeoff
+            });
+        });
+
+        const entry = {
+            ts: now,
+            activeId,
+            activeEst,
+            pages,
+            docHasActiveItem,
+            docHasAnyTakeoff
         };
+        docSummaryMemo.set(numDocId, entry);
+        return entry;
+    }
+
+    function getSheetTakeoffSummary(docId, pageNumber) {
+        const numPage = Number(pageNumber) || 1;
+        return getDocTakeoffPageMap(docId).pages.get(numPage) || EMPTY_SHEET_SUMMARY;
     }
 
     function buildSheets(doc) {
         if (!doc) return [];
         const count = doc.pageCount || (doc.extension === 'pdf' ? 0 : 1);
         if (!count) return [];
-        return Array.from({ length: count }, (_, index) => {
+        const docMap = getDocTakeoffPageMap(doc.id);
+        if (doc._cachedSheets && doc._cachedPageCount === count && doc._cachedSummaryRef === docMap) {
+            return doc._cachedSheets;
+        }
+        const built = Array.from({ length: count }, (_, index) => {
             const pageNumber = index + 1;
             const saved = doc.sheets?.[index] || {};
-            const summary = getSheetTakeoffSummary(doc.id, pageNumber);
+            const summary = docMap.pages.get(pageNumber) || EMPTY_SHEET_SUMMARY;
             return {
                 id: `${doc.id}:${pageNumber}`,
                 documentId: doc.id,
@@ -381,14 +506,39 @@
                 hasComments: Boolean(saved.hasComments)
             };
         });
+        doc._cachedSheets = built;
+        doc._cachedPageCount = count;
+        doc._cachedSummaryRef = docMap;
+        return built;
+    }
+
+    function syncResolvedPageCountToState(doc, count) {
+        if (!doc || !count || count <= 0) return;
+        doc.pageCount = Number(count);
+        if (window.ProjectState?.documents) {
+            const psDoc = window.ProjectState.documents.find(d => Number(d.id) === Number(doc.id));
+            if (psDoc) {
+                psDoc.pageCount = doc.pageCount;
+                psDoc.page_count = doc.pageCount;
+            }
+        }
     }
 
     async function ensurePageCount(doc) {
         if (!doc || doc.pageCount) return doc?.pageCount || 0;
+        if (window.ProjectState?.documents) {
+            const psDoc = window.ProjectState.documents.find(d => Number(d.id) === Number(doc.id));
+            const knownCount = Number(psDoc?.pageCount || psDoc?.page_count || 0);
+            if (knownCount > 0) {
+                doc.pageCount = knownCount;
+                doc.sheets = buildSheets(doc);
+                return doc.pageCount;
+            }
+        }
         if (doc.id === drawingState.selectedDocumentId) {
             const info = callEditor('takeoffGetDocumentInfo');
             if (info?.pageCount) {
-                doc.pageCount = Number(info.pageCount);
+                syncResolvedPageCountToState(doc, Number(info.pageCount));
                 doc.sheets = buildSheets(doc);
                 return doc.pageCount;
             }
@@ -399,8 +549,16 @@
             return doc.pageCount;
         }
         try {
+            if (window.__TakeoffThumbService?.getPageCount) {
+                const workerCount = await window.__TakeoffThumbService.getPageCount(doc);
+                if (workerCount > 0) {
+                    syncResolvedPageCountToState(doc, workerCount);
+                    doc.sheets = buildSheets(doc);
+                    return doc.pageCount;
+                }
+            }
             const pdf = await getPdfDocument(doc);
-            doc.pageCount = pdf.numPages;
+            syncResolvedPageCountToState(doc, pdf.numPages);
             doc.sheets = buildSheets(doc);
             return doc.pageCount;
         } catch (e) {
@@ -738,6 +896,7 @@
         { id: 'lot', label: 'lot', desc: 'Lot', hint: 'Lump sum packages', category: 'Count' },
         { id: 'pkg', label: 'pkg', desc: 'Package', hint: 'Standard packs', category: 'Count' },
         { id: 'box', label: 'box', desc: 'Box', hint: 'Box quantities', category: 'Count' },
+        { id: 'roll', label: 'roll', desc: 'Roll', hint: 'Wire spools, membrane', category: 'Count' },
 
         { section: 'Length & Distance' },
         { id: 'lf', label: 'lf', desc: 'Linear Feet', hint: 'Conduit, wire, piping', category: 'Length' },
@@ -753,11 +912,13 @@
         { id: 'm2', label: 'm²', desc: 'Square Meters', hint: 'Metric floor/wall', category: 'Area' },
         { id: 'acre', label: 'acre', desc: 'Acres', hint: 'Site acreage', category: 'Area' },
 
-        { section: 'Volume & Bulk' },
+        { section: 'Volume, Bulk & Weight' },
         { id: 'cu yd', label: 'cu yd', desc: 'Cubic Yards', hint: 'Concrete, excavation', category: 'Volume' },
         { id: 'ft3', label: 'ft³', desc: 'Cubic Feet', hint: 'Structural volume', category: 'Volume' },
         { id: 'm3', label: 'm³', desc: 'Cubic Meters', hint: 'Metric volume', category: 'Volume' },
         { id: 'gal', label: 'gal', desc: 'Gallons', hint: 'Liquid, paint, sealant', category: 'Volume' },
+        { id: 'lbs', label: 'lbs', desc: 'Pounds', hint: 'Weight / bulk metal', category: 'Volume' },
+        { id: 'cwt', label: 'cwt', desc: 'Hundredweight', hint: 'Structural steel', category: 'Volume' },
 
         { section: 'Time & Labor' },
         { id: 'hr', label: 'hr', desc: 'Hours', hint: 'Labor hours', category: 'Time' },
@@ -767,9 +928,9 @@
 
     function allowedUomCategoriesForType(type) {
         const raw = String(type || 'Count').trim();
-        if (raw === 'Count' || raw === 'Count by distance') return ['Count'];
-        if (raw === 'Linear' || raw.startsWith('Linear')) return ['Length'];
-        if (raw === 'Area / Volume' || raw.includes('Area') || raw.includes('Volume')) return ['Area', 'Volume'];
+        if (raw === 'Count' || raw === 'Count by distance') return ['Count', 'Length', 'Area', 'Volume', 'Time'];
+        if (raw === 'Linear' || raw.startsWith('Linear')) return ['Length', 'Count', 'Area', 'Volume', 'Time'];
+        if (raw === 'Area / Volume' || raw.includes('Area') || raw.includes('Volume')) return ['Area', 'Volume', 'Length', 'Count', 'Time'];
         return ['Count', 'Length', 'Area', 'Volume', 'Time'];
     }
 
@@ -782,18 +943,7 @@
     }
 
     function isUomValidForType(uom, type) {
-        if (!uom) return false;
-        const normUom = String(uom).trim().toLowerCase();
-        const allowed = allowedUomCategoriesForType(type);
-        const item = TAKEOFF_UOM_ITEMS.find(it => it.id && (
-            it.id.toLowerCase() === normUom ||
-            (normUom === 'm²' && it.id === 'm2') ||
-            (normUom === 'ft³' && it.id === 'ft3') ||
-            (normUom === 'cu yd' && it.id === 'cu yd') ||
-            (normUom === 'yd3' && it.id === 'cu yd')
-        ));
-        if (!item) return true;
-        return allowed.includes(item.category);
+        return Boolean(uom && String(uom).trim());
     }
 
     function setupUomDropdown(prefix, selectEl) {
@@ -801,6 +951,19 @@
         const trigger = $(`${prefix}UomTrigger`);
         const menu = $(`${prefix}UomMenu`);
         if (!dropdown || !trigger || !menu) return;
+
+        if (selectEl) {
+            TAKEOFF_UOM_ITEMS.forEach(it => {
+                if (!it.id) return;
+                const exists = Array.from(selectEl.options).some(o => o.value.toLowerCase() === it.id.toLowerCase());
+                if (!exists) {
+                    const opt = document.createElement('option');
+                    opt.value = it.id;
+                    opt.textContent = it.label || it.id;
+                    selectEl.appendChild(opt);
+                }
+            });
+        }
 
         let listHtml = '';
         TAKEOFF_UOM_ITEMS.forEach(item => {
@@ -863,13 +1026,13 @@
             items.forEach(el => {
                 const cat = el.dataset.category || '';
                 const isTypeAllowed = !cat || allowed.includes(cat);
-                if (!isTypeAllowed) {
+                if (!isTypeAllowed && !q) {
                     el.style.display = 'none';
                     return;
                 }
                 const uomId = (el.dataset.uom || '').toLowerCase();
                 const searchData = (el.dataset.search || '').toLowerCase();
-                const matches = !q || searchData.includes(q) || uomId.includes(q);
+                const matches = !q ? isTypeAllowed : (searchData.includes(q) || uomId.includes(q));
                 el.style.display = matches ? 'flex' : 'none';
                 if (matches) {
                     if (!firstVisible) firstVisible = el;
@@ -878,21 +1041,6 @@
             });
 
             menu.querySelectorAll('.pcd-section-header').forEach(header => {
-                if (!q) {
-                    // Check if any item in this section is allowed for current type
-                    let next = header.nextElementSibling;
-                    let sectionHasVisible = false;
-                    while (next && !next.classList.contains('pcd-section-header')) {
-                        const cat = next.dataset.category || '';
-                        if (next.classList.contains('pcd-uom-item') && (!cat || allowed.includes(cat))) {
-                            sectionHasVisible = true;
-                            break;
-                        }
-                        next = next.nextElementSibling;
-                    }
-                    header.style.display = sectionHasVisible ? 'block' : 'none';
-                    return;
-                }
                 let next = header.nextElementSibling;
                 let sectionHasVisible = false;
                 while (next && !next.classList.contains('pcd-section-header')) {
@@ -921,13 +1069,26 @@
             closeAllProCustomDropdowns();
             if (!isOpen) {
                 dropdown.classList.add('is-open');
+                trigger.setAttribute('aria-expanded', 'true');
                 if (searchInput) {
                     searchInput.value = '';
                 }
                 filterItems('');
+                requestAnimationFrame(() => {
+                    const rect = menu.getBoundingClientRect();
+                    if (rect.right > window.innerWidth - 8) {
+                        menu.style.left = 'auto';
+                        menu.style.right = '0px';
+                    } else {
+                        menu.style.left = '0px';
+                        menu.style.right = 'auto';
+                    }
+                });
                 if (searchInput) {
                     setTimeout(() => searchInput.focus(), 25);
                 }
+            } else {
+                trigger.setAttribute('aria-expanded', 'false');
             }
         });
 
@@ -1006,8 +1167,12 @@
             it.id.toLowerCase() === norm.toLowerCase() ||
             (norm.toLowerCase() === 'm²' && it.id === 'm2') ||
             (norm.toLowerCase() === 'ft³' && it.id === 'ft3') ||
+            (norm.toLowerCase() === 'm³' && it.id === 'm3') ||
             (norm.toLowerCase() === 'cu yd' && it.id === 'cu yd') ||
-            (norm.toLowerCase() === 'yd3' && it.id === 'cu yd')
+            (norm.toLowerCase() === 'yd3' && it.id === 'cu yd') ||
+            (norm.toLowerCase() === 'sqft' && it.id === 'sq ft') ||
+            (norm.toLowerCase() === 'sf' && it.id === 'sq ft') ||
+            (norm.toLowerCase() === 'linear ft' && it.id === 'lf')
         ));
         const displayLabel = matchedItem ? matchedItem.label : norm;
         const fullDesc = matchedItem ? `${matchedItem.desc} (${matchedItem.label})` : `Unit of Measure: ${norm}`;
@@ -1024,8 +1189,12 @@
                 const isSelected = (uomId === norm.toLowerCase()) ||
                     (norm.toLowerCase() === 'm²' && uomId === 'm2') ||
                     (norm.toLowerCase() === 'ft³' && uomId === 'ft3') ||
+                    (norm.toLowerCase() === 'm³' && uomId === 'm3') ||
                     (norm.toLowerCase() === 'cu yd' && uomId === 'cu yd') ||
-                    (norm.toLowerCase() === 'yd3' && uomId === 'cu yd');
+                    (norm.toLowerCase() === 'yd3' && uomId === 'cu yd') ||
+                    (norm.toLowerCase() === 'sqft' && uomId === 'sq ft') ||
+                    (norm.toLowerCase() === 'sf' && uomId === 'sq ft') ||
+                    (norm.toLowerCase() === 'linear ft' && uomId === 'lf');
                 el.classList.toggle('is-selected', Boolean(isSelected));
             });
         }
@@ -1222,6 +1391,9 @@
     };
     let draggedTakeoffGroupId = null;
     let suppressNextGroupToggle = false;
+    let draggedTakeoffLayerId = null;
+    let isDraggingTakeoffLayer = false;
+    let takeoffLayerDragSuppressedClickTime = 0;
 
     const historyState = [];
     const redoHistoryState = [];
@@ -2196,7 +2368,7 @@
                             </div>
                             <div class="pro-tree-row-actions">
                                 <button class="pro-layer-lock-btn ${isLocked ? 'is-locked' : ''}" type="button" data-layer-lock="${esc(layer.id)}" title="${isLocked ? 'Unlock item' : 'Lock item'}" aria-label="${isLocked ? 'Unlock item' : 'Lock item'}" aria-pressed="${isLocked ? 'true' : 'false'}"><i class="fas fa-${isLocked ? 'lock' : 'lock-open'}"></i></button>
-                                <button class="pro-row-menu-btn" type="button" data-layer-menu="${esc(layer.id)}" title="Item details" aria-label="Item details"><i class="fas fa-ellipsis-vertical"></i></button>
+                                <button class="pro-row-menu-btn" type="button" draggable="true" data-layer-menu="${esc(layer.id)}" title="Item details (drag to reorder)" aria-label="Item details"><i class="fas fa-ellipsis-vertical"></i></button>
                             </div>
                         </div>`;
             }).join('')}
@@ -2207,6 +2379,7 @@
         updateSubheadSelectedItem();
         syncTakeoffSubheadAlignment();
     }
+    window.updateTakeoffSubheadInfo = updateSubheadSelectedItem;
 
     function renderInspector() {
         const content = $('takeoffInspectorContent');
@@ -2289,18 +2462,33 @@
         });
         document.querySelectorAll('.pro-takeoff-group[data-group-id]').forEach(container => {
             container.addEventListener('dragover', event => {
-                if (!draggedTakeoffGroupId || takeoffState.query) return;
-                event.preventDefault();
-                event.dataTransfer.dropEffect = 'move';
+                if (draggedTakeoffGroupId && !takeoffState.query) {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                } else if (draggedTakeoffLayerId && !takeoffState.query) {
+                    event.preventDefault();
+                    event.dataTransfer.dropEffect = 'move';
+                    container.classList.add('pro-drag-over-group');
+                }
+            });
+            container.addEventListener('dragleave', event => {
+                if (event.relatedTarget && container.contains(event.relatedTarget)) return;
+                container.classList.remove('pro-drag-over-group');
             });
             container.addEventListener('drop', event => {
                 event.preventDefault();
-                const sourceId = draggedTakeoffGroupId || event.dataTransfer.getData('text/plain');
-                const targetId = container.dataset.groupId;
-                if (sourceId && targetId && sourceId !== targetId) reorderTakeoffGroup(sourceId, targetId);
-                suppressNextGroupToggle = true;
-                setTimeout(() => { suppressNextGroupToggle = false; }, 0);
-                draggedTakeoffGroupId = null;
+                container.classList.remove('pro-drag-over-group');
+                const targetGroupId = container.dataset.groupId;
+                if (draggedTakeoffGroupId) {
+                    const sourceId = draggedTakeoffGroupId || event.dataTransfer.getData('text/plain');
+                    if (sourceId && targetGroupId && sourceId !== targetGroupId) reorderTakeoffGroup(sourceId, targetGroupId);
+                    suppressNextGroupToggle = true;
+                    setTimeout(() => { suppressNextGroupToggle = false; }, 0);
+                    draggedTakeoffGroupId = null;
+                } else if (draggedTakeoffLayerId) {
+                    moveTakeoffLayerToGroup(draggedTakeoffLayerId, targetGroupId);
+                    draggedTakeoffLayerId = null;
+                }
             });
         });
         document.querySelectorAll('[data-group-select]').forEach(box => {
@@ -2399,8 +2587,37 @@
                 if (layer?.locked || editorLockState.locked) {
                     return; // Prevent selection if item is locked
                 }
+                const isCurrentlyActive = (String(takeoffState.activeLayerId || '') === String(layerId)) &&
+                    (selectionState.selectedLayerIds.length === 1 && String(selectionState.selectedLayerIds[0]) === String(layerId));
+                if (isCurrentlyActive) {
+                    clearAllSelections();
+                    return;
+                }
                 // Single item selection: deselect others, select only this one
                 selectSingleLayer(layerId);
+            });
+
+            row.addEventListener('dragover', event => {
+                if (!draggedTakeoffLayerId || takeoffState.query || row.dataset.layerRow === draggedTakeoffLayerId) return;
+                event.preventDefault();
+                event.dataTransfer.dropEffect = 'move';
+                row.classList.add('pro-drag-over-layer');
+            });
+
+            row.addEventListener('dragleave', event => {
+                if (event.relatedTarget && row.contains(event.relatedTarget)) return;
+                row.classList.remove('pro-drag-over-layer');
+            });
+
+            row.addEventListener('drop', event => {
+                if (!draggedTakeoffLayerId || takeoffState.query) return;
+                event.preventDefault();
+                row.classList.remove('pro-drag-over-layer');
+                const targetLayerId = row.dataset.layerRow;
+                if (draggedTakeoffLayerId && targetLayerId && draggedTakeoffLayerId !== targetLayerId) {
+                    moveTakeoffLayer(draggedTakeoffLayerId, targetLayerId);
+                }
+                draggedTakeoffLayerId = null;
             });
         });
         document.querySelectorAll('[data-layer-visibility]').forEach(button => {
@@ -2466,11 +2683,38 @@
             });
         });
         document.querySelectorAll('[data-layer-menu]').forEach(button => {
+            button.addEventListener('dragstart', event => {
+                if (takeoffState.query) { event.preventDefault(); return; }
+                draggedTakeoffLayerId = button.dataset.layerMenu;
+                isDraggingTakeoffLayer = true;
+                event.dataTransfer.effectAllowed = 'move';
+                event.dataTransfer.setData('text/plain', draggedTakeoffLayerId);
+                event.dataTransfer.setData('application/x-takeoff-layer', draggedTakeoffLayerId);
+                const row = button.closest('[data-layer-row]');
+                if (row) {
+                    row.classList.add('is-dragging-row');
+                }
+            });
+
+            button.addEventListener('dragend', () => {
+                isDraggingTakeoffLayer = false;
+                takeoffLayerDragSuppressedClickTime = Date.now();
+                document.querySelectorAll('.is-dragging-row').forEach(el => el.classList.remove('is-dragging-row'));
+                document.querySelectorAll('.pro-drag-over-layer, .pro-drag-over-group').forEach(el => {
+                    el.classList.remove('pro-drag-over-layer', 'pro-drag-over-group');
+                });
+                setTimeout(() => { draggedTakeoffLayerId = null; }, 60);
+            });
+
             button.addEventListener('click', event => {
                 event.stopPropagation();
+                if (isDraggingTakeoffLayer || (Date.now() - takeoffLayerDragSuppressedClickTime < 350)) {
+                    return;
+                }
                 const layerId = button.dataset.layerMenu;
                 const modal = $('takeoffLayerModal');
-                const isOpen = modal && !modal.hidden && takeoffState.editingLayerId === layerId;
+                const workspace = $('takeoffWorkspace');
+                const isOpen = modal && !modal.hidden && workspace?.classList.contains('has-layer-drawer') && takeoffState.editingLayerId === layerId;
                 closeGroupContextMenu();
                 if (isOpen) {
                     closeLayerModal();
@@ -2719,6 +2963,10 @@
 
         modal.querySelectorAll('[data-layer-tab]').forEach(tabBtn => {
             tabBtn.addEventListener('click', () => switchLayerModalTab(tabBtn.dataset.layerTab));
+        });
+
+        $('layerCatalogCard')?.addEventListener('click', () => {
+            openCatalogModal();
         });
 
         $('layerSwapCatalogBtn')?.addEventListener('click', event => {
@@ -3507,7 +3755,7 @@
         updateLayerDrawingsList(layer);
         const currentEditType = $('layerTypeInput').value;
         filterUomDropdownByType('editLayer', currentEditType);
-        if (!isUomValidForType($('layerUomInput')?.value, currentEditType)) {
+        if (!$('layerUomInput')?.value) {
             setSelectValue($('layerUomInput'), defaultUomForType(currentEditType));
         }
         updateTypeDropdownTrigger('editLayer', currentEditType);
@@ -3518,6 +3766,11 @@
         updateLayerColorSwatch();
         updateLayerTypeFields($('layerTypeInput').value);
         updateLayerSubmitState();
+
+        if (triggerEl) {
+            triggerEl.setAttribute('aria-expanded', 'true');
+            triggerEl.classList.add('is-active');
+        }
 
         const modal = $('takeoffLayerModal');
         const workspace = $('takeoffWorkspace');
@@ -3548,6 +3801,10 @@
                 notifyEditorVisible();
             }, 260);
         }
+        document.querySelectorAll('[data-layer-menu]').forEach(b => {
+            b.setAttribute('aria-expanded', 'false');
+            b.classList.remove('is-active');
+        });
         takeoffState.editingLayerId = null;
         takeoffState.pendingCatalogItem = null;
     }
@@ -4946,6 +5203,7 @@
         if (!modal || modal.hidden) return;
         modal.hidden = true;
         modal.style.display = 'none';
+        modal.classList.remove('open', 'is-open');
         document.body.classList.remove('pro-dialog-open');
         const input = $('takeoffGroupName');
         const error = $('takeoffGroupNameError');
@@ -4991,6 +5249,7 @@
 
         modal.hidden = false;
         modal.style.display = 'flex';
+        modal.classList.add('open', 'is-open');
         document.body.classList.add('pro-dialog-open');
         requestAnimationFrame(() => {
             input.focus();
@@ -5019,6 +5278,18 @@
         }));
         saveTakeoffState();
         renderTakeoffPanel();
+        requestAnimationFrame(() => {
+            const groupEl = document.querySelector(`[data-takeoff-group-row="${group.id}"]`) || document.querySelector(`.pro-takeoff-group[data-group-id="${group.id}"]`);
+            if (groupEl) {
+                groupEl.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                groupEl.classList.add('group-highlight-pulse');
+                setTimeout(() => groupEl.classList.remove('group-highlight-pulse'), 3600);
+            }
+            const nameEl = document.querySelector(`.pro-takeoff-group[data-group-id="${group.id}"] .pro-tree-name`);
+            if (nameEl) {
+                nameEl.click();
+            }
+        });
         return true;
     }
 
@@ -5194,6 +5465,9 @@
         `;
 
         const rect = button.getBoundingClientRect();
+        menu.classList.add('open');
+        button.setAttribute('aria-expanded', 'true');
+        button.classList.add('is-active');
         menu.style.display = 'flex';
         menu.style.visibility = 'hidden';
         menu.style.top = '0px';
@@ -5350,7 +5624,14 @@
 
     function closeGroupContextMenu() {
         const menu = $('takeoffGroupContextMenu');
-        if (menu) menu.style.display = 'none';
+        if (menu) {
+            menu.style.display = 'none';
+            menu.classList.remove('open');
+        }
+        document.querySelectorAll('[data-group-menu]').forEach(b => {
+            b.setAttribute('aria-expanded', 'false');
+            b.classList.remove('is-active');
+        });
         takeoffState.contextGroupId = null;
     }
 
@@ -5450,6 +5731,92 @@
             }
         }));
         saveTakeoffState(); renderTakeoffPanel();
+        return true;
+    }
+
+    function moveTakeoffLayer(sourceLayerId, targetLayerId) {
+        if (!sourceLayerId || !targetLayerId || sourceLayerId === targetLayerId) return false;
+        if (!requireWrite()) return false;
+
+        let sourceGroup = null, sourceIndex = -1, layer = null;
+        let targetGroup = null, targetIndex = -1;
+
+        for (const group of takeoffState.groups) {
+            const sIdx = (group.layers || []).findIndex(l => String(l.id) === String(sourceLayerId));
+            if (sIdx !== -1) {
+                sourceGroup = group;
+                sourceIndex = sIdx;
+                layer = group.layers[sIdx];
+            }
+            const tIdx = (group.layers || []).findIndex(l => String(l.id) === String(targetLayerId));
+            if (tIdx !== -1) {
+                targetGroup = group;
+                targetIndex = tIdx;
+            }
+        }
+
+        if (!layer || !sourceGroup || !targetGroup) return false;
+
+        pushTakeoffHistory('reorder-layer');
+        sourceGroup.layers.splice(sourceIndex, 1);
+        if (sourceGroup.id === targetGroup.id && sourceIndex < targetIndex) {
+            targetIndex--;
+        }
+        layer.groupId = targetGroup.id;
+        targetGroup.layers.splice(targetIndex, 0, layer);
+
+        window.dispatchEvent(new CustomEvent('takeoff:estimating-items-reorder-requested', {
+            detail: {
+                projectId: String(window.ProjectState?.projectId || ''),
+                estimateId: activeEstimateId(),
+                sourceLayerId: layer.id,
+                targetLayerId: targetLayerId,
+                targetGroupId: targetGroup.estimatingGroupId || targetGroup.id
+            }
+        }));
+
+        saveTakeoffState();
+        renderTakeoffPanel();
+        showTakeoffToast?.('Item moved.');
+        return true;
+    }
+
+    function moveTakeoffLayerToGroup(sourceLayerId, targetGroupId) {
+        if (!sourceLayerId || !targetGroupId) return false;
+        if (!requireWrite()) return false;
+
+        let sourceGroup = null, sourceIndex = -1, layer = null;
+        for (const group of takeoffState.groups) {
+            const sIdx = (group.layers || []).findIndex(l => String(l.id) === String(sourceLayerId));
+            if (sIdx !== -1) {
+                sourceGroup = group;
+                sourceIndex = sIdx;
+                layer = group.layers[sIdx];
+                break;
+            }
+        }
+        const targetGroup = findGroup(targetGroupId);
+        if (!layer || !sourceGroup || !targetGroup) return false;
+        if (sourceGroup.id === targetGroup.id) return false;
+
+        pushTakeoffHistory('reorder-layer');
+        sourceGroup.layers.splice(sourceIndex, 1);
+        layer.groupId = targetGroup.id;
+        if (!Array.isArray(targetGroup.layers)) targetGroup.layers = [];
+        targetGroup.layers.push(layer);
+
+        window.dispatchEvent(new CustomEvent('takeoff:estimating-items-reorder-requested', {
+            detail: {
+                projectId: String(window.ProjectState?.projectId || ''),
+                estimateId: activeEstimateId(),
+                sourceLayerId: layer.id,
+                targetGroupId: targetGroup.estimatingGroupId || targetGroup.id
+            }
+        }));
+
+        saveTakeoffState();
+        renderTakeoffPanel();
+        showTakeoffToast?.('Item moved to group.');
         return true;
     }
 
@@ -5734,6 +6101,10 @@
     window.syncTakeoffLayout = syncTakeoffSubheadAlignment;
 
     function updateSubheadSelectedItem() {
+        if (window.ProjectState?.activeTab === 'documents' || document.body?.classList.contains('is-documents-tab')) {
+            window.syncDocumentsSubheadInfo?.();
+            return;
+        }
         const info = $('takeoffSubheadItemInfo');
         if (!info) return;
         bindSubheadItemActions();
@@ -5920,6 +6291,7 @@
         }
         syncTakeoffSubheadAlignment();
     }
+    window.updateTakeoffSubheadInfo = updateSubheadSelectedItem;
 
     function setActiveTakeoffLayer(layerId, rerender = true) {
         const layer = findLayer(layerId);
@@ -6496,6 +6868,7 @@
 
     function handleTakeoffAction(action) {
         document.querySelectorAll('.pro-menu').forEach(menu => menu.classList.remove('open'));
+        document.querySelectorAll('[data-takeoff-menu-toggle]').forEach(btn => btn.setAttribute('aria-expanded', 'false'));
         if (action === 'create-group') return openTakeoffGroupModal(document.activeElement);
         if (action === 'create-layer') return openCreateLayerModal(null);
         if (action === 'collapse-all') return collapseAllTakeoffGroups();
@@ -7050,22 +7423,61 @@
         }, 1200);
     }
 
+    let isDropdownScrolling = false;
+    let dropdownScrollTimer = null;
+    let activeSheetHoverTimer = null;
+    let dropdownScrollBound = false;
+
+    function bindDropdownScrollGuards() {
+        if (dropdownScrollBound) return;
+        const docBox = $('takeoffDocumentList');
+        const sheetBox = $('takeoffSheetList');
+        if (!docBox && !sheetBox) return;
+        dropdownScrollBound = true;
+        const onScroll = () => {
+            isDropdownScrolling = true;
+            if (activeSheetHoverTimer) {
+                clearTimeout(activeSheetHoverTimer);
+                activeSheetHoverTimer = null;
+            }
+            if (dropdownScrollTimer) clearTimeout(dropdownScrollTimer);
+            dropdownScrollTimer = setTimeout(() => {
+                isDropdownScrolling = false;
+            }, 150);
+        };
+        docBox?.addEventListener('scroll', onScroll, { passive: true });
+        sheetBox?.addEventListener('scroll', onScroll, { passive: true });
+    }
+
     function openDrawingDropdown() {
         const panel = $('takeoffDrawingDropdown');
         const trigger = $('takeoffSheetSelect');
         if (!panel) return;
+        drawingState.dropdownOpen = true;
         panel.classList.add('open');
         trigger?.setAttribute('aria-expanded', 'true');
-        renderDrawingDropdown();
-        warmDrawingMetadata();
+        bindDropdownScrollGuards();
         const doc = browsingDrawingDoc();
-        if (doc) ensurePageCount(doc).then(() => {
-            renderDrawingDropdown();
-            renderSheetPreview(doc, drawingState.selectedPage || 1);
-        });
+        if (doc && doc.id === drawingState.selectedDocumentId && drawingState.selectedPage) {
+            drawingState.previewPage = drawingState.selectedPage;
+        }
+        renderDrawingDropdown();
+        if (doc && !doc.pageCount && doc.extension === 'pdf') {
+            ensurePageCount(doc).then(() => {
+                if (!drawingState.dropdownOpen) return;
+                renderDrawingDropdown();
+            });
+        }
+        warmDrawingMetadata();
     }
 
     function closeDrawingDropdown() {
+        drawingState.dropdownOpen = false;
+        if (activeSheetHoverTimer) {
+            clearTimeout(activeSheetHoverTimer);
+            activeSheetHoverTimer = null;
+        }
+        window.__TakeoffThumbService?.cancelTakeoffJobs?.();
         $('takeoffDrawingDropdown')?.classList.remove('open');
         $('takeoffSheetSelect')?.setAttribute('aria-expanded', 'false');
     }
@@ -7096,7 +7508,9 @@
 
             const doc = browsingDrawingDoc();
             let matchCount = 0;
-            if (doc) {
+            if (isBrowsingAttachmentFolder()) {
+                matchCount = attachmentImageDocs().filter(imgDoc => getSheetTakeoffSummary(imgDoc.id, 1)?.hasActiveItem).length;
+            } else if (doc) {
                 const sheets = buildSheets(doc);
                 matchCount = sheets.filter(s => s.takeoffSummary?.hasActiveItem).length;
             }
@@ -7135,11 +7549,33 @@
         renderSheetList();
     }
 
-    function warmDrawingMetadata() {
-        drawingState.documents.slice(0, 30).forEach(doc => {
-            if (doc.pageCount) return;
-            ensurePageCount(doc).then(() => renderDocumentList());
-        });
+    let isWarmingDrawingMeta = false;
+    async function warmDrawingMetadata() {
+        if (isWarmingDrawingMeta) return;
+        isWarmingDrawingMeta = true;
+        try {
+            const targets = pdfDrawingDocs().filter(doc => !doc.pageCount).slice(0, 20);
+            for (const doc of targets) {
+                if (!drawingState.dropdownOpen) break;
+                while (isDropdownScrolling && drawingState.dropdownOpen) {
+                    await new Promise(r => setTimeout(r, 160));
+                }
+                if (!drawingState.dropdownOpen) break;
+                if (doc.pageCount) continue;
+                await ensurePageCount(doc);
+                if (!drawingState.dropdownOpen) break;
+                const rowCountEl = document.querySelector(`#takeoffDocumentList [data-drawing-doc="${doc.id}"] .pro-drawing-count`);
+                if (rowCountEl && doc.pageCount) {
+                    rowCountEl.textContent = String(doc.pageCount);
+                }
+                if (Number(doc.id) === Number(drawingState.browseDocumentId)) {
+                    renderSheetList();
+                }
+                await new Promise(r => setTimeout(r, 90));
+            }
+        } finally {
+            isWarmingDrawingMeta = false;
+        }
     }
 
     function matchesDrawingQuery(doc, sheet) {
@@ -7157,8 +7593,11 @@
     function renderDocumentList() {
         const box = $('takeoffDocumentList');
         if (!box) return;
+        const allPdfs = pdfDrawingDocs();
+        const allImages = attachmentImageDocs();
+        const directoryTotal = allPdfs.length + (allImages.length > 0 ? 1 : 0);
         const totalCountBadge = $('takeoffDocTotalCount');
-        if (totalCountBadge) totalCountBadge.textContent = drawingState.documents.length;
+        if (totalCountBadge) totalCountBadge.textContent = directoryTotal;
 
         if (!drawingState.documents.length) {
             box.innerHTML = `<div class="pro-drawing-empty">
@@ -7170,20 +7609,25 @@
 
         const activeLayer = typeof findLayer === 'function' ? findLayer(takeoffState.activeLayerId || selectionState.activeLayerId) : null;
 
-        const docs = drawingState.documents.filter(doc => {
+        const pdfs = allPdfs.filter(doc => {
             if (!drawingState.query) return true;
             if (matchesDrawingQuery(doc)) return true;
             return buildSheets(doc).some(sheet => matchesDrawingQuery(doc, sheet));
         });
 
-        box.innerHTML = docs.map(doc => {
-            const isSelected = doc.id === drawingState.browseDocumentId;
-            let docHasActiveItem = false;
-            let docHasAnyTakeoff = false;
-            if (doc.sheets && doc.sheets.length > 0) {
-                docHasActiveItem = doc.sheets.some(s => s.takeoffSummary?.hasActiveItem);
-                docHasAnyTakeoff = doc.sheets.some(s => s.takeoffSummary?.hasAnyTakeoff);
-            }
+        const matchingImages = allImages.filter(doc => {
+            if (!drawingState.query) return true;
+            if ('attachment'.includes(drawingState.query)) return true;
+            return matchesDrawingQuery(doc);
+        });
+
+        const browsingAttachments = isBrowsingAttachmentFolder();
+
+        const pdfRowsHtml = pdfs.map(doc => {
+            const isSelected = !browsingAttachments && Number(doc.id) === Number(drawingState.browseDocumentId);
+            const docMap = getDocTakeoffPageMap(doc.id);
+            const docHasActiveItem = docMap.docHasActiveItem;
+            const docHasAnyTakeoff = docMap.docHasAnyTakeoff;
             return `
             <button class="pro-drawing-row ${isSelected ? 'active' : ''}" type="button" data-drawing-doc="${doc.id}" title="${esc(doc.name)}">
                 <span class="pro-drawing-info">
@@ -7195,19 +7639,56 @@
                     <span class="pro-drawing-count">${doc.pageCount || (doc.extension === 'pdf' ? '...' : '1')}</span>
                 </span>
             </button>`;
-        }).join('') || '<div class="pro-drawing-empty">No drawings match your search.</div>';
+        }).join('');
+
+        let attachmentFolderHtml = '';
+        if (matchingImages.length > 0) {
+            let folderHasActiveItem = false;
+            let folderHasAnyTakeoff = false;
+            matchingImages.forEach(imgDoc => {
+                const summary = getSheetTakeoffSummary(imgDoc.id, 1);
+                if (summary?.hasActiveItem) folderHasActiveItem = true;
+                if (summary?.hasAnyTakeoff) folderHasAnyTakeoff = true;
+            });
+            attachmentFolderHtml = `
+            <button class="pro-drawing-row pro-drawing-folder-row ${browsingAttachments ? 'active' : ''}" type="button" data-drawing-doc="attachment" title="Attachment (${matchingImages.length})">
+                <span class="pro-drawing-info">
+                    <i class="fas fa-folder pro-doc-icon" style="color: #f59e0b;"></i>
+                    <span class="pro-drawing-name">Attachment</span>
+                </span>
+                <span class="pro-drawing-meta">
+                    ${folderHasActiveItem ? `<span class="pro-drawing-item-dot" style="background: ${activeLayer?.color || '#2563eb'}" title="Contiene marcas de ${esc(activeLayer?.name || 'item activo')}"></span>` : (folderHasAnyTakeoff ? `<span class="pro-drawing-takeoff-dot" title="Contiene marcas de takeoff"></span>` : '')}
+                    <span class="pro-drawing-count">${matchingImages.length}</span>
+                </span>
+            </button>`;
+        }
+
+        box.innerHTML = (pdfRowsHtml + attachmentFolderHtml) || '<div class="pro-drawing-empty">No drawings match your search.</div>';
 
         box.querySelectorAll('[data-drawing-doc]').forEach(button => {
             button.addEventListener('click', () => {
-                drawingState.browseDocumentId = Number(button.dataset.drawingDoc);
+                const rawTarget = button.dataset.drawingDoc;
+                if (rawTarget === 'attachment') {
+                    drawingState.browseDocumentId = 'attachment';
+                    const imgs = attachmentImageDocs();
+                    if (!imgs.some(d => Number(d.id) === Number(drawingState.previewAttachmentDocId))) {
+                        drawingState.previewAttachmentDocId = imgs[0]?.id || null;
+                    }
+                    renderDrawingDropdown();
+                    return;
+                }
+                drawingState.browseDocumentId = Number(rawTarget);
+                drawingState.previewPage = 1;
                 const doc = browsingDrawingDoc();
-                renderDrawingDropdown();
-                if (doc) {
+                if (doc && !doc.pageCount && doc.extension === 'pdf') {
+                    renderDrawingDropdown();
                     showPreviewLoading();
                     ensurePageCount(doc).then(() => {
+                        if (!drawingState.dropdownOpen || Number(drawingState.browseDocumentId) !== Number(doc.id)) return;
                         renderDrawingDropdown();
-                        renderSheetPreview(doc, 1);
                     });
+                } else {
+                    renderDrawingDropdown();
                 }
             });
         });
@@ -7215,8 +7696,95 @@
 
     function renderSheetList() {
         const box = $('takeoffSheetList');
-        const doc = browsingDrawingDoc();
         if (!box) return;
+        bindDropdownScrollGuards();
+
+        const activeLayer = typeof findLayer === 'function' ? findLayer(takeoffState.activeLayerId || selectionState.activeLayerId) : null;
+
+        if (isBrowsingAttachmentFolder()) {
+            let imgDocs = attachmentImageDocs().filter(doc => {
+                if (!drawingState.query || 'attachment'.includes(drawingState.query)) return true;
+                return matchesDrawingQuery(doc);
+            });
+
+            const totalSheetBadge = $('takeoffSheetTotalCount');
+            if (totalSheetBadge) totalSheetBadge.textContent = imgDocs.length;
+
+            if (drawingState.filterMode === 'item') {
+                imgDocs = imgDocs.filter(imgDoc => getSheetTakeoffSummary(imgDoc.id, 1)?.hasActiveItem);
+            }
+
+            if (!imgDocs.length) {
+                box.innerHTML = `<div class="pro-drawing-empty">${drawingState.filterMode === 'item' ? 'Ninguna imagen contiene marcas del item activo.' : 'No attachments match your search.'}</div>`;
+                showPreviewFallback('Select an attachment');
+                return;
+            }
+
+            const activePreviewDoc = imgDocs.find(d => Number(d.id) === Number(drawingState.previewAttachmentDocId)) ||
+                                     imgDocs.find(d => Number(d.id) === Number(drawingState.selectedDocumentId)) ||
+                                     imgDocs[0];
+            drawingState.previewAttachmentDocId = activePreviewDoc?.id || null;
+
+            box.innerHTML = imgDocs.map((imgDoc, idx) => {
+                const isCurrentEditorSheet = Number(imgDoc.id) === Number(drawingState.selectedDocumentId);
+                const isPreviewActive = Number(imgDoc.id) === Number(drawingState.previewAttachmentDocId);
+                const summary = getSheetTakeoffSummary(imgDoc.id, 1);
+                const hasActiveMarks = summary.hasActiveItem;
+                const activeCount = summary.activeItemMarks;
+
+                return `<button class="pro-sheet-row ${isPreviewActive ? 'active' : ''} ${isCurrentEditorSheet ? 'is-editor-open' : ''}" type="button" data-attachment-doc-id="${imgDoc.id}" data-drawing-page="1" title="${esc(imgDoc.name)}">
+                    <span class="pro-sheet-info">
+                        <span class="pro-sheet-page-badge">Img ${idx + 1}</span>
+                        <span class="pro-sheet-name">${esc(imgDoc.name)}</span>
+                    </span>
+                    <span class="pro-sheet-icons">
+                        ${hasActiveMarks ? `
+                            <span class="pro-sheet-item-mark" style="--mark-color: ${activeLayer?.color || '#2563eb'}" title="${activeCount} ${activeCount === 1 ? 'marca' : 'marcas'} de ${esc(activeLayer?.name || 'item activo')}">
+                                <span class="pro-mark-dot" style="background: ${activeLayer?.color || '#2563eb'}"></span>
+                                ${activeCount}
+                            </span>
+                        ` : (summary.hasAnyTakeoff ? `
+                            <span class="pro-sheet-takeoff-tag" title="${summary.layers.length} ${summary.layers.length === 1 ? 'item' : 'items'} de cotización (${summary.totalMarks} marcas)">
+                                <i class="fas fa-layer-group"></i> ${summary.layers.length}
+                            </span>
+                        ` : '')}
+                        ${isCurrentEditorSheet ? '<span class="pro-sheet-current-tag" title="Imagen abierta en el visor"><i class="fas fa-eye"></i></span>' : ''}
+                    </span>
+                </button>`;
+            }).join('');
+
+            box.querySelectorAll('[data-attachment-doc-id]').forEach(button => {
+                const getTargetDoc = () => imgDocs.find(d => Number(d.id) === Number(button.dataset.attachmentDocId));
+                const updateHoverPreview = () => {
+                    if (isDropdownScrolling) return;
+                    if (activeSheetHoverTimer) clearTimeout(activeSheetHoverTimer);
+                    activeSheetHoverTimer = setTimeout(() => {
+                        if (isDropdownScrolling) return;
+                        const targetDoc = getTargetDoc();
+                        if (!targetDoc || Number(drawingState.previewAttachmentDocId) === Number(targetDoc.id)) return;
+                        drawingState.previewAttachmentDocId = targetDoc.id;
+                        renderSheetPreview(targetDoc, 1);
+                    }, 110);
+                };
+                button.addEventListener('mouseenter', updateHoverPreview);
+                button.addEventListener('focus', updateHoverPreview);
+                button.addEventListener('click', () => {
+                    if (activeSheetHoverTimer) clearTimeout(activeSheetHoverTimer);
+                    const targetDoc = getTargetDoc();
+                    if (!targetDoc) return;
+                    drawingState.previewAttachmentDocId = targetDoc.id;
+                    renderSheetPreview(targetDoc, 1);
+                    selectDrawingSheet(targetDoc, 1);
+                });
+            });
+
+            if (activePreviewDoc) {
+                renderSheetPreview(activePreviewDoc, 1);
+            }
+            return;
+        }
+
+        const doc = browsingDrawingDoc();
         if (!doc) {
             box.innerHTML = '<div class="pro-drawing-empty">No drawing selected.</div>';
             showPreviewFallback('Select a drawing');
@@ -7227,7 +7795,6 @@
             return;
         }
 
-        const activeLayer = typeof findLayer === 'function' ? findLayer(takeoffState.activeLayerId || selectionState.activeLayerId) : null;
         let sheets = buildSheets(doc).filter(sheet => matchesDrawingQuery(doc, sheet));
 
         const totalSheetBadge = $('takeoffSheetTotalCount');
@@ -7240,7 +7807,7 @@
         box.innerHTML = sheets.map(sheet => {
             const isCurrentEditorSheet = doc.id === drawingState.selectedDocumentId && sheet.pageNumber === drawingState.selectedPage;
             const isPreviewActive = sheet.pageNumber === (drawingState.previewPage || 1);
-            const summary = sheet.takeoffSummary || getSheetTakeoffSummary(doc.id, sheet.pageNumber);
+            const summary = sheet.takeoffSummary || EMPTY_SHEET_SUMMARY;
             const hasActiveMarks = summary.hasActiveItem;
             const activeCount = summary.activeItemMarks;
 
@@ -7267,9 +7834,20 @@
         }).join('') || `<div class="pro-drawing-empty">${drawingState.filterMode === 'item' ? 'Ninguna hoja contiene marcas del item activo.' : 'No sheets match your search.'}</div>`;
 
         box.querySelectorAll('[data-drawing-page]').forEach(button => {
-            button.addEventListener('mouseenter', () => renderSheetPreview(doc, Number(button.dataset.drawingPage)));
-            button.addEventListener('focus', () => renderSheetPreview(doc, Number(button.dataset.drawingPage)));
+            const schedulePreview = () => {
+                if (isDropdownScrolling) return;
+                const pg = Number(button.dataset.drawingPage);
+                if (activeSheetHoverTimer) clearTimeout(activeSheetHoverTimer);
+                activeSheetHoverTimer = setTimeout(() => {
+                    if (isDropdownScrolling) return;
+                    if (drawingState.previewPage === pg && Number(drawingState.lastPreviewDocId) === Number(doc.id)) return;
+                    renderSheetPreview(doc, pg);
+                }, 130);
+            };
+            button.addEventListener('mouseenter', schedulePreview);
+            button.addEventListener('focus', schedulePreview);
             button.addEventListener('click', () => {
+                if (activeSheetHoverTimer) clearTimeout(activeSheetHoverTimer);
                 const pg = Number(button.dataset.drawingPage);
                 renderSheetPreview(doc, pg);
                 selectDrawingSheet(doc, pg);
@@ -7290,28 +7868,39 @@
         if (box) box.innerHTML = `<span>${esc(text || 'Preview unavailable')}</span>`;
     }
 
+    function storeTakeoffPreviewThumb(key, fileKey, url) {
+        if (!url) return;
+        if (drawingState.thumbnailCache.has(key)) drawingState.thumbnailCache.delete(key);
+        drawingState.thumbnailCache.set(key, url);
+        sharedPdfThumbCache.set(key, url);
+        if (fileKey) sharedPdfThumbCache.set(fileKey, url);
+        while (drawingState.thumbnailCache.size > drawingState.thumbnailCacheLimit) {
+            drawingState.thumbnailCache.delete(drawingState.thumbnailCache.keys().next().value);
+        }
+    }
+
     async function renderSheetPreview(doc, pageNumber) {
         const box = $('takeoffSheetPreview');
         if (!box || !doc) return;
-        drawingState.previewPage = Math.max(1, Number(pageNumber) || 1);
+        const targetPage = Math.max(1, Number(pageNumber) || 1);
+        drawingState.previewPage = targetPage;
 
         // Update sheet row active state in list
-        document.querySelectorAll('#takeoffSheetList .pro-sheet-row').forEach(row => {
-            if (Number(row.dataset.drawingPage) === drawingState.previewPage) {
-                row.classList.add('active');
-            } else {
-                row.classList.remove('active');
-            }
-        });
+        const prevActive = document.querySelector('#takeoffSheetList .pro-sheet-row.active');
+        const nextActive = doc.extension !== 'pdf'
+            ? document.querySelector(`#takeoffSheetList .pro-sheet-row[data-attachment-doc-id="${doc.id}"]`)
+            : document.querySelector(`#takeoffSheetList .pro-sheet-row[data-drawing-page="${targetPage}"]`);
+        if (prevActive && prevActive !== nextActive) prevActive.classList.remove('active');
+        if (nextActive && !nextActive.classList.contains('active')) nextActive.classList.add('active');
 
         // Update preview headers
         const titleEl = $('takeoffPreviewTitle');
         const subEl = $('takeoffPreviewSub');
-        if (titleEl) titleEl.textContent = sheetName(doc, drawingState.previewPage);
-        if (subEl) subEl.textContent = `Hoja ${drawingState.previewPage} de ${doc.pageCount || 1} • ${esc(doc.name)}`;
+        if (titleEl) titleEl.textContent = sheetName(doc, targetPage);
+        if (subEl) subEl.textContent = `Hoja ${targetPage} de ${doc.pageCount || 1} • ${doc.name || ''}`;
 
         // Update Takeoff Items breakdown on this sheet
-        const summary = getSheetTakeoffSummary(doc.id, drawingState.previewPage);
+        const summary = getSheetTakeoffSummary(doc.id, targetPage);
         const countEl = $('takeoffPreviewItemCount');
         const listEl = $('takeoffPreviewItemsList');
         const openBtn = $('takeoffOpenSheetBtn');
@@ -7342,50 +7931,97 @@
 
         if (openBtn) {
             openBtn.disabled = false;
-            openBtn.onclick = () => selectDrawingSheet(doc, drawingState.previewPage);
+            openBtn.onclick = () => selectDrawingSheet(doc, targetPage);
         }
 
         // Render thumbnail
         const requestId = ++drawingState.thumbnailRequest;
-        showPreviewLoading();
+        drawingState.lastPreviewDocId = doc.id;
+        if (drawingState.activePreviewRenderTask && typeof drawingState.activePreviewRenderTask.cancel === 'function') {
+            try { drawingState.activePreviewRenderTask.cancel(); } catch (_) {}
+            drawingState.activePreviewRenderTask = null;
+        }
         if (doc.extension !== 'pdf') {
-            box.innerHTML = `<img src="${esc(doc.fileUrl)}" alt="${esc(doc.name)}">`;
+            box.innerHTML = `<img src="${esc(doc.fileUrl)}" alt="${esc(doc.name)}" loading="lazy" decoding="async">`;
             return;
         }
-        const key = `${doc.id}:${drawingState.previewPage}`;
+        const key = `${doc.id}:${targetPage}`;
+        const fileKey = doc.fileUrl ? `${doc.fileUrl}:${targetPage}` : null;
+
+        // 1. Check in-memory caches (0ms)
+        const cachedUrl = drawingState.thumbnailCache.get(key)
+            || sharedPdfThumbCache.get(key)
+            || (fileKey ? sharedPdfThumbCache.get(fileKey) : null)
+            || window.__TakeoffThumbService?.getCachedThumbUrl?.(doc, targetPage);
+        if (cachedUrl) {
+            drawingState.thumbnailCache.set(key, cachedUrl);
+            box.innerHTML = `<img src="${cachedUrl}" alt="${esc(sheetName(doc, targetPage))}" loading="lazy" decoding="async">`;
+            return;
+        }
+
+        showPreviewLoading();
+
         try {
-            if (drawingState.thumbnailCache.has(key)) {
-                if (requestId === drawingState.thumbnailRequest) {
-                    box.innerHTML = `<img src="${drawingState.thumbnailCache.get(key)}" alt="${esc(sheetName(doc, drawingState.previewPage))}">`;
+            // 2. Check IndexedDB persistent cache (~1ms, zero CPU load)
+            if (window.__TakeoffThumbService?.getPersistedThumbUrl) {
+                const persistedUrl = await window.__TakeoffThumbService.getPersistedThumbUrl(doc, targetPage);
+                if (requestId !== drawingState.thumbnailRequest) return;
+                if (persistedUrl) {
+                    storeTakeoffPreviewThumb(key, fileKey, persistedUrl);
+                    box.innerHTML = `<img src="${persistedUrl}" alt="${esc(sheetName(doc, targetPage))}" loading="lazy" decoding="async">`;
+                    return;
                 }
+            }
+
+            // 3. Render in Dedicated Background Web Worker (OffscreenCanvas) so scrolling/navigation never lags
+            if (window.__TakeoffThumbService?.renderPreviewThumb) {
+                const workerRes = await window.__TakeoffThumbService.renderPreviewThumb(doc, targetPage);
+                if (requestId !== drawingState.thumbnailRequest) return;
+                if (workerRes && workerRes.url) {
+                    if (workerRes.numPages && !doc.pageCount) {
+                        syncResolvedPageCountToState(doc, workerRes.numPages);
+                    }
+                    storeTakeoffPreviewThumb(key, fileKey, workerRes.url);
+                    box.innerHTML = `<img src="${workerRes.url}" alt="${esc(sheetName(doc, targetPage))}" loading="lazy" decoding="async">`;
+                    return;
+                }
+            }
+
+            // 4. Fallback if OffscreenCanvas Worker is unavailable: idle callback + async toBlob
+            if (requestId !== drawingState.thumbnailRequest) return;
+            const pdf = await getPdfDocument(doc);
+            if (requestId !== drawingState.thumbnailRequest || !pdf) return;
+            const page = await pdf.getPage(targetPage);
+            if (requestId !== drawingState.thumbnailRequest) {
+                try { page.cleanup(); } catch (_) {}
                 return;
             }
-            let dataUrl = null;
-            if (doc.id === drawingState.selectedDocumentId) {
-                dataUrl = await Promise.resolve(callEditor('takeoffRenderThumbnail', drawingState.previewPage));
+            const unscaled = page.getViewport({ scale: 1.0 });
+            const scale = Math.min(0.32, Math.max(0.12, 240 / (unscaled.width || 1000)));
+            const viewport = page.getViewport({ scale });
+            const canvas = document.createElement('canvas');
+            const ctx = canvas.getContext('2d', { alpha: false });
+            canvas.width = Math.max(1, Math.floor(viewport.width));
+            canvas.height = Math.max(1, Math.floor(viewport.height));
+            ctx.fillStyle = '#fff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            const renderTask = page.render({ canvasContext: ctx, viewport });
+            drawingState.activePreviewRenderTask = renderTask;
+            await renderTask.promise;
+            try { page.cleanup(); } catch (_) {}
+            if (drawingState.activePreviewRenderTask === renderTask) {
+                drawingState.activePreviewRenderTask = null;
             }
-            if (!dataUrl) {
-                const pdf = await getPdfDocument(doc);
-                const page = await pdf.getPage(drawingState.previewPage);
-                const viewport = page.getViewport({ scale: 0.18 });
-                const canvas = document.createElement('canvas');
-                const ctx = canvas.getContext('2d', { alpha: false });
-                canvas.width = Math.max(1, Math.floor(viewport.width));
-                canvas.height = Math.max(1, Math.floor(viewport.height));
-                ctx.fillStyle = '#fff';
-                ctx.fillRect(0, 0, canvas.width, canvas.height);
-                await page.render({ canvasContext: ctx, viewport }).promise;
-                dataUrl = canvas.toDataURL('image/jpeg', 0.68);
-            }
-            if (drawingState.thumbnailCache.has(key)) drawingState.thumbnailCache.delete(key);
-            drawingState.thumbnailCache.set(key, dataUrl);
-            while (drawingState.thumbnailCache.size > drawingState.thumbnailCacheLimit) {
-                drawingState.thumbnailCache.delete(drawingState.thumbnailCache.keys().next().value);
-            }
-            if (requestId === drawingState.thumbnailRequest) {
-                box.innerHTML = `<img src="${dataUrl}" alt="${esc(sheetName(doc, drawingState.previewPage))}">`;
-            }
+            if (requestId !== drawingState.thumbnailRequest) return;
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.80));
+            if (!blob || requestId !== drawingState.thumbnailRequest) return;
+            const blobUrl = URL.createObjectURL(blob);
+            storeTakeoffPreviewThumb(key, fileKey, blobUrl);
+            box.innerHTML = `<img src="${blobUrl}" alt="${esc(sheetName(doc, targetPage))}" loading="lazy" decoding="async">`;
         } catch (e) {
+            if (e && (e.name === 'RenderingCancelledException' || String(e.message || '').includes('Rendering cancelled'))) {
+                return;
+            }
             console.warn('Thumbnail failed', e);
             if (requestId === drawingState.thumbnailRequest) showPreviewFallback('Preview unavailable');
         }
@@ -7394,13 +8030,43 @@
     function syncProjectDocument(doc) {
         if (!doc) return;
         drawingState.selectedDocumentId = Number(doc.id);
-        drawingState.browseDocumentId = Number(doc.id);
+        if (isImageDrawingDoc(doc)) {
+            drawingState.browseDocumentId = 'attachment';
+            drawingState.previewAttachmentDocId = Number(doc.id);
+        } else {
+            drawingState.browseDocumentId = Number(doc.id);
+        }
         if (window.ProjectState) {
             window.ProjectState.selectedDocumentId = Number(doc.id);
             window.ProjectState.selectedDrawingId = Number(doc.id);
         }
         const download = document.getElementById('downloadDocBtn');
         if (download) download.href = doc.fileUrl || '#';
+    }
+
+    function showTakeoffCanvasLoader(text = 'Loading drawing...') {
+        const stage = $('takeoffFrame')?.parentElement;
+        if (!stage) return;
+        let loader = document.getElementById('takeoffCanvasLoadingOverlay');
+        if (!loader) {
+            loader = document.createElement('div');
+            loader.id = 'takeoffCanvasLoadingOverlay';
+            loader.className = 'takeoff-canvas-loading-overlay';
+            loader.setAttribute('role', 'status');
+            loader.setAttribute('aria-live', 'polite');
+            loader.innerHTML = `
+                <span class="doc-loading-spinner" aria-hidden="true"></span>
+                <span class="takeoff-canvas-loading-text"></span>
+            `;
+            stage.appendChild(loader);
+        }
+        const txtEl = loader.querySelector('.takeoff-canvas-loading-text');
+        if (txtEl) txtEl.textContent = text;
+        loader.classList.add('is-active');
+    }
+
+    function hideTakeoffCanvasLoader() {
+        document.getElementById('takeoffCanvasLoadingOverlay')?.classList.remove('is-active');
     }
 
     function selectDrawingSheet(doc, pageNumber) {
@@ -7420,11 +8086,15 @@
         } catch (e) { }
         if (currentFrameId !== Number(doc.id)) {
             frame.style.display = 'block';
+            showTakeoffCanvasLoader(`Loading ${doc.name || 'drawing'}...`);
+            const fallbackTimer = setTimeout(hideTakeoffCanvasLoader, 6000);
             const onLoad = () => {
+                clearTimeout(fallbackTimer);
                 frame.removeEventListener('load', onLoad);
                 setTimeout(() => {
                     callEditor('takeoffJumpToPage', drawingState.selectedPage);
                     syncEditorInfo();
+                    hideTakeoffCanvasLoader();
                 }, 80);
             };
             frame.addEventListener('load', onLoad);
@@ -7638,12 +8308,24 @@
     window.projectTakeoffRefreshDrawings = function (targetDocId = null) {
         drawingState.documents = drawingDocs();
         const preferredId = targetDocId || window.ProjectState?.selectedDocumentId;
-        if (preferredId && drawingState.documents.some(doc => Number(doc.id) === Number(preferredId))) {
-            drawingState.selectedDocumentId = Number(preferredId);
-            drawingState.browseDocumentId = Number(preferredId);
+        const matchedDoc = preferredId ? drawingState.documents.find(doc => Number(doc.id) === Number(preferredId)) : null;
+        if (matchedDoc) {
+            drawingState.selectedDocumentId = Number(matchedDoc.id);
+            if (isImageDrawingDoc(matchedDoc)) {
+                drawingState.browseDocumentId = 'attachment';
+                drawingState.previewAttachmentDocId = Number(matchedDoc.id);
+            } else {
+                drawingState.browseDocumentId = Number(matchedDoc.id);
+            }
         } else if (!drawingState.documents.some(doc => Number(doc.id) === Number(drawingState.selectedDocumentId)) && drawingState.documents[0]) {
-            drawingState.selectedDocumentId = drawingState.documents[0].id;
-            drawingState.browseDocumentId = drawingState.documents[0].id;
+            const firstDoc = drawingState.documents[0];
+            drawingState.selectedDocumentId = firstDoc.id;
+            if (isImageDrawingDoc(firstDoc)) {
+                drawingState.browseDocumentId = 'attachment';
+                drawingState.previewAttachmentDocId = firstDoc.id;
+            } else {
+                drawingState.browseDocumentId = firstDoc.id;
+            }
         }
         setDrawingLabel();
         renderDrawingDropdown();
@@ -7779,7 +8461,13 @@
             button.addEventListener('click', event => {
                 event.stopPropagation();
                 const menu = $(button.dataset.takeoffMenuToggle);
-                setMenuExpanded(button, !menu?.classList.contains('open'));
+                const isCurrentlyOpen = menu?.classList.contains('open') || button.getAttribute('aria-expanded') === 'true';
+                if (isCurrentlyOpen) {
+                    setMenuExpanded(button, false);
+                } else {
+                    if (typeof window.closeAllOpenPopouts === 'function') window.closeAllOpenPopouts();
+                    setMenuExpanded(button, true);
+                }
             });
         });
 
@@ -7913,6 +8601,12 @@
         window.addEventListener('takeoff:estimating-items-updated', event => {
             syncEstimatingItemsToTakeoff(event.detail || {});
             renderTakeoffEstimateFooter();
+        });
+        window.addEventListener('estimating:takeoff-item-moved', event => {
+            const detail = event.detail || {};
+            if (detail.layerId && detail.targetGroupId) {
+                moveTakeoffLayerToGroup(detail.layerId, detail.targetGroupId);
+            }
         });
         window.addEventListener('estimating:item-difficulty-updated', event => {
             const detail = event.detail || {};

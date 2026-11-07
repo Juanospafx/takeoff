@@ -2179,21 +2179,78 @@ body.theme-dark .pro-sidebar-collapse-tab:hover {
 #takeoffItemsActions {
     left: 0;
     right: auto;
-    width: min(310px, calc(100vw - 32px));
-    grid-template-columns: repeat(2, minmax(0, 1fr));
+    width: min(260px, calc(100vw - 32px));
+    grid-template-columns: 1fr;
     gap: 4px;
     padding: 6px;
 }
 
+#takeoffItemsActions:not(.open) {
+    display: none !important;
+}
+
+#takeoffItemsActions.open {
+    display: flex !important;
+    flex-direction: column;
+}
+
 #takeoffItemsActions button {
-    min-height: 30px;
-    padding: 5px 8px;
+    min-height: 32px;
+    padding: 6px 10px;
     line-height: 1.2;
-    font-size: .73rem;
+    font-size: .75rem;
+    width: 100%;
+    text-align: left;
+    display: flex;
+    align-items: center;
+    gap: 8px;
+    box-sizing: border-box;
 }
 
 #takeoffItemsActions button.excel {
-    grid-column: 1 / -1;
+    width: 100%;
+}
+
+@keyframes groupHighlightPulse {
+    0% {
+        background-color: rgba(251, 90, 58, 0.35);
+        box-shadow: 0 0 0 2px rgba(251, 90, 58, 0.5);
+    }
+    50% {
+        background-color: rgba(251, 90, 58, 0.1);
+        box-shadow: 0 0 0 1px rgba(251, 90, 58, 0.25);
+    }
+    100% {
+        background-color: transparent;
+        box-shadow: none;
+    }
+}
+
+.group-highlight-pulse {
+    animation: groupHighlightPulse 1.2s ease-in-out 2 !important;
+}
+
+/* Takeoff sidebar layer drag & drop styles */
+.pro-tree-row .pro-row-menu-btn {
+    cursor: grab;
+}
+
+.pro-tree-row .pro-row-menu-btn:active {
+    cursor: grabbing;
+}
+
+.pro-tree-row.is-dragging-row {
+    opacity: 0.45;
+    background: rgba(251, 90, 58, 0.12) !important;
+}
+
+.pro-tree-row.pro-drag-over-layer {
+    border-top: 2px solid #fb5a3a !important;
+}
+
+.pro-takeoff-group.pro-drag-over-group {
+    outline: 2px dashed #fb5a3a !important;
+    outline-offset: -2px;
 }
 
 @media (max-width: 430px) {
@@ -2819,6 +2876,18 @@ body.theme-dark .pro-stroke-preview {
     min-width: 0;
     width: 100%;
     overflow: hidden;
+    cursor: pointer;
+}
+
+.pro-associated-catalog-card:hover {
+    border-color: #fb5a3a;
+    box-shadow: 0 2px 10px rgba(251, 90, 58, 0.12);
+}
+
+[data-theme="dark"] .pro-associated-catalog-card:hover,
+body.theme-dark .pro-associated-catalog-card:hover {
+    border-color: #fb5a3a !important;
+    box-shadow: 0 2px 10px rgba(251, 90, 58, 0.2) !important;
 }
 
 [data-theme="dark"] .pro-associated-catalog-card,
@@ -5641,13 +5710,15 @@ body.theme-dark .pro-icon-btn:focus-visible {
     display: none !important;
 }
 
-.project-subhead-wrapper.is-takeoff-tab .pd-header-left {
+.project-subhead-wrapper.is-takeoff-tab .pd-header-left,
+.project-subhead-wrapper.is-documents-tab .pd-header-left {
     max-width: none !important;
     min-width: 0 !important;
     flex: 1 1 auto !important;
 }
 
-.project-subhead-wrapper.is-takeoff-tab .project-title-row {
+.project-subhead-wrapper.is-takeoff-tab .project-title-row,
+.project-subhead-wrapper.is-documents-tab .project-title-row {
     display: flex !important;
     align-items: center !important;
     gap: 10px !important;
@@ -5655,7 +5726,8 @@ body.theme-dark .pro-icon-btn:focus-visible {
     min-width: 0 !important;
 }
 
-.project-subhead-wrapper.is-takeoff-tab .pd-project-title {
+.project-subhead-wrapper.is-takeoff-tab .pd-project-title,
+.project-subhead-wrapper.is-documents-tab .pd-project-title {
     max-width: 260px !important;
     min-width: 0 !important;
     flex-shrink: 1 !important;
@@ -5664,7 +5736,8 @@ body.theme-dark .pro-icon-btn:focus-visible {
     text-overflow: ellipsis !important;
 }
 
-.project-subhead-wrapper.is-takeoff-tab .bb-status-pill-container {
+.project-subhead-wrapper.is-takeoff-tab .bb-status-pill-container,
+.project-subhead-wrapper.is-documents-tab .bb-status-pill-container {
     flex-shrink: 0 !important;
 }
 
@@ -5685,11 +5758,19 @@ body.theme-dark .pro-icon-btn:focus-visible {
 }
 
 body:not(.is-takeoff-tab) #takeoffSubheadItemInfo,
-.project-subhead-wrapper:not(.is-takeoff-tab) #takeoffSubheadItemInfo {
+.project-subhead-wrapper:not(.is-takeoff-tab) #takeoffSubheadItemInfo,
+.project-subhead-wrapper.is-documents-tab #takeoffSubheadItemInfo {
     display: none !important;
 }
 
-.project-subhead-wrapper.is-takeoff-tab .takeoff-subhead-item-info.is-visible {
+body:not(.is-documents-tab) #documentsSubheadItemInfo,
+.project-subhead-wrapper:not(.is-documents-tab) #documentsSubheadItemInfo,
+.project-subhead-wrapper.is-takeoff-tab #documentsSubheadItemInfo {
+    display: none !important;
+}
+
+.project-subhead-wrapper.is-takeoff-tab #takeoffSubheadItemInfo.is-visible,
+.project-subhead-wrapper.is-documents-tab #documentsSubheadItemInfo.is-visible {
     display: inline-flex !important;
     position: absolute !important;
     left: 50% !important;
@@ -5700,7 +5781,8 @@ body:not(.is-takeoff-tab) #takeoffSubheadItemInfo,
 }
 
 @media (max-width: 992px) {
-    .project-subhead-wrapper.is-takeoff-tab .takeoff-subhead-item-info.is-visible {
+    .project-subhead-wrapper.is-takeoff-tab #takeoffSubheadItemInfo.is-visible,
+    .project-subhead-wrapper.is-documents-tab #documentsSubheadItemInfo.is-visible {
         position: static !important;
         transform: none !important;
         margin-left: 6px !important;
@@ -9503,16 +9585,24 @@ body.theme-dark .pcd-add-custom-color-btn:hover {
 
 /* UoM Menu */
 .pcd-uom-menu {
-    width: 250px;
-    max-height: 310px;
+    width: min(220px, calc(100vw - 32px));
+    max-height: 220px;
     padding: 0;
     display: none;
     flex-direction: column;
     overflow: hidden;
+    z-index: 3600;
 }
 
 .pro-custom-dropdown.is-open .pcd-uom-menu {
     display: flex;
+}
+
+.pro-edit-selectors-row .col-uom .pcd-uom-menu,
+.pro-create-selectors-row .col-uom .pcd-uom-menu,
+.pro-custom-dropdown-trigger.pcd-compact ~ .pcd-uom-menu {
+    width: min(210px, 90vw);
+    max-height: 215px;
 }
 
 .pcd-search-wrap {
@@ -9556,7 +9646,7 @@ body.theme-dark .pcd-add-custom-color-btn:hover {
 
 .pcd-uom-list {
     overflow-y: auto;
-    max-height: 245px;
+    max-height: 160px;
     padding: 4px 0;
     scrollbar-width: thin;
     scrollbar-color: #cbd5e1 transparent;

@@ -1654,11 +1654,24 @@
         let draggedColId = null;
         let dragOverRaf = null;
         let lastDragTh = null;
+        let draggedRowItemId = null;
+        let lastDragRow = null;
 
         table.addEventListener('dragstart', e => {
             if (resizingCol || e.target.closest('.est-col-resizer') || document.body.style.cursor === 'col-resize') {
                 e.preventDefault();
                 return false;
+            }
+            const grip = e.target.closest('.est-row-grip');
+            if (grip) {
+                const row = grip.closest('tr.est-item-row');
+                if (!row) { e.preventDefault(); return false; }
+                draggedRowItemId = row.dataset.itemId;
+                e.dataTransfer.setData('text/plain', draggedRowItemId);
+                e.dataTransfer.setData('application/x-est-item', draggedRowItemId);
+                e.dataTransfer.effectAllowed = 'move';
+                row.classList.add('est-row-dragging');
+                return;
             }
             const th = e.target.closest('.est-th-draggable');
             if (!th || th.classList.contains('col-cost-item')) {
@@ -1672,6 +1685,35 @@
         });
 
         table.addEventListener('dragover', e => {
+            if (draggedRowItemId) {
+                const itemRow = e.target.closest('tr.est-item-row');
+                const groupRow = e.target.closest('tr.est-group-row');
+                if (itemRow && itemRow.dataset.itemId !== draggedRowItemId) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    const rect = itemRow.getBoundingClientRect();
+                    const isTop = e.clientY < rect.top + rect.height / 2;
+                    if (lastDragRow && lastDragRow !== itemRow) {
+                        lastDragRow.classList.remove('est-row-drag-over-top', 'est-row-drag-over-bottom', 'est-group-drag-over');
+                    }
+                    lastDragRow = itemRow;
+                    itemRow.classList.toggle('est-row-drag-over-top', isTop);
+                    itemRow.classList.toggle('est-row-drag-over-bottom', !isTop);
+                    return;
+                }
+                if (groupRow) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (lastDragRow && lastDragRow !== groupRow) {
+                        lastDragRow.classList.remove('est-row-drag-over-top', 'est-row-drag-over-bottom', 'est-group-drag-over');
+                    }
+                    lastDragRow = groupRow;
+                    groupRow.classList.add('est-group-drag-over');
+                    return;
+                }
+                return;
+            }
+
             const th = e.target.closest('.est-th-draggable');
             if (!th || !draggedColId || th.dataset.colId === draggedColId) return;
             e.preventDefault();
@@ -1702,6 +1744,14 @@
         });
 
         table.addEventListener('dragleave', e => {
+            if (draggedRowItemId) {
+                const row = e.target.closest('tr.est-item-row, tr.est-group-row');
+                if (row && e.relatedTarget && !row.contains(e.relatedTarget)) {
+                    row.classList.remove('est-row-drag-over-top', 'est-row-drag-over-bottom', 'est-group-drag-over');
+                    if (lastDragRow === row) lastDragRow = null;
+                }
+                return;
+            }
             const th = e.target.closest('.est-th-draggable');
             if (th && e.relatedTarget && !th.contains(e.relatedTarget)) {
                 th.classList.remove('est-th-drag-over-left', 'est-th-drag-over-right');
@@ -1710,6 +1760,25 @@
         });
 
         table.addEventListener('drop', e => {
+            if (draggedRowItemId) {
+                e.preventDefault();
+                const itemRow = e.target.closest('tr.est-item-row');
+                const groupRow = e.target.closest('tr.est-group-row');
+                if (itemRow && itemRow.dataset.itemId !== draggedRowItemId) {
+                    const rect = itemRow.getBoundingClientRect();
+                    const isBefore = e.clientY < rect.top + rect.height / 2;
+                    moveEstimatingItem(draggedRowItemId, itemRow.dataset.itemId, null, isBefore);
+                } else if (groupRow) {
+                    moveEstimatingItem(draggedRowItemId, null, groupRow.dataset.groupId, false);
+                }
+                table.querySelectorAll('.est-row-dragging, .est-row-drag-over-top, .est-row-drag-over-bottom, .est-group-drag-over').forEach(el => {
+                    el.classList.remove('est-row-dragging', 'est-row-drag-over-top', 'est-row-drag-over-bottom', 'est-group-drag-over');
+                });
+                draggedRowItemId = null;
+                lastDragRow = null;
+                return;
+            }
+
             const th = e.target.closest('.est-th-draggable');
             if (!th || !draggedColId || th.dataset.colId === draggedColId) return;
             e.preventDefault();
@@ -1736,9 +1805,11 @@
         table.addEventListener('dragend', () => {
             draggedColId = null;
             lastDragTh = null;
+            draggedRowItemId = null;
+            lastDragRow = null;
             if (dragOverRaf) { cancelAnimationFrame(dragOverRaf); dragOverRaf = null; }
-            table.querySelectorAll('.est-th-draggable').forEach(th => {
-                th.classList.remove('est-th-dragging', 'est-th-drag-over-left', 'est-th-drag-over-right');
+            table.querySelectorAll('.est-th-draggable, .est-row-dragging, .est-row-drag-over-top, .est-row-drag-over-bottom, .est-group-drag-over').forEach(el => {
+                el.classList.remove('est-th-dragging', 'est-th-drag-over-left', 'est-th-drag-over-right', 'est-row-dragging', 'est-row-drag-over-top', 'est-row-drag-over-bottom', 'est-group-drag-over');
             });
         });
     }
@@ -1961,6 +2032,7 @@
         return `<tr class="est-item-row ${assembly ? 'est-assembly-parent-row' : ''} ${isItemSelected ? 'selected' : ''} ${invalid ? 'est-invalid-row' : ''}" data-item-id="${esc(rowId)}" ${invalid ? 'title="This item has calculation validation errors"' : ''}>
             <td class="col-check">
                 <div class="est-col-check-cell">
+                    <span class="est-row-grip" draggable="true" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
                     <input type="checkbox" data-item-check="${esc(item.id)}" ${isItemSelected ? 'checked' : ''}>
                 </div>
             </td>
@@ -3063,10 +3135,89 @@ function renderFooter() {
         portal.querySelector('input, button')?.focus();
     }
 
+    function moveEstimatingItem(draggedItemId, targetItemId, targetGroupId, isBefore = true) {
+        if (!draggedItemId) return;
+        if (targetItemId && String(draggedItemId) === String(targetItemId)) return;
+
+        let srcGroup = null, srcIndex = -1, draggedItem = null;
+        for (const g of current().groups) {
+            const idx = (g.items || []).findIndex(it => String(it.id) === String(draggedItemId));
+            if (idx !== -1) {
+                srcGroup = g;
+                srcIndex = idx;
+                draggedItem = g.items[idx];
+                break;
+            }
+        }
+        if (!draggedItem || !srcGroup) return;
+
+        if (targetItemId) {
+            let tgtGroup = null, tgtIndex = -1;
+            for (const g of current().groups) {
+                const idx = (g.items || []).findIndex(it => String(it.id) === String(targetItemId));
+                if (idx !== -1) {
+                    tgtGroup = g;
+                    tgtIndex = idx;
+                    break;
+                }
+            }
+            if (!tgtGroup || tgtIndex === -1) return;
+
+            srcGroup.items.splice(srcIndex, 1);
+            if (srcGroup === tgtGroup && srcIndex < tgtIndex) {
+                tgtIndex--;
+            }
+            const insertIdx = isBefore ? tgtIndex : tgtIndex + 1;
+            tgtGroup.items.splice(insertIdx, 0, draggedItem);
+            changed(`Moved ${draggedItem.name || 'item'}`);
+
+            if (draggedItem.takeoffLayerId) {
+                window.dispatchEvent(new CustomEvent('estimating:takeoff-item-moved', {
+                    detail: {
+                        projectId: String(projectId),
+                        estimateId: String(state.activeEstimateId),
+                        layerId: draggedItem.takeoffLayerId,
+                        targetGroupId: tgtGroup.takeoffGroupId || tgtGroup.id
+                    }
+                }));
+            }
+        } else if (targetGroupId) {
+            const tgtGroup = current().groups.find(g => String(g.id) === String(targetGroupId) || String(g.takeoffGroupId) === String(targetGroupId));
+            if (!tgtGroup) return;
+            srcGroup.items.splice(srcIndex, 1);
+            tgtGroup.items.push(draggedItem);
+            changed(`Moved ${draggedItem.name || 'item'} to ${tgtGroup.name}`);
+
+            if (draggedItem.takeoffLayerId) {
+                window.dispatchEvent(new CustomEvent('estimating:takeoff-item-moved', {
+                    detail: {
+                        projectId: String(projectId),
+                        estimateId: String(state.activeEstimateId),
+                        layerId: draggedItem.takeoffLayerId,
+                        targetGroupId: tgtGroup.takeoffGroupId || tgtGroup.id
+                    }
+                }));
+            }
+        }
+    }
+
     function createGroup() {
         const group = Workspace.group({ name: `Group ${current().groups.length + 1}`, items: [] }, current().groups.length);
         current().groups.push(group);
-        changed(`Created group â€œ${group.name}â€`);
+        changed(`Created group "${group.name}"`);
+        requestAnimationFrame(() => {
+            const row = document.querySelector(`.est-group-row[data-group-id="${group.id}"]`);
+            if (row) {
+                row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                row.classList.add('group-highlight-pulse');
+                setTimeout(() => row.classList.remove('group-highlight-pulse'), 3600);
+            }
+            const input = document.querySelector(`.est-group-name-input[data-group-name="${group.id}"]`);
+            if (input) {
+                input.focus();
+                input.select();
+            }
+        });
     }
 
     function renderCatalogChoices(query = '') {
@@ -5070,6 +5221,32 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         estimate.groups.push(Workspace.group(detail.group));
         changed(`Created Takeoff group ${detail.group.name || ''}`.trim());
     });
+        window.addEventListener('takeoff:estimating-items-reorder-requested', event => {
+        const detail = event.detail || {};
+        if (detail.projectId && String(detail.projectId) !== String(projectId)) return;
+        if (String(detail.estimateId || '') !== String(state.activeEstimateId)) return;
+        const { sourceLayerId, targetLayerId, targetGroupId } = detail;
+        let draggedItem = null;
+        for (const g of current().groups) {
+            const item = (g.items || []).find(it => String(it.takeoffLayerId || it.id) === String(sourceLayerId));
+            if (item) { draggedItem = item; break; }
+        }
+        if (!draggedItem) return;
+        let targetItemId = null;
+        if (targetLayerId) {
+            for (const g of current().groups) {
+                const item = (g.items || []).find(it => String(it.takeoffLayerId || it.id) === String(targetLayerId));
+                if (item) { targetItemId = item.id; break; }
+            }
+        }
+        let tgtGroupId = null;
+        if (targetGroupId) {
+            const grp = current().groups.find(g => String(g.takeoffGroupId || g.id) === String(targetGroupId) || String(g.id) === `takeoff_group_${targetGroupId}`);
+            if (grp) tgtGroupId = grp.id;
+        }
+        moveEstimatingItem(draggedItem.id, targetItemId, tgtGroupId, true);
+    });
+
     window.addEventListener('takeoff:estimating-groups-reorder-requested', event => {
         const detail = event.detail || {};
         if (detail.projectId && String(detail.projectId) !== String(projectId)) return;

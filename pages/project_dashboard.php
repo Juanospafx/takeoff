@@ -935,7 +935,7 @@ $state = [
 <body data-user-role="<?= htmlspecialchars($authRole, ENT_QUOTES, 'UTF-8') ?>" data-can-write="<?= $canWrite ? 'true' : 'false' ?>" data-read-only="<?= $canWrite ? 'false' : 'true' ?>">
     <?php include __DIR__ . '/../views/global_tools_header.php'; ?>
     <div class="workspace-shell">
-        <div class="project-subhead-wrapper <?= $activeTab === 'takeoff' ? 'is-takeoff-tab' : '' ?>">
+        <div class="project-subhead-wrapper <?= $activeTab === 'takeoff' ? 'is-takeoff-tab' : ($activeTab === 'documents' ? 'is-documents-tab' : '') ?>">
             <header class="project-header">
                 <div class="pd-header-left">
                     <?php
@@ -992,6 +992,26 @@ $state = [
                                 <button type="button" class="subhead-item-act-btn danger"
                                     data-subhead-item-action="delete" title="Delete item or selection">
                                     <i class="fas fa-trash"></i><span>Delete</span>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Selected Documents info with quick actions (Independent from Takeoff) -->
+                        <div class="takeoff-subhead-item-info documents-subhead-item-info" id="documentsSubheadItemInfo" style="display:none;"
+                            title="Selected Documents">
+                            <div class="takeoff-subhead-item-main">
+                                <span class="pro-active-layer-dot" id="documentsSubheadItemDot"><i class="fas fa-folder" style="color: #f59e0b; font-size: 11.5px;"></i></span>
+                                <strong class="takeoff-subhead-item-name" id="documentsSubheadItemName"></strong>
+                                <span class="takeoff-subhead-item-meta" id="documentsSubheadItemMeta"></span>
+                            </div>
+                            <div class="takeoff-subhead-item-divider"></div>
+                            <div class="takeoff-subhead-item-actions" id="documentsSubheadItemActions">
+                                <button type="button" class="subhead-item-act-btn" data-doc-subhead-action="move-takeoff"
+                                    title="Move selected documents to Takeoff">
+                                    <i class="fas fa-folder-tree"></i><span>Move to Takeoff</span>
+                                </button>
+                                <button type="button" class="subhead-item-act-btn danger"
+                                    data-doc-subhead-action="delete-all" title="Delete selected documents">
+                                    <i class="fas fa-trash"></i><span>Delete All</span>
                                 </button>
                             </div>
                         </div>
@@ -1550,7 +1570,11 @@ $state = [
                         </svg>
 
                         <h2 class="doc-empty-title">Upload Documents to Get Started</h2>
-                        <p class="doc-empty-desc">Once you upload, you and your team can manage documents here.</p>
+                        <p class="doc-empty-desc">Drag and drop your PDF or image documents into this area to load them onto the page, or click the button below to select files from your computer.</p>
+                        <div class="doc-empty-drop-hint">
+                            <i class="fas fa-cloud-arrow-up"></i>
+                            <span>Drag &amp; drop files here (PDF, PNG, JPG, WEBP)</span>
+                        </div>
                         <button type="button" class="btn-main orange doc-empty-upload-btn" id="docEmptyUploadBtn">
                             <i class="fas fa-upload"></i>
                             <span>Upload</span>
@@ -1562,19 +1586,17 @@ $state = [
                 <div class="documents-layout pro-documents" id="documentsPageView" style="display: none;">
                     <aside class="documents-sidebar" id="documentsSidebar" aria-label="Document folders">
                         <div class="documents-sidebar-head">
-                            <h2>Folders</h2>
+                            <h2>Documents</h2>
                             <div class="documents-menu-wrap">
                                 <button class="btn-ghost icon-only" type="button" data-doc-folder-menu-toggle
-                                    title="Folder options"><i class="fas fa-ellipsis-vertical"></i></button>
+                                    title="Drawing group options"><i class="fas fa-ellipsis-vertical"></i></button>
                                 <div class="documents-menu" id="documentsFolderMenu">
-                                    <button type="button" data-doc-folder-action="create"><i
-                                            class="fas fa-folder-plus"></i> Create folder</button>
-                                    <button type="button" data-doc-folder-action="rename"><i class="fas fa-pen"></i>
-                                        Rename folder</button>
-                                    <button type="button" data-doc-folder-action="delete"><i class="fas fa-trash"></i>
-                                        Delete folder</button>
+                                    <button type="button" data-doc-folder-action="expand-all"><i
+                                            class="fas fa-up-right-and-down-left-from-center"></i> Expand all groups</button>
+                                    <button type="button" data-doc-folder-action="collapse-all"><i
+                                            class="fas fa-down-left-and-up-right-to-center"></i> Collapse all groups</button>
                                     <button type="button" data-doc-folder-action="sort"><i
-                                            class="fas fa-arrow-down-a-z"></i> Sort folders</button>
+                                            class="fas fa-arrow-down-a-z"></i> Sort drawings A–Z</button>
                                 </div>
                             </div>
                         </div>
@@ -1645,6 +1667,10 @@ $state = [
                         </div>
 
                         <div class="documents-list" id="documentsList"></div>
+                        <footer class="documents-content-footer" id="documentsContentFooter">
+                            <i class="fas fa-cloud-arrow-up"></i>
+                            <span>Drag and drop your documents here to upload them</span>
+                        </footer>
                     </section>
                     <!-- Universal Sidebar Context Menu -->
                     <div class="documents-menu" id="docSidebarMenu" style="display: none;"></div>
@@ -1903,8 +1929,8 @@ $state = [
         </main>
     </div>
 
-    <input type="file" id="projectUploadInput" class="d-none" multiple>
-    <input type="file" id="documentsBrowseInput" class="d-none" multiple>
+    <input type="file" id="projectUploadInput" class="d-none" multiple accept=".pdf,image/*,application/pdf,image/png,image/jpeg,image/jpg,image/webp,image/gif,image/bmp,image/tiff">
+    <input type="file" id="documentsBrowseInput" class="d-none" multiple accept=".pdf,image/*,application/pdf,image/png,image/jpeg,image/jpg,image/webp,image/gif,image/bmp,image/tiff">
 
     <!-- Customer Information Modal -->
     <div class="pd-modal-backdrop" id="pdCustomerModal" role="dialog" aria-modal="true"
@@ -2075,6 +2101,38 @@ $state = [
         </div>
     </div>
 
+    <!-- Real-Time Document Upload Progress Modal -->
+    <div class="pd-modal-backdrop doc-upload-modal-backdrop" id="pdDocumentUploadModal" role="dialog" aria-modal="true"
+        aria-labelledby="docUploadModalTitle" aria-live="polite">
+        <div class="pd-modal doc-upload-modal" style="width: min(480px, 100%);">
+            <div class="pd-modal-head">
+                <h3 id="docUploadModalTitle">
+                    <i class="fas fa-cloud-arrow-up doc-upload-modal-icon" id="docUploadModalIcon" style="color: var(--primary);"></i>
+                    <span id="docUploadModalHeading">Uploading Documents...</span>
+                </h3>
+                <span class="doc-upload-modal-counter" id="docUploadModalCounter">0 / 0</span>
+            </div>
+            <div class="pd-modal-body doc-upload-modal-body" style="grid-template-columns: 1fr; gap: 14px;">
+                <div class="doc-upload-current-card">
+                    <div class="doc-upload-file-row">
+                        <div class="doc-upload-file-meta">
+                            <i class="far fa-file-pdf doc-upload-file-icon" id="docUploadFileIcon"></i>
+                            <span class="doc-upload-file-name" id="docUploadFileName">Preparing upload...</span>
+                        </div>
+                        <span class="doc-upload-file-percent" id="docUploadFilePercent">0%</span>
+                    </div>
+                    <div class="doc-upload-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="docUploadProgressTrack">
+                        <div class="doc-upload-progress-bar" id="docUploadProgressBar" style="width: 0%;"></div>
+                    </div>
+                    <div class="doc-upload-status-line">
+                        <span class="doc-upload-status-text" id="docUploadStatusText">Uploading file...</span>
+                    </div>
+                </div>
+                <div class="doc-upload-file-list" id="docUploadFileList" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Item Options Floating Menu for Notes & Tasks -->
     <div class="pd-floating-options-menu" id="pdItemContextMenu" style="display:none;">
         <button type="button" id="pdItemActionEdit"><i class="fas fa-pen"></i> Edit</button>
@@ -2224,12 +2282,21 @@ $state = [
             const scrollTabs = ['overview'];
             document.querySelector('.workspace-shell')?.classList.toggle('workspace-scroll-mode', scrollTabs.includes(tab));
             const isTakeoff = (tab === 'takeoff');
+            const isDocuments = (tab === 'documents');
             document.querySelector('.project-subhead-wrapper')?.classList.toggle('is-takeoff-tab', isTakeoff);
             document.querySelector('.workspace-shell')?.classList.toggle('is-takeoff-tab', isTakeoff);
             document.body.classList.toggle('is-takeoff-tab', isTakeoff);
+            document.querySelector('.project-subhead-wrapper')?.classList.toggle('is-documents-tab', isDocuments);
+            document.querySelector('.workspace-shell')?.classList.toggle('is-documents-tab', isDocuments);
+            document.body.classList.toggle('is-documents-tab', isDocuments);
             const footer = document.querySelector('.bb-brightronix-footer');
             if (footer) footer.style.display = isTakeoff ? 'none' : '';
-            if (!isTakeoff) {
+            window.onDocumentsTabVisibilityChange?.(isDocuments);
+            if (isDocuments) {
+                setTimeout(() => {
+                    window.syncDocumentsSubheadInfo?.();
+                }, 0);
+            } else if (!isTakeoff) {
                 const info = document.getElementById('takeoffSubheadItemInfo');
                 if (info) {
                     info.style.display = 'none';
@@ -2237,6 +2304,7 @@ $state = [
                 }
             } else {
                 setTimeout(() => {
+                    window.updateTakeoffSubheadInfo?.();
                     window.syncTakeoffLayout?.();
                 }, 0);
             }
@@ -2462,28 +2530,40 @@ $state = [
             const files = Array.from(this.files || []);
             this.value = '';
             if (!files.length) return;
+            if (typeof window.uploadProjectDocumentsWithModal === 'function') {
+                await window.uploadProjectDocumentsWithModal(files);
+                return;
+            }
 
-            const host = document.createElement('div');
-            host.style.cssText = 'position:fixed;right:24px;bottom:24px;z-index:10000;width:min(420px,calc(100vw - 48px));padding:16px;border-radius:12px;background:#111827;color:#fff;box-shadow:0 14px 40px rgba(0,0,0,.35)';
-            const label = document.createElement('div');
-            const count = document.createElement('div');
-            count.style.cssText = 'font-size:12px;color:#cbd5e1;margin:5px 0';
-            const track = document.createElement('div');
-            track.style.cssText = 'height:8px;border-radius:999px;overflow:hidden;background:#334155';
-            const bar = document.createElement('div');
-            bar.style.cssText = 'width:0;height:100%;background:#3b82f6;transition:width .15s ease';
-            const results = document.createElement('div');
-            results.style.cssText = 'font-size:12px;max-height:140px;overflow:auto;margin-top:8px';
-            track.appendChild(bar);
-            host.append(label, count, track, results);
-            document.body.appendChild(host);
+            const allowedExts = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'svg']);
+            const validFiles = [];
+            const invalidFiles = [];
+            for (const file of files) {
+                const ext = String(file.name.split('.').pop() || '').toLowerCase();
+                if (allowedExts.has(ext)) validFiles.push(file);
+                else invalidFiles.push(file);
+            }
+            if (invalidFiles.length) {
+                alert('Cannot process unsupported file(s): ' + invalidFiles.map(f => f.name).join(', ') + '. Only PDF and image files are allowed.');
+            }
+            if (!validFiles.length) return;
+
+            const modal = document.getElementById('pdDocumentUploadModal');
+            const label = document.getElementById('docUploadFileName');
+            const count = document.getElementById('docUploadModalCounter');
+            const percentEl = document.getElementById('docUploadFilePercent');
+            const bar = document.getElementById('docUploadProgressBar');
+            const statusText = document.getElementById('docUploadStatusText');
+            if (modal) modal.classList.add('open');
 
             const errors = [];
             let completed = 0;
             let succeeded = 0;
-            for (const file of files) {
-                label.textContent = file.name;
-                count.textContent = `${completed} / ${files.length} · 0%`;
+            for (const file of validFiles) {
+                if (label) label.textContent = file.name;
+                if (count) count.textContent = `${completed + 1} / ${validFiles.length}`;
+                if (percentEl) percentEl.textContent = '0%';
+                if (bar) bar.style.width = '0%';
                 if (file.size > MAX_PROJECT_FILE_BYTES) {
                     errors.push({ filename: file.name, message: 'File exceeds the 10 GB limit.' });
                     completed++;
@@ -2491,25 +2571,27 @@ $state = [
                 }
                 try {
                     await uploadProjectFile(file, percent => {
-                        count.textContent = `${completed} / ${files.length} · ${percent}%`;
-                        bar.style.width = `${Math.round(((completed + percent / 100) / files.length) * 100)}%`;
+                        if (percentEl) percentEl.textContent = `${percent}%`;
+                        if (bar) bar.style.width = `${percent}%`;
                     });
+                    if (percentEl) percentEl.textContent = '100%';
+                    if (bar) bar.style.width = '100%';
                     succeeded++;
                 } catch (error) {
                     errors.push({ filename: file.name, message: error.message || 'Upload failed.' });
                 }
                 completed++;
             }
-            bar.style.width = '100%';
-            label.textContent = errors.length ? `${succeeded} uploaded, ${errors.length} failed` : `${succeeded} uploaded`;
-            count.textContent = `${completed} / ${files.length}`;
-            for (const error of errors) {
-                const row = document.createElement('div');
-                row.style.color = '#fca5a5';
-                row.textContent = `${error.filename}: ${error.message}`;
-                results.appendChild(row);
+            if (bar) bar.style.width = '100%';
+            if (percentEl) percentEl.textContent = '100%';
+            if (statusText) statusText.textContent = errors.length ? `${succeeded} uploaded, ${errors.length} failed` : 'Upload completed';
+            await new Promise(r => setTimeout(r, 2000));
+            if (modal) modal.classList.remove('open');
+            if (errors.length) {
+                alert(errors.map(e => `${e.filename}: ${e.message}`).join('\n'));
+            } else {
+                location.reload();
             }
-            if (!errors.length) location.reload();
         });
 
         function alignOverviewWonBtn() {
