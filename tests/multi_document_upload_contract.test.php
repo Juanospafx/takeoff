@@ -72,6 +72,12 @@ expect(str_contains($files['overview'], '__TakeoffThumbService'), 'Documents wor
 expect(str_contains($files['takeoffJs'], 'bindDropdownScrollGuards'), 'Takeoff drawing dropdown must suppress hover preview renders while scrolling');
 expect(str_contains($files['takeoffJs'], 'getDocTakeoffPageMap'), 'Takeoff drawing dropdown must memoize per-document sheet summaries in O(1)');
 expect(str_contains($files['takeoffJs'], 'activePreviewRenderTask'), 'Takeoff sheet preview must cancel stale PDF.js render tasks on hover');
+expect(!str_contains($files['dashboard'], 'id="docMoveToTakeoffBtn"'), 'Obsolete topbar Move to Takeoff button must be removed from dashboard');
+expect(!str_contains($files['overview'], 'data-doc-subhead-action="move-takeoff"'), 'Obsolete subhead Move to Takeoff button must be removed from Documents');
+expect(str_contains($files['overview'], '_pendingTakeoffDrawingId'), 'Documents upload must defer Takeoff canvas rendering until Takeoff tab is active');
+expect(str_contains($files['dashboard'], 'showTakeoffCanvasLoader'), 'Dashboard Takeoff tab switcher must display loading overlay while rendering new blueprint');
+expect(str_contains($files['overview'], "norm.startsWith('Drawings:')"), 'inferCategory must preserve Drawings category and discipline groups after page refresh');
+expect(str_contains($files['takeoffApi'], 'requestedFolderName'), 'Upload endpoint must persist drawing group folder assignment in database');
 
 foreach (['uploadPage', 'index', 'dashboard'] as $key) {
     expect((bool)preg_match('/for\s*\([^)]*(?:files|fileList|incoming)[^)]*\)/s', $files[$key]), "{$key} must iterate through the whole selection");

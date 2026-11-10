@@ -1608,15 +1608,10 @@ $state = [
                     </div>
 
                     <section class="documents-content-panel" aria-label="Documents content">
-                        <!-- Top title bar with density slider & Move to Takeoff -->
+                        <!-- Top title bar with density slider -->
                         <div class="doc-main-topbar">
                             <h2 id="documentsContentTitle">Custom Drawings</h2>
                             <div class="doc-topbar-actions">
-                                <button type="button" class="btn-main orange doc-move-takeoff-btn"
-                                    id="docMoveToTakeoffBtn" title="Move current document to Takeoff workspace">
-                                    <i class="fas fa-ruler-combined"></i>
-                                    <span>Move to Takeoff</span>
-                                </button>
                                 <div class="doc-slider-wrap" title="Adjust row density">
                                     <input id="documentsZoom" class="doc-density-slider" type="range" min="0" max="2"
                                         step="1" value="1" aria-label="Document row density">
@@ -1767,11 +1762,11 @@ $state = [
                                         class="fas fa-right-left"></i></button>
                             </div>
 
-                            <?php if ($selectedDoc && $selectedDoc['source'] === 'legacy_file'): ?>
+                            <?php if ($selectedDoc && $selectedDoc['source'] === 'legacy_file' && $activeTab === 'takeoff'): ?>
                                 <iframe id="takeoffFrame" class="takeoff-frame pro-takeoff-frame"
                                     src="editor.php?id=<?= (int) $selectedDoc['id'] ?>&embedded=1&estimate_key=est_primary&inherit_legacy=1&_v=<?= time() ?>"></iframe>
                             <?php else: ?>
-                                <div id="takeoffEmpty" class="takeoff-empty pro-takeoff-empty">
+                                <div id="takeoffEmpty" class="takeoff-empty pro-takeoff-empty" <?= ($selectedDoc && $selectedDoc['source'] === 'legacy_file') ? 'style="display:none;"' : '' ?>>
                                     <div>
                                         <i class="fas fa-file-pdf fa-3x mb-3"></i>
                                         <h3>No drawing selected</h3>
@@ -2333,9 +2328,25 @@ $state = [
                 history.pushState({ ...ProjectState }, '', url.toString());
             }
             if (tab === 'takeoff') {
+                if (window._pendingTakeoffDrawingId) {
+                    const pendingId = Number(window._pendingTakeoffDrawingId);
+                    window._pendingTakeoffDrawingId = null;
+                    if (pendingId > 0) {
+                        ProjectState.selectedDocumentId = pendingId;
+                        ProjectState.selectedDrawingId = pendingId;
+                    }
+                    if (typeof window.projectTakeoffRefreshDrawings === 'function') {
+                        window.projectTakeoffRefreshDrawings(pendingId || null);
+                    }
+                } else if (window._pendingTakeoffSync) {
+                    window._pendingTakeoffSync = false;
+                    if (typeof window.projectTakeoffRefreshDrawings === 'function') {
+                        window.projectTakeoffRefreshDrawings(ProjectState.selectedDocumentId || null);
+                    }
+                }
                 let drawing = selectedDocument();
                 if (!drawing || drawing.source !== 'legacy_file') {
-                    drawing = ProjectState.documents.find(doc => doc.source === 'legacy_file' && ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'heic'].includes(String(doc.extension || '').toLowerCase()));
+                    drawing = ProjectState.documents.find(doc => doc.source === 'legacy_file' && ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'svg', 'heic'].includes(String(doc.extension || '').toLowerCase()));
                     if (drawing) {
                         ProjectState.selectedDocumentId = Number(drawing.id);
                         ProjectState.selectedDrawingId = Number(drawing.id);
@@ -2347,6 +2358,19 @@ $state = [
                         ? window.projectTakeoffEditorUrl(drawing.id)
                         : 'editor.php?id=' + encodeURIComponent(drawing.id) + '&embedded=1';
                     if (!takeoffFrame.getAttribute('src') || !takeoffFrame.getAttribute('src').includes('id=' + encodeURIComponent(drawing.id))) {
+                        const drawingLabel = drawing.filename || drawing.title || 'plano';
+                        if (typeof window.showTakeoffCanvasLoader === 'function') {
+                            window.showTakeoffCanvasLoader(`Renderizando y cargando plano (${drawingLabel}) en Takeoff...`);
+                        }
+                        const hideLoaderFallback = setTimeout(() => {
+                            if (typeof window.hideTakeoffCanvasLoader === 'function') window.hideTakeoffCanvasLoader();
+                        }, 6000);
+                        takeoffFrame.addEventListener('load', () => {
+                            clearTimeout(hideLoaderFallback);
+                            setTimeout(() => {
+                                if (typeof window.hideTakeoffCanvasLoader === 'function') window.hideTakeoffCanvasLoader();
+                            }, 280);
+                        }, { once: true });
                         takeoffFrame.src = expectedSrc;
                     }
                     takeoffFrame.style.display = 'block';

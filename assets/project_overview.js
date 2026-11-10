@@ -220,9 +220,13 @@
         for (const doc of pending) {
             const file = sessionFiles.get(String(doc.id));
             try {
+                const isDrawing = doc.category === 'Drawings' || inferCategory({ name: doc.name || file.name }, doc.category) === 'Drawings';
+                const disc = isDrawing ? classifyDrawingDiscipline(doc) : null;
+                const folderName = isDrawing ? `Drawings:${disc || 'general'}` : 'Attachments';
                 const form = new FormData();
                 form.append('project_id', projectId);
-                form.append('file', file, file.name);
+                form.append('folder_name', folderName);
+                form.append('file', file, doc.name || file.name);
                 const response = await fetch('../api/project_document_takeoff.php', {
                     method: 'POST', body: form, headers: { Accept: 'application/json' }
                 });
@@ -230,11 +234,17 @@
                 if (!response.ok || !result?.success || !result.file?.id) {
                     throw new Error(result?.message || `HTTP ${response.status}`);
                 }
+                const storedId = Number(result.file.id);
+                const storedName = doc.name || result.file.filename;
+                if (isDrawing && disc) {
+                    saveDisciplineOverride(`existing-legacy_file-${storedId}`, disc, storedId, storedName);
+                }
                 const stored = {
-                    id: Number(result.file.id), source: 'legacy_file', filename: result.file.filename,
-                    title: result.file.filename, path: `../${result.file.filepath}`,
+                    id: storedId, source: 'legacy_file', filename: storedName,
+                    title: storedName, path: `../${result.file.filepath}`,
                     extension: doc.extension, mime_type: doc.type, uploaded_at: new Date().toISOString(),
-                    pageCount: doc.pageCount || null, page_count: doc.pageCount || null, pages: doc.pages || []
+                    pageCount: doc.pageCount || null, page_count: doc.pageCount || null, pages: doc.pages || [],
+                    folder_name: result.file.folder_name || folderName
                 };
                 window.ProjectState.documents = (window.ProjectState.documents || [])
                     .filter(row => !(row.source === 'local_metadata' && String(row.id) === String(doc.id)));
@@ -988,6 +998,7 @@
         const prefixes = [
             'takeoff.projectDocuments',
             'takeoff.projectDocumentFolders',
+            'takeoff.docDisciplines',
             'takeoff.quantification',
             'takeoff.estimating.columns',
             'takeoff.proposal.settings',
@@ -1081,8 +1092,12 @@
     }
 
     function inferCategory(file, forcedCategory = null) {
-        if (forcedCategory) return forcedCategory;
-        const ext = String(file.name.split('.').pop() || '').toLowerCase();
+        if (forcedCategory) {
+            const norm = String(forcedCategory).trim();
+            if (norm === 'Drawings' || norm.startsWith('Drawings:')) return 'Drawings';
+            if (norm === 'Attachments') return 'Attachments';
+        }
+        const ext = String((file?.name || '').split('.').pop() || '').toLowerCase();
         return ['pdf', 'dwg', 'dxf'].includes(ext) ? 'Drawings' : 'Attachments';
     }
 
@@ -2260,11 +2275,12 @@
         return modal;
     }
 
-    function uploadDocumentFile(file, projectId, onProgress, targetFilename = null) {
+    function uploadDocumentFile(file, projectId, onProgress, targetFilename = null, folderName = null) {
         return new Promise((resolve, reject) => {
             const finalName = targetFilename || file.name;
             const form = new FormData();
             form.append('project_id', projectId);
+            if (folderName) form.append('folder_name', folderName);
             form.append('file', file, finalName);
             const xhr = new XMLHttpRequest();
             xhr.open('POST', '../api/project_document_takeoff.php');
@@ -2415,28 +2431,18 @@
 
                 const id = String(Date.now() + index + Math.random().toString(16).slice(2));
                 const inferredCategory = activeDisciplineGroup ? 'Drawings' : inferCategory({ name: resolvedName }, effectiveCategory);
+                const resolvedDiscipline = inferredCategory === 'Drawings'
+                    ? (activeDisciplineGroup || classifyDrawingDiscipline({ name: resolvedName, filename: resolvedName }))
+                    : null;
+                const targetFolderName = inferredCategory === 'Drawings'
+                    ? `Drawings:${resolvedDiscipline || 'general'}`
+                    : 'Attachments';
                 const folderId = '';
                 let pageCount = null;
                 let pages = [];
 
-                if (ext === 'pdf' && file.size <= MAX_PDF_PREVIEW_BYTES && window.pdfjsLib) {
-                    try {
-                        setModalProgress(15, `Reading PDF pages (${resolvedName})...`);
-                        if (itemStatusEl) itemStatusEl.textContent = '15%';
-                        const arrayBuffer = await file.arrayBuffer();
-                        const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
-                        pdfDocumentCache.set(id, pdf);
-                        pageCount = pdf.numPages;
-                        pages = Array.from({ length: pageCount }, (_, pageIndex) => ({
-                            id: `${id}-p${pageIndex + 1}`,
-                            pageNumber: pageIndex + 1,
-                            name: `Sheet ${pageIndex + 1}`,
-                            title: `${resolvedName.replace(/\.pdf$/i, '')} - Page ${pageIndex + 1}`
-                        }));
-                    } catch (error) {
-                        console.warn('Could not extract PDF page count:', error);
-                    }
-                }
+                // PDF page counts and thumbnails are resolved asynchronously in the background Web Worker
+                // (capped by MAX_PDF_PREVIEW_BYTES) after upload completes so main-thread UI never freezes.
 
                 if (!projectId) {
                     setModalProgress(60, `Processing ${resolvedName}...`);
@@ -2450,9 +2456,9 @@
                         uploadedBy: $('poEstimator')?.value || 'Juan Estevez', type: file.type || '',
                         extension: ext, source: 'local', pageCount, pages, order: Date.now() + index
                     });
-                    if (activeDisciplineGroup) {
-                        saveDisciplineOverride(id, activeDisciplineGroup);
-                        collapsedDisciplines.delete(activeDisciplineGroup);
+                    if (inferredCategory === 'Drawings' && resolvedDiscipline) {
+                        saveDisciplineOverride(id, resolvedDiscipline, null, resolvedName);
+                        collapsedDisciplines.delete(resolvedDiscipline);
                     }
                     firstAddedId = firstAddedId || id;
                     succeeded++;
@@ -2471,7 +2477,7 @@
                         const filePct = Math.max(0, Math.min(100, Math.round(percent)));
                         setModalProgress(filePct, `Uploading ${resolvedName}... (${completed + 1} of ${uploadEntries.length})`);
                         if (itemStatusEl) itemStatusEl.textContent = `${filePct}%`;
-                    }, resolvedName);
+                    }, resolvedName, targetFolderName);
                     const storedId = Number(stored.id);
                     const finalStoredName = resolvedName || stored.filename || file.name;
                     const docStateId = `existing-legacy_file-${storedId}`;
@@ -2480,11 +2486,15 @@
                         title: finalStoredName, path: `../${stored.filepath}`,
                         extension: stored.file_type || ext, mime_type: file.type || '',
                         uploaded_at: new Date().toISOString(), pageCount, page_count: pageCount, pages,
-                        folder_name: activeDisciplineGroup ? 'Drawings' : undefined
+                        folder_name: stored.folder_name || targetFolderName
                     });
-                    if (activeDisciplineGroup) {
-                        saveDisciplineOverride(docStateId, activeDisciplineGroup);
-                        collapsedDisciplines.delete(activeDisciplineGroup);
+                    if (!window._pendingTakeoffDrawingId && storedId > 0) {
+                        window._pendingTakeoffDrawingId = storedId;
+                    }
+                    window._pendingTakeoffSync = true;
+                    if (inferredCategory === 'Drawings' && resolvedDiscipline) {
+                        saveDisciplineOverride(docStateId, resolvedDiscipline, storedId, finalStoredName);
+                        collapsedDisciplines.delete(resolvedDiscipline);
                     }
                     firstAddedId = firstAddedId || docStateId;
                     succeeded++;
@@ -2508,10 +2518,8 @@
             if (firstAddedId) selectedDocumentsId = firstAddedId;
             persistLocalDocuments();
             syncDocumentsToProjectState();
-            renderDocumentsPage();
-            window.projectTakeoffRefreshDrawings?.();
 
-            setModalProgress(100, errors.length ? `${succeeded} uploaded, ${errors.length} failed` : `${succeeded} document${succeeded === 1 ? '' : 's'} uploaded (100%)`);
+            setModalProgress(100, errors.length ? `${succeeded} uploaded, ${errors.length} failed` : `${succeeded} document${succeeded === 1 ? '' : 's'} uploaded & synced with Takeoff (100%)`);
             if (modalHeading) {
                 modalHeading.textContent = errors.length ? 'Upload Finished with Issues' : 'Upload Complete';
             }
@@ -2523,9 +2531,18 @@
                 modalCounter.textContent = `${completed} / ${uploadEntries.length}`;
             }
 
-            // Hold the modal at 100% for 3 seconds before disappearing so fast uploads don't flash
+            // Hold the modal at 100% for 2 seconds before disappearing so fast uploads don't flash
             await new Promise(resolve => setTimeout(resolve, UPLOAD_MODAL_HOLD_MS));
             modal.classList.remove('open');
+
+            // Render Documents list after modal closes so upload animation & Takeoff sync never compete in parallel
+            renderDocumentsPage();
+            const isTakeoffTabActive = document.getElementById('tab-takeoff')?.classList.contains('active');
+            if (isTakeoffTabActive) {
+                window.projectTakeoffRefreshDrawings?.(window._pendingTakeoffDrawingId || null);
+                window._pendingTakeoffDrawingId = null;
+                window._pendingTakeoffSync = false;
+            }
 
             if (unsupportedFiles.length || errors.length) {
                 const messages = [];
@@ -2565,13 +2582,24 @@
                     }));
                 }
                 const docId = `existing-${doc.source}-${doc.id}`;
+                const docName = doc.source === 'project_document' ? (doc.title || doc.filename || 'Document') : (doc.filename || doc.title || 'Document');
                 const overrides = loadDisciplineOverrides();
-                const hasDisciplineOverride = Boolean(overrides[docId] && DRAWING_DISCIPLINES.some(d => d.key === overrides[docId]));
+                const nameKey = `name:${String(docName).trim().toLowerCase()}`;
+                const backendKey = `backend:${doc.id}`;
+                const folderNameStr = String(doc.folder_name || '').trim();
+                const hasDisciplineOverride = Boolean(
+                    folderNameStr === 'Drawings' ||
+                    folderNameStr.startsWith('Drawings:') ||
+                    (overrides[docId] && DRAWING_DISCIPLINES.some(d => d.key === overrides[docId])) ||
+                    (overrides[backendKey] && DRAWING_DISCIPLINES.some(d => d.key === overrides[backendKey])) ||
+                    (overrides[nameKey] && DRAWING_DISCIPLINES.some(d => d.key === overrides[nameKey]))
+                );
                 return {
                     id: docId,
                     backendId: doc.id,
-                    name: doc.source === 'project_document' ? (doc.title || doc.filename || 'Document') : (doc.filename || doc.title || 'Document'),
+                    name: docName,
                     filename: doc.filename || doc.title || 'Document',
+                    folderName: folderNameStr,
                     category: hasDisciplineOverride ? 'Drawings' : inferCategory({ name: doc.filename || doc.title || '' }, doc.folder_name || null),
                     size: '',
                     uploadedAt: doc.uploaded_at || '',
@@ -2734,10 +2762,25 @@
         }
     }
 
-    function saveDisciplineOverride(docId, disciplineKey) {
+    function saveDisciplineOverride(docId, disciplineKey, backendId = null, docName = null) {
         try {
             const map = loadDisciplineOverrides();
             map[String(docId)] = disciplineKey;
+            let resolvedBackendId = backendId;
+            let resolvedName = docName;
+            if (!resolvedBackendId || !resolvedName) {
+                const doc = (window.ProjectState?.documents || []).find(d => `existing-${d.source}-${d.id}` === String(docId) || String(d.id) === String(docId));
+                if (doc) {
+                    if (!resolvedBackendId) resolvedBackendId = doc.id;
+                    if (!resolvedName) resolvedName = doc.filename || doc.title;
+                }
+            }
+            if (resolvedBackendId) {
+                map[`backend:${resolvedBackendId}`] = disciplineKey;
+            }
+            if (resolvedName) {
+                map[`name:${String(resolvedName).trim().toLowerCase()}`] = disciplineKey;
+            }
             localStorage.setItem(disciplineStorageKey(), JSON.stringify(map));
         } catch (e) { }
     }
@@ -2745,9 +2788,21 @@
     function classifyDrawingDiscipline(doc) {
         if (!doc) return 'general';
         const overrides = loadDisciplineOverrides();
-        const overrideKey = overrides[String(doc.id)];
-        if (overrideKey && DRAWING_DISCIPLINES.some(d => d.key === overrideKey)) {
-            return overrideKey;
+        const folderDisc = String(doc.folderName || doc.folder_name || '').startsWith('Drawings:')
+            ? String(doc.folderName || doc.folder_name).split(':')[1]
+            : null;
+        const nameKey = `name:${String(doc.name || doc.filename || '').trim().toLowerCase()}`;
+        const backendKey = doc.backendId ? `backend:${doc.backendId}` : null;
+        const candidates = [
+            overrides[String(doc.id)],
+            backendKey ? overrides[backendKey] : null,
+            folderDisc,
+            overrides[nameKey]
+        ];
+        for (const candidate of candidates) {
+            if (candidate && DRAWING_DISCIPLINES.some(d => d.key === candidate)) {
+                return candidate;
+            }
         }
         const rawTitle = stripDuplicateUploadPrefix(doc.name || doc.filename || '');
         const cleanTitle = rawTitle.replace(/\.[a-z0-9]+$/i, '').trim();
@@ -2835,9 +2890,6 @@
 
         if (actionsEl) {
             actionsEl.innerHTML = `
-                <button type="button" class="subhead-item-act-btn" data-doc-subhead-action="move-takeoff" title="Move selected documents to Takeoff">
-                    <i class="fas fa-folder-tree"></i><span>Move to Takeoff</span>
-                </button>
                 <button type="button" class="subhead-item-act-btn danger" data-doc-subhead-action="delete-all" title="Delete selected documents">
                     <i class="fas fa-trash"></i><span>Delete All</span>
                 </button>
@@ -2849,183 +2901,6 @@
         container.setAttribute('aria-hidden', 'false');
     }
     window.syncDocumentsSubheadInfo = syncDocumentsSubheadInfo;
-
-    async function prepareSingleDocForTakeoff(doc) {
-        if (!doc) return null;
-        let takeoffFileId = doc.backendId || doc.id;
-        if (doc.source === 'local') {
-            let file = sessionFiles.get(String(doc.id));
-            if (!file) {
-                const existingMatch = (window.ProjectState?.documents || []).find(row =>
-                    row.source === 'legacy_file' &&
-                    (row.filename === doc.filename || row.title === doc.filename || row.filename === doc.name)
-                );
-                if (existingMatch && existingMatch.id) {
-                    takeoffFileId = Number(existingMatch.id);
-                    doc.backendId = takeoffFileId;
-                    doc.source = 'existing';
-                    doc.originalSource = 'legacy_file';
-                }
-            }
-            if (file) {
-                const form = new FormData();
-                form.append('project_id', window.ProjectState?.projectId || '');
-                form.append('file', file, doc.name || file.name);
-                const response = await fetch('../api/project_document_takeoff.php', { method: 'POST', body: form, headers: { Accept: 'application/json' } });
-                const result = await response.json().catch(() => null);
-                if (!response.ok || !result?.success || !result.file?.id) throw new Error(result?.message || `HTTP ${response.status}`);
-                takeoffFileId = Number(result.file.id);
-                const finalName = doc.name || result.file.filename;
-                const alias = { id: takeoffFileId, source: 'legacy_file', filename: finalName, title: finalName, path: `../${result.file.filepath}`, extension: doc.extension, mime_type: doc.type };
-                window.ProjectState.documents = (window.ProjectState.documents || []).filter(row =>
-                    !(row.source === 'local_metadata' && String(row.id) === String(doc.id)) &&
-                    !(row.source === 'legacy_file' && Number(row.id) === takeoffFileId)
-                );
-                window.ProjectState.documents.push(alias);
-                localDocuments = localDocuments.filter(row => String(row.id) !== String(doc.id));
-                sessionFiles.delete(String(doc.id));
-                const objectUrl = sessionFileUrls.get(String(doc.id));
-                if (objectUrl) URL.revokeObjectURL(objectUrl);
-                sessionFileUrls.delete(String(doc.id));
-                persistLocalDocuments();
-            }
-        } else if (doc.source === 'existing') {
-            const response = await fetch('../api/project_document_takeoff.php', {
-                method: 'POST',
-                headers: { 'Content-Type': 'application/json', Accept: 'application/json' },
-                body: JSON.stringify({
-                    document_id: doc.backendId,
-                    project_id: window.ProjectState?.projectId,
-                    source: doc.originalSource || 'legacy_file'
-                })
-            });
-            const result = await response.json().catch(() => null);
-            if (!response.ok || !result?.success || !result.file?.id) throw new Error(result?.message || `HTTP ${response.status}`);
-            takeoffFileId = Number(result.file.id);
-            const sourceRow = window.ProjectState.documents.find(row => row.source === doc.originalSource && Number(row.id) === Number(doc.backendId));
-            const alias = {
-                ...sourceRow,
-                id: takeoffFileId,
-                source: 'legacy_file',
-                filename: sourceRow?.filename || doc.filename || result.file.filename,
-                title: sourceRow?.title || doc.name || result.file.filename,
-                path: `../${result.file.filepath}`,
-                extension: doc.extension,
-                mime_type: doc.type
-            };
-            if (!window.ProjectState.documents.some(row => row.source === 'legacy_file' && Number(row.id) === takeoffFileId)) {
-                window.ProjectState.documents.push(alias);
-            }
-        }
-        return takeoffFileId;
-    }
-
-    async function moveSelectedDocumentsToTakeoff() {
-        pruneSelectionSet();
-        const checkedIds = Array.from(selectedDocumentCheckboxIds);
-        if (!checkedIds.length) {
-            showAlertDialog({
-                title: 'No Documents Selected',
-                message: 'Please select at least one document using the checkboxes before moving to Takeoff.',
-                buttonText: 'Understood',
-                type: 'warning',
-                badge: 'SELECTION REQUIRED',
-                icon: 'fas fa-circle-info'
-            });
-            return;
-        }
-
-        const allDocs = allDocumentRows();
-        const selectedDocs = checkedIds.map(id => allDocs.find(d => String(d.id) === String(id))).filter(Boolean);
-        const validDocs = selectedDocs.filter(d => d.category === 'Drawings' || ALLOWED_DOCUMENT_EXTENSIONS.has(String(d.extension || '').toLowerCase()));
-
-        if (!validDocs.length) {
-            showAlertDialog({
-                title: 'Cannot Move to Takeoff',
-                message: 'None of the selected files can be opened in Takeoff. Please select PDF or image drawings.',
-                buttonText: 'Understood',
-                type: 'warning',
-                badge: 'INVALID SELECTION',
-                icon: 'fas fa-triangle-exclamation'
-            });
-            return;
-        }
-
-        const confirmed = await showConfirmDialog({
-            title: 'Move to Takeoff',
-            message: `Move ${validDocs.length} selected ${validDocs.length === 1 ? 'document' : 'documents'} (${validDocs.map(d => `"${d.name}"`).join(', ')}) to the Takeoff workspace?`,
-            confirmText: 'Move to Takeoff',
-            cancelText: 'Cancel',
-            type: 'info',
-            badge: 'MOVE TO TAKEOFF',
-            icon: 'fas fa-ruler-combined',
-            primaryDanger: false
-        });
-        if (!confirmed) return;
-
-        const moveBtn = document.querySelector('[data-doc-subhead-action="move-takeoff"]');
-        const origMoveHtml = moveBtn ? moveBtn.innerHTML : '';
-        if (moveBtn) {
-            moveBtn.disabled = true;
-            moveBtn.innerHTML = `<i class="fas fa-circle-notch fa-spin"></i><span>Moving...</span>`;
-        }
-
-        let firstTakeoffId = null;
-        const movedNames = [];
-        try {
-            for (const doc of validDocs) {
-                try {
-                    if (doc.category !== 'Drawings') {
-                        doc.category = 'Drawings';
-                    }
-                    const preparedId = await prepareSingleDocForTakeoff(doc);
-                    if (preparedId) {
-                        if (!firstTakeoffId) firstTakeoffId = preparedId;
-                        movedNames.push(doc.name);
-                    }
-                } catch (err) {
-                    console.warn('Error preparing document for takeoff:', doc.name, err);
-                }
-            }
-        } finally {
-            if (moveBtn && moveBtn.isConnected) {
-                moveBtn.disabled = false;
-                moveBtn.innerHTML = origMoveHtml;
-            }
-        }
-
-        if (!firstTakeoffId) {
-            showAlertDialog({
-                title: 'Move to Takeoff Failed',
-                message: 'Unable to prepare the selected documents for Takeoff.',
-                buttonText: 'Understood',
-                type: 'error',
-                badge: 'TAKEOFF ERROR',
-                icon: 'fas fa-circle-exclamation'
-            });
-            return;
-        }
-
-        selectedDocumentCheckboxIds.clear();
-        syncDocumentsSubheadInfo();
-
-        window.ProjectState.selectedDocumentId = firstTakeoffId;
-        window.ProjectState.selectedDrawingId = firstTakeoffId;
-        if (typeof window.setActiveTab === 'function') window.setActiveTab('takeoff');
-        if (typeof window.projectTakeoffRefreshDrawings === 'function') window.projectTakeoffRefreshDrawings(firstTakeoffId);
-        if (typeof window.activateTakeoffDocument === 'function') {
-            window.activateTakeoffDocument(firstTakeoffId, 1);
-        }
-
-        showAlertDialog({
-            title: 'Moved to Takeoff',
-            message: `${movedNames.length} ${movedNames.length === 1 ? 'document was' : 'documents were'} moved to Takeoff: ${movedNames.join(', ')}.`,
-            buttonText: 'Continue',
-            type: 'info',
-            badge: 'TAKEOFF READY',
-            icon: 'fas fa-circle-check'
-        });
-    }
 
     async function deleteSelectedDocuments() {
         pruneSelectionSet();
@@ -3706,7 +3581,6 @@
                         <i class="fas fa-ellipsis-vertical"></i>
                     </button>
                     <div class="documents-menu row-menu" data-doc-menu="${escapeHtml(sheet.id)}">
-                        <button type="button" data-doc-action="takeoff" data-doc-id="${escapeHtml(doc.id)}" data-page-num="${sheet.pageNumber}"><i class="fas fa-ruler-combined"></i> Takeoff Page ${sheet.pageNumber}</button>
                         <button type="button" data-doc-action="view-sheet" data-doc-id="${escapeHtml(doc.id)}" data-page-num="${sheet.pageNumber}"><i class="fas fa-eye"></i> View File</button>
                     </div>
                 </div>
@@ -3792,7 +3666,6 @@
                 </button>
                 <div class="documents-menu row-menu" data-doc-menu="${escapeHtml(doc.id)}">
                     <button type="button" data-doc-action="view" data-doc-id="${escapeHtml(doc.id)}"><i class="fas fa-eye"></i> View</button>
-                    <button type="button" data-doc-action="takeoff" data-doc-id="${escapeHtml(doc.id)}"><i class="fas fa-ruler-combined"></i> Move to Takeoff</button>
                     <button type="button" data-doc-action="rename" data-doc-id="${escapeHtml(doc.id)}"><i class="fas fa-pen"></i> Rename</button>
                     <button type="button" data-doc-action="download" data-doc-id="${escapeHtml(doc.id)}"><i class="fas fa-download"></i> Download</button>
                     <button type="button" class="danger" data-doc-action="delete" data-doc-id="${escapeHtml(doc.id)}"><i class="fas fa-trash"></i> Delete</button>
@@ -3852,7 +3725,8 @@
             if (sheetRow && sheetRow.dataset.parentDocId) {
                 selectedDocumentsId = sheetRow.dataset.parentDocId;
                 const pageNum = sheetRow.dataset.pageNum ? Number(sheetRow.dataset.pageNum) : 1;
-                startDocumentsTakeoff(pageNum);
+                const parentDoc = findDocumentById(sheetRow.dataset.parentDocId);
+                if (parentDoc) openDocumentInBrowser(parentDoc, pageNum);
                 return;
             }
             const row = event.target.closest('.doc-file-row');
@@ -3959,7 +3833,6 @@
             html = `
                 <button type="button" data-sidebar-action="view-doc" data-id="${escapeHtml(docId)}"><i class="fas fa-eye"></i> View File</button>
                 <button type="button" data-sidebar-action="rename-doc" data-id="${escapeHtml(docId)}"><i class="fas fa-pen"></i> Rename</button>
-                <button type="button" data-sidebar-action="takeoff-doc" data-id="${escapeHtml(docId)}"><i class="fas fa-ruler-combined"></i> Move to Takeoff</button>
                 <button type="button" data-sidebar-action="download-doc" data-id="${escapeHtml(docId)}"><i class="fas fa-download"></i> Download</button>
                 <div class="documents-menu-eyebrow" style="margin-top: 4px; border-top: 1px solid var(--border-soft); padding-top: 6px;">Drawing Group</div>
                 ${discButtons}
@@ -5238,28 +5111,6 @@
             event.stopPropagation();
             toggleFloatingMenu('documentsViewMenu', event.currentTarget);
         });
-        $('docMoveToTakeoffBtn')?.addEventListener('click', () => {
-            let targetDocId = null;
-            let targetPage = 1;
-            if (selectedDocumentsFolder.startsWith('document:')) {
-                targetDocId = selectedDocumentsFolder.replace('document:', '');
-                if (selectedDocumentsId && String(selectedDocumentsId).startsWith(targetDocId + '-p')) {
-                    const p = parseInt(selectedDocumentsId.replace(targetDocId + '-p', ''), 10);
-                    if (!isNaN(p) && p > 0) targetPage = p;
-                }
-            } else if (selectedDocumentsId) {
-                targetDocId = selectedDocumentsId;
-            } else {
-                const drawings = drawingDocuments();
-                if (drawings.length) targetDocId = drawings[0].id;
-            }
-            if (!targetDocId) {
-                showToast('Please upload or select a document to move to Takeoff.');
-                return;
-            }
-            selectedDocumentsId = targetDocId;
-            startDocumentsTakeoff(targetPage);
-        });
 
         $('modalSaveDocRenameBtn')?.addEventListener('click', () => {
             const input = $('modalDocRenameInput');
@@ -5306,9 +5157,7 @@
             event.preventDefault();
             event.stopPropagation();
             const action = docActionBtn.dataset.docSubheadAction;
-            if (action === 'move-takeoff') {
-                moveSelectedDocumentsToTakeoff();
-            } else if (action === 'delete-all') {
+            if (action === 'delete-all') {
                 deleteSelectedDocuments();
             }
         });

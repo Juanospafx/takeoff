@@ -7453,6 +7453,7 @@
         const panel = $('takeoffDrawingDropdown');
         const trigger = $('takeoffSheetSelect');
         if (!panel) return;
+        drawingState.documents = drawingDocs();
         drawingState.dropdownOpen = true;
         panel.classList.add('open');
         trigger?.setAttribute('aria-expanded', 'true');
@@ -7544,6 +7545,7 @@
     }
 
     function renderDrawingDropdown() {
+        if (!drawingState.dropdownOpen) return;
         renderActiveDrawingItemBar();
         renderDocumentList();
         renderSheetList();
@@ -8068,6 +8070,8 @@
     function hideTakeoffCanvasLoader() {
         document.getElementById('takeoffCanvasLoadingOverlay')?.classList.remove('is-active');
     }
+    window.showTakeoffCanvasLoader = showTakeoffCanvasLoader;
+    window.hideTakeoffCanvasLoader = hideTakeoffCanvasLoader;
 
     function selectDrawingSheet(doc, pageNumber) {
         if (!doc) return;
@@ -8086,7 +8090,7 @@
         } catch (e) { }
         if (currentFrameId !== Number(doc.id)) {
             frame.style.display = 'block';
-            showTakeoffCanvasLoader(`Loading ${doc.name || 'drawing'}...`);
+            showTakeoffCanvasLoader(`Renderizando y cargando plano (${doc.name || 'plano'}) en Takeoff...`);
             const fallbackTimer = setTimeout(hideTakeoffCanvasLoader, 6000);
             const onLoad = () => {
                 clearTimeout(fallbackTimer);
@@ -8282,13 +8286,14 @@
                 return;
             }
             if (event.data?.type !== 'takeoff-editor-ready') return;
+            hideTakeoffCanvasLoader();
             const doc = activeDrawingDoc();
             if (doc && Number(event.data.fileId) === Number(doc.id)) {
                 doc.pageCount = Number(event.data.pageCount || 1);
                 doc.sheets = buildSheets(doc);
                 drawingState.selectedPage = Number(event.data.pageNum || 1);
                 setDrawingLabel();
-                renderDrawingDropdown();
+                if (drawingState.dropdownOpen) renderDrawingDropdown();
                 syncScaleStatus();
             }
         });
