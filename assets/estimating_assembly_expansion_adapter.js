@@ -47,12 +47,23 @@
         function dto(row, path = new Set()) {
             const id = itemId(row) || `embedded-${++sequence}`;
             if (index.has(id)) return index.get(id);
+            const snap = (row?.pricingSnapshot && typeof row.pricingSnapshot === 'object')
+                ? row.pricingSnapshot
+                : ((row?.catalogSnapshot?.pricing && typeof row.catalogSnapshot.pricing === 'object') ? row.catalogSnapshot.pricing : {});
             const result = {
                 id,
+                name: text(row?.name ?? row?.child_item_name ?? ''),
+                description: text(row?.description ?? ''),
                 type: isAssembly(row) ? 'ASSEMBLY' : text((row?.itemType ?? row?.item_type) || 'PART').toUpperCase(),
                 costCategory: row?.costCategory || 'other',
                 uom: row?.uom || 'ea',
-                pricing: {},
+                pricing: {
+                    materialUnitCost: Number(row?.unitMaterialCost ?? row?.unitCost ?? row?.unit_cost ?? snap.materialUnitCost ?? 0),
+                    equipmentUnitCost: Number(row?.unitEquipmentCost ?? row?.equipment_cost ?? snap.equipmentUnitCost ?? 0),
+                    subcontractorUnitCost: Number(row?.unitSubcontractorCost ?? row?.subcontractor_cost ?? snap.subcontractorUnitCost ?? 0),
+                    laborHoursPerUnit: Number(row?.unitLabor ?? row?.unit_labor_time ?? row?.laborHours ?? snap.laborHoursPerUnit ?? 0),
+                    laborRate: Number(row?.laborRate ?? row?.labor_rate ?? snap.laborRate ?? 0)
+                },
                 estimatingItem: { ...row },
                 assemblyComponents: []
             };
@@ -81,13 +92,16 @@
                 return {
                     id: text(component?.id) || `${id}:${componentIndex}`,
                     catalogItemId: childId,
+                    name: text(child?.name ?? component?.name ?? component?.child_item_name ?? ''),
+                    description: text(child?.description ?? component?.description ?? ''),
+                    uom: text(child?.uom ?? component?.uom ?? component?.unit_of_measure ?? '') || 'ea',
                     quantity: Number(rawQty),
                     ratioType: component?.ratioType ?? component?.ratio_type
                         ?? child?.ratioType ?? child?.ratio_type
                         ?? (row?.childrenQuantitiesExtended ? 'fixed' : 'per_unit'),
                     spacing: component?.spacing ?? component?.spacingValue ?? child?.spacing ?? null,
                     waste: component?.waste ?? component?.wasteFactorPercent ?? child?.componentWaste ?? 0,
-                    pricingSnapshot: component?.pricingSnapshot || {},
+                    pricingSnapshot: component?.pricingSnapshot || childDto?.pricing || {},
                     overrides: component?.overrides || {}
                 };
             });
@@ -105,13 +119,35 @@
             measurementType: root?.measurementType,
             measurementUom: root?.uom
         });
+        const compLookup = new Map((rootDto.assemblyComponents || []).map(c => [text(c.id || c.catalogItemId), c]));
         return {
             ...result,
             leaves: result.leaves.map(leaf => ({
                 ...leaf,
                 item: (() => {
-                    const source = { ...(leaf.sourceCatalogItem?.estimatingItem || {}),
-                        quantity: leaf.effectiveQuantity, waste: leaf.wastePercent };
+                    const fallbackComp = compLookup.get(text(leaf.componentId || leaf.catalogItemId)) || {};
+                    const pricing = leaf.pricingSnapshot || fallbackComp.pricingSnapshot || {};
+                    const source = {
+                        name: text(leaf.sourceCatalogItem?.estimatingItem?.name || leaf.sourceCatalogItem?.name || fallbackComp.name || 'Assembly component'),
+                        uom: text(leaf.sourceCatalogItem?.estimatingItem?.uom || leaf.uom || fallbackComp.uom || 'ea'),
+                        unitMaterialCost: Number(leaf.unitMaterialCost ?? leaf.sourceCatalogItem?.pricing?.materialUnitCost ?? pricing.materialUnitCost ?? 0),
+                        unitEquipmentCost: Number(leaf.unitEquipmentCost ?? leaf.sourceCatalogItem?.pricing?.equipmentUnitCost ?? pricing.equipmentUnitCost ?? 0),
+                        unitSubcontractorCost: Number(leaf.unitSubcontractorCost ?? leaf.sourceCatalogItem?.pricing?.subcontractorUnitCost ?? pricing.subcontractorUnitCost ?? 0),
+                        unitLabor: Number(leaf.unitLabor ?? leaf.sourceCatalogItem?.pricing?.laborHoursPerUnit ?? pricing.laborHoursPerUnit ?? 0),
+                        laborRate: Number(leaf.laborRate ?? leaf.sourceCatalogItem?.pricing?.laborRate ?? pricing.laborRate ?? settings.globalLaborCost ?? 85),
+                        ...(leaf.sourceCatalogItem?.estimatingItem || {}),
+                        quantity: leaf.effectiveQuantity,
+                        waste: leaf.wastePercent
+                    };
+                    if (!source.name || source.name === 'Cost item') {
+                        source.name = fallbackComp.name || leaf.sourceCatalogItem?.name || source.name || 'Assembly component';
+                    }
+                    if (!Number(source.unitMaterialCost || 0) && Number(pricing.materialUnitCost || 0)) {
+                        source.unitMaterialCost = Number(pricing.materialUnitCost);
+                    }
+                    if (!Number(source.unitLabor || 0) && Number(pricing.laborHoursPerUnit || 0)) {
+                        source.unitLabor = Number(pricing.laborHoursPerUnit);
+                    }
                     if (text(leaf.type).toUpperCase() === 'EQUIPMENT') {
                         source.equipmentQuantity = leaf.effectiveQuantity;
                     }

@@ -596,12 +596,33 @@
         const groupMenu = document.getElementById('takeoffGroupContextMenu');
         if (groupMenu && isElementVisible(groupMenu) && !shouldKeep(groupMenu)) {
             groupMenu.style.display = 'none';
+            groupMenu.classList.remove('open');
+            delete groupMenu.dataset.activeGroupId;
+            if (groupMenu.__trigger && !shouldKeep(groupMenu.__trigger)) {
+                groupMenu.__trigger.classList.remove('active', 'is-active');
+                groupMenu.__trigger.setAttribute('aria-expanded', 'false');
+            }
+            groupMenu.__trigger = null;
         }
+        document.querySelectorAll('[data-group-menu], [data-subhead-group-action="more"]').forEach(b => {
+            if (!shouldKeep(b) && (!groupMenu || !isElementVisible(groupMenu))) {
+                b.classList.remove('active', 'is-active');
+                b.setAttribute('aria-expanded', 'false');
+            }
+        });
 
         // 2. Takeoff Estimate picker popup
         const estPicker = document.getElementById('takeoffEstimatePickerPopup');
         if (estPicker && !shouldKeep(estPicker)) {
             estPicker.remove();
+        }
+        const estMovePopover = document.getElementById('estimatingSubheadMovePopover');
+        if (estMovePopover && !shouldKeep(estMovePopover)) {
+            estMovePopover.remove();
+        }
+        const estCopyPopover = document.getElementById('estimatingSubheadCopyPopover');
+        if (estCopyPopover && !shouldKeep(estCopyPopover)) {
+            estCopyPopover.remove();
         }
 
         // 3. Project overview item context menu (tasks, notes)
@@ -697,7 +718,7 @@
                 }
             }
         });
-        document.querySelectorAll('[data-doc-sidebar-more].active, [data-doc-action="menu"].active, [data-doc-action="sheet-menu"].active, [data-doc-folder-more].active, [data-doc-folder-menu-toggle].active, [data-doc-view-menu-toggle].active, #docSortMenuBtn.active, .doc-tree-item-more.active').forEach(b => {
+        document.querySelectorAll('[data-row-menu].is-active, [data-row-menu][aria-expanded="true"], [data-doc-sidebar-more].active, [data-doc-action="menu"].active, [data-doc-action="sheet-menu"].active, [data-doc-folder-more].active, [data-doc-folder-menu-toggle].active, [data-doc-view-menu-toggle].active, #docSortMenuBtn.active, .doc-tree-item-more.active').forEach(b => {
             if (!shouldKeep(b)) {
                 b.classList.remove('active', 'is-active');
                 b.setAttribute('aria-expanded', 'false');
@@ -745,7 +766,7 @@
         '[data-tree-more-group], .bb-row-menu-toggle, [data-row-menu], [data-status-trigger], ' +
         '[data-estimate-menu], .est-version-menu-toggle, [data-est-pill-toggle], ' +
         '#takeoffDrawingBtn, #takeoffScaleStatus, #takeoffMoreToolsBtn, [data-viewer-command="layers"], ' +
-        '[data-takeoff-menu-toggle], .pro-actions-btn, .pro-row-menu-btn, .pd-row-dots-btn, .pro-custom-dropdown-trigger'
+        '[data-subhead-group-action="more"], [data-est-subhead-action="move"], [data-est-subhead-action="copy"], [data-takeoff-menu-toggle], .pro-actions-btn, .pro-row-menu-btn, .pd-row-dots-btn, .pro-custom-dropdown-trigger'
     );
 
     function handleUniversalCapture(event) {
@@ -771,7 +792,7 @@
 
         // 1. Check if clicking INSIDE any active open menu
         const activePopout = target.closest(
-            '[data-global-menu].open, #takeoffGroupContextMenu, #takeoffEstimatePickerPopup, #pdItemContextMenu, ' +
+            '[data-global-menu].open, #takeoffGroupContextMenu, #takeoffEstimatePickerPopup, #estimatingSubheadMovePopover, #estimatingSubheadCopyPopover, #pdItemContextMenu, ' +
             '#ccRowItemFloatingMenu, #ccTreeMoreMenu, #ccTreeMoreFloatingMenu, #bbFloatingRowMenu, ' +
             '.bb-status-menu-panel.open, [data-status-panel].open, ' +
             '[data-estimate-actions-menu]:not([hidden]), [data-est-pill-menu]:not([hidden]), ' +
@@ -804,23 +825,53 @@
                 )
             );
 
-            const isAlreadyActiveToggle = (
-                clickedToggle.classList.contains('is-active') ||
-                clickedToggle.classList.contains('active') ||
-                clickedToggle.getAttribute('aria-expanded') === 'true' ||
-                isDocMenuTrigger ||
-                (clickedToggle.id === 'takeoffDrawingBtn' && document.getElementById('takeoffDrawingDropdown')?.classList.contains('open')) ||
-                (clickedToggle.id === 'takeoffScaleStatus' && document.getElementById('takeoffScalePanel')?.classList.contains('open')) ||
-                (clickedToggle.id === 'takeoffMoreToolsBtn' && !document.getElementById('takeoffMoreToolsPanel')?.hasAttribute('hidden')) ||
-                (clickedToggle.matches && clickedToggle.matches('[data-takeoff-menu-toggle]') && (
-                    document.getElementById(clickedToggle.dataset.takeoffMenuToggle)?.classList.contains('open') ||
+            const groupMenuEl = document.getElementById('takeoffGroupContextMenu');
+            const isGroupMenuTrigger = Boolean(clickedToggle.matches && clickedToggle.matches('[data-group-menu], [data-subhead-group-action="more"]'));
+            const isLayerMenuTrigger = Boolean(clickedToggle.matches && clickedToggle.matches('[data-layer-menu]'));
+            const isRowMenuTrigger = Boolean(clickedToggle.matches && clickedToggle.matches('[data-row-menu]'));
+            const isOpenGroupMenuForToggle = Boolean(
+                isGroupMenuTrigger &&
+                groupMenuEl &&
+                isElementVisible(groupMenuEl) && (
+                    groupMenuEl.__trigger === clickedToggle ||
+                    (groupMenuEl.dataset.activeGroupId && groupMenuEl.dataset.activeGroupId === String(clickedToggle.dataset.groupMenu || '')) ||
+                    clickedToggle.classList.contains('is-active') ||
                     clickedToggle.getAttribute('aria-expanded') === 'true'
-                )) ||
-                (clickedToggle.matches && clickedToggle.matches('[data-group-menu]') && (
-                    document.getElementById('takeoffGroupContextMenu')?.style.display !== 'none' ||
-                    clickedToggle.getAttribute('aria-expanded') === 'true'
-                ))
+                )
             );
+            const rowMenuEl = document.getElementById('takeoffRowMenu');
+            const isOpenTakeoffRowMenuForToggle = Boolean(
+                isRowMenuTrigger &&
+                rowMenuEl &&
+                rowMenuEl.classList.contains('open') && (
+                    rowMenuEl.__trigger === clickedToggle ||
+                    clickedToggle.classList.contains('is-active') ||
+                    clickedToggle.getAttribute('aria-expanded') === 'true'
+                )
+            );
+
+            // [data-layer-menu] toggles the non-popout Item Details drawer (#takeoffLayerModal)
+            // directly in project_takeoff.js, so let its click handler manage open/close.
+            const isAlreadyActiveToggle = isLayerMenuTrigger
+                ? false
+                : isGroupMenuTrigger
+                    ? isOpenGroupMenuForToggle
+                    : (
+                        clickedToggle.classList.contains('is-active') ||
+                        clickedToggle.classList.contains('active') ||
+                        clickedToggle.getAttribute('aria-expanded') === 'true' ||
+                        isDocMenuTrigger ||
+                        isOpenTakeoffRowMenuForToggle ||
+                        (clickedToggle.id === 'takeoffDrawingBtn' && document.getElementById('takeoffDrawingDropdown')?.classList.contains('open')) ||
+                        (clickedToggle.id === 'takeoffScaleStatus' && document.getElementById('takeoffScalePanel')?.classList.contains('open')) ||
+                        (clickedToggle.id === 'takeoffMoreToolsBtn' && !document.getElementById('takeoffMoreToolsPanel')?.hasAttribute('hidden')) ||
+                        (clickedToggle.matches && clickedToggle.matches('[data-est-subhead-action="move"]') && Boolean(document.getElementById('estimatingSubheadMovePopover'))) ||
+                        (clickedToggle.matches && clickedToggle.matches('[data-est-subhead-action="copy"]') && Boolean(document.getElementById('estimatingSubheadCopyPopover'))) ||
+                        (clickedToggle.matches && clickedToggle.matches('[data-takeoff-menu-toggle]') && (
+                            document.getElementById(clickedToggle.dataset.takeoffMenuToggle)?.classList.contains('open') ||
+                            clickedToggle.getAttribute('aria-expanded') === 'true'
+                        ))
+                    );
 
             if (isAlreadyActiveToggle) {
                 // The user clicked the same toggle that opened the menu, to toggle it off!

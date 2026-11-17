@@ -822,8 +822,18 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
         }
 
         document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape' && modalBackdrop && modalBackdrop.classList.contains('open')) {
+            if (!modalBackdrop || !modalBackdrop.classList.contains('open')) return;
+            if (e.key === 'Escape') {
                 handleCancelDismiss();
+                return;
+            }
+            if (e.key === 'Enter' && !e.isComposing && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey
+                && primBtn && !primBtn.disabled && !primBtn.hidden && primBtn.style.display !== 'none') {
+                var activeTag = document.activeElement && document.activeElement.tagName;
+                if (activeTag !== 'TEXTAREA' && activeTag !== 'BUTTON' && activeTag !== 'A') {
+                    e.preventDefault();
+                    primBtn.click();
+                }
             }
         });
 

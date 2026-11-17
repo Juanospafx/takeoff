@@ -326,25 +326,51 @@
             const metadata = parseMetadata(project);
             const estimatorName = String(metadata.estimator || metadata.estimator_name || '').trim();
             const sqft = Number(metadata.square_footage || metadata.sqft || metadata.area_sqft || 0);
-            const metadataPrimary = Number(metadata.primary_estimate_total ?? metadata.primary_quote_value ?? metadata.primaryEstimateTotal ?? 0);
+            const rawServerPrimary = project?.has_primary_estimate_total
+                ? project.primary_estimate_total
+                : (metadata.primary_estimate_total ?? metadata.primary_quote_value ?? metadata.primaryEstimateTotal);
+            const hasServerPrimary = rawServerPrimary !== undefined && rawServerPrimary !== null && Number.isFinite(Number(rawServerPrimary));
+            const metadataPrimary = hasServerPrimary ? Number(rawServerPrimary) : 0;
+            const serverUpdatedMs = Date.parse(metadata.primary_estimate_updated_at || project.primary_estimate_updated_at || project.updated_at || '') || 0;
+
+            let hasStoragePrimary = false;
             let storagePrimary = 0;
-            if (!metadataPrimary && project?.id) {
+            let storageUpdatedMs = 0;
+            if (project?.id) {
                 try {
                     const raw = localStorage.getItem(`takeoff.estimating.module.${project.id}`);
                     if (raw) {
                         const parsed = JSON.parse(raw);
                         const list = Array.isArray(parsed.estimates) ? parsed.estimates : [];
+                        const metaPrimaryId = String(project?.primary_estimate_id || metadata.primary_estimate_id || '');
                         const explicitId = String(parsed.activeEstimateId || '');
-                        const pEst = list.find(e => Boolean(e.is_primary || e.isPrimary)) || list.find(e => String(e.id) === explicitId) || list[0];
+                        const pEst = list.find(e => Boolean(e.is_primary || e.isPrimary))
+                            || (metaPrimaryId ? list.find(e => String(e.id) === metaPrimaryId) : null)
+                            || list.find(e => String(e.id) === explicitId)
+                            || list[0];
                         if (pEst) {
-                            const val = Number(pEst.estimateTotal || pEst.totalSales || pEst.grand_total || pEst.total_amount || pEst.total || 0);
-                            if (val > 0) storagePrimary = val;
+                            const rawVal = pEst.estimateTotal ?? pEst.totalSales ?? pEst.estimateSummary?.estimateTotal ?? pEst.estimateSummary?.total ?? pEst.grand_total ?? pEst.total_amount ?? pEst.total;
+                            const val = Number(rawVal);
+                            if (rawVal !== undefined && rawVal !== null && Number.isFinite(val)) {
+                                hasStoragePrimary = true;
+                                storagePrimary = val;
+                                storageUpdatedMs = Date.parse(parsed.clientUiUpdatedAt || pEst.updatedAt || '') || 0;
+                            }
                         }
                     }
                 } catch (e) {}
             }
-            const fallbackValue = Number(metadata.estimate_total || metadata.total_sales || metadata.totalValue || 0);
-            const totalValue = metadataPrimary > 0 ? metadataPrimary : (storagePrimary > 0 ? storagePrimary : fallbackValue);
+            const fallbackValue = Number(metadata.estimate_total ?? metadata.total_sales ?? metadata.totalValue ?? 0);
+            let totalValue;
+            if (hasStoragePrimary && (!hasServerPrimary || storageUpdatedMs > serverUpdatedMs)) {
+                totalValue = storagePrimary;
+            } else if (hasServerPrimary) {
+                totalValue = metadataPrimary;
+            } else if (hasStoragePrimary) {
+                totalValue = storagePrimary;
+            } else {
+                totalValue = fallbackValue;
+            }
             const primaryQuoteValue = totalValue;
             const salesPerSqFt = sqft > 0 ? `${money(totalValue / sqft, 2)} /sq ft` : '$0 /sq ft';
 
@@ -1751,10 +1777,12 @@
             }
         });
 
-        // Ensure browser Back button (bfcache) preserves the active stage
+        // Ensure browser Back button (bfcache) preserves the active stage and fetches latest totals
         window.addEventListener('pageshow', (event) => {
             applyUrlInitialFilter();
-            if (state.projects && state.projects.length) {
+            if (event.persisted) {
+                load();
+            } else if (state.projects && state.projects.length) {
                 render();
             }
         });

@@ -141,6 +141,7 @@
                 const saveTakeoff = takeoffFrame?.contentWindow?.projectTakeoffSave;
                 if (typeof saveTakeoff === 'function') {
                     await saveTakeoff.call(takeoffFrame.contentWindow);
+                    takeoffFrame?.contentWindow?.clearEditorTakeoffDirtyCheckpoint?.();
                 }
             } catch (takeoffErr) {
                 console.warn('Takeoff iframe save ignored or unavailable:', takeoffErr);
@@ -2825,6 +2826,12 @@
     function getDisciplineMeta(key) {
         return DRAWING_DISCIPLINES.find(d => d.key === key) || DRAWING_DISCIPLINES[DRAWING_DISCIPLINES.length - 1];
     }
+
+    window.ProjectDocumentsDisciplines = {
+        list: DRAWING_DISCIPLINES,
+        classify: classifyDrawingDiscipline,
+        getMeta: getDisciplineMeta
+    };
 
     function pruneSelectionSet() {
         const validIds = new Set(allDocumentRows().map(d => String(d.id)));

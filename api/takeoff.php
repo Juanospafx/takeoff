@@ -393,26 +393,84 @@ function ensure_project_estimate(PDO $pdo, int $projectId): int
     return (int)$pdo->lastInsertId();
 }
 
+function takeoff_drawing_row_exists(PDO $pdo, int $drawingId): bool
+{
+    if ($drawingId <= 0) return false;
+    static $cache = [];
+    if (array_key_exists($drawingId, $cache)) return $cache[$drawingId];
+    try {
+        $stmt = $pdo->prepare("SELECT 1 FROM drawings WHERE id = ? LIMIT 1");
+        $stmt->execute([$drawingId]);
+        return $cache[$drawingId] = (bool)$stmt->fetchColumn();
+    } catch (Throwable $e) {
+        return $cache[$drawingId] = false;
+    }
+}
+
 function ensure_drawing_takeoff(PDO $pdo, int $projectId, int $drawingId): int
 {
     $stmt = $pdo->prepare("SELECT id FROM takeoffs WHERE project_id = ? AND drawing_id = ? AND deleted_at IS NULL ORDER BY id LIMIT 1");
     $stmt->execute([$projectId, $drawingId]);
     $id = (int)$stmt->fetchColumn();
     if ($id > 0) return $id;
+    $fallbackName = 'Drawing Takeoff #' . $drawingId;
+    if (takeoff_drawing_row_exists($pdo, $drawingId)) {
+        try {
+            $stmt = $pdo->prepare("INSERT INTO takeoffs (project_id, drawing_id, name, status) VALUES (?, ?, ?, 'draft')");
+            $stmt->execute([$projectId, $drawingId, 'Drawing Takeoff']);
+            return (int)$pdo->lastInsertId();
+        } catch (Throwable $e) {
+            // Fall back to legacy file-scoped row below if the FK check fails concurrently.
+        }
+    }
+    // Some installations constrain takeoffs.drawing_id to the drawings table,
+    // while editor.php identifies plans through files.id. Keep a dedicated row
+    // per file ID using metadata_json / name so layers never collide across PDFs.
+    $stmt = $pdo->prepare("SELECT id FROM takeoffs WHERE project_id = ? AND drawing_id IS NULL AND name = ? AND deleted_at IS NULL ORDER BY id LIMIT 1");
+    $stmt->execute([$projectId, $fallbackName]);
+    $existingByName = (int)$stmt->fetchColumn();
+    if ($existingByName > 0) return $existingByName;
     try {
-        $stmt = $pdo->prepare("INSERT INTO takeoffs (project_id, drawing_id, name, status) VALUES (?, ?, ?, 'draft')");
-        $stmt->execute([$projectId, $drawingId, 'Drawing Takeoff']);
+        $stmt = $pdo->prepare("INSERT INTO takeoffs (project_id, drawing_id, name, status, metadata_json) VALUES (?, NULL, ?, 'draft', ?)");
+        $stmt->execute([$projectId, $fallbackName, json_value(['file_drawing_id' => $drawingId])]);
+        return (int)$pdo->lastInsertId();
     } catch (Throwable $e) {
-        // Some installations still constrain takeoffs.drawing_id to the newer
-        // drawings table, while editor.php identifies plans through files.id.
         $stmt = $pdo->prepare("SELECT id FROM takeoffs WHERE project_id = ? AND deleted_at IS NULL ORDER BY id LIMIT 1");
         $stmt->execute([$projectId]);
         $existing = (int)$stmt->fetchColumn();
         if ($existing > 0) return $existing;
         $stmt = $pdo->prepare("INSERT INTO takeoffs (project_id, drawing_id, name, status) VALUES (?, NULL, ?, 'draft')");
         $stmt->execute([$projectId, 'Project Takeoff']);
+        return (int)$pdo->lastInsertId();
     }
-    return (int)$pdo->lastInsertId();
+}
+
+function merge_takeoff_layers(array $currentLayers, array $incomingLayers, bool $preserveMissing = false): array
+{
+    $byId = [];
+    foreach ($currentLayers as $row) {
+        if (!is_array($row)) continue;
+        $id = (string)($row['client_uid'] ?? $row['id'] ?? '');
+        if ($id === '') continue;
+        $byId[$id] = $row;
+    }
+    foreach ($incomingLayers as $row) {
+        if (!is_array($row)) continue;
+        $id = (string)($row['client_uid'] ?? $row['id'] ?? '');
+        if ($id === '') continue;
+        $existing = $byId[$id] ?? null;
+        if (is_array($existing)) {
+            $existingMeta = is_array($existing['metadata_json'] ?? null) ? $existing['metadata_json'] : [];
+            $incomingMeta = is_array($row['metadata_json'] ?? null) ? $row['metadata_json'] : [];
+            $mergedMeta = array_merge($existingMeta, $incomingMeta);
+            if ($preserveMissing) {
+                $row = array_merge($existing, $row);
+            }
+            $row['metadata_json'] = $mergedMeta;
+        }
+        $byId[$id] = $row;
+    }
+    return array_values($byId);
 }
 
 function merge_takeoff_pages(array $current, array $incoming, array $dirtyPages): array
@@ -444,22 +502,25 @@ function merge_takeoff_pages(array $current, array $incoming, array $dirtyPages)
         }
         return array_merge($kept, array_values($pageRows));
     };
-    $layers = $mergeRows('layers');
+    $layers = merge_takeoff_layers(
+        is_array($current['layers'] ?? null) ? $current['layers'] : [],
+        is_array($incoming['layers'] ?? null) ? $incoming['layers'] : [],
+        false
+    );
     $markers = $mergeRows('markers');
     $segments = $mergeRows('segments');
-    $dirtyLayerIds = [];
-    foreach (array_merge(is_array($current['layers'] ?? null) ? $current['layers'] : [], is_array($incoming['layers'] ?? null) ? $incoming['layers'] : []) as $layer) {
-        if (!is_array($layer) || empty($pages[(int)($layer['page_number'] ?? 1)])) continue;
-        $id = (string)($layer['client_uid'] ?? $layer['id'] ?? '');
-        if ($id !== '') $dirtyLayerIds[$id] = true;
+    $summaryByUid = [];
+    foreach (is_array($current['summary'] ?? null) ? $current['summary'] : [] as $row) {
+        if (!is_array($row)) continue;
+        $uid = (string)($row['layerUid'] ?? '');
+        if ($uid !== '') $summaryByUid[$uid] = $row;
     }
-    $summary = array_values(array_filter(is_array($current['summary'] ?? null) ? $current['summary'] : [], function ($row) use ($dirtyLayerIds) {
-        return is_array($row) && empty($dirtyLayerIds[(string)($row['layerUid'] ?? '')]);
-    }));
     foreach (is_array($incoming['summary'] ?? null) ? $incoming['summary'] : [] as $row) {
-        if (is_array($row) && !empty($dirtyLayerIds[(string)($row['layerUid'] ?? '')])) $summary[] = $row;
+        if (!is_array($row)) continue;
+        $uid = (string)($row['layerUid'] ?? '');
+        if ($uid !== '') $summaryByUid[$uid] = $row;
     }
-    return ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary];
+    return ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => array_values($summaryByUid)];
 }
 
 function takeoff_object_map(array $snapshot): array
@@ -531,32 +592,105 @@ function assert_takeoff_object_versions(array $current, array $dirtyIds, array $
     }
 }
 
-function recalculate_takeoff_snapshot_quantities(array $snapshot): array
+function normalize_takeoff_layer_subtype(array $layer, array $metadata = []): string
+{
+    $raw = strtolower(trim((string)(
+        $metadata['takeoff_subtype']
+        ?? $layer['takeoff_subtype']
+        ?? $layer['takeoff_type']
+        ?? $layer['type']
+        ?? ''
+    )));
+    if ($raw === 'linear_avg_with_drop' || $raw === 'linear avg. with drop' || $raw === 'linear avg with drop') {
+        return 'linear_avg_with_drop';
+    }
+    if ($raw === 'linear_with_drop' || $raw === 'linear with drop') {
+        return 'linear_with_drop';
+    }
+    if ($raw === 'count_by_distance' || $raw === 'count by distance') {
+        return 'count_by_distance';
+    }
+    if ($raw === 'area' || $raw === 'area / volume' || $raw === 'vertical wall area' || $raw === 'volume') {
+        return 'area';
+    }
+    if ($raw === 'linear') {
+        return 'linear';
+    }
+    return 'count';
+}
+
+function calculate_takeoff_layer_quantities(array $layers, array $markers, array $segments): array
 {
     $quantities = [];
-    foreach (is_array($snapshot['layers'] ?? null) ? $snapshot['layers'] : [] as $layer) {
+    $avgMeta = [];
+    foreach ($layers as $layer) {
         if (!is_array($layer)) continue;
         $key = (string)($layer['client_uid'] ?? $layer['id'] ?? '');
-        $metadata = is_array($layer['metadata_json'] ?? null) ? $layer['metadata_json'] : [];
-        if ($key !== '') {
-            $quantities[$key] = n($layer['baseQuantity'] ?? $layer['base_quantity']
-                ?? $layer['seed_quantity'] ?? $metadata['base_quantity'] ?? 0);
+        if ($key === '') continue;
+        $metadata = is_array($layer['metadata_json'] ?? null)
+            ? $layer['metadata_json']
+            : (json_decode((string)($layer['metadata_json'] ?? '{}'), true) ?: []);
+        $quantities[$key] = n($layer['baseQuantity'] ?? $layer['base_quantity']
+            ?? $layer['seed_quantity'] ?? $metadata['base_quantity'] ?? 0);
+        if (normalize_takeoff_layer_subtype($layer, $metadata) === 'linear_avg_with_drop') {
+            $avgMeta[$key] = [
+                'dropLength' => n($layer['dropLength'] ?? $layer['drop_length'] ?? $metadata['drop_length'] ?? $metadata['dropLength'] ?? 0),
+                'multiplier' => n($layer['multiplier'] ?? $metadata['multiplier'] ?? 1, 1),
+                'sumRounded' => 0.0,
+                'count' => 0,
+            ];
         }
     }
-    foreach (is_array($snapshot['markers'] ?? null) ? $snapshot['markers'] : [] as $row) {
+    foreach ($markers as $row) {
         if (!is_array($row)) continue;
         $key = (string)($row['layer_client_uid'] ?? $row['layer_id'] ?? '');
-        if ($key !== '') $quantities[$key] = ($quantities[$key] ?? 0) + n($row['quantity'] ?? $row['multiplier'] ?? 1, 1);
+        if ($key !== '') {
+            $quantities[$key] = ($quantities[$key] ?? 0) + n($row['quantity'] ?? $row['multiplier'] ?? 1, 1);
+        }
     }
-    foreach (is_array($snapshot['segments'] ?? null) ? $snapshot['segments'] : [] as $row) {
+    foreach ($segments as $row) {
         if (!is_array($row)) continue;
         $key = (string)($row['layer_client_uid'] ?? $row['layer_id'] ?? '');
-        if ($key !== '') $quantities[$key] = ($quantities[$key] ?? 0) + n($row['total_area'] ?? $row['total_length'] ?? $row['measured_length'] ?? 0);
+        if ($key === '') continue;
+        if (isset($avgMeta[$key])) {
+            $segMeta = is_array($row['metadata_json'] ?? null)
+                ? $row['metadata_json']
+                : (json_decode((string)($row['metadata_json'] ?? '{}'), true) ?: []);
+            $horizontal = $segMeta['horizontal_length'] ?? $row['measured_length'] ?? $row['total_length'] ?? 0;
+            $avgMeta[$key]['sumRounded'] += round(n($horizontal));
+            $avgMeta[$key]['count'] += 1;
+        } else {
+            $quantities[$key] = ($quantities[$key] ?? 0) + n($row['total_area'] ?? $row['total_length'] ?? $row['measured_length'] ?? 0);
+        }
     }
+    foreach ($avgMeta as $key => $info) {
+        if ($info['count'] > 0) {
+            $avgLen = $info['sumRounded'] / $info['count'];
+            $quantities[$key] = round(($quantities[$key] ?? 0) + (($avgLen + $info['dropLength']) * $info['multiplier']), 4);
+        }
+    }
+    return $quantities;
+}
+
+function recalculate_takeoff_snapshot_quantities(array $snapshot): array
+{
+    $quantities = calculate_takeoff_layer_quantities(
+        is_array($snapshot['layers'] ?? null) ? $snapshot['layers'] : [],
+        is_array($snapshot['markers'] ?? null) ? $snapshot['markers'] : [],
+        is_array($snapshot['segments'] ?? null) ? $snapshot['segments'] : []
+    );
     foreach ($snapshot['layers'] as &$layer) {
         if (!is_array($layer)) continue;
         $key = (string)($layer['client_uid'] ?? $layer['id'] ?? '');
-        if ($key !== '') $layer['quantity'] = $quantities[$key] ?? 0;
+        $metadata = is_array($layer['metadata_json'] ?? null) ? $layer['metadata_json'] : [];
+        $baseQty = n($layer['baseQuantity'] ?? $layer['base_quantity']
+            ?? $layer['seed_quantity'] ?? $metadata['base_quantity'] ?? 0);
+        if ($key !== '') {
+            $layer['baseQuantity'] = $baseQty;
+            $layer['base_quantity'] = $baseQty;
+            $layer['seed_quantity'] = $baseQty;
+            $layer['quantity'] = $quantities[$key] ?? 0;
+        }
     }
     unset($layer);
     foreach ($snapshot['summary'] as &$row) {
@@ -793,6 +927,7 @@ try {
 
             try {
                 $takeoffId = ensure_drawing_takeoff($pdo, $projectId, $drawingId);
+                $mirrorDrawingId = takeoff_drawing_row_exists($pdo, $drawingId) ? $drawingId : null;
 
                 $pdo->beginTransaction();
             $ensureState = $pdo->prepare("INSERT IGNORE INTO takeoff_estimate_states (estimate_key, drawing_id, project_id, state_json, revision) VALUES (?, ?, ?, '{}', 0)");
@@ -800,9 +935,15 @@ try {
             $currentStmt = $pdo->prepare("SELECT state_json FROM takeoff_estimate_states WHERE estimate_key = ? AND drawing_id = ? LIMIT 1 FOR UPDATE");
             $currentStmt->execute([$estimateKey, $drawingId]);
             $currentSnapshot = json_decode((string)($currentStmt->fetchColumn() ?: '{}'), true);
+            $isPartialKeepalive = !empty($input['partial_keepalive']);
             $snapshot = ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary];
             if (is_array($currentSnapshot) && isset($currentSnapshot['layers'], $currentSnapshot['markers'], $currentSnapshot['segments'])) {
                 assert_takeoff_object_versions($currentSnapshot, $dirtyObjectIds, $deletedObjectIds, $objectBaseVersions);
+                if ($isPartialKeepalive) {
+                    $mergedLayers = merge_takeoff_layers($currentSnapshot['layers'], $layers, true);
+                    $snapshot = $currentSnapshot;
+                    $snapshot['layers'] = $mergedLayers;
+                }
                 if ($dirtyPages) $snapshot = merge_takeoff_pages($currentSnapshot, $snapshot, $dirtyPages);
                 if ($dirtyObjectIds || $deletedObjectIds) $snapshot = merge_takeoff_objects($snapshot, ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary], $dirtyObjectIds, $deletedObjectIds);
                 $snapshot = recalculate_takeoff_snapshot_quantities($snapshot);
@@ -817,8 +958,8 @@ try {
                  ON DUPLICATE KEY UPDATE project_id=VALUES(project_id), state_json=VALUES(state_json), revision=revision+1, updated_at=CURRENT_TIMESTAMP"
             );
             $stmt->execute([$estimateKey, $drawingId, $projectId ?: null, json_value($snapshot) ?? '{}']);
-            $old = $pdo->prepare("SELECT id FROM takeoff_layers WHERE drawing_id = ? AND estimate_key = ?");
-            $old->execute([$drawingId, $estimateKey]);
+            $old = $pdo->prepare("SELECT id FROM takeoff_layers WHERE estimate_key = ? AND (drawing_id = ? OR (drawing_id IS NULL AND takeoff_id = ?))");
+            $old->execute([$estimateKey, $drawingId, $takeoffId]);
             $oldIds = $old->fetchAll(PDO::FETCH_COLUMN);
             if ($oldIds) {
                 $in = implode(',', array_fill(0, count($oldIds), '?'));
@@ -827,38 +968,44 @@ try {
                 $pdo->prepare("DELETE FROM takeoff_layers WHERE id IN ($in)")->execute($oldIds);
             }
 
+            $savedLayers = is_array($snapshot['layers'] ?? null) ? $snapshot['layers'] : $layers;
+            $savedMarkers = is_array($snapshot['markers'] ?? null) ? $snapshot['markers'] : $markers;
+            $savedSegments = is_array($snapshot['segments'] ?? null) ? $snapshot['segments'] : $segments;
+
+            $hasLayerProjectIdCol = in_array('project_id', takeoff_columns($pdo, 'takeoff_layers'), true);
             $layerMap = [];
-            $layerStmt = $pdo->prepare(
-                "INSERT INTO takeoff_layers
+            $layerStmt = $pdo->prepare($hasLayerProjectIdCol ? "
+                INSERT INTO takeoff_layers
+                 (takeoff_id, project_id, integration_key, drawing_id, estimate_key, page_number, name, type, takeoff_type, unit_of_measure, group_name, catalog_item_id, assembly_id, color, symbol, symbol_size, quantity, visible, locked, tag, estimate_item_id, metadata_json)
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            " : "
+                INSERT INTO takeoff_layers
                  (takeoff_id, integration_key, drawing_id, estimate_key, page_number, name, type, takeoff_type, unit_of_measure, group_name, catalog_item_id, assembly_id, color, symbol, symbol_size, quantity, visible, locked, tag, estimate_item_id, metadata_json)
-                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
-            );
-            foreach ($layers as $layer) {
+                 VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
+            ");
+            $computedLayerQuantities = calculate_takeoff_layer_quantities($savedLayers, $savedMarkers, $savedSegments);
+            foreach ($savedLayers as $layer) {
                 if (!is_array($layer)) continue;
                 $layerClientId = (string)($layer['client_uid'] ?? $layer['id'] ?? '');
                 $layerMetadata = is_array($layer['metadata_json'] ?? null) ? $layer['metadata_json'] : [];
+                if ($mirrorDrawingId === null) {
+                    $layerMetadata['file_drawing_id'] = $drawingId;
+                }
                 if (isset($layer['difficulty'])) {
                     $layerMetadata['difficulty'] = (float)$layer['difficulty'];
                 }
                 if (isset($layer['multiplier'])) {
                     $layerMetadata['multiplier'] = (float)$layer['multiplier'];
                 }
-                $layerQty = n($layer['baseQuantity'] ?? $layer['base_quantity']
-                    ?? $layer['seed_quantity'] ?? $layerMetadata['base_quantity'] ?? 0);
-                foreach ($markers as $markerRow) {
-                    if ((string)($markerRow['layer_client_uid'] ?? $markerRow['layer_id'] ?? '') === $layerClientId) {
-                        $layerQty += n($markerRow['quantity'] ?? $markerRow['multiplier'] ?? 1);
-                    }
-                }
-                foreach ($segments as $segmentRow) {
-                    if ((string)($segmentRow['layer_client_uid'] ?? $segmentRow['layer_id'] ?? '') === $layerClientId) {
-                        $layerQty += n($segmentRow['total_length'] ?? $segmentRow['measured_length'] ?? 0);
-                    }
-                }
-                $layerStmt->execute([
-                    $takeoffId,
+                $layerQty = $layerClientId !== '' && array_key_exists($layerClientId, $computedLayerQuantities)
+                    ? $computedLayerQuantities[$layerClientId]
+                    : n($layer['baseQuantity'] ?? $layer['base_quantity'] ?? $layer['seed_quantity'] ?? $layerMetadata['base_quantity'] ?? 0);
+                $layerParams = [$takeoffId];
+                if ($hasLayerProjectIdCol) $layerParams[] = $projectId ?: null;
+                array_push(
+                    $layerParams,
                     $layerClientId !== '' ? $layerClientId : null,
-                    $drawingId,
+                    $mirrorDrawingId,
                     $estimateKey,
                     i($layer['page_number'] ?? 1, 1),
                     trim((string)($layer['name'] ?? 'Takeoff Layer')) ?: 'Takeoff Layer',
@@ -876,8 +1023,9 @@ try {
                     !empty($layer['locked']) ? 1 : 0,
                     $layer['tag'] ?? null,
                     !empty($layer['estimate_item_id']) && is_numeric($layer['estimate_item_id']) ? (int)$layer['estimate_item_id'] : null,
-                    json_value($layerMetadata),
-                ]);
+                    json_value($layerMetadata)
+                );
+                $layerStmt->execute($layerParams);
                 $clientId = (string)($layer['client_uid'] ?? $layer['id'] ?? '');
                 if ($clientId !== '') $layerMap[$clientId] = (int)$pdo->lastInsertId();
             }
@@ -887,7 +1035,7 @@ try {
                  (client_uid, layer_id, catalog_item_id, assembly_id, page_number, x, y, symbol, color, label, multiplier, quantity, notes, metadata_json)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             );
-            foreach ($markers as $marker) {
+            foreach ($savedMarkers as $marker) {
                 if (!is_array($marker)) continue;
                 $layerKey = (string)($marker['layer_client_uid'] ?? $marker['layer_id'] ?? '');
                 $layerId = $layerMap[$layerKey] ?? i($marker['layer_id'] ?? 0);
@@ -915,7 +1063,7 @@ try {
                  (client_uid, layer_id, catalog_item_id, assembly_id, page_number, points_json, measured_length, multiplier, total_length, unit, color, stroke_width, label, metadata_json)
                  VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)"
             );
-            foreach ($segments as $segment) {
+            foreach ($savedSegments as $segment) {
                 if (!is_array($segment)) continue;
                 $layerKey = (string)($segment['layer_client_uid'] ?? $segment['layer_id'] ?? '');
                 $layerId = $layerMap[$layerKey] ?? i($segment['layer_id'] ?? 0);
@@ -957,6 +1105,11 @@ try {
                 $retrySnapshot = ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary];
                 if (is_array($latestSnapshot) && isset($latestSnapshot['layers'], $latestSnapshot['markers'], $latestSnapshot['segments'])) {
                     assert_takeoff_object_versions($latestSnapshot, $dirtyObjectIds, $deletedObjectIds, $objectBaseVersions);
+                    if ($isPartialKeepalive) {
+                        $mergedLayers = merge_takeoff_layers($latestSnapshot['layers'], $layers, true);
+                        $retrySnapshot = $latestSnapshot;
+                        $retrySnapshot['layers'] = $mergedLayers;
+                    }
                     if ($dirtyPages) $retrySnapshot = merge_takeoff_pages($latestSnapshot, $retrySnapshot, $dirtyPages);
                     if ($dirtyObjectIds || $deletedObjectIds) $retrySnapshot = merge_takeoff_objects($retrySnapshot, ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary], $dirtyObjectIds, $deletedObjectIds);
                     $retrySnapshot = recalculate_takeoff_snapshot_quantities($retrySnapshot);

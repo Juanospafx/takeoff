@@ -20,6 +20,8 @@ test('wheel, trackpad pinch, fit, and the parent API report the resulting zoom',
     assert.match(bodyAfter(editor, "addEventListener('touchmove'", "}, { passive: false })"), /notifyTakeoffZoomChanged\('pinch'\)/);
     assert.match(bodyAfter(editor, 'function centerPdfAtZoom', 'function pdfRenderScaleForZoom'), /notifyTakeoffZoomChanged\('fit'\)/);
     assert.match(bodyAfter(editor, "canvas.on('mouse:wheel'", "window.addEventListener('beforeunload'"), /notifyTakeoffZoomChanged\('wheel'\)/);
+    assert.match(bodyAfter(editor, 'function computeWheelZoomFactor', "addEventListener('wheel'"), /e\?\.ctrlKey && Math\.abs\(delta\) < 40/);
+    assert.match(bodyAfter(editor, "canvas.on('mouse:wheel'", 'schedulePdfRerender'), /evt\?\.ctrlKey && Math\.abs\(delta\) < 40/);
     assert.match(bodyAfter(takeoff, 'window.projectTakeoffSetZoom = function', 'window.projectTakeoffGetZoom'), /notifyTakeoffZoomChanged\?\.\('parent-api'\)/);
 });
 
@@ -46,7 +48,7 @@ test('the parent mirrors editor zoom into controls without feeding it back to th
 
 test('buttons and slider remain command paths into the editor', () => {
     const commands = bodyAfter(project, 'function runViewerCommand', 'function showPrepared');
-    assert.match(commands, /zoom-out[\s\S]*setZoom\(currentZoomPercent\(\)\s*-\s*10\)/);
-    assert.match(commands, /zoom-in[\s\S]*setZoom\(currentZoomPercent\(\)\s*\+\s*10\)/);
+    assert.match(commands, /zoom-out[\s\S]*setZoom\(currentZoomPercent\(\)\s*-\s*25\)/);
+    assert.match(commands, /zoom-in[\s\S]*setZoom\(currentZoomPercent\(\)\s*\+\s*25\)/);
     assert.match(project, /takeoffZoomSlider[\s\S]*addEventListener\('input',\s*event\s*=>\s*setZoom\(event\.target\.value\)\)/);
 });

@@ -43,20 +43,24 @@
         } catch (e) { }
     }
 
-    function takeoffEditorUrl(documentId, estimateId = activeEstimateId()) {
+    function takeoffEditorUrl(documentId, estimateId = activeEstimateId(), pageNumber = null) {
         const inheritLegacy = String(estimateId) === primaryEstimateId() ? '&inherit_legacy=1' : '';
-        return `editor.php?id=${encodeURIComponent(documentId)}&embedded=1&estimate_key=${encodeURIComponent(estimateId)}${inheritLegacy}&_v=${Date.now()}`;
+        const parsedPage = Number(pageNumber);
+        const pageParam = Number.isFinite(parsedPage) && parsedPage > 1 ? `&page=${Math.floor(parsedPage)}` : '';
+        return `editor.php?id=${encodeURIComponent(documentId)}&embedded=1&estimate_key=${encodeURIComponent(estimateId)}${inheritLegacy}${pageParam}&_v=${Date.now()}`;
     }
     window.projectTakeoffEditorUrl = takeoffEditorUrl;
 
-    function ensureEditorEstimate(estimateId = activeEstimateId()) {
+    function ensureEditorEstimate(estimateId = activeEstimateId(), forceReload = false) {
         const frame = $('takeoffFrame');
         const documentId = activeDrawingDoc()?.id || window.ProjectState?.selectedDocumentId;
         if (!frame || !documentId) return false;
         let loadedEstimate = '';
         try { loadedEstimate = new URL(frame.getAttribute('src') || '', window.location.href).searchParams.get('estimate_key') || ''; } catch (_) { }
-        if (loadedEstimate === String(estimateId)) return false;
+        if (!forceReload && loadedEstimate === String(estimateId)) return false;
         const requestedEstimateId = String(estimateId);
+        const preservedPage = Math.max(1, Number(drawingState?.selectedPage || 1));
+        if (preservedPage > 1) drawingState.pendingPageJump = preservedPage;
         const generation = ++editorEstimateGeneration;
         frame.addEventListener('load', () => {
             if (generation !== editorEstimateGeneration || requestedEstimateId !== activeEstimateId()) return;
@@ -64,7 +68,7 @@
             renderTakeoffPanel();
             notifyEditorVisible();
         }, { once: true });
-        frame.src = takeoffEditorUrl(documentId, estimateId);
+        frame.src = takeoffEditorUrl(documentId, estimateId, preservedPage);
         return true;
     }
 
@@ -152,7 +156,16 @@
     }
 
     let takeoffIsDirty = false;
-    window.isTakeoffDirty = () => takeoffIsDirty;
+    function getTakeoffEditorFrame() {
+        return $('takeoffFrame');
+    }
+    window.isTakeoffDirty = () => {
+        if (takeoffIsDirty) return true;
+        try {
+            if (getTakeoffEditorFrame()?.contentWindow?.isEditorTakeoffDirty?.()) return true;
+        } catch (_) { }
+        return false;
+    };
     window.projectTakeoffFitToScreen = fitTakeoffToScreen;
     window.projectTakeoffSaveState = async function () {
         takeoffIsDirty = false;
@@ -164,6 +177,7 @@
         syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
         try {
             await callEditor('projectTakeoffSave');
+            getTakeoffEditorFrame()?.contentWindow?.clearEditorTakeoffDirtyCheckpoint?.();
         } catch (e) {
             console.warn('Canvas save ignored or complete:', e);
         }
@@ -570,13 +584,12 @@
 
     const TAKEOFF_TYPES = ['Count', 'Linear', 'Linear with drop', 'Linear avg. with drop', 'Count by distance', 'Area / Volume', 'Vertical wall area'];
     const TAKEOFF_UOMS = [
-        'ea', 'set', 'lot', 'pr', 'pkg', 'box',
+        'ea', 'pr', 'set', 'lot', 'box', 'roll',
         'lf', 'ft', 'in', 'yd', 'm', 'mm',
-        'sq ft', 'sq yd', 'm2', 'acre',
-        'cu yd', 'ft3', 'm3', 'gal',
-        'hr', 'day', 'wk'
+        'sq ft', 'sq yd', 'm2',
+        'cu yd', 'ft3', 'm3'
     ];
-    const TAKEOFF_SYMBOLS = ['Checkmark', 'Octagon', 'Solid Circle', 'Square', 'Triangle', 'Cross', 'Pentagon', 'Target', 'Dimension', 'Hollow Circle', 'Diamond'];
+    const TAKEOFF_SYMBOLS = ['Checkmark', 'Octagon', 'Solid Circle', 'Hollow Circle', 'Square', 'Triangle', 'Diamond', 'Cross', 'Pentagon', 'Target'];
     const TAKEOFF_SIZES = ['X-Small', 'Small', 'Medium', 'Large'];
     const takeoffSizeRadius = size => ({ 'X-Small': 5, Small: 7, Medium: 9, Large: 12 }[size]
         || Math.max(4, Math.min(96, Number(size) || 9)));
@@ -606,10 +619,30 @@
     function getLayerBadgeSvg(layer, size = 14) {
         const color = layer?.color || '#3b82f6';
         const rawType = String(layer?.type || 'Count');
-        const isCount = rawType === 'Count' || rawType === 'Count by distance' || Boolean(layer?.symbol && !rawType.startsWith('Linear') && !rawType.includes('Area'));
+        const isCount = rawType === 'Count' || (Boolean(layer?.symbol) && !rawType.startsWith('Linear') && !rawType.includes('Area') && !rawType.includes('Volume') && rawType !== 'Count by distance');
 
         if (!isCount) {
-            if (rawType === 'Linear' || rawType.startsWith('Linear')) {
+            if (rawType === 'Count by distance') {
+                return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none">
+                    <line x1="3" y1="12" x2="21" y2="12" stroke="${esc(color)}" stroke-width="3" stroke-linecap="round" stroke-dasharray="4 3"/>
+                    <circle cx="5" cy="12" r="2.5" fill="${esc(color)}"/>
+                    <circle cx="19" cy="12" r="2.5" fill="${esc(color)}"/>
+                </svg>`;
+            }
+            if (rawType === 'Linear') {
+                return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none">
+                    <line x1="5" y1="12" x2="19" y2="12" stroke="${esc(color)}" stroke-width="3.2" stroke-linecap="round"/>
+                    <rect x="2.5" y="9.5" width="5" height="5" fill="${esc(color)}"/>
+                    <rect x="16.5" y="9.5" width="5" height="5" fill="${esc(color)}"/>
+                </svg>`;
+            }
+            if (rawType === 'Linear with drop') {
+                return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none">
+                    <line x1="6" y1="12" x2="18" y2="12" stroke="${esc(color)}" stroke-width="3" stroke-linecap="round"/>
+                    <path d="M2.5 9.5L7.5 14.5M7.5 9.5L2.5 14.5M16.5 9.5L21.5 14.5M21.5 9.5L16.5 14.5" stroke="${esc(color)}" stroke-width="2.1" stroke-linecap="round"/>
+                </svg>`;
+            }
+            if (rawType === 'Linear avg. with drop' || rawType.startsWith('Linear')) {
                 return `<svg viewBox="0 0 24 24" width="${size}" height="${size}" fill="none">
                     <line x1="3" y1="12" x2="21" y2="12" stroke="${esc(color)}" stroke-width="3.5" stroke-linecap="round"/>
                     <circle cx="5" cy="12" r="2.5" fill="${esc(color)}"/>
@@ -683,20 +716,11 @@
 
     const TAKEOFF_COLORS = window.TakeoffColorPalette?.COLORS || [];
     const TAKEOFF_RICH_COLORS = [
-        '#7c3aed',
-        '#3b5998',
-        '#0ea5e9',
-        '#00d2ff',
-        '#009688',
-        '#16a34a',
-        '#84cc16',
-        '#a3e635',
-        '#fde047',
-        '#f59e0b',
-        '#f97316',
-        '#ef4444',
-        '#78350f',
-        '#000000'
+        '#7c3aed', '#6366f1', '#3b5998', '#2563eb', '#0ea5e9', '#00d2ff',
+        '#06b6d4', '#009688', '#10b981', '#16a34a', '#22c55e', '#84cc16',
+        '#a3e635', '#eab308', '#fde047', '#f59e0b', '#f97316', '#fb5a3a',
+        '#ef4444', '#dc2626', '#991b1b', '#ec4899', '#d946ef', '#a855f7',
+        '#78350f', '#92400e', '#475569', '#000000'
     ];
 
     const TAKEOFF_TYPE_ITEMS = [
@@ -739,53 +763,55 @@
     ];
 
     const TAKEOFF_SYMBOL_ITEMS = [
-        { section: 'Basic Symbols' },
-        {
-            id: 'Checkmark',
-            label: 'Checkmark',
-            svg: `<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.5" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
-        },
-        {
-            id: 'Octagon',
-            label: 'Octagon',
-            svg: `<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor"><polygon points="7.86 2 16.14 2 22 7.86 22 16.14 16.14 22 7.86 22 2 16.14 2 7.86"/></svg>`
-        },
         {
             id: 'Solid Circle',
-            label: 'Circle',
-            svg: `<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor"><circle cx="12" cy="12" r="8.5"/></svg>`
+            label: 'Solid Circle',
+            svg: `<svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><circle cx="12" cy="12" r="8"/></svg>`
+        },
+        {
+            id: 'Hollow Circle',
+            label: 'Hollow Circle',
+            svg: `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.4"><circle cx="12" cy="12" r="7.5"/></svg>`
         },
         {
             id: 'Square',
             label: 'Square',
-            svg: `<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor"><rect x="3.5" y="3.5" width="17" height="17" rx="1"/></svg>`
+            svg: `<svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><rect x="4" y="4" width="16" height="16" rx="1.5"/></svg>`
         },
         {
             id: 'Triangle',
             label: 'Triangle',
-            svg: `<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor"><polygon points="12 3 22 21 2 21"/></svg>`
+            svg: `<svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><polygon points="12 3.5 21.5 20.5 2.5 20.5"/></svg>`
+        },
+        {
+            id: 'Diamond',
+            label: 'Diamond',
+            svg: `<svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><polygon points="12 2.5 21.5 12 12 21.5 2.5 12"/></svg>`
         },
         {
             id: 'Cross',
-            label: 'Plus',
-            svg: `<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor"><path d="M19 10.5h-5.5V5c0-.83-.67-1.5-1.5-1.5s-1.5.67-1.5 1.5v5.5H5c-.83 0-1.5.67-1.5 1.5s.67 1.5 1.5 1.5h5.5V19c0 .83.67 1.5 1.5 1.5s1.5-.67 1.5-1.5v-5.5H19c.83 0 1.5-.67 1.5-1.5s-.67-1.5-1.5-1.5z"/></svg>`
+            label: 'Cross / Plus',
+            svg: `<svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><path d="M18.5 10.5h-5v-5a1.5 1.5 0 0 0-3 0v5h-5a1.5 1.5 0 0 0 0 3h5v5a1.5 1.5 0 0 0 3 0v-5h5a1.5 1.5 0 0 0 0-3z"/></svg>`
+        },
+        {
+            id: 'Octagon',
+            label: 'Octagon',
+            svg: `<svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><polygon points="7.86 2.5 16.14 2.5 21.5 7.86 21.5 16.14 16.14 21.5 7.86 21.5 2.5 16.14 2.5 7.86"/></svg>`
         },
         {
             id: 'Pentagon',
             label: 'Pentagon',
-            svg: `<svg viewBox="0 0 24 24" width="19" height="19" fill="currentColor"><polygon points="12 2 22 9.5 18.2 21.5 5.8 21.5 2 9.5"/></svg>`
+            svg: `<svg viewBox="0 0 24 24" width="17" height="17" fill="currentColor"><polygon points="12 2.5 21.5 9.5 17.8 21 6.2 21 2.5 9.5"/></svg>`
+        },
+        {
+            id: 'Checkmark',
+            label: 'Checkmark',
+            svg: `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.6" stroke-linecap="round" stroke-linejoin="round"><polyline points="20 6 9 17 4 12"/></svg>`
         },
         {
             id: 'Target',
-            label: 'Concentric',
-            svg: `<svg viewBox="0 0 24 24" width="19" height="19" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="9"/><circle cx="12" cy="12" r="4" fill="currentColor"/></svg>`
-        },
-        { divider: true },
-        { section: 'Dynamic Symbols' },
-        {
-            id: 'Dimension',
-            label: 'Dimension',
-            svg: `<svg viewBox="0 0 28 20" width="22" height="17" fill="none" stroke="currentColor" stroke-width="1.8"><text x="14" y="8" text-anchor="middle" font-size="9" font-family="sans-serif" font-weight="bold" fill="currentColor" stroke="none">x</text><line x1="3" y1="11" x2="3" y2="18"/><line x1="25" y1="11" x2="25" y2="18"/><line x1="3" y1="15" x2="25" y2="15"/></svg>`
+            label: 'Target',
+            svg: `<svg viewBox="0 0 24 24" width="17" height="17" fill="none" stroke="currentColor" stroke-width="2.2"><circle cx="12" cy="12" r="8.5"/><circle cx="12" cy="12" r="3.8" fill="currentColor"/></svg>`
         }
     ];
 
@@ -793,22 +819,22 @@
         {
             id: 'X-Small',
             label: 'X-Small',
-            svg: `<svg viewBox="0 0 28 28" width="20" height="20" fill="none"><circle cx="14" cy="14" r="11" stroke="var(--pcd-ring, #cbd5e1)" stroke-width="1.2"/><circle cx="14" cy="14" r="7.5" stroke="var(--pcd-ring-2, #94a3b8)" stroke-width="1.2"/><circle cx="14" cy="14" r="2.5" fill="#1e293b"/></svg>`
+            svg: `<svg viewBox="0 0 28 28" width="18" height="18" fill="none"><circle cx="14" cy="14" r="10.5" stroke="var(--pcd-ring, #cbd5e1)" stroke-width="1.2"/><circle cx="14" cy="14" r="3" fill="currentColor"/></svg>`
         },
         {
             id: 'Small',
             label: 'Small',
-            svg: `<svg viewBox="0 0 28 28" width="20" height="20" fill="none"><circle cx="14" cy="14" r="9.5" stroke="var(--pcd-ring, #cbd5e1)" stroke-width="1.4"/><circle cx="14" cy="14" r="5" stroke="#1e293b" stroke-width="2"/></svg>`
+            svg: `<svg viewBox="0 0 28 28" width="18" height="18" fill="none"><circle cx="14" cy="14" r="9.5" stroke="var(--pcd-ring, #cbd5e1)" stroke-width="1.4"/><circle cx="14" cy="14" r="5" stroke="currentColor" stroke-width="2.2"/></svg>`
         },
         {
             id: 'Medium',
             label: 'Medium',
-            svg: `<svg viewBox="0 0 28 28" width="20" height="20" fill="none"><circle cx="14" cy="14" r="7.5" stroke="#1e293b" stroke-width="2.2"/></svg>`
+            svg: `<svg viewBox="0 0 28 28" width="18" height="18" fill="none"><circle cx="14" cy="14" r="7.5" stroke="currentColor" stroke-width="2.2"/></svg>`
         },
         {
             id: 'Large',
             label: 'Large',
-            svg: `<svg viewBox="0 0 28 28" width="20" height="20" fill="none"><circle cx="14" cy="14" r="10.5" stroke="#1e293b" stroke-width="2.2"/></svg>`
+            svg: `<svg viewBox="0 0 28 28" width="18" height="18" fill="none"><circle cx="14" cy="14" r="10.5" stroke="currentColor" stroke-width="2.3"/></svg>`
         }
     ];
 
@@ -825,6 +851,36 @@
     function closeAllProCustomDropdowns() {
         document.querySelectorAll('.pro-custom-dropdown.is-open').forEach(dd => {
             dd.classList.remove('is-open');
+            dd.querySelector('.pro-custom-dropdown-trigger')?.setAttribute('aria-expanded', 'false');
+        });
+    }
+
+    function positionProDropdownMenu(dropdown, trigger, menu) {
+        if (!dropdown || !trigger || !menu) return;
+        requestAnimationFrame(() => {
+            if (!dropdown.classList.contains('is-open')) return;
+            const container = dropdown.closest('.pro-layer-modal, .pro-create-layer-modal, .pro-layer-drawer');
+            const containerRect = container ? container.getBoundingClientRect() : null;
+            const minLeft = containerRect ? containerRect.left + 8 : 8;
+            const maxRight = Math.min(
+                window.innerWidth - 8,
+                containerRect ? containerRect.right - 8 : window.innerWidth - 8
+            );
+            const triggerRect = trigger.getBoundingClientRect();
+
+            menu.style.left = '0px';
+            menu.style.right = 'auto';
+            menu.style.maxWidth = `${Math.max(64, Math.floor(maxRight - minLeft))}px`;
+            const rect = menu.getBoundingClientRect();
+            if (rect.right > maxRight) {
+                menu.style.left = 'auto';
+                menu.style.right = '0px';
+                const flippedRect = menu.getBoundingClientRect();
+                if (flippedRect.left < minLeft) {
+                    menu.style.left = `${Math.round(minLeft - triggerRect.left)}px`;
+                    menu.style.right = 'auto';
+                }
+            }
         });
     }
 
@@ -857,7 +913,11 @@
             e.stopPropagation();
             const isOpen = dropdown.classList.contains('is-open');
             closeAllProCustomDropdowns();
-            if (!isOpen) dropdown.classList.add('is-open');
+            if (!isOpen) {
+                dropdown.classList.add('is-open');
+                trigger.setAttribute('aria-expanded', 'true');
+                positionProDropdownMenu(dropdown, trigger, menu);
+            }
         });
 
         menu.querySelectorAll('.pcd-item').forEach(itemEl => {
@@ -889,49 +949,40 @@
     }
 
     const TAKEOFF_UOM_ITEMS = [
-        { section: 'Count & Items' },
+        { section: 'Count' },
         { id: 'ea', label: 'ea', desc: 'Each', hint: 'Fixtures, devices, boxes', category: 'Count' },
         { id: 'pr', label: 'pr', desc: 'Pair', hint: 'Matched pairs', category: 'Count' },
         { id: 'set', label: 'set', desc: 'Set', hint: 'Assemblies, sets', category: 'Count' },
         { id: 'lot', label: 'lot', desc: 'Lot', hint: 'Lump sum packages', category: 'Count' },
-        { id: 'pkg', label: 'pkg', desc: 'Package', hint: 'Standard packs', category: 'Count' },
         { id: 'box', label: 'box', desc: 'Box', hint: 'Box quantities', category: 'Count' },
         { id: 'roll', label: 'roll', desc: 'Roll', hint: 'Wire spools, membrane', category: 'Count' },
 
-        { section: 'Length & Distance' },
-        { id: 'lf', label: 'lf', desc: 'Linear Feet', hint: 'Conduit, wire, piping', category: 'Length' },
+        { section: 'Length' },
+        { id: 'lf', label: 'lf', desc: 'Linear Ft', hint: 'Conduit, wire, piping', category: 'Length' },
         { id: 'ft', label: 'ft', desc: 'Feet', hint: 'Drop & run lengths', category: 'Length' },
         { id: 'in', label: 'in', desc: 'Inches', hint: 'Short measurements', category: 'Length' },
         { id: 'yd', label: 'yd', desc: 'Yards', hint: 'Trenching & site work', category: 'Length' },
         { id: 'm', label: 'm', desc: 'Meters', hint: 'Metric distance', category: 'Length' },
         { id: 'mm', label: 'mm', desc: 'Millimeters', hint: 'Precision metric', category: 'Length' },
 
-        { section: 'Area & Surface' },
-        { id: 'sq ft', label: 'sq ft', desc: 'Square Feet', hint: 'Floor, wall, ceiling', category: 'Area' },
-        { id: 'sq yd', label: 'sq yd', desc: 'Square Yards', hint: 'Paving, turf, flooring', category: 'Area' },
-        { id: 'm2', label: 'm²', desc: 'Square Meters', hint: 'Metric floor/wall', category: 'Area' },
-        { id: 'acre', label: 'acre', desc: 'Acres', hint: 'Site acreage', category: 'Area' },
+        { section: 'Area' },
+        { id: 'sq ft', label: 'sq ft', desc: 'Sq Feet', hint: 'Floor, wall, ceiling', category: 'Area' },
+        { id: 'sq yd', label: 'sq yd', desc: 'Sq Yards', hint: 'Paving, turf, flooring', category: 'Area' },
+        { id: 'm2', label: 'm²', desc: 'Sq Meters', hint: 'Metric floor/wall', category: 'Area' },
 
-        { section: 'Volume, Bulk & Weight' },
-        { id: 'cu yd', label: 'cu yd', desc: 'Cubic Yards', hint: 'Concrete, excavation', category: 'Volume' },
-        { id: 'ft3', label: 'ft³', desc: 'Cubic Feet', hint: 'Structural volume', category: 'Volume' },
-        { id: 'm3', label: 'm³', desc: 'Cubic Meters', hint: 'Metric volume', category: 'Volume' },
-        { id: 'gal', label: 'gal', desc: 'Gallons', hint: 'Liquid, paint, sealant', category: 'Volume' },
-        { id: 'lbs', label: 'lbs', desc: 'Pounds', hint: 'Weight / bulk metal', category: 'Volume' },
-        { id: 'cwt', label: 'cwt', desc: 'Hundredweight', hint: 'Structural steel', category: 'Volume' },
-
-        { section: 'Time & Labor' },
-        { id: 'hr', label: 'hr', desc: 'Hours', hint: 'Labor hours', category: 'Time' },
-        { id: 'day', label: 'day', desc: 'Days', hint: 'Daily crew / equipment', category: 'Time' },
-        { id: 'wk', label: 'wk', desc: 'Weeks', hint: 'Duration schedule', category: 'Time' }
+        { section: 'Volume' },
+        { id: 'cu yd', label: 'cu yd', desc: 'Cu Yards', hint: 'Concrete, excavation', category: 'Volume' },
+        { id: 'ft3', label: 'ft³', desc: 'Cu Feet', hint: 'Structural volume', category: 'Volume' },
+        { id: 'm3', label: 'm³', desc: 'Cu Meters', hint: 'Metric volume', category: 'Volume' }
     ];
 
     function allowedUomCategoriesForType(type) {
         const raw = String(type || 'Count').trim();
-        if (raw === 'Count' || raw === 'Count by distance') return ['Count', 'Length', 'Area', 'Volume', 'Time'];
-        if (raw === 'Linear' || raw.startsWith('Linear')) return ['Length', 'Count', 'Area', 'Volume', 'Time'];
-        if (raw === 'Area / Volume' || raw.includes('Area') || raw.includes('Volume')) return ['Area', 'Volume', 'Length', 'Count', 'Time'];
-        return ['Count', 'Length', 'Area', 'Volume', 'Time'];
+        if (raw === 'Count' || raw === 'Count by distance') return ['Count'];
+        if (raw === 'Linear' || raw.startsWith('Linear')) return ['Length'];
+        if (raw === 'Vertical wall area') return ['Area'];
+        if (raw === 'Area / Volume' || raw.includes('Area') || raw.includes('Volume')) return ['Area', 'Volume'];
+        return ['Count'];
     }
 
     function defaultUomForType(type) {
@@ -943,7 +994,14 @@
     }
 
     function isUomValidForType(uom, type) {
-        return Boolean(uom && String(uom).trim());
+        const norm = String(uom || '').trim().toLowerCase();
+        if (!norm) return false;
+        const allowed = allowedUomCategoriesForType(type);
+        const aliasMap = { 'm²': 'm2', 'ft³': 'ft3', 'm³': 'm3', 'sqft': 'sq ft', 'sf': 'sq ft', 'linear ft': 'lf', 'yd3': 'cu yd' };
+        const canonical = aliasMap[norm] || norm;
+        const matched = TAKEOFF_UOM_ITEMS.find(it => it.id && (it.id.toLowerCase() === canonical || String(it.label || '').toLowerCase() === norm));
+        if (!matched) return true;
+        return !matched.category || allowed.includes(matched.category);
     }
 
     function setupUomDropdown(prefix, selectEl) {
@@ -971,13 +1029,10 @@
                 listHtml += `<div class="pcd-section-header" data-uom-section="${esc(item.section)}">${esc(item.section)}</div>`;
             } else {
                 listHtml += `
-                    <div class="pcd-uom-item" data-uom="${esc(item.id)}" data-category="${esc(item.category || '')}" data-search="${esc((item.label + ' ' + item.desc + ' ' + item.id + ' ' + (item.hint || '')).toLowerCase())}">
+                    <div class="pcd-uom-item" data-uom="${esc(item.id)}" data-category="${esc(item.category || '')}" data-search="${esc((item.label + ' ' + item.desc + ' ' + item.id + ' ' + (item.hint || '')).toLowerCase())}" title="${esc(item.desc)}${item.hint ? ' — ' + esc(item.hint) : ''}">
                         <div class="pcd-uom-left">
                             <span class="pcd-uom-badge">${esc(item.label)}</span>
-                            <div class="pcd-uom-info">
-                                <span class="pcd-uom-name">${esc(item.desc)}</span>
-                                ${item.hint ? `<span class="pcd-uom-hint">${esc(item.hint)}</span>` : ''}
-                            </div>
+                            <span class="pcd-uom-name">${esc(item.desc)}</span>
                         </div>
                         <i class="fas fa-check pcd-uom-check"></i>
                     </div>
@@ -986,24 +1041,10 @@
         });
 
         menu.innerHTML = `
-            <div class="pcd-search-wrap">
-                <i class="fas fa-search pcd-search-icon"></i>
-                <input type="text" class="pcd-search-input" placeholder="Search or type unit..." autocomplete="off">
-            </div>
             <div class="pcd-uom-list">
                 ${listHtml}
             </div>
-            <div class="pcd-uom-custom-row" style="display:none;">
-                <button type="button" class="pcd-uom-custom-btn">
-                    <i class="fas fa-plus"></i> <span class="pcd-uom-custom-text">Use custom unit</span>
-                </button>
-            </div>
         `;
-
-        const searchInput = menu.querySelector('.pcd-search-input');
-        const customRow = menu.querySelector('.pcd-uom-custom-row');
-        const customBtn = menu.querySelector('.pcd-uom-custom-btn');
-        const customText = menu.querySelector('.pcd-uom-custom-text');
 
         function applyUomSelection(uom) {
             const clean = String(uom || 'ea').trim();
@@ -1015,29 +1056,17 @@
             closeAllProCustomDropdowns();
         }
 
-        function filterItems(query) {
-            const q = String(query || '').toLowerCase().trim();
+        function filterItems() {
             const currentType = dropdown._takeoffType || 'Count';
             const allowed = allowedUomCategoriesForType(currentType);
             const items = menu.querySelectorAll('.pcd-uom-item');
-            let hasExactMatch = false;
             let firstVisible = null;
 
             items.forEach(el => {
                 const cat = el.dataset.category || '';
                 const isTypeAllowed = !cat || allowed.includes(cat);
-                if (!isTypeAllowed && !q) {
-                    el.style.display = 'none';
-                    return;
-                }
-                const uomId = (el.dataset.uom || '').toLowerCase();
-                const searchData = (el.dataset.search || '').toLowerCase();
-                const matches = !q ? isTypeAllowed : (searchData.includes(q) || uomId.includes(q));
-                el.style.display = matches ? 'flex' : 'none';
-                if (matches) {
-                    if (!firstVisible) firstVisible = el;
-                    if (uomId === q) hasExactMatch = true;
-                }
+                el.style.display = isTypeAllowed ? 'flex' : 'none';
+                if (isTypeAllowed && !firstVisible) firstVisible = el;
             });
 
             menu.querySelectorAll('.pcd-section-header').forEach(header => {
@@ -1053,14 +1082,7 @@
                 header.style.display = sectionHasVisible ? 'block' : 'none';
             });
 
-            if (q && !hasExactMatch && customRow && customText) {
-                customRow.style.display = 'block';
-                customText.textContent = `Use custom unit "${q}"`;
-            } else if (customRow) {
-                customRow.style.display = 'none';
-            }
-
-            return { firstVisible, hasExactMatch };
+            return { firstVisible };
         }
 
         trigger.addEventListener('click', (e) => {
@@ -1070,23 +1092,8 @@
             if (!isOpen) {
                 dropdown.classList.add('is-open');
                 trigger.setAttribute('aria-expanded', 'true');
-                if (searchInput) {
-                    searchInput.value = '';
-                }
-                filterItems('');
-                requestAnimationFrame(() => {
-                    const rect = menu.getBoundingClientRect();
-                    if (rect.right > window.innerWidth - 8) {
-                        menu.style.left = 'auto';
-                        menu.style.right = '0px';
-                    } else {
-                        menu.style.left = '0px';
-                        menu.style.right = 'auto';
-                    }
-                });
-                if (searchInput) {
-                    setTimeout(() => searchInput.focus(), 25);
-                }
+                filterItems();
+                positionProDropdownMenu(dropdown, trigger, menu);
             } else {
                 trigger.setAttribute('aria-expanded', 'false');
             }
@@ -1094,31 +1101,6 @@
 
         menu.addEventListener('click', (e) => {
             e.stopPropagation();
-        });
-
-        searchInput?.addEventListener('input', (e) => {
-            filterItems(e.target.value);
-        });
-
-        searchInput?.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                const q = searchInput.value.trim();
-                const { firstVisible } = filterItems(q);
-                if (firstVisible && (!q || firstVisible.style.display !== 'none')) {
-                    applyUomSelection(firstVisible.dataset.uom);
-                } else if (q) {
-                    applyUomSelection(q);
-                }
-            } else if (e.key === 'Escape') {
-                closeAllProCustomDropdowns();
-            }
-        });
-
-        customBtn?.addEventListener('click', (e) => {
-            e.stopPropagation();
-            const q = searchInput?.value.trim();
-            if (q) applyUomSelection(q);
         });
 
         menu.querySelectorAll('.pcd-uom-item').forEach(itemEl => {
@@ -1206,25 +1188,26 @@
         const menu = $(`${prefix}SymbolMenu`);
         if (!dropdown || !trigger || !menu) return;
 
-        let html = '';
+        let html = '<div class="pcd-symbol-grid">';
         TAKEOFF_SYMBOL_ITEMS.forEach(item => {
-            if (item.section) {
-                html += `<div class="pcd-section-header">${esc(item.section)}</div>`;
-            } else if (item.divider) {
-                html += `<div class="pcd-divider"></div>`;
-            } else {
+            if (item.id) {
                 html += `<div class="pcd-symbol-item" data-symbol="${esc(item.id)}" title="${esc(item.label)}">
                     <span>${item.svg}</span>
                 </div>`;
             }
         });
+        html += '</div>';
         menu.innerHTML = html;
 
         trigger.addEventListener('click', (e) => {
             e.stopPropagation();
             const isOpen = dropdown.classList.contains('is-open');
             closeAllProCustomDropdowns();
-            if (!isOpen) dropdown.classList.add('is-open');
+            if (!isOpen) {
+                dropdown.classList.add('is-open');
+                trigger.setAttribute('aria-expanded', 'true');
+                positionProDropdownMenu(dropdown, trigger, menu);
+            }
         });
 
         menu.querySelectorAll('.pcd-symbol-item').forEach(itemEl => {
@@ -1270,7 +1253,11 @@
             e.stopPropagation();
             const isOpen = dropdown.classList.contains('is-open');
             closeAllProCustomDropdowns();
-            if (!isOpen) dropdown.classList.add('is-open');
+            if (!isOpen) {
+                dropdown.classList.add('is-open');
+                trigger.setAttribute('aria-expanded', 'true');
+                positionProDropdownMenu(dropdown, trigger, menu);
+            }
         });
 
         menu.querySelectorAll('.pcd-size-item').forEach(itemEl => {
@@ -1325,7 +1312,11 @@
             e.stopPropagation();
             const isOpen = dropdown.classList.contains('is-open');
             closeAllProCustomDropdowns();
-            if (!isOpen) dropdown.classList.add('is-open');
+            if (!isOpen) {
+                dropdown.classList.add('is-open');
+                trigger.setAttribute('aria-expanded', 'true');
+                positionProDropdownMenu(dropdown, trigger, menu);
+            }
         });
 
         menu.querySelectorAll('.pcd-color-item').forEach(itemEl => {
@@ -1388,6 +1379,11 @@
         selectedNote: null,
         selectedCloud: null,
         selectedObjectType: null
+    };
+    const takeoffRulersState = {
+        page: 1,
+        isExpanded: true,
+        items: []
     };
     let draggedTakeoffGroupId = null;
     let suppressNextGroupToggle = false;
@@ -1472,10 +1468,11 @@
     function seedGroupsFromProjectLayers() {
         const groups = [];
         const byName = new Map();
+        const seenLayers = new Map();
         (window.ProjectState?.takeoffLayers || []).forEach((layer, index) => {
             const metadata = takeoffLayerMetadata(layer);
             const groupName = layer.group_name || 'Default Group';
-            const estimateId = metadata.estimate_id || null;
+            const estimateId = metadata.estimate_id || layer.estimate_key || null;
             const groupKey = `${estimateId || 'legacy'}:${metadata.estimating_group_id || groupName}`;
             let group = byName.get(groupKey);
             if (!group) {
@@ -1488,17 +1485,28 @@
                 byName.set(groupKey, group);
                 groups.push(group);
             }
+            const layerId = String(layer.integration_key || metadata.project_layer_id || layer.id || makeId('layer'));
+            const dedupeKey = `${estimateId || 'legacy'}:${layerId}`;
+            const qtyVal = Number(layer.quantity || layer.count || layer.measurement_count || 0);
+            const baseVal = Number(layer.baseQuantity ?? layer.seedQuantity ?? layer.seed_quantity ?? metadata.base_quantity ?? 0);
+            const existingLayer = seenLayers.get(dedupeKey);
+            if (existingLayer) {
+                if (baseVal > 0 && !(existingLayer.baseQuantity > 0)) existingLayer.baseQuantity = baseVal;
+                if (qtyVal > Number(existingLayer.quantity || 0)) existingLayer.quantity = qtyVal;
+                return;
+            }
             const type = normalizeTakeoffType(layer.takeoff_type || layer.type);
-            const layerTag = metadata.tag || layer.tag || layer.cost_code || layer.costCode || '';
-            group.layers.push({
-                id: String(layer.integration_key || layer.id || makeId('layer')),
+            const layerTag = metadata.tag || layer.tag || '';
+            const layerCostCode = layer.cost_code || layer.costCode || '';
+            const seededLayer = {
+                id: layerId,
                 groupId: group.id,
                 estimateId,
                 estimatingItemId: metadata.estimating_item_id || null,
                 estimatingGroupId: metadata.estimating_group_id || null,
                 name: layer.name || layer.title || `Takeoff Item ${index + 1}`,
                 tag: layerTag,
-                costCode: layerTag,
+                costCode: layerCostCode,
                 type,
                 uom: layer.unit_of_measure || typeToUom(type),
                 symbol: layer.symbol || 'Solid Circle',
@@ -1506,12 +1514,12 @@
                 color: layer.color || '#111827',
                 visible: layer.visible !== false,
                 locked: Number(layer.locked || 0) === 1,
-                quantity: Number(layer.quantity || layer.count || layer.measurement_count || 0),
+                quantity: qtyVal,
                 // `quantity`, `count`, and `measurement_count` are calculated
                 // takeoff totals returned by the API. Treating one of them as
                 // a seed makes every saved shape count twice after reload and
                 // causes the next canvas event to jump the displayed total.
-                baseQuantity: Number(layer.baseQuantity ?? layer.seedQuantity ?? layer.seed_quantity ?? 0),
+                baseQuantity: baseVal,
                 catalogItemId: layer.catalog_item_id || layer.catalogItemId || null,
                 catalog_item_id: layer.catalog_item_id || layer.catalogItemId || null,
                 unitCost: Number(layer.unit_cost || layer.unitCost || 0),
@@ -1530,7 +1538,9 @@
                 spacing: Number(layer.spacing || 0),
                 height: Number(layer.height || 0),
                 depth: Number(layer.depth || 0)
-            });
+            };
+            seenLayers.set(dedupeKey, seededLayer);
+            group.layers.push(seededLayer);
         });
         return groups;
     }
@@ -1557,8 +1567,8 @@
                 estimatingItemId: layer.estimatingItemId || null,
                 estimatingGroupId: layer.estimatingGroupId || group.estimatingGroupId || null,
                 name: layer.name || 'New Takeoff Layer',
-                tag: layer.tag || layer.costCode || layer.cost_code || '',
-                costCode: layer.costCode || layer.tag || layer.cost_code || '',
+                tag: layer.tag || '',
+                costCode: layer.costCode || layer.cost_code || '',
                 type: normalizeTakeoffType(layer.type),
                 uom: layer.uom || typeToUom(normalizeTakeoffType(layer.type)),
                 symbol: layer.symbol || 'Solid Circle',
@@ -1591,15 +1601,42 @@
         }));
     }
 
+    let estimatingSyncTimer = null;
+
+    function flushEstimatingSyncFromCanvas() {
+        if (estimatingSyncTimer) {
+            clearTimeout(estimatingSyncTimer);
+            estimatingSyncTimer = null;
+        }
+        syncTakeoffToEstimating();
+    }
+
+    function scheduleEstimatingSyncFromCanvas(delayMs = 1400) {
+        clearTimeout(estimatingSyncTimer);
+        estimatingSyncTimer = setTimeout(() => {
+            estimatingSyncTimer = null;
+            syncTakeoffToEstimating();
+        }, delayMs);
+    }
+
+    window.flushTakeoffEstimatingSync = flushEstimatingSyncFromCanvas;
+
     function saveTakeoffState() {
         if (!canWrite()) return false;
+        const options = arguments[0] || {};
         // iframe/API owns persistent Takeoff state
-        takeoffIsDirty = true;
+        if (!options.suppressDirty) {
+            takeoffIsDirty = true;
+        }
         try {
             const pId = String(window.ProjectState?.projectId || 0);
             localStorage.setItem('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
         } catch (_) { }
-        syncTakeoffToEstimating();
+        if (options && options.debounceEstimatingSync) {
+            scheduleEstimatingSyncFromCanvas();
+        } else {
+            flushEstimatingSyncFromCanvas();
+        }
     }
 
     function pushTakeoffHistory(reason = 'change') {
@@ -1732,12 +1769,15 @@
             selected: [],
             fullscreen: false,
             hiddenColumns: [],
-            laborUnit: 'mins',
+            laborUnit: 'hrs',
             groups: [],
             estimates: [{ id: 'est_primary', name: 'Primary Estimate', primary: true }],
             activeEstimateId: 'est_primary',
-            globalLaborCost: 85,
-            globalLaborSales: 110,
+            globalLaborCost: 36,
+            globalLaborSales: 55.05,
+            globalLaborMargin: 34.6,
+            materialMargin: 15,
+            equipmentMargin: 15,
             taxes: { Labor: 0, Materials: 0, Equipment: 0 },
             preTaxMarkups: [],
             postTaxMarkups: []
@@ -1850,11 +1890,17 @@
         const seen = new Set();
         const pendingLinks = [];
         const orderedGroupIds = [];
+        let didMutateGroupMeta = false;
+        const previousOrderSignature = takeoffState.groups
+            .filter(group => groupBelongsToEstimate(group, estimateId))
+            .map(group => String(group.id))
+            .join('|');
         detail.groups.forEach((estimateGroup, groupIndex) => {
             const groupKey = String(estimateGroup.id || `group_${groupIndex}`);
             let group = takeoffState.groups.find(row => String(row.estimateId || '') === estimateId
                 && (String(row.estimatingGroupId || '') === groupKey
                     || String(row.id || '') === groupKey
+                    || (estimateGroup.takeoffGroupId && String(row.id || '') === String(estimateGroup.takeoffGroupId))
                     || groupKey.endsWith('_' + String(row.id || ''))
                     || (row.name && row.name.trim().toLowerCase() === (estimateGroup.name || '').trim().toLowerCase())));
             if (!group) {
@@ -1863,9 +1909,14 @@
                     estimateId, name: estimateGroup.name || 'Default Group', isExpanded: true, isDefault: false, layers: []
                 };
                 takeoffState.groups.push(group);
+                didMutateGroupMeta = true;
             }
             group.estimatingGroupId = groupKey;
-            group.name = estimateGroup.name || group.name;
+            if (estimateGroup.name && estimateGroup.name !== group.name) {
+                group.name = estimateGroup.name;
+                group.isDefault = false;
+                didMutateGroupMeta = true;
+            }
             group.sortOrder = groupIndex;
             orderedGroupIds.push(String(group.id));
             (estimateGroup.items || []).forEach(item => {
@@ -1896,15 +1947,18 @@
                     && layerMatchesEstimatingItem(row));
                 const isItemOverridden = Boolean(item.quantityOverride || String(item.quantitySyncStatus || '') === 'overridden');
                 const isItemAddedFromEst = Boolean(item.addedFromEstimating || item.origin === 'estimating');
+                const hasTakeoffOrigin = Boolean(item.copiedFromTakeoffLayerId || item.takeoffLayerId || item.source_layer_key || String(item.quantitySource || '') === 'takeoff');
                 if (!layer) {
-                    const initialTakeoffQty = isItemOverridden
-                        ? Number(item.lastSyncedTakeoffQuantity ?? item.originalQuantity ?? 0)
-                        : Number(item.quantity || 0);
+                    const initialTakeoffQty = (isItemAddedFromEst && !hasTakeoffOrigin)
+                        ? (isItemOverridden
+                            ? Number(item.lastSyncedTakeoffQuantity ?? item.originalQuantity ?? 0)
+                            : Number(item.quantity || 0))
+                        : 0;
                     layer = {
                         id: layerId, groupId: group.id, estimateId, estimatingItemId: itemId,
                         name: item.name || 'Cost item', type: inferTakeoffTypeFromUom(item.uom) || 'Count',
                         uom: item.uom || 'ea', symbol: 'Solid Circle', size: 'Medium', color: '#2563eb',
-                        visible: true, locked: false, quantity: initialTakeoffQty,
+                        visible: true, locked: false, quantity: Number(item.quantity || initialTakeoffQty || 0),
                         baseQuantity: initialTakeoffQty,
                         quantityOverride: isItemOverridden,
                         estimatingQuantity: Number(item.quantity || 0),
@@ -1946,6 +2000,19 @@
         const scopedGroups = scopedIndexes.map(index => takeoffState.groups[index]).sort((a, b) =>
             (order.get(String(a.id)) ?? Number.MAX_SAFE_INTEGER) - (order.get(String(b.id)) ?? Number.MAX_SAFE_INTEGER));
         scopedGroups.forEach((group, index) => { takeoffState.groups[scopedIndexes[index]] = group; });
+        const nextOrderSignature = takeoffState.groups
+            .filter(group => groupBelongsToEstimate(group, estimateId))
+            .map(group => String(group.id))
+            .join('|');
+        if (didMutateGroupMeta || nextOrderSignature !== previousOrderSignature) {
+            if (canWrite()) {
+                takeoffIsDirty = true;
+                try {
+                    const pId = String(window.ProjectState?.projectId || 0);
+                    localStorage.setItem('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
+                } catch (_) { }
+            }
+        }
         if (takeoffState.activeLayerId && !layerBelongsToEstimate(findLayer(takeoffState.activeLayerId), estimateId)) {
             takeoffState.activeLayerId = null;
         }
@@ -1979,15 +2046,22 @@
             quantity: Number(layer.quantity || 0),
             unitCost: Number(layer.unitCost || layer.unit_cost || 0),
             unitMaterialCost: Number(layer.unitCost || layer.unit_cost || 0),
-            waste: 0,
-            margin: 0,
+            waste: (layer.waste !== undefined && layer.waste !== null && layer.waste !== '') ? Number(layer.waste) : null,
+            materialMargin: (layer.materialMargin !== undefined && layer.materialMargin !== null && layer.materialMargin !== '')
+                ? Number(layer.materialMargin)
+                : ((layer.margin !== undefined && layer.margin !== null && layer.margin !== '') ? Number(layer.margin) : null),
+            equipmentMargin: (layer.equipmentMargin !== undefined && layer.equipmentMargin !== null && layer.equipmentMargin !== '')
+                ? Number(layer.equipmentMargin) : null,
             unitLabor: Number(layer.laborHours || layer.labor_hours || 0),
-            laborRate: 85,
+            laborRate: (layer.laborRate !== undefined && layer.laborRate !== null && Number(layer.laborRate) > 0)
+                ? Number(layer.laborRate) : null,
             laborUnitType: 'hrs',
-            difficulty: (layer.difficulty !== undefined && layer.difficulty !== null)
+            difficulty: (layer.difficulty !== undefined && layer.difficulty !== null && layer.difficulty !== '' && Number(layer.difficulty) !== 1)
                 ? Number(layer.difficulty)
-                : (layer.metadata_json?.difficulty !== undefined ? Number(layer.metadata_json.difficulty) : undefined),
-            laborMargin: 0,
+                : (layer.metadata_json?.difficulty !== undefined && layer.metadata_json?.difficulty !== null
+                    ? Number(layer.metadata_json.difficulty) : null),
+            laborMargin: (layer.laborMargin !== undefined && layer.laborMargin !== null && layer.laborMargin !== '')
+                ? Number(layer.laborMargin) : null,
             notes: `Synced from Takeoff${group?.name ? ` / ${group.name}` : ''}`,
             taxable: true,
             groupId: group?.id || 'default',
@@ -2104,9 +2178,14 @@
                 name: groupName,
                 expanded: currentGroup ? currentGroup.expanded !== false : takeoffGroup.isExpanded !== false,
                 sortOrder: groupIndex,
+                isDefault: Boolean(takeoffGroup.isDefault),
                 items
             };
-        }).filter(group => group.items.length || currentGroups.some(row => row.name === group.name));
+        }).filter(group => group.items.length
+            || !group.isDefault
+            || currentGroups.some(row => row.name === group.name
+                || String(row.id) === String(group.id)
+                || (group.takeoffGroupId && String(row.takeoffGroupId || '') === String(group.takeoffGroupId))));
 
         // Manual estimating items remain intact. Empty and takeoff-only legacy groups
         // intentionally disappear so deleted/renamed Takeoff folders cannot accumulate.
@@ -2146,8 +2225,8 @@
         return {
             id: layer.id,
             name: layer.name,
-            tag: layer.tag || layer.costCode || '',
-            cost_code: layer.tag || layer.costCode || '',
+            tag: layer.tag || '',
+            cost_code: layer.costCode || layer.catalogNumber || '',
             takeoff_type: layer.type.toLowerCase(),
             type: layer.type.toLowerCase(),
             unit_of_measure: layer.uom,
@@ -2160,6 +2239,7 @@
             color: layer.color,
             quantity: layer.quantity,
             baseQuantity: layer.baseQuantity || 0,
+            multiplier: Number(layer.multiplier ?? layer.metadata_json?.multiplier ?? 1),
             catalog_item_id: layer.catalogItemId || null,
             unit_cost: layer.unitCost || 0,
             labor_hours: layer.laborHours || 0,
@@ -2191,7 +2271,7 @@
     }
 
     function symbolGlyph(layer) {
-        if (isLinearType(layer.type)) return '<i class="fas fa-minus"></i>';
+        if (isLinearType(layer.type) || layer.type === 'Count by distance') return '<i class="fas fa-minus"></i>';
         if (isAreaType(layer.type)) return '<i class="far fa-square"></i>';
         const map = {
             'Solid Circle': '<i class="fas fa-circle"></i>',
@@ -2217,18 +2297,81 @@
         return ['Area', 'Area / Volume', 'Vertical wall area'].includes(type);
     }
 
+    function takeoffGeometryFamily(type) {
+        if (isLinearType(type) || type === 'Count by distance') return 'linear';
+        if (isAreaType(type)) return 'area';
+        const raw = String(type || '').trim().toLowerCase();
+        if (raw.includes('linear') || raw === 'count by distance' || raw === 'count_by_distance') return 'linear';
+        if (raw.includes('area') || raw.includes('volume')) return 'area';
+        return 'count';
+    }
+
+    function needsTakeoffTypeChangeWarning(prevType, nextType) {
+        return Boolean(prevType && nextType && takeoffGeometryFamily(prevType) !== takeoffGeometryFamily(nextType));
+    }
+
+    async function confirmTakeoffTypeChange({ layer = null, prevType = 'Count', nextType = 'Linear' } = {}) {
+        if (!needsTakeoffTypeChangeWarning(prevType, nextType)) return true;
+        const prevFam = takeoffGeometryFamily(prevType);
+        const nextFam = takeoffGeometryFamily(nextType);
+        const itemName = layer?.name ? `"${layer.name}"` : 'this item';
+        const prevObjectLabel = prevFam === 'count'
+            ? 'count markers'
+            : (prevFam === 'linear' ? 'linear lines' : 'area measurements');
+        const nextActionHint = nextFam === 'linear'
+            ? 'so you can re-measure using Linear lines'
+            : (nextFam === 'count' ? 'so you can re-count using Count markers' : 'so you can re-measure with the new type');
+        const qtyNote = Number(layer?.quantity || 0) > 0
+            ? ` Current quantity (${quantityLabel(layer)}) will reset to 0.`
+            : '';
+        const message = `Changing ${itemName} from ${prevType} to ${nextType} will delete all existing ${prevObjectLabel} from the drawings and reset its quantity to 0 ${nextActionHint}.${qtyNote} Do you want to continue?`;
+        if (typeof window.showConfirmDialog === 'function') {
+            return await window.showConfirmDialog({
+                title: 'Confirm Takeoff Type Change',
+                message,
+                confirmText: 'Change Type & Clear',
+                cancelText: 'Cancel',
+                type: 'warning',
+                badge: 'TYPE CHANGE',
+                icon: 'fas fa-triangle-exclamation',
+                primaryDanger: true
+            });
+        }
+        return window.confirm(message);
+    }
+
+    function clearLayerCachedStateOnTypeChange(layer) {
+        if (!layer) return;
+        layer.quantity = 0;
+        layer.baseQuantity = 0;
+        layer.shapes = [];
+        layer.takeoffObjects = [];
+        if (layer.metadata && typeof layer.metadata === 'object') layer.metadata.base_quantity = 0;
+        if (layer.metadata_json && typeof layer.metadata_json === 'object') layer.metadata_json.base_quantity = 0;
+        const activeEst = activeEstimateId();
+        const ids = new Set([String(layer.id || ''), String(layer.client_uid || '')].filter(Boolean));
+        Object.values(takeoffState.canvasSnapshots || {}).forEach(snapshot => {
+            if (!snapshot || String(snapshot.estimateId || snapshot.estimateKey || '') !== activeEst) return;
+            (snapshot.layers || []).forEach(remote => {
+                const rid = String(remote?.id || remote?.layerId || remote?.client_uid || '');
+                if (!rid || !ids.has(rid)) return;
+                remote.shapes = [];
+                remote.takeoffObjects = [];
+                remote.quantity = 0;
+                remote.baseQuantity = 0;
+                remote.base_quantity = 0;
+                remote.seedQuantity = 0;
+                remote.seed_quantity = 0;
+            });
+        });
+    }
+
     function itemQuantitySubtitle(layer) {
         const qty = Number(layer.quantity || 0);
         const formatted = qty % 1 === 0 ? qty.toFixed(0) : qty.toFixed(2);
         const uom = layer.uom || typeToUom(layer.type) || 'ft';
         if (layer.type === 'Linear avg. with drop' || String(layer.type).toLowerCase().includes('avg')) {
-            return `${formatted} ${uom} avg. (${formatted} ${uom})`;
-        }
-        if (layer.type === 'Linear with drop') {
-            return `${formatted} ${uom} (${formatted} ${uom})`;
-        }
-        if (isLinearType(layer.type)) {
-            return `${formatted} ${uom} avg. (${formatted} ${uom})`;
+            return `${formatted} ${uom} avg.`;
         }
         return `${formatted} ${uom}`;
     }
@@ -2304,7 +2447,7 @@
         renderActiveLayerToolbar();
         renderInspector();
         renderWorkspaceSummary();
-        tree.innerHTML = takeoffState.groups.filter(group => groupBelongsToEstimate(group, estimateId)).map(group => {
+        const groupsHtml = takeoffState.groups.filter(group => groupBelongsToEstimate(group, estimateId)).map(group => {
             const visibleLayers = (group.layers || []).filter(layer => layerBelongsToEstimate(layer, estimateId)).filter(layer => {
                 if (!q) return true;
                 return group.name.toLowerCase().includes(q) || layer.name.toLowerCase().includes(q) || layer.type.toLowerCase().includes(q);
@@ -2322,12 +2465,12 @@
             const isFolderActive = groupSelected;
 
             return `<div class="pro-takeoff-group" data-group-id="${esc(group.id)}">
-                <div class="pro-tree-row pro-tree-folder ${isFolderActive ? 'active' : ''} ${groupSelected ? 'group-selected' : ''}" data-takeoff-group-row="${esc(group.id)}" role="button" tabindex="0" aria-selected="${groupSelected ? 'true' : 'false'}">
+                <div class="pro-tree-row pro-tree-folder ${isFolderActive ? 'active' : ''} ${groupSelected ? 'group-selected' : ''}" draggable="true" data-takeoff-group-row="${esc(group.id)}" role="button" tabindex="0" aria-selected="${groupSelected ? 'true' : 'false'}">
                     <button class="pro-visibility-btn ${hasVisibleChild ? '' : 'is-off'}" type="button" data-group-visibility="${esc(group.id)}" title="Show or hide group" aria-label="Show or hide group"><i class="fas ${hasVisibleChild ? 'fa-eye' : 'fa-eye-slash'}"></i></button>
                     <input type="checkbox" class="pro-group-select-check" ${groupSelected ? 'checked' : ''} aria-label="Select all items in group" data-group-select="${esc(group.id)}">
                     <div class="pro-tree-folder-title">
                         <button class="pro-tree-toggle" type="button" draggable="true" data-group-toggle="${esc(group.id)}" title="Click arrow to expand/collapse; drag to reorder" aria-label="Expand or drag group"><i class="fas ${expanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i></button>
-                        <span class="pro-tree-name" data-group-name-wrap="${esc(group.id)}" title="Double-click to rename"><strong>${esc(group.name)}</strong></span>
+                        <span class="pro-tree-name" data-group-name-wrap="${esc(group.id)}" title="Double-click to rename or drag to reorder"><strong>${esc(group.name)}</strong></span>
                     </div>
                     <div class="pro-tree-row-actions">
                         <button class="pro-folder-lock-btn ${groupLocked ? 'is-locked' : ''}" type="button" data-group-lock="${esc(group.id)}" title="${groupLocked ? 'Unlock folder' : 'Lock folder'}" aria-label="${groupLocked ? 'Unlock folder' : 'Lock folder'}"><i class="fas ${groupLocked ? 'fa-lock' : 'fa-lock-open'}"></i></button>
@@ -2374,7 +2517,46 @@
             }).join('')}
                 </div>
             </div>`;
-        }).join('') || '<div class="pro-drawing-empty">No takeoffs match your search.</div>';
+        }).join('');
+
+        // Sidebar-only Measurements group (isolated from Estimating)
+        const allRulers = Array.isArray(takeoffRulersState.items) ? takeoffRulersState.items : [];
+        const visibleRulers = allRulers.filter((r, idx) => {
+            if (!q) return true;
+            const label = `measurement #${idx + 1}: "${r.sidebarQuantityText || r.lengthText || ''}"`.toLowerCase();
+            return 'measurements'.includes(q) || label.includes(q);
+        });
+        const anyRulerVisible = allRulers.some(r => !r.hidden);
+        const mExpanded = q ? true : takeoffRulersState.isExpanded !== false;
+        const measurementsHtml = visibleRulers.length ? `
+            <div class="pro-takeoff-group pro-measurements-group" data-measurements-group="true">
+                <div class="pro-tree-row pro-tree-folder is-measurements-folder" data-measurements-header="true">
+                    <button class="pro-visibility-btn ${anyRulerVisible ? '' : 'is-off'}" type="button" data-measurements-all-visibility="true" title="${anyRulerVisible ? 'Hide all measurements' : 'Show all measurements'}" aria-label="Show or hide all measurements"><i class="fas ${anyRulerVisible ? 'fa-eye' : 'fa-eye-slash'}"></i></button>
+                    <div class="pro-tree-folder-title">
+                        <button class="pro-tree-toggle" type="button" data-measurements-toggle="true" title="Expand or collapse measurements" aria-label="Expand or collapse measurements"><i class="fas ${mExpanded ? 'fa-chevron-down' : 'fa-chevron-right'}"></i></button>
+                        <span class="pro-tree-name"><strong>Measurements</strong></span>
+                        <span class="pro-measurements-badge">${visibleRulers.length}</span>
+                    </div>
+                    <div></div>
+                </div>
+                <div class="pro-tree-children" ${mExpanded ? '' : 'hidden'}>
+                    ${visibleRulers.map((r) => {
+                        const qtyStr = String(r.sidebarQuantityText || r.lengthText || '0');
+                        const rowTitle = `Measurement #${r.index}: "${qtyStr}"`;
+                        const isSelected = Boolean(selectionState.selectedRuler && String(selectionState.selectedRuler.id || '') === String(r.id || ''));
+                        return `<div class="pro-tree-row pro-measurement-row ${r.hidden ? 'is-hidden-measurement' : ''} ${isSelected ? 'active' : ''}" data-measurement-row="${esc(r.id)}" title="${esc(rowTitle)}">
+                            <button class="pro-visibility-btn ${r.hidden ? 'is-off' : ''}" type="button" data-measurement-visibility="${esc(r.id)}" title="${r.hidden ? 'Show measurement' : 'Hide measurement'}" aria-label="Show or hide measurement"><i class="fas ${r.hidden ? 'fa-eye-slash' : 'fa-eye'}"></i></button>
+                            <span class="pro-measurement-color-dot" style="background:${esc(r.color || '#22c55e')};"></span>
+                            <span class="pro-measurement-title">${esc(rowTitle)}</span>
+                        </div>`;
+                    }).join('')}
+                </div>
+            </div>
+        ` : '';
+
+        tree.innerHTML = (groupsHtml || measurementsHtml)
+            ? `${groupsHtml}${measurementsHtml}`
+            : '<div class="pro-drawing-empty">No takeoffs match your search.</div>';
         bindTakeoffTreeEvents();
         updateSubheadSelectedItem();
         syncTakeoffSubheadAlignment();
@@ -2426,17 +2608,92 @@
             </section>`;
     }
 
+    function applyTakeoffGroupRename(group, nextName) {
+        const trimmed = String(nextName || '').trim().replace(/\s+/g, ' ');
+        if (!group || !trimmed || trimmed === String(group.name || '').trim()) return false;
+        pushTakeoffHistory('rename-group');
+        const oldName = String(group.name || '');
+        const estimateId = activeEstimateId();
+        group.name = trimmed;
+        group.isDefault = false;
+        group.estimatingGroupId = group.estimatingGroupId || `takeoff_group_${group.id}`;
+        (group.layers || []).forEach(layer => {
+            if (!layer) return;
+            layer.groupName = trimmed;
+            if (!layer.category || layer.category === oldName) layer.category = trimmed;
+            if (layer.metadata_json && typeof layer.metadata_json === 'object') {
+                layer.metadata_json.estimating_group_id = group.estimatingGroupId;
+            }
+        });
+        takeoffIsDirty = true;
+        try {
+            const pId = String(window.ProjectState?.projectId || 0);
+            localStorage.setItem('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
+        } catch (_) { }
+        window.dispatchEvent(new CustomEvent('takeoff:estimating-group-rename-requested', {
+            detail: {
+                projectId: String(window.ProjectState?.projectId || ''),
+                estimateId,
+                groupId: group.estimatingGroupId,
+                takeoffGroupId: String(group.id),
+                oldName,
+                name: group.name
+            }
+        }));
+        saveTakeoffState();
+        syncAllLayersToCanvas({ suppressEstimatingSync: true });
+        renderTakeoffPanel();
+        renderSelectionBar?.();
+        updateSubheadSelectedItem?.();
+        return true;
+    }
+
     function bindTakeoffTreeEvents() {
+        let draggedGroupInsertAfter = false;
+        const clearGroupDragMarkers = () => {
+            document.querySelectorAll('.pro-takeoff-group').forEach(el => {
+                el.classList.remove('is-dragging-group', 'pro-drag-over-group', 'pro-drag-over-group-before', 'pro-drag-over-group-after');
+            });
+        };
+        const beginGroupDrag = (groupId, sourceEl, event) => {
+            if (!groupId || takeoffState.query) { event.preventDefault(); return; }
+            draggedTakeoffGroupId = String(groupId);
+            draggedTakeoffLayerId = null;
+            draggedGroupInsertAfter = false;
+            event.dataTransfer.effectAllowed = 'move';
+            event.dataTransfer.setData('text/plain', draggedTakeoffGroupId);
+            event.dataTransfer.setData('application/x-takeoff-group', draggedTakeoffGroupId);
+            sourceEl?.setAttribute('aria-grabbed', 'true');
+            const groupContainer = document.querySelector(`.pro-takeoff-group[data-group-id="${draggedTakeoffGroupId}"]`);
+            if (groupContainer) groupContainer.classList.add('is-dragging-group');
+        };
+        const endGroupDrag = (sourceEl) => {
+            sourceEl?.removeAttribute('aria-grabbed');
+            clearGroupDragMarkers();
+            draggedTakeoffGroupId = null;
+        };
+
         document.querySelectorAll('[data-takeoff-group-row]').forEach(row => {
             row.addEventListener('click', event => {
                 if (event.target.closest('button, input')) return;
                 toggleGroupSelection(row.dataset.takeoffGroupRow);
             });
             row.addEventListener('keydown', event => {
+                if (event.target.closest('input, textarea, select, button')) return;
                 if (event.key !== 'Enter' && event.key !== ' ') return;
                 event.preventDefault();
                 toggleGroupSelection(row.dataset.takeoffGroupRow);
             });
+            row.addEventListener('dragstart', event => {
+                if (event.target.closest('[data-group-toggle], button, input')) {
+                    if (!event.target.closest('[data-group-toggle]')) {
+                        event.preventDefault();
+                    }
+                    return;
+                }
+                beginGroupDrag(row.dataset.takeoffGroupRow, row, event);
+            });
+            row.addEventListener('dragend', () => endGroupDrag(row));
         });
         document.querySelectorAll('[data-group-toggle]').forEach(button => {
             button.addEventListener('click', event => {
@@ -2449,22 +2706,25 @@
                 renderTakeoffPanel();
             });
             button.addEventListener('dragstart', event => {
-                if (takeoffState.query) { event.preventDefault(); return; }
-                draggedTakeoffGroupId = button.dataset.groupToggle;
-                event.dataTransfer.effectAllowed = 'move';
-                event.dataTransfer.setData('text/plain', draggedTakeoffGroupId);
-                button.setAttribute('aria-grabbed', 'true');
+                event.stopPropagation();
+                beginGroupDrag(button.dataset.groupToggle, button, event);
             });
-            button.addEventListener('dragend', () => {
-                button.removeAttribute('aria-grabbed');
-                draggedTakeoffGroupId = null;
-            });
+            button.addEventListener('dragend', () => endGroupDrag(button));
         });
         document.querySelectorAll('.pro-takeoff-group[data-group-id]').forEach(container => {
             container.addEventListener('dragover', event => {
+                const targetGroupId = container.dataset.groupId;
                 if (draggedTakeoffGroupId && !takeoffState.query) {
+                    if (String(targetGroupId) === String(draggedTakeoffGroupId)) return;
                     event.preventDefault();
                     event.dataTransfer.dropEffect = 'move';
+                    const rect = container.getBoundingClientRect();
+                    draggedGroupInsertAfter = event.clientY > (rect.top + rect.height / 2);
+                    document.querySelectorAll('.pro-takeoff-group').forEach(el => {
+                        if (el !== container) el.classList.remove('pro-drag-over-group-before', 'pro-drag-over-group-after');
+                    });
+                    container.classList.toggle('pro-drag-over-group-before', !draggedGroupInsertAfter);
+                    container.classList.toggle('pro-drag-over-group-after', draggedGroupInsertAfter);
                 } else if (draggedTakeoffLayerId && !takeoffState.query) {
                     event.preventDefault();
                     event.dataTransfer.dropEffect = 'move';
@@ -2473,15 +2733,16 @@
             });
             container.addEventListener('dragleave', event => {
                 if (event.relatedTarget && container.contains(event.relatedTarget)) return;
-                container.classList.remove('pro-drag-over-group');
+                container.classList.remove('pro-drag-over-group', 'pro-drag-over-group-before', 'pro-drag-over-group-after');
             });
             container.addEventListener('drop', event => {
                 event.preventDefault();
-                container.classList.remove('pro-drag-over-group');
+                const insertAfter = container.classList.contains('pro-drag-over-group-after') || draggedGroupInsertAfter;
+                clearGroupDragMarkers();
                 const targetGroupId = container.dataset.groupId;
                 if (draggedTakeoffGroupId) {
                     const sourceId = draggedTakeoffGroupId || event.dataTransfer.getData('text/plain');
-                    if (sourceId && targetGroupId && sourceId !== targetGroupId) reorderTakeoffGroup(sourceId, targetGroupId);
+                    if (sourceId && targetGroupId && sourceId !== targetGroupId) reorderTakeoffGroup(sourceId, targetGroupId, insertAfter);
                     suppressNextGroupToggle = true;
                     setTimeout(() => { suppressNextGroupToggle = false; }, 0);
                     draggedTakeoffGroupId = null;
@@ -2489,6 +2750,32 @@
                     moveTakeoffLayerToGroup(draggedTakeoffLayerId, targetGroupId);
                     draggedTakeoffLayerId = null;
                 }
+            });
+        });
+
+        // Measurements sidebar-only group bindings
+        document.querySelector('[data-measurements-toggle]')?.addEventListener('click', event => {
+            event.stopPropagation();
+            takeoffRulersState.isExpanded = takeoffRulersState.isExpanded === false;
+            renderTakeoffPanel();
+        });
+        document.querySelector('[data-measurements-all-visibility]')?.addEventListener('click', event => {
+            event.stopPropagation();
+            const anyVisible = (takeoffRulersState.items || []).some(r => !r.hidden);
+            callEditor('setAllKonvaRulersVisibility', !anyVisible);
+        });
+        document.querySelectorAll('[data-measurement-visibility]').forEach(btn => {
+            btn.addEventListener('click', event => {
+                event.stopPropagation();
+                const id = btn.dataset.measurementVisibility;
+                const found = (takeoffRulersState.items || []).find(r => String(r.id || '') === String(id));
+                callEditor('setKonvaRulerVisibility', id, Boolean(found?.hidden));
+            });
+        });
+        document.querySelectorAll('[data-measurement-row]').forEach(row => {
+            row.addEventListener('click', event => {
+                if (event.target.closest('button')) return;
+                callEditor('selectKonvaRulerById', row.dataset.measurementRow);
             });
         });
         document.querySelectorAll('[data-group-select]').forEach(box => {
@@ -2520,6 +2807,9 @@
                 input.className = 'pro-tree-inline-edit';
                 input.value = currentName;
 
+                const prevDraggable = row ? row.getAttribute('draggable') : null;
+                if (row) row.draggable = false;
+
                 nameSpan.replaceWith(input);
                 input.focus();
                 input.select();
@@ -2530,24 +2820,19 @@
                     committed = true;
                     document.removeEventListener('pointerdown', handleOutside, true);
                     document.removeEventListener('mousedown', handleOutside, true);
-                    const val = input.value.trim();
-                    if (save && val && val !== currentName) {
-                        pushTakeoffHistory('rename-group');
-                        group.name = val;
-                        group.isDefault = false;
-                        takeoffIsDirty = true;
-                        saveTakeoffState();
-                        window.dispatchEvent(new CustomEvent('takeoff:estimating-group-rename-requested', {
-                            detail: {
-                                projectId: String(window.ProjectState?.projectId || ''),
-                                estimateId: activeEstimateId(),
-                                groupId: group.estimatingGroupId || `takeoff_group_${group.id}`,
-                                name: val
-                            }
-                        }));
-                        showTakeoffToast?.('Group renamed.');
+                    if (row && row.isConnected) {
+                        row.draggable = prevDraggable !== 'false';
                     }
-                    renderTakeoffPanel();
+                    const val = input.value.trim().replace(/\s+/g, ' ');
+                    if (save && val && val !== currentName) {
+                        if (applyTakeoffGroupRename(group, val)) {
+                            showTakeoffToast?.('Group renamed.');
+                        } else {
+                            renderTakeoffPanel();
+                        }
+                    } else {
+                        renderTakeoffPanel();
+                    }
                 };
 
                 const handleOutside = (e) => {
@@ -2557,19 +2842,29 @@
                 };
 
                 setTimeout(() => {
-                    document.addEventListener('pointerdown', handleOutside, true);
-                    document.addEventListener('mousedown', handleOutside, true);
+                    if (!committed && input.isConnected) {
+                        document.addEventListener('pointerdown', handleOutside, true);
+                        document.addEventListener('mousedown', handleOutside, true);
+                    }
                 }, 50);
 
+                input.addEventListener('dragstart', e => {
+                    e.preventDefault();
+                    e.stopPropagation();
+                });
                 input.addEventListener('keydown', e => {
                     if (e.key === 'Enter') {
                         e.preventDefault();
                         e.stopPropagation();
+                        e.stopImmediatePropagation?.();
                         commit(true);
+                        return;
                     } else if (e.key === 'Escape') {
                         e.preventDefault();
                         e.stopPropagation();
+                        e.stopImmediatePropagation?.();
                         commit(false);
+                        return;
                     }
                     e.stopPropagation();
                 });
@@ -2755,6 +3050,20 @@
         ensureEstimateTakeoffWorkspace();
         takeoffState.activeLayerId = null;
         takeoffState.canvasSnapshots = {};
+        const dbDrawingStates = Array.isArray(window.ProjectState?.takeoffDrawingStates)
+            ? window.ProjectState.takeoffDrawingStates
+            : [];
+        dbDrawingStates.forEach(snap => {
+            const estId = String(snap?.estimateId || snap?.estimateKey || '').trim();
+            const docId = Number(snap?.drawingId || snap?.documentId || 0);
+            if (!estId || docId <= 0 || !Array.isArray(snap?.layers)) return;
+            takeoffState.canvasSnapshots[`${estId}:${docId}`] = {
+                ...snap,
+                estimateId: estId,
+                documentId: String(docId),
+                drawingId: docId
+            };
+        });
         takeoffState.annotations = [];
         takeoffState.pins = [];
         takeoffState.snapshots = [];
@@ -2813,11 +3122,11 @@
                     </div>
                     <div class="pro-field">
                         <label for="layerNameInput">Takeoff Display Name</label>
-                        <input id="layerNameInput" type="text" placeholder="Enter takeoff display name">
+                        <textarea id="layerNameInput" rows="2" placeholder="Enter takeoff display name"></textarea>
                     </div>
                     <div class="pro-field">
                         <label for="layerTagInput">Tag</label>
-                        <input id="layerTagInput" type="text" placeholder="Enter your own short text to tag this takeoff">
+                        <textarea id="layerTagInput" rows="2" placeholder="Enter your own short text to tag this takeoff"></textarea>
                     </div>
                     <div class="pro-edit-selectors-row">
                         <div class="pro-field col-symbol" id="layerSymbolCol">
@@ -2918,7 +3227,7 @@
                     <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
                         <div class="pro-field" id="layerMultiplierField">
                             <label for="layerMultiplierInput">Multiplier</label>
-                            <input id="layerMultiplierInput" type="number" min="1" step="1" value="1">
+                            <input id="layerMultiplierInput" type="number" min="0" step="any" value="1">
                         </div>
                         <div class="pro-field" id="layerDifficultyField">
                             <label for="layerDifficultyInput">Difficulty Factor</label>
@@ -2929,12 +3238,15 @@
                         <label for="layerDropInput">Default Drop Length (ft)</label>
                         <input id="layerDropInput" type="number" min="0" step="0.1" placeholder="0">
                     </div>
+                    <div class="pro-field" id="layerSpacingField" style="display:none;">
+                        <label for="layerSpacingInput">Spacing (ft)</label>
+                        <input id="layerSpacingInput" type="number" min="0.1" step="0.1" placeholder="1">
+                    </div>
                     <div style="display:none;">
                         <h3 id="takeoffLayerModalTitle">Edit takeoff layer</h3>
                         <p id="layerTypeHelp"></p>
                         <div id="layerCatalogSelected"></div>
                         <input id="layerDiameterInput" type="number">
-                        <input id="layerSpacingInput" type="number">
                         <input id="layerHeightInput" type="number">
                         <input id="layerDepthInput" type="number">
                         <button type="button" id="layerCreateSubmit">Save</button>
@@ -2951,7 +3263,7 @@
                     <button type="button" class="pro-foot-btn" data-layer-act="lock" title="Lock/Unlock takeoff layer"><i class="fas fa-lock"></i> <span id="layerModalLockLabel">Lock</span></button>
                 </div>
                 <div class="pro-modal-foot-right">
-                    <button type="button" class="pro-btn-save-layer" id="layerDrawerSaveBtn"><i class="fas fa-check"></i> Save</button>
+                    <button type="button" class="pro-btn-save-layer" id="layerDrawerSaveBtn"><i class="fas fa-xmark"></i> Close</button>
                 </div>
             </div>
         </div>`;
@@ -3004,6 +3316,16 @@
         });
 
         $('layerNameInput').addEventListener('input', updateLayerSubmitState);
+        modal.addEventListener('keydown', event => {
+            if (event.key !== 'Enter') return;
+            if (event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return;
+            const target = event.target;
+            if (!target || !target.matches?.('input, textarea, select')) return;
+            if (target.id === 'layerTagInput' && event.shiftKey) return;
+            if (modal.querySelector('.pro-custom-dropdown.is-open')) return;
+            event.preventDefault();
+            submitLayerModal();
+        });
 
         setupTypeDropdown('editLayer', $('layerTypeInput'));
         setupUomDropdown('editLayer', $('layerUomInput'));
@@ -3011,8 +3333,24 @@
         setupSizeDropdown('editLayer', $('layerSizeInput'));
         setupColorDropdown('editLayer', $('layerColorInput'), $('layerCustomColorPicker'));
 
-        $('layerTypeInput').addEventListener('change', () => {
+        $('layerTypeInput').addEventListener('change', async () => {
             const type = $('layerTypeInput').value;
+            if (!layerModalPopulating && takeoffState.editingLayerId && needsTakeoffTypeChangeWarning(layerModalActiveFormType, type)) {
+                const editingLayer = findLayer(takeoffState.editingLayerId);
+                const prevType = layerModalActiveFormType;
+                const confirmed = await confirmTakeoffTypeChange({ layer: editingLayer, prevType, nextType: type });
+                if (!confirmed) {
+                    $('layerTypeInput').value = prevType;
+                    $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[prevType] || TAKEOFF_TYPE_HELP.Count;
+                    filterUomDropdownByType('editLayer', prevType);
+                    updateTypeDropdownTrigger('editLayer', prevType);
+                    updateLayerTypeIcon();
+                    updateLayerTypeFields(prevType);
+                    updateLayerSubmitState();
+                    return;
+                }
+            }
+            layerModalActiveFormType = type;
             $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[type] || TAKEOFF_TYPE_HELP.Count;
             filterUomDropdownByType('editLayer', type);
             if (!isUomValidForType($('layerUomInput')?.value, type)) {
@@ -3028,10 +3366,12 @@
 
         $('layerUomInput')?.addEventListener('change', () => {
             updateUomDropdownTrigger('editLayer', $('layerUomInput').value);
+            scheduleLiveLayerModalSave({ immediate: true });
         });
 
         $('layerSymbolInput')?.addEventListener('change', () => {
             updateSymbolDropdownTrigger('editLayer', $('layerSymbolInput').value);
+            scheduleLiveLayerModalSave({ immediate: true });
         });
 
         $('layerSizeInput')?.addEventListener('change', () => {
@@ -3039,6 +3379,7 @@
             updateSizeDropdownTrigger('editLayer', nextSize);
             const r = takeoffSizeRadius(nextSize);
             if ($('layerDiameterInput')) $('layerDiameterInput').value = r * 2;
+            scheduleLiveLayerModalSave({ immediate: true });
         });
 
         $('layerStrokeInput').addEventListener('change', updateLayerStrokePreview);
@@ -3048,13 +3389,16 @@
                 $('layerCustomColorPicker')?.click();
             } else {
                 updateLayerColorSwatch();
+                scheduleLiveLayerModalSave({ immediate: true });
             }
         });
         $('layerCustomColorPicker')?.addEventListener('input', event => {
             setLayerColor(event.target.value);
+            scheduleLiveLayerModalSave({ debounceMs: 120 });
         });
         $('layerCustomColorPicker')?.addEventListener('change', event => {
             setLayerColor(event.target.value);
+            scheduleLiveLayerModalSave({ immediate: true });
         });
         $('layerCreateSubmit').addEventListener('click', submitLayerModal);
         ensureCatalogModal();
@@ -3232,6 +3576,14 @@
             }
         });
 
+        modal.addEventListener('keydown', (e) => {
+            if (e.key !== 'Enter' || e.isComposing || e.shiftKey || e.metaKey || e.ctrlKey || e.altKey) return;
+            if (!e.target?.matches?.('input, select')) return;
+            if (modal.querySelector('.pro-custom-dropdown.is-open')) return;
+            e.preventDefault();
+            submitCreateLayerModal();
+        });
+
         $('createLayerColor')?.addEventListener('change', (e) => {
             if (e.target.value === '__custom__') {
                 $('createLayerCustomColorPicker')?.click();
@@ -3327,7 +3679,7 @@
     }
 
     function updateCreateLayerTypeUi(type) {
-        const isCount = type === 'Count' || type === 'Count by distance';
+        const isCount = type === 'Count';
         const symCol = $('createLayerSymbolCol');
         const sizeCol = $('createLayerSizeCol');
         if (symCol) symCol.style.display = isCount ? 'block' : 'none';
@@ -3428,7 +3780,7 @@
                     estimateId: activeEstimateId(),
                     name: layerName,
                     tag: tag,
-                    costCode: tag || it.supplier?.catalogNumber || it.classification?.costCode || '',
+                    costCode: it.supplier?.catalogNumber || it.classification?.costCode || '',
                     metadata_json: {
                         tag,
                         catalog_item: {
@@ -3474,6 +3826,7 @@
                     const meta = catalogItemMeta(it);
                     Object.assign(newLayer, meta);
                     newLayer.name = layerName;
+                    newLayer.tag = tag;
                     newLayer.type = itemType;
                     newLayer.uom = itemUom;
                     newLayer.symbol = itemSymbol;
@@ -3525,7 +3878,7 @@
             estimateId: activeEstimateId(),
             name,
             tag,
-            costCode: tag,
+            costCode: '',
             metadata_json: { tag },
             type,
             uom,
@@ -3681,22 +4034,132 @@
             const hasDrop = ['Linear with drop', 'Linear avg. with drop'].includes(type);
             dropField.style.display = hasDrop ? 'flex' : 'none';
         }
-        const isCount = type === 'Count' || type === 'Count by distance';
+        const spacingField = $('layerSpacingField');
+        if (spacingField) {
+            spacingField.style.display = type === 'Count by distance' ? 'flex' : 'none';
+        }
+        const isPointCount = type === 'Count';
         const symCol = $('layerSymbolCol');
         const sizeCol = $('layerSizeCol');
         const strokeCol = $('layerStrokeCol');
-        if (symCol) symCol.style.display = isCount ? 'block' : 'none';
-        if (sizeCol) sizeCol.style.display = isCount ? 'block' : 'none';
-        if (strokeCol) strokeCol.style.display = isCount ? 'none' : 'block';
+        if (symCol) symCol.style.display = isPointCount ? 'block' : 'none';
+        if (sizeCol) sizeCol.style.display = isPointCount ? 'block' : 'none';
+        if (strokeCol) strokeCol.style.display = isPointCount ? 'none' : 'block';
+    }
+
+    let layerModalLiveSaveTimer = null;
+    let layerModalPendingSave = false;
+    let layerModalPopulating = false;
+    let layerModalHistorySnapshotId = null;
+    let layerModalActiveFormType = 'Count';
+
+    function applyLiveLayerModalEdits({ syncBackend = true } = {}) {
+        if (layerModalPopulating || !canWrite()) return false;
+        const editingLayerId = takeoffState.editingLayerId;
+        if (!editingLayerId) return false;
+        const layer = findLayer(editingLayerId);
+        if (!layer) return false;
+        if (layerModalHistorySnapshotId !== editingLayerId) {
+            pushTakeoffHistory('edit-layer');
+            layerModalHistorySnapshotId = editingLayerId;
+        }
+        // Auto-save applies strictly to UoM, Symbol, Size, and Color; remaining fields save through Close.
+        const chosenColor = ($('layerColorInput')?.value === '__custom__'
+            ? $('layerCustomColorPicker')?.value
+            : $('layerColorInput')?.value) || layer.color || '#ef4444';
+        const chosenSize = $('layerSizeInput')?.value || layer.size || 'Medium';
+        const calcRadius = takeoffSizeRadius(chosenSize);
+        const markerDiameter = calcRadius * 2;
+        if ($('layerDiameterInput')) $('layerDiameterInput').value = markerDiameter;
+        const chosenUom = $('layerUomInput')?.value || layer.uom || typeToUom(layer.type || 'Count');
+        const chosenSymbol = $('layerSymbolInput')?.value || layer.symbol || 'Solid Circle';
+
+        layer.uom = chosenUom;
+        layer.symbol = chosenSymbol;
+        layer.size = chosenSize;
+        layer.markerDiameter = markerDiameter;
+        layer.color = chosenColor;
+
+        callEditor('projectTakeoffUpdateLayerObjects', editingLayerId, {
+            symbol: chosenSymbol,
+            color: chosenColor,
+            symbolSize: calcRadius,
+            diameter: markerDiameter
+        });
+        syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
+        const liveSnap = callEditor('projectTakeoffSnapshot');
+        if (liveSnap && Array.isArray(liveSnap.layers)) {
+            syncTakeoffFromCanvasSnapshot(liveSnap, { suppressEstimatingSync: true });
+        }
+        saveTakeoffState();
+        renderTakeoffPanel();
+        renderActiveLayerToolbar();
+        updateSubheadSelectedItem();
+        if (takeoffState.editingLayerId === editingLayerId) {
+            const activeMenuBtn = document.querySelector(`[data-layer-menu="${CSS.escape ? CSS.escape(editingLayerId) : editingLayerId}"]`);
+            if (activeMenuBtn) {
+                activeMenuBtn.setAttribute('aria-expanded', 'true');
+                activeMenuBtn.classList.add('is-active');
+            }
+        }
+        window.dispatchEvent(new CustomEvent('takeoff:layer-visuals-updated', { detail: { projectId: String(window.ProjectState?.projectId || '') } }));
+        if (syncBackend) {
+            try {
+                const saved = callEditor('projectTakeoffSave');
+                if (saved && typeof saved.then === 'function') {
+                    saved.catch(err => console.warn('Takeoff live layer save warning:', err));
+                }
+            } catch (editorErr) {
+                console.warn('Takeoff live layer save warning:', editorErr);
+            }
+            layerModalPendingSave = false;
+        }
+        return true;
+    }
+
+    function scheduleLiveLayerModalSave({ immediate = false, debounceMs = 220 } = {}) {
+        if (layerModalPopulating || !takeoffState.editingLayerId || !canWrite()) return;
+        layerModalPendingSave = true;
+        if (layerModalLiveSaveTimer) {
+            clearTimeout(layerModalLiveSaveTimer);
+            layerModalLiveSaveTimer = null;
+        }
+        if (immediate) {
+            applyLiveLayerModalEdits({ syncBackend: true });
+            return;
+        }
+        applyLiveLayerModalEdits({ syncBackend: false });
+        layerModalLiveSaveTimer = setTimeout(() => {
+            layerModalLiveSaveTimer = null;
+            applyLiveLayerModalEdits({ syncBackend: true });
+        }, debounceMs);
+    }
+
+    function flushActiveLayerModalSave() {
+        if (layerModalLiveSaveTimer) {
+            clearTimeout(layerModalLiveSaveTimer);
+            layerModalLiveSaveTimer = null;
+        }
+        if (!takeoffState.editingLayerId || !canWrite()) {
+            layerModalPendingSave = false;
+            return false;
+        }
+        if (!layerModalPendingSave) return false;
+        return applyLiveLayerModalEdits({ syncBackend: true });
     }
 
     function openLayerModal(groupId = takeoffState.activeGroupId, layerId = null, triggerEl = null) {
         if (!requireWrite()) return false;
+        if (takeoffState.editingLayerId && takeoffState.editingLayerId !== layerId) {
+            flushActiveLayerModalSave();
+        }
         if (!layerId && !takeoffState.groups.some(group => groupBelongsToEstimate(group))) {
             ensureEstimateTakeoffWorkspace(activeEstimateId(), true);
             groupId = takeoffState.activeGroupId;
         }
         ensureTakeoffModal();
+        layerModalPopulating = true;
+        layerModalHistorySnapshotId = null;
         const layer = layerId ? findLayer(layerId) : null;
         takeoffState.pendingLayerGroupId = groupId || layer?.groupId || takeoffState.activeGroupId || 'default';
         takeoffState.editingLayerId = layerId;
@@ -3717,7 +4180,7 @@
         if ($('takeoffLayerModalTitle')) $('takeoffLayerModalTitle').textContent = layer ? 'Edit takeoff layer' : 'Create new takeoff layer';
         $('layerNameInput').value = layer?.name || '';
         if ($('layerTagInput')) $('layerTagInput').value = layer?.tag || '';
-        if ($('layerMultiplierInput')) $('layerMultiplierInput').value = layer?.multiplier || 1;
+        if ($('layerMultiplierInput')) $('layerMultiplierInput').value = (layer?.multiplier !== undefined && layer?.multiplier !== null && layer?.multiplier !== '') ? layer.multiplier : 1;
         if ($('layerDifficultyInput')) $('layerDifficultyInput').value = layer?.difficulty !== undefined ? layer.difficulty : (layer?.metadata_json?.difficulty !== undefined ? layer.metadata_json.difficulty : 1.0);
         ['layerDifficultyInput', 'layerMultiplierInput'].forEach(id => {
             const el = $(id);
@@ -3765,8 +4228,14 @@
         updateCatalogSelectionIndicator();
         updateLayerColorSwatch();
         updateLayerTypeFields($('layerTypeInput').value);
+        layerModalActiveFormType = $('layerTypeInput').value || 'Count';
         updateLayerSubmitState();
 
+        document.querySelectorAll('[data-layer-menu]').forEach(b => {
+            b.setAttribute('aria-expanded', 'false');
+            b.classList.remove('is-active');
+        });
+        if (typeof window.closeAllOpenPopouts === 'function') window.closeAllOpenPopouts();
         if (triggerEl) {
             triggerEl.setAttribute('aria-expanded', 'true');
             triggerEl.classList.add('is-active');
@@ -3781,6 +4250,8 @@
             notifyEditorVisible();
             setTimeout(() => notifyEditorVisible(), 260);
         }
+        layerModalPopulating = false;
+        layerModalPendingSave = false;
         setTimeout(() => $('layerNameInput')?.focus(), 50);
     }
 
@@ -3789,6 +4260,8 @@
     }
 
     function closeLayerModal() {
+        flushActiveLayerModalSave();
+        layerModalHistorySnapshotId = null;
         const modal = $('takeoffLayerModal');
         const workspace = $('takeoffWorkspace');
         if (modal) {
@@ -4094,7 +4567,7 @@
         });
     }
 
-    function applyCatalogItemsToLayerForm(items) {
+    async function applyCatalogItemsToLayerForm(items) {
         if (!Array.isArray(items)) items = items ? [items] : [];
         const palette = TAKEOFF_RICH_COLORS;
         items.forEach((it, idx) => {
@@ -4124,57 +4597,93 @@
             }
         });
 
+        const createModal = $('takeoffCreateLayerModal');
+        const inCreateFlow = Boolean(createModal && !createModal.hidden);
+
+        if (!inCreateFlow && items.length && takeoffState.editingLayerId) {
+            const editingLayer = findLayer(takeoffState.editingLayerId);
+            const inferred = items[0].type;
+            const prevType = layerModalActiveFormType || editingLayer?.type || 'Count';
+            if (editingLayer && inferred && needsTakeoffTypeChangeWarning(prevType, inferred)) {
+                const confirmed = await confirmTakeoffTypeChange({ layer: editingLayer, prevType, nextType: inferred });
+                if (!confirmed) return false;
+            }
+        }
+
         takeoffState.pendingCatalogItems = items;
+        if (items[0]) items[0]._fromCatalogPicker = true;
         takeoffState.pendingCatalogItem = items[0] || null;
         takeoffState.activeAddedItemId = items.length ? String(items[0].id) : null;
 
-        const createModal = $('takeoffCreateLayerModal');
-        if (createModal && !createModal.hidden) {
+        if (inCreateFlow) {
             createModal.classList.remove('is-behind');
             renderCreateLayerAddedItems();
             syncFormWithActiveAddedItem();
             updateCreateLayerSubmitState();
             closeCatalogModal();
             setTimeout(() => $('createLayerCatalogName')?.focus(), 40);
-            return;
+            return true;
         }
 
         if (items.length) {
             const item = items[0];
             $('layerNameInput').value = item.name || '';
-            setSelectValue($('layerUomInput'), item.uom || 'ea');
-            updateUomDropdownTrigger('editLayer', item.uom || 'ea');
             const inferred = item.type;
             if (inferred) {
+                layerModalActiveFormType = inferred;
                 $('layerTypeInput').value = inferred;
-                $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[inferred];
+                if ($('layerTypeHelp')) $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[inferred] || TAKEOFF_TYPE_HELP.Count;
+                filterUomDropdownByType('editLayer', inferred);
+                updateTypeDropdownTrigger('editLayer', inferred);
                 updateLayerTypeIcon();
+                updateLayerTypeFields(inferred);
             }
+            const nextUom = item.uom || defaultUomForType(inferred || $('layerTypeInput')?.value || 'Count') || 'ea';
+            setSelectValue($('layerUomInput'), nextUom);
+            updateUomDropdownTrigger('editLayer', nextUom);
             const symbol = item.symbol;
             const color = item.color;
-            if (symbol && TAKEOFF_SYMBOLS.includes(symbol)) $('layerSymbolInput').value = symbol;
+            if (symbol && TAKEOFF_SYMBOLS.includes(symbol)) {
+                $('layerSymbolInput').value = symbol;
+                updateSymbolDropdownTrigger('editLayer', symbol);
+            }
             if (color) {
                 setLayerColor(color);
             }
-            updateAssociatedCatalogCard(null);
+            updateAssociatedCatalogCard({
+                name: item.name,
+                category: item.category || item.catalogName || item.catalog_name || '',
+                catalogNumber: item.catalogNumber || item.code || item.catalog_number || '',
+                unitCost: item.unitCost ?? item.unit_cost ?? 0,
+                laborHours: item.laborHours ?? item.labor_hours ?? 0
+            });
             updateCatalogSelectionIndicator();
             updateLayerSubmitState();
         }
         closeCatalogModal();
         setTimeout(() => $('layerNameInput')?.focus(), 40);
+        return true;
     }
 
     function applyCatalogItemToLayerForm(item) {
-        applyCatalogItemsToLayerForm(item ? [item] : []);
+        return applyCatalogItemsToLayerForm(item ? [item] : []);
     }
 
     async function submitLayerModal() {
         if (!requireWrite()) return false;
-        const name = $('layerNameInput')?.value.trim();
+        const name = $('layerNameInput')?.value.replace(/\r?\n+/g, ' ').trim();
         if (!name) return closeLayerModal();
         const submit = $('layerCreateSubmit');
         if (submit?.dataset.saving === '1') return;
         const editingLayerId = takeoffState.editingLayerId;
+        const editingLayer = editingLayerId ? findLayer(editingLayerId) : null;
+        const previousLayerType = editingLayer?.type || 'Count';
+        const nextFormType = $('layerTypeInput').value;
+        const typeFamilyChanged = Boolean(editingLayer && needsTakeoffTypeChangeWarning(previousLayerType, nextFormType));
+        if (typeFamilyChanged && needsTakeoffTypeChangeWarning(layerModalActiveFormType, nextFormType)) {
+            const confirmed = await confirmTakeoffTypeChange({ layer: editingLayer, prevType: previousLayerType, nextType: nextFormType });
+            if (!confirmed) return false;
+        }
         const drawerSaveBtn = $('layerDrawerSaveBtn');
         if (drawerSaveBtn) {
             drawerSaveBtn.disabled = true;
@@ -4187,7 +4696,7 @@
         }
         try {
             pushTakeoffHistory(editingLayerId ? 'edit-layer' : 'create-layer');
-            const type = $('layerTypeInput').value;
+            const type = nextFormType;
             const chosenColor = ($('layerColorInput')?.value === '__custom__'
                 ? $('layerCustomColorPicker')?.value
                 : $('layerColorInput')?.value) || '#ef4444';
@@ -4197,11 +4706,15 @@
             if ($('layerDiameterInput')) $('layerDiameterInput').value = markerDiameter;
             const strokeVal = parseFloat($('layerStrokeInput')?.value || '2.5') || 2.5;
             const diffVal = parseFloat($('layerDifficultyInput')?.value || '1.0') || 1.0;
+            const rawMult = $('layerMultiplierInput')?.value;
+            const parsedMult = (rawMult !== undefined && rawMult !== '' && Number.isFinite(Number(rawMult)) && Number(rawMult) >= 0)
+                ? Number(rawMult)
+                : 1;
             const payload = {
                 name,
                 type,
-                tag: $('layerTagInput')?.value.trim() || '',
-                multiplier: Number($('layerMultiplierInput')?.value || 1),
+                tag: $('layerTagInput')?.value.replace(/\r?\n+/g, ' ').trim() || '',
+                multiplier: parsedMult,
                 difficulty: diffVal,
                 uom: $('layerUomInput')?.value || typeToUom(type),
                 symbol: $('layerSymbolInput')?.value || 'Solid Circle',
@@ -4214,7 +4727,7 @@
                 height: Number($('layerHeightInput')?.value || 0),
                 depth: Number($('layerDepthInput')?.value || 0)
             };
-            if (takeoffState.pendingCatalogItem) {
+            if (takeoffState.pendingCatalogItem && takeoffState.pendingCatalogItem._fromCatalogPicker === true) {
                 try {
                     Object.assign(payload, catalogItemMeta(takeoffState.pendingCatalogItem));
                 } catch (metaError) {
@@ -4227,9 +4740,13 @@
             if (editingLayerId) {
                 const layer = findLayer(editingLayerId);
                 if (layer) {
+                    if (typeFamilyChanged) {
+                        clearLayerCachedStateOnTypeChange(layer);
+                    }
+                    const prevCostCode = layer.costCode || '';
                     Object.assign(layer, payload);
                     layer.tag = payload.tag;
-                    layer.costCode = payload.tag;
+                    layer.costCode = prevCostCode || layer.catalogNumber || '';
                     if (!layer.metadata_json || typeof layer.metadata_json !== 'object') layer.metadata_json = {};
                     layer.metadata_json.tag = payload.tag;
                     if (payload.unitCost !== undefined) layer.unitCost = payload.unitCost;
@@ -4244,13 +4761,20 @@
                     }
                 }
                 callEditor('projectTakeoffUpdateLayerObjects', editingLayerId, {
+                    type: payload.type,
+                    uom: payload.uom,
+                    purgeIncompatibleGeometry: typeFamilyChanged,
                     symbol: payload.symbol,
                     color: payload.color,
                     symbolSize: calcRadius,
                     diameter: markerDiameter,
-                    strokeWidth: payload.strokeWidth
+                    strokeWidth: payload.strokeWidth,
+                    multiplier: payload.multiplier,
+                    dropLength: payload.dropLength,
+                    spacing: payload.spacing
                 });
-                setActiveTakeoffLayer(editingLayerId, false);
+                const shouldReactivateTool = typeFamilyChanged && takeoffState.activeLayerId === editingLayerId;
+                setActiveTakeoffLayer(editingLayerId, shouldReactivateTool);
             } else {
                 const group = findGroup(takeoffState.pendingLayerGroupId);
                 const layer = {
@@ -4259,8 +4783,8 @@
                     estimateId: activeEstimateId(),
                     quantity: 0,
                     tag: payload.tag,
-                    costCode: payload.tag,
-                    metadata_json: { tag: payload.tag, difficulty: payload.difficulty || 1.0, multiplier: payload.multiplier || 1 },
+                    costCode: payload.catalogNumber || '',
+                    metadata_json: { tag: payload.tag, difficulty: payload.difficulty || 1.0, multiplier: payload.multiplier ?? 1 },
                     difficulty: payload.difficulty || 1.0,
                     ...payload
                 };
@@ -4270,7 +4794,11 @@
                 takeoffState.activeGroupId = group.id;
                 setActiveTakeoffLayer(layer.id, false);
             }
-            syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
+            syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: !typeFamilyChanged });
+            const liveSnap = callEditor('projectTakeoffSnapshot');
+            if (liveSnap && Array.isArray(liveSnap.layers)) {
+                syncTakeoffFromCanvasSnapshot(liveSnap, { suppressEstimatingSync: !typeFamilyChanged, immediateEstimatingSync: typeFamilyChanged });
+            }
             // Modal Save is a durable operation, not merely a request for the
             // editor's delayed autosave. Waiting for this ACK prevents a quick
             // close/reload from restoring the duplicate's previous appearance.
@@ -4281,7 +4809,7 @@
                 console.warn('Takeoff editor background save notification warning:', editorErr);
             }
             closeLayerModal();
-            saveTakeoffState();
+            saveTakeoffState({ debounceEstimatingSync: !typeFamilyChanged });
             renderTakeoffPanel();
             window.dispatchEvent(new CustomEvent('takeoff:layer-visuals-updated', { detail: { projectId: String(window.ProjectState?.projectId || '') } }));
             window.dispatchEvent(new CustomEvent('takeoff:layer-properties-updated', { detail: { layerId: savedLayerId, difficulty: payload.difficulty, multiplier: payload.multiplier } }));
@@ -4292,7 +4820,7 @@
             const drawerSaveBtn = $('layerDrawerSaveBtn');
             if (drawerSaveBtn) {
                 drawerSaveBtn.disabled = false;
-                drawerSaveBtn.innerHTML = '<i class="fas fa-check"></i> Save';
+                drawerSaveBtn.innerHTML = '<i class="fas fa-xmark"></i> Close';
             }
             if (submit) {
                 submit.dataset.saving = '0';
@@ -4566,18 +5094,51 @@
 
         modal.querySelectorAll('[data-catalog-close]').forEach(btn => btn.addEventListener('click', closeCatalogModal));
 
+        const goToBrowseCatalogPage = (targetPage) => {
+            const lastPage = browseCatalogState._lastTotalPages || 1;
+            const nextPage = Math.max(1, Math.min(lastPage, Number(targetPage) || 1));
+            if (nextPage === browseCatalogState.page) return;
+            browseCatalogState.page = nextPage;
+            renderCatalogItems({ scrollToTop: true });
+        };
+
+        const syncItemSearch = (immediate = false) => {
+            const input = $('proBrowseItemSearch');
+            if (!input) return;
+            const apply = () => {
+                browseCatalogState.itemQuery = input.value.trim();
+                browseCatalogState.page = 1;
+                renderCatalogItems({ scrollToTop: true });
+            };
+            clearTimeout(input._timer);
+            if (immediate) apply();
+            else input._timer = setTimeout(apply, 120);
+        };
+
         $('proBrowseCatSearch')?.addEventListener('input', e => {
-            browseCatalogState.catalogQuery = e.target.value.trim().toLowerCase();
+            browseCatalogState.catalogQuery = e.target.value.trim();
             renderCatalogSidebar();
         });
+        $('proBrowseCatSearch')?.closest('.bb-search-field-procore')?.querySelector('.bb-search-submit')?.addEventListener('click', () => {
+            const inp = $('proBrowseCatSearch');
+            if (inp) {
+                browseCatalogState.catalogQuery = inp.value.trim();
+                renderCatalogSidebar();
+                inp.focus();
+            }
+        });
 
-        $('proBrowseItemSearch')?.addEventListener('input', e => {
-            clearTimeout(e.target._timer);
-            e.target._timer = setTimeout(() => {
-                browseCatalogState.itemQuery = e.target.value.trim().toLowerCase();
-                browseCatalogState.page = 1;
-                renderCatalogItems();
-            }, 120);
+        $('proBrowseItemSearch')?.addEventListener('input', () => syncItemSearch(false));
+        $('proBrowseItemSearch')?.addEventListener('search', () => syncItemSearch(true));
+        $('proBrowseItemSearch')?.addEventListener('keydown', e => {
+            if (e.key === 'Enter') {
+                e.preventDefault();
+                syncItemSearch(true);
+            }
+        });
+        $('proBrowseItemSearch')?.closest('.bb-search-field-procore')?.querySelector('.bb-search-submit')?.addEventListener('click', () => {
+            syncItemSearch(true);
+            $('proBrowseItemSearch')?.focus();
         });
 
         $('proBrowseSelectBtn')?.addEventListener('click', () => {
@@ -4598,44 +5159,15 @@
             window.open('/pages/cost_catalog.php', '_blank');
         });
 
-        $('ccPageFirst')?.addEventListener('click', () => {
-            if (browseCatalogState.page > 1) {
-                browseCatalogState.page = 1;
-                renderCatalogItems();
-            }
-        });
-
-        $('ccPagePrev')?.addEventListener('click', () => {
-            if (browseCatalogState.page > 1) {
-                browseCatalogState.page--;
-                renderCatalogItems();
-            }
-        });
-
-        $('ccPageNext')?.addEventListener('click', () => {
-            const lastPage = browseCatalogState._lastTotalPages || 1;
-            if (browseCatalogState.page < lastPage) {
-                browseCatalogState.page++;
-                renderCatalogItems();
-            }
-        });
-
-        $('ccPageLast')?.addEventListener('click', () => {
-            const lastPage = browseCatalogState._lastTotalPages || 1;
-            if (browseCatalogState.page < lastPage) {
-                browseCatalogState.page = lastPage;
-                renderCatalogItems();
-            }
-        });
+        $('ccPageFirst')?.addEventListener('click', () => goToBrowseCatalogPage(1));
+        $('ccPagePrev')?.addEventListener('click', () => goToBrowseCatalogPage(browseCatalogState.page - 1));
+        $('ccPageNext')?.addEventListener('click', () => goToBrowseCatalogPage(browseCatalogState.page + 1));
+        $('ccPageLast')?.addEventListener('click', () => goToBrowseCatalogPage(browseCatalogState._lastTotalPages || 1));
 
         $('ccPaginationNumbers')?.addEventListener('click', (e) => {
             const btn = e.target.closest('.cc-page-number');
             if (btn && btn.dataset.page) {
-                const targetPage = Number(btn.dataset.page);
-                if (targetPage && targetPage !== browseCatalogState.page) {
-                    browseCatalogState.page = targetPage;
-                    renderCatalogItems();
-                }
+                goToBrowseCatalogPage(btn.dataset.page);
             }
         });
     }
@@ -4832,10 +5364,94 @@
         }
     }
 
+    function normalizeCatalogSearchText(value) {
+        return String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/["'""'']/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function compactCatalogSearchText(value) {
+        return normalizeCatalogSearchText(value).replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
+    }
+
+    function scoreCatalogItemMatch(item, queryNorm, tokens, compactTokens) {
+        if (!tokens.length) return 1;
+        const nameNorm = normalizeCatalogSearchText(item.name);
+        const nameCompact = compactCatalogSearchText(item.name);
+        const codeParts = [
+            item.supplier?.catalogNumber,
+            item.supplier?.sku,
+            item.classification?.costCode,
+            item.catalogNumber,
+            item.code,
+            item.sku
+        ].filter(Boolean);
+        const codeNorm = normalizeCatalogSearchText(codeParts.join(' '));
+        const codeCompact = compactCatalogSearchText(codeParts.join(' '));
+        const descNorm = normalizeCatalogSearchText([item.description, item.notes].filter(Boolean).join(' '));
+        const metaNorm = normalizeCatalogSearchText([
+            item.catalog?.name,
+            item.category?.name,
+            item.uom || item.unit_of_measure,
+            item.item_type || item.type,
+            item.measurement_type || item.measurementType,
+            item.supplier?.name,
+            item.supplier?.manufacturer,
+            item.manufacturer
+        ].filter(Boolean).join(' '));
+
+        const fullNorm = `${nameNorm} ${codeNorm} ${descNorm} ${metaNorm}`.trim();
+        const fullCompact = `${nameCompact} ${codeCompact} ${compactCatalogSearchText(descNorm)} ${compactCatalogSearchText(metaNorm)}`.trim();
+
+        for (let i = 0; i < tokens.length; i++) {
+            const tok = tokens[i];
+            const cTok = compactTokens[i];
+            const matched = fullNorm.includes(tok) || (cTok && fullCompact.includes(cTok));
+            if (!matched) return 0;
+        }
+
+        let score = 10;
+        if (codeNorm && (codeNorm === queryNorm || codeCompact === compactTokens.join(' '))) score += 140;
+        else if (codeNorm && codeNorm.startsWith(queryNorm)) score += 90;
+        else if (codeNorm && codeNorm.includes(queryNorm)) score += 55;
+
+        if (nameNorm === queryNorm) score += 120;
+        else if (nameNorm.startsWith(queryNorm)) score += 85;
+        else if (nameNorm.includes(queryNorm)) score += 50;
+
+        for (let i = 0; i < tokens.length; i++) {
+            const tok = tokens[i];
+            const cTok = compactTokens[i];
+            if (nameNorm.includes(tok) || (cTok && nameCompact.includes(cTok))) {
+                score += 24;
+                if (nameNorm.startsWith(tok) || nameNorm.includes(` ${tok}`)) score += 8;
+            } else if (codeNorm.includes(tok) || (cTok && codeCompact.includes(cTok))) {
+                score += 18;
+            } else if (descNorm.includes(tok)) {
+                score += 8;
+            } else if (metaNorm.includes(tok)) {
+                score += 5;
+            }
+        }
+        return score;
+    }
+
+    function resetBrowseCatalogScrollTop() {
+        const list = $('proBrowseItemsList');
+        const main = list?.closest('.pro-browse-items-main');
+        if (list) list.scrollTop = 0;
+        if (main) main.scrollTop = 0;
+    }
+
     function renderCatalogSidebar() {
         const tree = $('proBrowseCatTree');
         if (!tree) return;
-        const q = browseCatalogState.catalogQuery;
+        const rawQuery = browseCatalogState.catalogQuery || '';
+        const queryTokens = normalizeCatalogSearchText(rawQuery).split(' ').filter(Boolean);
         const isAllActive = !browseCatalogState.selectedCatalogId && !browseCatalogState.selectedGroupId;
         const isRecentActive = browseCatalogState.selectedCatalogId === '__recent__';
 
@@ -4851,13 +5467,25 @@
 
         let html = '';
         (catalogState.catalogs || []).forEach(cat => {
-            if (q && !cat.name.toLowerCase().includes(q)) return;
             const catId = String(cat.id);
-            const isCatActive = String(browseCatalogState.selectedCatalogId) === catId && !browseCatalogState.selectedGroupId;
-            const isExpanded = Boolean(browseCatalogState.expandedCatalogs[catId] ?? true);
-            const groups = (catalogState.groups || [])
+            const allGroups = (catalogState.groups || [])
                 .filter(g => String(g.catalogId) === catId && !g.parentGroupId)
                 .sort((a, b) => String(a?.name || '').localeCompare(String(b?.name || ''), undefined, { numeric: true, sensitivity: 'base' }));
+
+            const catNorm = normalizeCatalogSearchText(cat.name);
+            const catMatches = !queryTokens.length || queryTokens.every(tok => catNorm.includes(tok));
+            const matchingGroups = queryTokens.length
+                ? allGroups.filter(g => {
+                    const gNorm = `${catNorm} ${normalizeCatalogSearchText(g.name)}`;
+                    return queryTokens.every(tok => gNorm.includes(tok));
+                })
+                : allGroups;
+
+            if (queryTokens.length && !catMatches && !matchingGroups.length) return;
+
+            const groups = (queryTokens.length && !catMatches) ? matchingGroups : allGroups;
+            const isCatActive = String(browseCatalogState.selectedCatalogId) === catId && !browseCatalogState.selectedGroupId;
+            const isExpanded = queryTokens.length && matchingGroups.length ? true : Boolean(browseCatalogState.expandedCatalogs[catId] ?? true);
             const catColor = getCatalogColor(cat.name, cat.id);
             const catCount = allItems.filter(i => String(i.catalog?.id) === catId).length;
 
@@ -4876,7 +5504,6 @@
                 groups.forEach(grp => {
                     const grpId = String(grp.id);
                     const isGrpActive = String(browseCatalogState.selectedGroupId) === grpId;
-                    const grpColor = getGroupColor(grp.name, grp.id, cat.id);
                     const grpCount = allItems.filter(i => String(i.category?.id) === grpId).length;
 
                     html += `
@@ -4918,7 +5545,7 @@
                 }
                 browseCatalogState.page = 1;
                 renderCatalogSidebar();
-                renderCatalogItems();
+                renderCatalogItems({ scrollToTop: true });
             });
         });
 
@@ -4930,45 +5557,44 @@
                 browseCatalogState.selectedGroupId = grpId;
                 browseCatalogState.page = 1;
                 renderCatalogSidebar();
-                renderCatalogItems();
+                renderCatalogItems({ scrollToTop: true });
             });
         });
     }
 
     function filterBrowseCatalogItems() {
         const items = catalogState.items || [];
-        const q = browseCatalogState.itemQuery;
+        const queryNorm = normalizeCatalogSearchText(browseCatalogState.itemQuery);
+        const tokens = queryNorm ? queryNorm.split(' ').filter(Boolean) : [];
+        const compactTokens = tokens.map(compactCatalogSearchText);
         const catId = browseCatalogState.selectedCatalogId;
         const grpId = browseCatalogState.selectedGroupId;
 
-        return items.filter(item => {
+        const scoped = items.filter(item => {
             if (catId === '__recent__') {
-                // Return all items
+                return true;
             } else if (grpId) {
                 if (String(item.category?.id || '') !== String(grpId)) return false;
             } else if (catId) {
                 if (String(item.catalog?.id || '') !== String(catId)) return false;
             }
-            if (q) {
-                const searchString = [
-                    item.name,
-                    item.description,
-                    item.catalog?.name,
-                    item.category?.name,
-                    item.supplier?.catalogNumber,
-                    item.classification?.costCode,
-                    item.uom
-                ].filter(Boolean).join(' ').toLowerCase();
-                if (!searchString.includes(q)) return false;
-            }
             return true;
         });
+
+        if (!tokens.length) return scoped;
+
+        return scoped
+            .map(item => ({ item, score: scoreCatalogItemMatch(item, queryNorm, tokens, compactTokens) }))
+            .filter(entry => entry.score > 0)
+            .sort((a, b) => b.score - a.score)
+            .map(entry => entry.item);
     }
 
-    function renderCatalogItems() {
+    function renderCatalogItems(options = {}) {
         const list = $('proBrowseItemsList');
         const selectBtn = $('proBrowseSelectBtn');
         if (!list) return;
+        const shouldScrollTop = options?.scrollToTop !== false;
 
         if (catalogState.loading) {
             list.innerHTML = '<div style="padding: 60px 20px; text-align: center; color: var(--tk-text-muted);"><i class="fas fa-spinner fa-spin" style="font-size: 26px; color: var(--tk-primary, #fb5a3a);"></i><p style="margin-top: 12px; font-size: 13px; font-weight: 500;">Loading catalog items...</p></div>';
@@ -5041,6 +5667,7 @@
 
         if (!pageItems.length) {
             list.innerHTML = '<div style="padding: 60px 20px; text-align: center; color: var(--tk-text-muted);"><i class="fas fa-box-open" style="font-size: 32px; opacity: 0.45; margin-bottom: 8px;"></i><p style="margin-top: 8px; font-size: 13.5px; font-weight: 500;">No catalog items match this criteria.</p></div>';
+            if (shouldScrollTop) resetBrowseCatalogScrollTop();
             if (selectBtn) { selectBtn.disabled = true; selectBtn.classList.remove('is-active'); }
             updateBrowseSelectionUi();
             return;
@@ -5102,6 +5729,11 @@
                 </div>
             `;
         }).join('');
+
+        if (shouldScrollTop) {
+            resetBrowseCatalogScrollTop();
+            requestAnimationFrame(resetBrowseCatalogScrollTop);
+        }
 
         // Wire click handlers
         list.querySelectorAll('[data-browse-item]').forEach(card => {
@@ -5322,20 +5954,7 @@
         if (takeoffGroupModalEditingGroup) {
             const group = takeoffGroupModalEditingGroup;
             if (group.name !== name) {
-                pushTakeoffHistory('rename-group');
-                group.name = name;
-                group.isDefault = false;
-                saveTakeoffState();
-                window.dispatchEvent(new CustomEvent('takeoff:estimating-group-rename-requested', {
-                    detail: {
-                        projectId: String(window.ProjectState?.projectId || ''),
-                        estimateId: activeEstimateId(),
-                        groupId: group.estimatingGroupId || `takeoff_group_${group.id}`,
-                        name: group.name
-                    }
-                }));
-                renderTakeoffPanel();
-                updateSubheadSelectedItem();
+                applyTakeoffGroupRename(group, name);
                 showTakeoffToast?.('Group renamed.');
             }
             closeTakeoffGroupModal();
@@ -5465,6 +6084,12 @@
         `;
 
         const rect = button.getBoundingClientRect();
+        document.querySelectorAll('[data-group-menu], [data-subhead-group-action="more"]').forEach(b => {
+            b.setAttribute('aria-expanded', 'false');
+            b.classList.remove('is-active');
+        });
+        menu.__trigger = button;
+        menu.dataset.activeGroupId = String(groupId);
         menu.classList.add('open');
         button.setAttribute('aria-expanded', 'true');
         button.classList.add('is-active');
@@ -5627,8 +6252,10 @@
         if (menu) {
             menu.style.display = 'none';
             menu.classList.remove('open');
+            delete menu.dataset.activeGroupId;
+            menu.__trigger = null;
         }
-        document.querySelectorAll('[data-group-menu]').forEach(b => {
+        document.querySelectorAll('[data-group-menu], [data-subhead-group-action="more"]').forEach(b => {
             b.setAttribute('aria-expanded', 'false');
             b.classList.remove('is-active');
         });
@@ -5712,7 +6339,7 @@
         return true;
     }
 
-    function reorderTakeoffGroup(sourceId, targetId) {
+    function reorderTakeoffGroup(sourceId, targetId, insertAfter = false) {
         if (!requireWrite()) return false;
         const estimateId = activeEstimateId();
         const scopedIndexes = takeoffState.groups.map((group, index) => groupBelongsToEstimate(group, estimateId) ? index : -1).filter(index => index >= 0);
@@ -5720,14 +6347,24 @@
         const from = scoped.findIndex(group => String(group.id) === String(sourceId));
         const to = scoped.findIndex(group => String(group.id) === String(targetId));
         if (from < 0 || to < 0 || from === to) return false;
+        let insertAt = from < to
+            ? (insertAfter ? to : Math.max(0, to - 1))
+            : (insertAfter ? to + 1 : to);
+        insertAt = Math.max(0, Math.min(scoped.length - 1, insertAt));
+        if (insertAt === from) return false;
         pushTakeoffHistory('reorder-groups');
         const [moved] = scoped.splice(from, 1);
-        scoped.splice(to, 0, moved);
+        scoped.splice(insertAt, 0, moved);
         scoped.forEach((group, index) => { group.sortOrder = index; takeoffState.groups[scopedIndexes[index]] = group; });
         window.dispatchEvent(new CustomEvent('takeoff:estimating-groups-reorder-requested', {
             detail: {
                 projectId: String(window.ProjectState?.projectId || ''), estimateId,
-                groupIds: scoped.map(group => String(group.estimatingGroupId || `takeoff_group_${group.id}`))
+                groupIds: scoped.map(group => String(group.estimatingGroupId || `takeoff_group_${group.id}`)),
+                groupNames: scoped.map(group => ({
+                    id: String(group.estimatingGroupId || `takeoff_group_${group.id}`),
+                    takeoffGroupId: String(group.id),
+                    name: String(group.name || '')
+                }))
             }
         }));
         saveTakeoffState(); renderTakeoffPanel();
@@ -5969,9 +6606,43 @@
                 if (dotIcon) dotIcon.style.color = col;
                 return;
             }
+            const rulerColorPicker = event.target.closest('.subhead-ruler-color-picker');
+            if (rulerColorPicker && selectionState.selectedRuler) {
+                const col = rulerColorPicker.value;
+                selectionState.selectedRuler.color = col;
+                callEditor('updateSelectedRulerStyle', { color: col });
+                const dotIcon = $('takeoffSubheadItemDot')?.querySelector('.fa-ruler');
+                if (dotIcon) dotIcon.style.color = col;
+                info.querySelectorAll('.subhead-ruler-color-swatch').forEach(sw => {
+                    sw.classList.toggle('is-active', String(sw.dataset.rulerColor || '').toLowerCase() === col.toLowerCase());
+                });
+                return;
+            }
         });
 
         info.addEventListener('click', event => {
+            const rulerSwatch = event.target.closest('[data-ruler-color]');
+            if (rulerSwatch && selectionState.selectedRuler) {
+                event.stopPropagation();
+                const col = rulerSwatch.dataset.rulerColor;
+                selectionState.selectedRuler.color = col;
+                callEditor('updateSelectedRulerStyle', { color: col });
+                const picker = info.querySelector('.subhead-ruler-color-picker');
+                if (picker && col.startsWith('#')) picker.value = col;
+                const dotIcon = $('takeoffSubheadItemDot')?.querySelector('.fa-ruler');
+                if (dotIcon) dotIcon.style.color = col;
+                info.querySelectorAll('.subhead-ruler-color-swatch').forEach(sw => sw.classList.toggle('is-active', sw === rulerSwatch));
+                return;
+            }
+            const rulerVisBtn = event.target.closest('[data-subhead-ruler-visibility]');
+            if (rulerVisBtn && selectionState.selectedRuler) {
+                event.stopPropagation();
+                const nextHidden = !Boolean(selectionState.selectedRuler.hidden);
+                selectionState.selectedRuler.hidden = nextHidden;
+                callEditor('updateSelectedRulerStyle', { hidden: nextHidden });
+                updateSubheadSelectedItem();
+                return;
+            }
             const groupBtn = event.target.closest('[data-subhead-group-action]');
             if (groupBtn) {
                 event.stopPropagation();
@@ -6105,6 +6776,15 @@
             window.syncDocumentsSubheadInfo?.();
             return;
         }
+        if (window.ProjectState?.activeTab === 'estimating' || document.body?.classList.contains('is-estimating-tab')) {
+            const info = $('takeoffSubheadItemInfo');
+            if (info) {
+                info.classList.remove('is-visible');
+                info.style.display = 'none';
+            }
+            window.syncEstimatingSubheadInfo?.();
+            return;
+        }
         const info = $('takeoffSubheadItemInfo');
         if (!info) return;
         bindSubheadItemActions();
@@ -6186,14 +6866,30 @@
             info.classList.add('is-visible');
             info.classList.remove('is-group-info');
             info.style.display = 'inline-flex';
+            const rColor = String(selectionState.selectedRuler.color || '#22c55e');
+            const isHidden = Boolean(selectionState.selectedRuler.hidden);
             if (dot) {
                 dot.style.background = 'transparent';
-                dot.innerHTML = '<i class="fas fa-ruler" style="color: #22c55e; font-size: 11px;"></i>';
+                dot.innerHTML = `<i class="fas fa-ruler" style="color: ${esc(rColor)}; font-size: 11px;"></i>`;
             }
-            if (name) name.textContent = 'Ruler Measurement';
-            if (meta) meta.textContent = selectionState.selectedRuler.lengthText || 'Measurement';
+            if (name) {
+                const idx = selectionState.selectedRuler.index ? ` #${selectionState.selectedRuler.index}` : '';
+                name.textContent = `Measurement${idx}`;
+            }
+            if (meta) meta.textContent = selectionState.selectedRuler.sidebarQuantityText || selectionState.selectedRuler.lengthText || 'Measurement';
             if (actionsContainer) {
+                const quickColors = ['#22c55e', '#ef4444', '#2563eb', '#f59e0b', '#a855c9', '#06b6d4'];
+                const swatchesHtml = quickColors.map(c =>
+                    `<button type="button" class="subhead-ruler-color-swatch ${rColor.toLowerCase() === c.toLowerCase() ? 'is-active' : ''}" data-ruler-color="${c}" style="background:${c};" title="Color ${c}" aria-label="Color ${c}"></button>`
+                ).join('');
                 actionsContainer.innerHTML = `
+                    <div class="subhead-ruler-color-wrap" style="margin-right:4px;">
+                        ${swatchesHtml}
+                        <input type="color" class="subhead-ruler-color-picker" value="${rColor.startsWith('#') ? esc(rColor) : '#22c55e'}" title="Custom measurement color">
+                    </div>
+                    <button type="button" class="subhead-item-act-btn" data-subhead-ruler-visibility="true" title="${isHidden ? 'Show measurement' : 'Hide measurement'}">
+                        <i class="fas ${isHidden ? 'fa-eye-slash' : 'fa-eye'}"></i><span>${isHidden ? 'Show' : 'Hide'}</span>
+                    </button>
                     <button type="button" class="subhead-item-act-btn danger" data-subhead-item-action="delete" title="Delete ruler measurement">
                         <i class="fas fa-trash"></i><span>Delete</span>
                     </button>
@@ -6360,9 +7056,9 @@
         const payload = layerCanvasPayload(layer);
         win.__projectActiveTakeoffLayer = payload;
         callEditor('projectTakeoffActivateLayer', payload);
-        if (isLinearType(layer.type)) setActiveTool('linear');
-        if (isAreaType(layer.type)) setActiveTool('area');
-        if (!isLinearType(layer.type) && !isAreaType(layer.type)) setActiveTool('count');
+        if (isLinearType(layer.type) || layer.type === 'Count by distance') setActiveTool('linear');
+        else if (isAreaType(layer.type)) setActiveTool('area');
+        else setActiveTool('count');
     }
 
     function syncTakeoffFromCanvasSnapshot(snapshot, options = {}) {
@@ -6370,13 +7066,21 @@
         const estimateId = String(snapshot.estimateId || snapshot.estimateKey || activeEstimateId());
         if (estimateId && estimateId !== activeEstimateId()) return;
         const doc = activeDrawingDoc();
-        const documentId = String(snapshot.drawingId || snapshot.drawing_id || doc?.id || 'active');
+        const rawDocId = Number(snapshot.drawingId || snapshot.drawing_id || doc?.id || 0);
+        const documentId = rawDocId > 0 ? String(rawDocId) : 'active';
+        if (rawDocId > 0 && takeoffState.canvasSnapshots?.[`${estimateId}:active`]) {
+            delete takeoffState.canvasSnapshots[`${estimateId}:active`];
+        }
         takeoffState.canvasSnapshots[`${estimateId}:${documentId}`] = {
             ...snapshot,
             estimateId,
             documentId,
+            drawingId: rawDocId > 0 ? rawDocId : (snapshot.drawingId || null),
             updatedAt: Date.now()
         };
+        if (snapshot.userDirty === true || snapshot.dirty === true) {
+            takeoffIsDirty = true;
+        }
         snapshot.layers.forEach(remote => {
             const remoteId = String(remote.id || remote.layerId || '');
             const layer = findLayer(remoteId) || allLayers().find(row => String(row.id) === remoteId
@@ -6401,7 +7105,12 @@
         } else if (snapshot.activeLayerId === null || snapshot.activeLayerId === '') {
             takeoffState.activeLayerId = null;
         }
-        if (!options.suppressEstimatingSync) saveTakeoffState();
+        if (!options.suppressEstimatingSync) {
+            saveTakeoffState({
+                debounceEstimatingSync: !options.immediateEstimatingSync,
+                suppressDirty: !(snapshot.userDirty === true || snapshot.dirty === true)
+            });
+        }
         renderTakeoffPanel();
         renderViewerLayersPopover();
         renderActiveLayerToolbar();
@@ -6410,23 +7119,89 @@
 
     function applyAggregatedCanvasQuantities() {
         const totals = new Map();
-        Object.values(takeoffState.canvasSnapshots || {}).forEach(snapshot => {
-            if (String(snapshot.estimateId || snapshot.estimateKey || '') !== activeEstimateId()) return;
+        const avgStats = new Map();
+        const canonicalKeyMap = new Map();
+        const avgLayerMeta = new Map();
+        const activeEst = activeEstimateId();
+        const snapshots = Object.entries(takeoffState.canvasSnapshots || {});
+        const seenDocKeys = new Set();
+        const hasNumericDocSnapshot = snapshots.some(([, s]) =>
+            String(s?.estimateId || s?.estimateKey || '') === activeEst && Number(s?.drawingId || s?.drawing_id || 0) > 0
+        );
+        const layerBaseMap = new Map();
+        allLayers().forEach(layer => {
+            if (!layerBelongsToEstimate(layer, activeEst)) return;
+            const baseVal = Number(layer.baseQuantity || 0);
+            const dropVal = Number(layer.dropLength ?? layer.drop_length ?? 0);
+            const multVal = Number(layer.multiplier ?? layer.metadata_json?.multiplier ?? 1) || 1;
+            const isAvgDrop = normalizeTakeoffType(layer.type) === 'Linear avg. with drop';
+            const primaryKey = layer.id !== undefined && layer.id !== null ? String(layer.id) : String(layer.client_uid || '');
+            if (layer.id !== undefined && layer.id !== null) {
+                const idKey = String(layer.id);
+                layerBaseMap.set(idKey, baseVal);
+                canonicalKeyMap.set(idKey, primaryKey);
+                if (isAvgDrop) avgLayerMeta.set(idKey, { dropLength: dropVal, multiplier: multVal });
+            }
+            if (layer.client_uid) {
+                const uidKey = String(layer.client_uid);
+                layerBaseMap.set(uidKey, baseVal);
+                canonicalKeyMap.set(uidKey, primaryKey);
+                if (isAvgDrop) avgLayerMeta.set(uidKey, { dropLength: dropVal, multiplier: multVal });
+            }
+        });
+        snapshots.forEach(([, snapshot]) => {
+            if (!snapshot || String(snapshot.estimateId || snapshot.estimateKey || '') !== activeEst) return;
+            const numericDocId = Number(snapshot.drawingId || snapshot.drawing_id || 0);
+            if (numericDocId <= 0 && hasNumericDocSnapshot) return;
+            const docDedupeKey = numericDocId > 0 ? String(numericDocId) : String(snapshot.documentId || 'active');
+            if (seenDocKeys.has(docDedupeKey)) return;
+            seenDocKeys.add(docDedupeKey);
+            const seenLayerIdsInSnap = new Set();
             (snapshot.layers || []).forEach(remote => {
                 const id = String(remote.id || remote.layerId || '');
-                if (!id) return;
-                const objects = remote.shapes || remote.takeoffObjects || [];
-                const objectTotal = objects
-                    .reduce((sum, obj) => sum + Number(obj.quantityValue || obj.quantity || 0), 0);
-                const remoteBase = Number(remote.baseQuantity ?? remote.base_quantity
-                    ?? remote.seedQuantity ?? remote.seed_quantity ?? 0);
+                const canonId = canonicalKeyMap.get(id) || id;
+                if (!id || seenLayerIdsInSnap.has(canonId)) return;
+                seenLayerIdsInSnap.add(canonId);
+                const rawObjects = remote.shapes || remote.takeoffObjects || [];
+                const seenObjIds = new Set();
+                const avgMeta = avgLayerMeta.get(id) || avgLayerMeta.get(canonId);
+                const isAvgDrop = Boolean(avgMeta) || normalizeTakeoffType(remote.takeoff_type || remote.type) === 'Linear avg. with drop';
+                let objectTotal = 0;
+                let hasObjects = false;
+                rawObjects.forEach((obj, idx) => {
+                    if (!obj || typeof obj !== 'object') return;
+                    const oid = String(obj.id || obj.client_uid || `idx_${idx}`);
+                    if (seenObjIds.has(oid)) return;
+                    seenObjIds.add(oid);
+                    hasObjects = true;
+                    if (isAvgDrop) {
+                        const stats = avgStats.get(canonId) || {
+                            sumRounded: 0,
+                            count: 0,
+                            dropLength: Number(avgMeta?.dropLength ?? remote.dropLength ?? remote.drop_length ?? 0),
+                            multiplier: Number(avgMeta?.multiplier ?? remote.multiplier ?? 1) || 1
+                        };
+                        const roundedSeg = obj.roundedLength !== undefined && obj.roundedLength !== null
+                            ? Number(obj.roundedLength)
+                            : Math.round(Number(obj.horizontalLength ?? obj.quantityValue ?? obj.quantity ?? 0));
+                        stats.sumRounded += Number.isFinite(roundedSeg) ? roundedSeg : 0;
+                        stats.count += 1;
+                        avgStats.set(canonId, stats);
+                    } else {
+                        objectTotal += Number(obj.quantityValue ?? obj.quantity ?? 0);
+                    }
+                });
+                const localBase = Number(layerBaseMap.get(id) || 0);
+                const remoteBase = Math.max(
+                    localBase,
+                    Number(remote.baseQuantity ?? remote.base_quantity ?? remote.seedQuantity ?? remote.seed_quantity ?? 0)
+                );
                 const remoteMeasured = Math.max(0, Number(remote.quantity || 0) - remoteBase);
                 // Count snapshots from older/editor-loading paths may expose the
                 // aggregate quantity before their marker objects are hydrated.
-                // The aggregate is a safe fallback; never add it on top of the
-                // same objects or the Part would be counted twice.
-                const measured = objects.length ? objectTotal : remoteMeasured;
-                totals.set(id, (totals.get(id) || 0) + measured);
+                // Subtracting effective base ensures base + base never doubles.
+                const measured = hasObjects ? objectTotal : remoteMeasured;
+                totals.set(canonId, (totals.get(canonId) || 0) + measured);
             });
         });
         allLayers().forEach(layer => {
@@ -6436,10 +7211,21 @@
             // layers on the active sheet continued to calculate normally.
             const idKey = String(layer.id);
             const uidKey = String(layer.client_uid || '');
-            const hasTotal = totals.has(idKey) || (uidKey && totals.has(uidKey));
+            const canonId = canonicalKeyMap.get(idKey) || canonicalKeyMap.get(uidKey) || idKey;
+            const stats = avgStats.get(canonId);
+            if (normalizeTakeoffType(layer.type) === 'Linear avg. with drop' && stats && stats.count > 0) {
+                const base = Number(layer.baseQuantity || 0);
+                const drop = Number(layer.dropLength ?? layer.drop_length ?? stats.dropLength ?? 0);
+                const mult = Number(layer.multiplier ?? layer.metadata_json?.multiplier ?? stats.multiplier ?? 1) || 1;
+                layer.quantity = Math.round((base + ((stats.sumRounded / stats.count) + drop) * mult) * 10000) / 10000;
+                return;
+            }
+            const hasTotal = totals.has(canonId) || totals.has(idKey) || (uidKey && totals.has(uidKey));
             if (!hasTotal) return;
             const base = Number(layer.baseQuantity || 0);
-            const totalVal = totals.has(idKey) ? totals.get(idKey) : totals.get(uidKey);
+            const totalVal = totals.has(canonId)
+                ? totals.get(canonId)
+                : (totals.has(idKey) ? totals.get(idKey) : totals.get(uidKey));
             layer.quantity = base + totalVal;
         });
     }
@@ -6996,6 +7782,10 @@
             return;
         }
         if (command === 'smart' || command === 'pan') {
+            if (command === 'smart') {
+                callEditor('resolveMeasurementOnPointer');
+                callEditor('projectTakeoffResolveDraftOnPointer');
+            }
             callEditor('clearPlacementTool');
             callEditor('projectTakeoffSetTool', command === 'pan' ? 'pan' : 'select');
             setActiveTool(command);
@@ -7107,8 +7897,8 @@
     }
 
     function runViewerCommand(command) {
-        if (command === 'zoom-out') return setZoom(currentZoomPercent() - 10);
-        if (command === 'zoom-in') return setZoom(currentZoomPercent() + 10);
+        if (command === 'zoom-out') return setZoom(currentZoomPercent() - 25);
+        if (command === 'zoom-in') return setZoom(currentZoomPercent() + 25);
         if (command === 'fit') {
             const zoom = callEditor('projectTakeoffFitToView') || callEditor('fitPdfToView', true) || currentZoomPercent();
             setTimeout(() => updateZoomUi(zoom || currentZoomPercent()), 40);
@@ -7224,12 +8014,22 @@
         const menu = $('takeoffRowMenu');
         if (!menu) return;
         const isSameOpen = menu.classList.contains('open') && activeRowMenuAnchor === button;
-        document.querySelectorAll('.pro-row-menu').forEach(item => item.classList.remove('open'));
+        document.querySelectorAll('.pro-row-menu').forEach(item => {
+            item.classList.remove('open');
+            item.__trigger = null;
+        });
+        document.querySelectorAll('[data-row-menu]').forEach(btn => {
+            btn.classList.remove('is-active');
+            btn.setAttribute('aria-expanded', 'false');
+        });
         if (isSameOpen) {
             activeRowMenuAnchor = null;
             return;
         }
         activeRowMenuAnchor = button;
+        menu.__trigger = button;
+        button.classList.add('is-active');
+        button.setAttribute('aria-expanded', 'true');
         positionRowMenu(button);
     }
 
@@ -7251,14 +8051,18 @@
     function syncScaleStatus(forcePresetSync = false) {
         const button = $('takeoffScaleStatus');
         if (!button) return;
+        const editorWin = takeoffWindow();
         const editorDoc = editorDocument();
-        const scaleText = (editorDoc?.getElementById('scale-display')?.textContent || '').trim();
+        const rawDisplay = (editorDoc?.getElementById('scale-display')?.textContent || callEditor('getActiveScaleLabel') || '').trim();
+        const activePpf = Number(editorWin?.pixelsPerFoot || 0);
+        const scaleText = (rawDisplay && rawDisplay !== '--') ? rawDisplay : (activePpf > 0 ? 'Custom' : '');
         const label = button.querySelector('#takeoffScaleLabel') || button.querySelector('span:not(.pro-scale-dot)') || button.querySelector('span');
         const icon = button.querySelector('i');
         const hasScale = Boolean(scaleText && scaleText !== '--' && !scaleText.toLowerCase().includes('not set') && scaleText !== '0');
         button.classList.toggle('is-set', hasScale);
         if (icon) icon.style.display = 'none';
         if (label) label.textContent = hasScale ? `Scale: ${scaleText}` : 'Not Drawing Scale';
+        button.title = hasScale ? `Drawing scale: ${scaleText}` : 'Set drawing scale';
 
         const panel = $('takeoffScalePanel');
         const isPanelOpen = panel?.classList.contains('open');
@@ -7267,24 +8071,30 @@
 
         // Only update preset dropdown if forced, or if panel is closed and user isn't actively selecting
         if (presetSelect && (forcePresetSync || (!isPanelOpen && !isUserDirty))) {
+            let matched = false;
             if (hasScale) {
                 for (let i = 0; i < presetSelect.options.length; i++) {
                     if (presetSelect.options[i].text.trim().toLowerCase() === scaleText.toLowerCase() ||
                         presetSelect.options[i].value.trim().toLowerCase() === scaleText.toLowerCase()) {
                         presetSelect.selectedIndex = i;
+                        matched = true;
                         break;
                     }
                 }
-            } else {
+            }
+            if (!matched) {
                 presetSelect.value = '';
             }
+            presetSelect._syncCustom?.();
         }
     }
     window.syncScaleStatus = syncScaleStatus;
 
     function hasScaleSet() {
-        const scaleText = (editorDocument()?.getElementById('scale-display')?.textContent || '').trim();
-        return Boolean(scaleText && scaleText !== '--');
+        const editorWin = takeoffWindow();
+        const scaleText = (editorDocument()?.getElementById('scale-display')?.textContent || callEditor('getActiveScaleLabel') || '').trim();
+        if (scaleText && scaleText !== '--' && !scaleText.toLowerCase().includes('not set') && scaleText !== '0') return true;
+        return Number(editorWin?.pixelsPerFoot || 0) > 0;
     }
 
     function syncScaleHint() {
@@ -7299,7 +8109,10 @@
         const target = $('takeoffScalePreset');
         if (!target) return false;
         if (source && source.options && source.options.length > 1) {
-            if (target.dataset.loaded === '1' && target.dataset.optionCount === String(source.options.length)) return true;
+            if (target.dataset.loaded === '1' && target.dataset.optionCount === String(source.options.length)) {
+                target._syncCustom?.();
+                return true;
+            }
             target.innerHTML = source.innerHTML;
             target.value = source.value || '';
             target.dataset.loaded = '1';
@@ -7307,7 +8120,7 @@
             target._syncCustom?.();
             return true;
         }
-        return true;
+        return false;
     }
 
     function setScaleMode(mode) {
@@ -7343,7 +8156,7 @@
     }
 
     function applyScalePreset(value) {
-        if (!value) return;
+        if (value === '' || value === null || value === undefined) return;
         const applyCheckbox = $('takeoffScaleApplyAll');
         const applyAll = Boolean(applyCheckbox?.checked);
         const editorSelect = editorDocument()?.getElementById('cal-preset');
@@ -7351,6 +8164,7 @@
         const result = callEditor('applyScalePreset', value, applyAll);
         const presetSelect = $('takeoffScalePreset');
         if (presetSelect) delete presetSelect.dataset.userDirty;
+        syncScaleStatus(true);
         Promise.resolve(result).finally(() => {
             if (applyCheckbox) applyCheckbox.checked = false;
             syncScaleStatus(true);
@@ -7367,6 +8181,7 @@
         const result = callEditor('finishCal', true, applyAll);
         const presetSelect = $('takeoffScalePreset');
         if (presetSelect) delete presetSelect.dataset.userDirty;
+        syncScaleStatus(true);
         Promise.resolve(result).finally(() => {
             if (applyCheckbox) applyCheckbox.checked = false;
             syncScaleStatus(true);
@@ -7392,8 +8207,9 @@
             if (mode === 'manual') {
                 applyManualScale();
             } else {
+                syncScalePresets();
                 const presetVal = $('takeoffScalePreset')?.value;
-                if (presetVal) {
+                if (presetVal !== '' && presetVal !== null && presetVal !== undefined) {
                     applyScalePreset(presetVal);
                 } else {
                     showToast('Please select a scale preset', 'warning');
@@ -7625,7 +8441,7 @@
 
         const browsingAttachments = isBrowsingAttachmentFolder();
 
-        const pdfRowsHtml = pdfs.map(doc => {
+        const renderPdfDocRow = doc => {
             const isSelected = !browsingAttachments && Number(doc.id) === Number(drawingState.browseDocumentId);
             const docMap = getDocTakeoffPageMap(doc.id);
             const docHasActiveItem = docMap.docHasActiveItem;
@@ -7641,7 +8457,35 @@
                     <span class="pro-drawing-count">${doc.pageCount || (doc.extension === 'pdf' ? '...' : '1')}</span>
                 </span>
             </button>`;
-        }).join('');
+        };
+
+        const discApi = window.ProjectDocumentsDisciplines;
+        let pdfRowsHtml = '';
+        if (discApi && Array.isArray(discApi.list) && typeof discApi.classify === 'function') {
+            const groupedPdfs = new Map(discApi.list.map(d => [d.key, []]));
+            pdfs.forEach(doc => {
+                const key = discApi.classify({
+                    ...doc,
+                    title: doc.name,
+                    filename: doc.name,
+                    folder_name: doc.folder || doc.folder_name || ''
+                });
+                if (!groupedPdfs.has(key)) groupedPdfs.set(key, []);
+                groupedPdfs.get(key).push(doc);
+            });
+            pdfRowsHtml = discApi.list.map(disc => {
+                const groupDocs = groupedPdfs.get(disc.key) || [];
+                if (!groupDocs.length) return '';
+                return `
+                    <div class="pro-drawing-group-header" data-discipline-group="${esc(disc.key)}">
+                        <span class="pro-drawing-group-title"><i class="${esc(disc.icon)}" style="color: ${esc(disc.color)};"></i> ${esc(disc.label)}</span>
+                        <span class="pro-drawing-group-count">${groupDocs.length}</span>
+                    </div>
+                    ${groupDocs.map(renderPdfDocRow).join('')}`;
+            }).join('');
+        } else {
+            pdfRowsHtml = pdfs.map(renderPdfDocRow).join('');
+        }
 
         let attachmentFolderHtml = '';
         if (matchingImages.length > 0) {
@@ -7653,6 +8497,10 @@
                 if (summary?.hasAnyTakeoff) folderHasAnyTakeoff = true;
             });
             attachmentFolderHtml = `
+            <div class="pro-drawing-group-header" data-discipline-group="attachments">
+                <span class="pro-drawing-group-title"><i class="fas fa-paperclip" style="color: #f59e0b;"></i> Attachments</span>
+                <span class="pro-drawing-group-count">${matchingImages.length}</span>
+            </div>
             <button class="pro-drawing-row pro-drawing-folder-row ${browsingAttachments ? 'active' : ''}" type="button" data-drawing-doc="attachment" title="Attachment (${matchingImages.length})">
                 <span class="pro-drawing-info">
                     <i class="fas fa-folder pro-doc-icon" style="color: #f59e0b;"></i>
@@ -8075,51 +8923,107 @@
 
     function selectDrawingSheet(doc, pageNumber) {
         if (!doc) return;
+        const targetPage = Math.max(1, Number(pageNumber) || 1);
         syncProjectDocument(doc);
-        drawingState.selectedPage = Math.max(1, Number(pageNumber) || 1);
+        drawingState.selectedPage = targetPage;
         setDrawingLabel();
         closeDrawingDropdown();
         if (doc.source !== 'legacy_file') return;
         const frame = $('takeoffFrame');
         if (!frame) return;
-        const nextSrc = takeoffEditorUrl(doc.id);
+        const nextSrc = takeoffEditorUrl(doc.id, activeEstimateId(), targetPage);
         let currentFrameId = 0;
         try {
             const currentUrl = new URL(frame.getAttribute('src') || '', window.location.href);
             currentFrameId = Number(currentUrl.searchParams.get('id') || 0);
         } catch (e) { }
         if (currentFrameId !== Number(doc.id)) {
+            drawingState.pendingPageJump = targetPage;
             frame.style.display = 'block';
             showTakeoffCanvasLoader(`Renderizando y cargando plano (${doc.name || 'plano'}) en Takeoff...`);
-            const fallbackTimer = setTimeout(hideTakeoffCanvasLoader, 6000);
-            const onLoad = () => {
-                clearTimeout(fallbackTimer);
-                frame.removeEventListener('load', onLoad);
-                setTimeout(() => {
-                    callEditor('takeoffJumpToPage', drawingState.selectedPage);
-                    syncEditorInfo();
-                    hideTakeoffCanvasLoader();
-                }, 80);
+            const switchFrame = async () => {
+                try {
+                    if (frame.contentWindow?.isEditorTakeoffDirty?.() && typeof frame.contentWindow?.projectTakeoffSave === 'function') {
+                        await Promise.race([
+                            Promise.resolve(frame.contentWindow.projectTakeoffSave()),
+                            new Promise(resolve => setTimeout(resolve, 1500))
+                        ]);
+                    }
+                } catch (_) { }
+                const fallbackTimer = setTimeout(hideTakeoffCanvasLoader, 6000);
+                const onLoad = () => {
+                    clearTimeout(fallbackTimer);
+                    frame.removeEventListener('load', onLoad);
+                    setTimeout(() => {
+                        callEditor('takeoffJumpToPage', targetPage);
+                        if (!drawingState.pendingPageJump) syncEditorInfo();
+                        hideTakeoffCanvasLoader();
+                    }, 80);
+                };
+                frame.addEventListener('load', onLoad);
+                frame.src = nextSrc;
             };
-            frame.addEventListener('load', onLoad);
-            frame.src = nextSrc;
+            switchFrame();
         } else {
-            callEditor('takeoffJumpToPage', drawingState.selectedPage);
+            drawingState.pendingPageJump = null;
+            callEditor('takeoffJumpToPage', targetPage);
             syncEditorInfo();
         }
         $('takeoffEmpty')?.style.setProperty('display', 'none');
     }
 
-    function changeActiveSheet(delta) {
+    function orderedDirectoryDocuments() {
+        const allPdfs = pdfDrawingDocs();
+        const allImages = attachmentImageDocs();
+        const discApi = window.ProjectDocumentsDisciplines;
+        let orderedPdfs = allPdfs;
+        if (discApi && Array.isArray(discApi.list) && typeof discApi.classify === 'function') {
+            const grouped = new Map(discApi.list.map(d => [d.key, []]));
+            allPdfs.forEach(doc => {
+                const key = discApi.classify({
+                    ...doc,
+                    title: doc.name,
+                    filename: doc.name,
+                    folder_name: doc.folder || doc.folder_name || ''
+                });
+                if (!grouped.has(key)) grouped.set(key, []);
+                grouped.get(key).push(doc);
+            });
+            orderedPdfs = [];
+            grouped.forEach(list => {
+                if (list.length) orderedPdfs.push(...list);
+            });
+        }
+        return [...orderedPdfs, ...allImages];
+    }
+
+    async function changeActiveSheet(delta) {
         const doc = activeDrawingDoc();
         if (!doc) return;
+        const step = delta < 0 ? -1 : 1;
         const info = callEditor('takeoffGetDocumentInfo');
         const max = Number(info?.pageCount || doc.pageCount || 1);
         const current = Number(info?.pageNum || drawingState.selectedPage || 1);
-        const next = current + delta;
-        if (next < 1 || next > max) return;
+        const next = current + step;
         doc.pageCount = max;
-        selectDrawingSheet(doc, next);
+        if (next >= 1 && next <= max) {
+            selectDrawingSheet(doc, next);
+            return;
+        }
+        const ordered = orderedDirectoryDocuments();
+        if (!ordered.length) return;
+        const currentIdx = ordered.findIndex(item => Number(item.id) === Number(doc.id));
+        const targetIdx = currentIdx === -1 ? (step > 0 ? 0 : ordered.length - 1) : currentIdx + step;
+        if (targetIdx < 0 || targetIdx >= ordered.length) return;
+        const targetDoc = ordered[targetIdx];
+        if (!targetDoc) return;
+        if (step > 0) {
+            selectDrawingSheet(targetDoc, 1);
+        } else {
+            await ensurePageCount(targetDoc);
+            const lastPage = Math.max(1, Number(targetDoc.pageCount || 1));
+            selectDrawingSheet(targetDoc, lastPage);
+        }
     }
 
     function syncEditorInfo() {
@@ -8129,7 +9033,7 @@
             doc.pageCount = Number(info.pageCount);
             doc.sheets = buildSheets(doc);
         }
-        if (info?.pageNum) drawingState.selectedPage = Number(info.pageNum);
+        if (info?.pageNum && !drawingState.pendingPageJump) drawingState.selectedPage = Number(info.pageNum);
         setDrawingLabel();
         renderDrawingDropdown();
         syncScaleStatus();
@@ -8178,6 +9082,21 @@
             }, 120);
         });
         window.addEventListener('message', event => {
+            if (event.data?.type === 'project-takeoff-canvas-pointerdown') {
+                if (event.source !== takeoffWindow()) return;
+                document.querySelectorAll('.pro-menu, .pro-row-menu').forEach(menu => menu.classList.remove('open'));
+                document.querySelectorAll('[data-takeoff-menu-toggle], [data-row-menu]').forEach(btn => {
+                    btn.classList.remove('is-active');
+                    btn.setAttribute('aria-expanded', 'false');
+                });
+                activeRowMenuAnchor = null;
+                if (typeof window.closeAllOpenPopouts === 'function') window.closeAllOpenPopouts();
+                closeScalePanel();
+                closeDrawingDropdown();
+                closeGroupContextMenu();
+                $('takeoffMoreToolsPanel')?.setAttribute('hidden', '');
+                return;
+            }
             if (event.data?.type === 'project-takeoff-scale-required') {
                 if (event.source !== takeoffWindow()) return;
                 openScalePanel();
@@ -8231,10 +9150,18 @@
                 setActiveTool(event.data?.payload?.tool || 'smart');
                 return;
             }
+            if (event.data?.type === 'project-takeoff-rulers-updated') {
+                const payload = event.data.payload || {};
+                takeoffRulersState.page = Number(payload.page || 1);
+                takeoffRulersState.items = Array.isArray(payload.rulers) ? payload.rulers : [];
+                renderTakeoffPanel();
+                return;
+            }
             if (event.data?.type === 'project-takeoff-ruler-selected') {
                 const payload = event.data.payload || {};
                 selectionState.selectedRuler = payload.selected ? payload : null;
                 updateSubheadSelectedItem();
+                renderTakeoffPanel();
                 return;
             }
             if (event.data?.type === 'project-takeoff-note-selected') {
@@ -8285,16 +9212,40 @@
                 syncScaleStatus();
                 return;
             }
+            if (event.data?.type === 'takeoff-editor-state-loaded') {
+                if (event.source !== takeoffWindow()) return;
+                syncAllLayersToCanvas({ suppressEstimatingSync: true });
+                const active = findLayer(takeoffState.activeLayerId);
+                if (active) applyLayerToCanvas(active, { skipLayerSync: true });
+                return;
+            }
             if (event.data?.type !== 'takeoff-editor-ready') return;
             hideTakeoffCanvasLoader();
             const doc = activeDrawingDoc();
             if (doc && Number(event.data.fileId) === Number(doc.id)) {
-                doc.pageCount = Number(event.data.pageCount || 1);
+                const totalPages = Math.max(1, Number(event.data.pageCount || 1));
+                doc.pageCount = totalPages;
                 doc.sheets = buildSheets(doc);
-                drawingState.selectedPage = Number(event.data.pageNum || 1);
+                const pendingTarget = drawingState.pendingPageJump
+                    ? Math.max(1, Math.min(totalPages, Number(drawingState.pendingPageJump) || 1))
+                    : null;
+                drawingState.pendingPageJump = null;
+                if (pendingTarget && Number(event.data.pageNum || 1) !== pendingTarget) {
+                    drawingState.selectedPage = pendingTarget;
+                    callEditor('takeoffJumpToPage', pendingTarget);
+                } else {
+                    drawingState.selectedPage = Number(event.data.pageNum || 1);
+                }
                 setDrawingLabel();
                 if (drawingState.dropdownOpen) renderDrawingDropdown();
-                syncScaleStatus();
+                syncScalePresets();
+                syncScaleStatus(true);
+            }
+            const readyRulers = callEditor('getKonvaRulersSummary');
+            if (Array.isArray(readyRulers)) {
+                takeoffRulersState.page = Number(drawingState.selectedPage || 1);
+                takeoffRulersState.items = readyRulers;
+                renderTakeoffPanel();
             }
         });
         $('takeoffFrame')?.addEventListener('load', () => {
@@ -8309,6 +9260,137 @@
             }, 360);
         });
     }
+
+    window.cloneTakeoffWorkspaceForEstimate = function (sourceEstimateId, targetEstimateId, copiedEstimate = null) {
+        const srcEstId = String(sourceEstimateId || activeEstimateId() || '');
+        const dstEstId = String(targetEstimateId || '');
+        if (!srcEstId || !dstEstId || srcEstId === dstEstId) return null;
+
+        const layerIdMap = {};
+        const groupIdMap = {};
+        const itemIdMap = {};
+        const copiedEstGroups = Array.isArray(copiedEstimate?.groups) ? copiedEstimate.groups : [];
+        const sourceGroups = takeoffState.groups.filter(g => groupBelongsToEstimate(g, srcEstId));
+
+        takeoffState.groups = takeoffState.groups.filter(g => String(g.estimateId || '') !== dstEstId);
+
+        const matchCopiedEstGroup = (srcGroup, idx) => {
+            const byIdx = copiedEstGroups[idx];
+            if (byIdx && String(byIdx.name || '') === String(srcGroup.name || '')) return byIdx;
+            return copiedEstGroups.find(eg => String(eg.name || '') === String(srcGroup.name || '')) || byIdx || null;
+        };
+
+        const clonedGroups = sourceGroups.map((srcGroup, idx) => {
+            const newGroupId = makeId('grp');
+            const matchedEstGrp = matchCopiedEstGroup(srcGroup, idx);
+            const newEstGroupId = matchedEstGrp ? String(matchedEstGrp.id) : `takeoff_group_${newGroupId}`;
+            if (matchedEstGrp) matchedEstGrp.takeoffGroupId = newGroupId;
+            groupIdMap[String(srcGroup.id)] = newGroupId;
+            if (srcGroup.estimatingGroupId) groupIdMap[String(srcGroup.estimatingGroupId)] = newEstGroupId;
+
+            const clonedLayers = (srcGroup.layers || []).map(srcLayer => {
+                const newLayerId = makeId('layer');
+                const srcLayerKeys = [
+                    srcLayer.id,
+                    srcLayer.client_uid,
+                    srcLayer.integration_key,
+                    srcLayer.metadata_json?.project_layer_id
+                ].filter(Boolean).map(String);
+                srcLayerKeys.forEach(k => { layerIdMap[k] = newLayerId; });
+
+                let matchedEstItem = null;
+                const findMatchInItems = (rows) => {
+                    for (const it of (rows || [])) {
+                        if (srcLayerKeys.includes(String(it.copiedFromTakeoffLayerId || it.takeoffLayerId || ''))) return it;
+                        if (srcLayer.estimatingItemId && String(it.name || '') === String(srcLayer.name || '')) return it;
+                    }
+                    return null;
+                };
+                if (matchedEstGrp) matchedEstItem = findMatchInItems(matchedEstGrp.items);
+                if (!matchedEstItem) {
+                    for (const g of copiedEstGroups) {
+                        matchedEstItem = findMatchInItems(g.items);
+                        if (matchedEstItem) break;
+                    }
+                }
+                if (matchedEstItem) {
+                    matchedEstItem.takeoffLayerId = newLayerId;
+                    matchedEstItem.source_layer_key = newLayerId;
+                    if (srcLayer.estimatingItemId) itemIdMap[String(srcLayer.estimatingItemId)] = String(matchedEstItem.id);
+                }
+
+                const clonedMeta = srcLayer.metadata_json && typeof srcLayer.metadata_json === 'object'
+                    ? JSON.parse(JSON.stringify(srcLayer.metadata_json))
+                    : {};
+                clonedMeta.project_layer_id = newLayerId;
+                clonedMeta.estimate_id = dstEstId;
+                clonedMeta.estimating_group_id = newEstGroupId;
+                if (matchedEstItem) clonedMeta.estimating_item_id = String(matchedEstItem.id);
+                if (srcLayer.tag) clonedMeta.tag = srcLayer.tag;
+                if (srcLayer.multiplier !== undefined) clonedMeta.multiplier = Number(srcLayer.multiplier ?? 1);
+                if (srcLayer.difficulty !== undefined) clonedMeta.difficulty = Number(srcLayer.difficulty ?? 1);
+
+                const clonedShapes = Array.isArray(srcLayer.shapes)
+                    ? srcLayer.shapes.map(sh => ({
+                        ...JSON.parse(JSON.stringify(sh)),
+                        id: makeId('shape'),
+                        layerId: newLayerId
+                    }))
+                    : [];
+
+                return {
+                    ...JSON.parse(JSON.stringify(srcLayer)),
+                    id: newLayerId,
+                    client_uid: newLayerId,
+                    integration_key: newLayerId,
+                    groupId: newGroupId,
+                    estimateId: dstEstId,
+                    estimatingGroupId: newEstGroupId,
+                    estimatingItemId: matchedEstItem ? String(matchedEstItem.id) : null,
+                    shapes: clonedShapes,
+                    takeoffObjects: clonedShapes,
+                    metadata_json: clonedMeta
+                };
+            });
+
+            return {
+                ...JSON.parse(JSON.stringify(srcGroup)),
+                id: newGroupId,
+                estimateId: dstEstId,
+                estimatingGroupId: newEstGroupId,
+                layers: clonedLayers
+            };
+        });
+
+        takeoffState.groups.push(...clonedGroups);
+
+        Object.entries(takeoffState.canvasSnapshots || {}).forEach(([snapKey, snap]) => {
+            if (!snap || String(snap.estimateId || snap.estimateKey || '') !== srcEstId) return;
+            const docId = String(snap.documentId || snap.drawingId || snapKey.split(':')[1] || 'active');
+            const clonedSnap = JSON.parse(JSON.stringify(snap));
+            clonedSnap.estimateId = dstEstId;
+            clonedSnap.estimateKey = dstEstId;
+            if (Array.isArray(clonedSnap.layers)) {
+                clonedSnap.layers = clonedSnap.layers.map(rl => {
+                    const mappedId = layerIdMap[String(rl.id || rl.layerId || rl.client_uid || '')] || String(rl.id || '');
+                    const shapes = Array.isArray(rl.shapes || rl.takeoffObjects)
+                        ? (rl.shapes || rl.takeoffObjects).map(s => ({ ...s, id: makeId('shape'), layerId: mappedId }))
+                        : [];
+                    return { ...rl, id: mappedId, layerId: mappedId, client_uid: mappedId, estimate_id: dstEstId, shapes, takeoffObjects: shapes };
+                });
+            }
+            clonedSnap.updatedAt = Date.now();
+            takeoffState.canvasSnapshots[`${dstEstId}:${docId}`] = clonedSnap;
+        });
+
+        if (canWrite()) {
+            try {
+                const pId = String(window.ProjectState?.projectId || 0);
+                localStorage.setItem('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
+            } catch (_) { }
+        }
+        return { sourceEstimateId: srcEstId, targetEstimateId: dstEstId, layerIdMap, groupIdMap, itemIdMap };
+    };
 
     window.projectTakeoffRefreshDrawings = function (targetDocId = null) {
         drawingState.documents = drawingDocs();
@@ -8528,15 +9610,42 @@
         }
 
         const controlsDockBtn = $('takeoffControlsDockToggle');
+        const controlsCollapseBtn = $('takeoffControlsCollapseToggle');
         const controlsPanel = document.querySelector('.pro-floating-controls');
+        const syncFloatingControlsUi = () => {
+            if (!controlsPanel) return;
+            const isLeft = controlsPanel.classList.contains('is-docked-left');
+            const isCollapsed = controlsPanel.classList.contains('is-collapsed');
+            if (controlsCollapseBtn) {
+                controlsCollapseBtn.setAttribute('aria-expanded', isCollapsed ? 'false' : 'true');
+                controlsCollapseBtn.title = isCollapsed ? 'Expand floating controls' : 'Collapse floating controls';
+                controlsCollapseBtn.setAttribute('aria-label', controlsCollapseBtn.title);
+                const icon = controlsCollapseBtn.querySelector('i');
+                if (icon) {
+                    const pointLeft = isCollapsed ? !isLeft : isLeft;
+                    icon.className = `fas fa-chevron-${pointLeft ? 'left' : 'right'}`;
+                }
+            }
+        };
         if (controlsDockBtn && controlsPanel) {
             const savedControlsDock = localStorage.getItem('takeoff.floatingControlsDock');
             if (savedControlsDock === 'left') controlsPanel.classList.add('is-docked-left');
             controlsDockBtn.addEventListener('click', () => {
                 const isLeft = controlsPanel.classList.toggle('is-docked-left');
                 localStorage.setItem('takeoff.floatingControlsDock', isLeft ? 'left' : 'right');
+                syncFloatingControlsUi();
             });
         }
+        if (controlsCollapseBtn && controlsPanel) {
+            const savedCollapsed = localStorage.getItem('takeoff.floatingControlsCollapsed');
+            if (savedCollapsed === '1') controlsPanel.classList.add('is-collapsed');
+            controlsCollapseBtn.addEventListener('click', () => {
+                const isCollapsed = controlsPanel.classList.toggle('is-collapsed');
+                localStorage.setItem('takeoff.floatingControlsCollapsed', isCollapsed ? '1' : '0');
+                syncFloatingControlsUi();
+            });
+        }
+        syncFloatingControlsUi();
 
         $('takeoffCompareBtn')?.addEventListener('click', () => {
             if (typeof window.showTakeoffToast === 'function') {
@@ -8587,12 +9696,13 @@
         });
         window.addEventListener('takeoff:active-estimate-changed', (event) => {
             const estimateId = event.detail?.estimateId || activeEstimateId();
+            const forceReload = Boolean(event.detail?.cloned);
             takeoffState.activeEstimateId = String(estimateId);
             setSelectedObjects([]);
             renderTakeoffEstimateFooter();
             setTimeout(() => {
                 ensureEstimateTakeoffWorkspace(estimateId, true);
-                ensureEditorEstimate();
+                ensureEditorEstimate(estimateId, forceReload);
                 renderTakeoffPanel();
                 renderViewerLayersPopover();
                 syncAllLayersToCanvas({ suppressEstimatingSync: true });
@@ -8643,8 +9753,15 @@
         }
 
         document.addEventListener('click', (event) => {
-            document.querySelectorAll('.pro-menu, .pro-row-menu').forEach(menu => menu.classList.remove('open'));
-            document.querySelectorAll('[data-takeoff-menu-toggle]').forEach(button => button.setAttribute('aria-expanded', 'false'));
+            document.querySelectorAll('.pro-menu, .pro-row-menu').forEach(menu => {
+                menu.classList.remove('open');
+                menu.__trigger = null;
+            });
+            document.querySelectorAll('[data-takeoff-menu-toggle], [data-row-menu]').forEach(button => {
+                button.classList.remove('is-active');
+                button.setAttribute('aria-expanded', 'false');
+            });
+            activeRowMenuAnchor = null;
             if (typeof window.closeAllOpenPopouts === 'function') window.closeAllOpenPopouts();
             closeScalePanel();
             closeDrawingDropdown();
@@ -8673,6 +9790,13 @@
             setTimeout(syncTakeoffSubheadAlignment, 50);
             updateSubheadSelectedItem();
         });
+        document.querySelectorAll('[data-tab="estimating"], [data-tab="proposal"], #saveProjectBtn, [data-takeoff-estimating-action]').forEach(el => {
+            el.addEventListener('pointerdown', () => {
+                try { callEditor('projectTakeoffSave'); } catch (_) { }
+                flushEstimatingSyncFromCanvas();
+            }, true);
+        });
+        window.addEventListener('pagehide', () => flushEstimatingSyncFromCanvas());
         if (typeof ResizeObserver === 'function') {
             const observer = new ResizeObserver(() => {
                 syncWorkspaceDensity();
@@ -8710,6 +9834,15 @@
                 if (event.key === 'Escape') {
                     event.preventDefault();
                     closeTakeoffGroupModal();
+                    return;
+                }
+                if (event.key === 'Enter' && !event.isComposing && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+                    const form = $('takeoffGroupForm');
+                    if (form && event.target?.tagName !== 'BUTTON') {
+                        event.preventDefault();
+                        if (typeof form.requestSubmit === 'function') form.requestSubmit();
+                        else submitTakeoffGroupModal(event);
+                    }
                     return;
                 }
                 if (event.key === 'Tab') {

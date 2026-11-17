@@ -6,6 +6,15 @@
         return Number.isFinite(parsed) ? parsed : fallback;
     }
 
+    function firstDefined(...values) {
+        for (const value of values) {
+            if (value !== undefined && value !== null && value !== '' && Number.isFinite(Number(value))) {
+                return Number(value);
+            }
+        }
+        return undefined;
+    }
+
     function clampMargin(value) {
         return Math.min(99.999999, Math.max(-999, num(value)));
     }
@@ -60,14 +69,14 @@
 
     function calculatePart(item, settings = {}) {
         const quantity = num(item.quantity);
-        const wastePercent = Math.max(0, num(item.waste));
-        const adjustedQuantity = quantity * (1 + wastePercent / 100);
         const isEquipmentItem = String(item.itemType ?? item.item_type ?? item.costCategory ?? '')
             .toLowerCase().includes('equip');
+        const wastePercent = Math.max(0, firstDefined(item.waste, isEquipmentItem ? settings.equipmentWaste : settings.materialWaste) ?? 0);
+        const adjustedQuantity = quantity * (1 + wastePercent / 100);
         const materialCost = isEquipmentItem ? 0 : adjustedQuantity * num(item.unitMaterialCost ?? item.unitCost);
-        const materialMargin = num(item.materialMargin ?? item.margin);
-        const equipmentMargin = num(item.equipmentMargin);
-        const laborMargin = num(item.laborMargin ?? settings.globalLaborMargin);
+        const materialMargin = firstDefined(item.materialMargin, item.margin, settings.materialMargin) ?? 0;
+        const equipmentMargin = firstDefined(item.equipmentMargin, settings.equipmentMargin) ?? 0;
+        const laborMargin = firstDefined(item.laborMargin, settings.globalLaborMargin) ?? 0;
         const validation = [];
         if (materialMargin >= 100) validation.push({ field: 'materialMargin', code: 'margin_must_be_below_100' });
         if (equipmentMargin >= 100) validation.push({ field: 'equipmentMargin', code: 'margin_must_be_below_100' });
@@ -89,10 +98,16 @@
         // Waste is a material allowance. Labor follows the measured/base quantity
         // modified by difficulty and optional labor inefficiency / waste allowance.
         const baseLaborHours = quantity * unitLaborHours(item);
-        const itemLaborWaste = item.laborWaste ?? (item.itemType === 'labor' ? item.waste : undefined);
-        const laborWastePercent = Math.max(0, num(itemLaborWaste ?? settings.laborWaste, 0));
-        const adjustedLaborHours = baseLaborHours * Math.max(0, num(item.difficulty, 1)) * (1 + laborWastePercent / 100);
-        const laborCost = adjustedLaborHours * num(item.laborRate ?? settings.globalLaborCost);
+        const itemLaborWaste = (item.laborWaste !== undefined && item.laborWaste !== null && item.laborWaste !== '')
+            ? item.laborWaste
+            : (item.itemType === 'labor' ? item.waste : undefined);
+        const laborWastePercent = Math.max(0, firstDefined(itemLaborWaste, settings.laborWaste) ?? 0);
+        const difficultyFactor = Math.max(0, firstDefined(item.difficulty, settings.laborDifficulty) ?? 1);
+        const adjustedLaborHours = baseLaborHours * difficultyFactor * (1 + laborWastePercent / 100);
+        const hasExplicitLaborRate = item._manualFields?.laborRate === true
+            || (item.overrides?.laborRate !== null && item.overrides?.laborRate !== undefined);
+        const effectiveItemLaborRate = (Number(item.laborRate) > 0 || hasExplicitLaborRate) ? item.laborRate : null;
+        const laborCost = adjustedLaborHours * (firstDefined(effectiveItemLaborRate, settings.globalLaborCost) ?? 0);
         const laborSales = salesFromCost(laborCost, laborMargin >= 100 ? 0 : clampMargin(laborMargin), settings.marginMode);
         const totalCost = materialCost + equipmentCost + laborCost;
         const totalSales = materialSales + equipmentSales + laborSales;
@@ -153,15 +168,16 @@
                     ? num(c.factorOverride)
                     : (c.ratio !== undefined && c.ratio !== null ? num(c.ratio) : num(c.quantity));
                 const cCost = num(c.unitMaterialCost ?? c.unitCost);
-                const cWaste = Math.max(0, num(c.waste));
+                const cWaste = Math.max(0, firstDefined(c.waste, settings.materialWaste) ?? 0);
                 unitMaterialCost += ratio * cCost * (1 + cWaste / 100);
             });
             children.forEach(c => {
                 const ratio = (c.factorOverride !== undefined && c.factorOverride !== null && c.factorOverride !== '')
                     ? num(c.factorOverride)
                     : (c.ratio !== undefined && c.ratio !== null ? num(c.ratio) : num(c.quantity));
-                const cCost = num(c.unitMaterialCost ?? c.unitCost) * (1 + Math.max(0, num(c.waste)) / 100);
-                const margin = num(c.materialMargin ?? c.margin);
+                const cWaste = Math.max(0, firstDefined(c.waste, settings.materialWaste) ?? 0);
+                const cCost = num(c.unitMaterialCost ?? c.unitCost) * (1 + cWaste / 100);
+                const margin = firstDefined(c.materialMargin, c.margin, settings.materialMargin) ?? 0;
                 unitMaterialSales += ratio * salesFromCost(cCost, margin >= 100 ? 0 : clampMargin(margin), settings.marginMode);
             });
         }

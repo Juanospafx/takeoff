@@ -282,20 +282,27 @@ if ($projectId > 0 && dash_table_exists($pdo, 'drawings')) {
 }
 
 $takeoffLayers = [];
-if ($projectId > 0 && dash_table_exists($pdo, 'takeoff_layers')) {
-    $stmt = $pdo->prepare(dash_column_exists($pdo, 'takeoff_layers', 'project_id') ? "
-        SELECT * FROM takeoff_layers
-        WHERE project_id = ? AND deleted_at IS NULL
-        ORDER BY sort_order ASC, id DESC
+if ($projectId > 0 && dash_table_exists($pdo, 'takeoff_layers') && dash_table_exists($pdo, 'takeoffs')) {
+    $hasLayerProjectId = dash_column_exists($pdo, 'takeoff_layers', 'project_id');
+    $stmt = $pdo->prepare($hasLayerProjectId ? "
+        SELECT tl.*, COALESCE(NULLIF(tl.drawing_id, 0), t.drawing_id) AS resolved_drawing_id
+        FROM takeoff_layers tl
+        LEFT JOIN takeoffs t ON t.id = tl.takeoff_id AND t.deleted_at IS NULL
+        WHERE (tl.project_id = ? OR t.project_id = ?) AND tl.deleted_at IS NULL
+        ORDER BY tl.sort_order ASC, tl.id DESC
     " : "
-        SELECT tl.*
+        SELECT tl.*, t.drawing_id AS resolved_drawing_id
         FROM takeoff_layers tl
         INNER JOIN takeoffs t ON t.id = tl.takeoff_id
-        WHERE t.project_id = ? AND tl.deleted_at IS NULL
+        WHERE t.project_id = ? AND t.deleted_at IS NULL
         ORDER BY tl.sort_order ASC, tl.id DESC
     ");
-    $stmt->execute([$projectId]);
+    $stmt->execute($hasLayerProjectId ? [$projectId, $projectId] : [$projectId]);
     $takeoffLayers = array_map(function ($tl) {
+        if (empty($tl['drawing_id']) && !empty($tl['resolved_drawing_id'])) {
+            $tl['drawing_id'] = (int)$tl['resolved_drawing_id'];
+        }
+        unset($tl['resolved_drawing_id']);
         if (!empty($tl['metadata_json'])) {
             $meta = is_array($tl['metadata_json']) ? $tl['metadata_json'] : json_decode($tl['metadata_json'], true);
             if (is_array($meta)) {
@@ -305,10 +312,108 @@ if ($projectId > 0 && dash_table_exists($pdo, 'takeoff_layers')) {
                 if (isset($meta['multiplier']) && !isset($tl['multiplier'])) {
                     $tl['multiplier'] = (float)$meta['multiplier'];
                 }
+                if (empty($tl['drawing_id']) && !empty($meta['file_drawing_id'])) {
+                    $tl['drawing_id'] = (int)$meta['file_drawing_id'];
+                }
             }
         }
         return $tl;
     }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
+$takeoffDrawingStates = [];
+if ($projectId > 0 && dash_table_exists($pdo, 'takeoff_estimate_states')) {
+    try {
+        $stmtStates = $pdo->prepare("
+            SELECT estimate_key, drawing_id, state_json, updated_at
+            FROM takeoff_estimate_states
+            WHERE project_id = ? AND drawing_id > 0
+            ORDER BY updated_at ASC
+        ");
+        $stmtStates->execute([$projectId]);
+        foreach ($stmtStates->fetchAll(PDO::FETCH_ASSOC) as $stRow) {
+            $estKey = trim((string)($stRow['estimate_key'] ?? ''));
+            $did = (int)($stRow['drawing_id'] ?? 0);
+            if ($estKey === '' || $did <= 0) continue;
+            $decoded = json_decode((string)($stRow['state_json'] ?? '{}'), true);
+            if (!is_array($decoded)) continue;
+            $rawLayers = is_array($decoded['layers'] ?? null) ? $decoded['layers'] : [];
+            $rawMarkers = is_array($decoded['markers'] ?? null) ? $decoded['markers'] : [];
+            $rawSegments = is_array($decoded['segments'] ?? null) ? $decoded['segments'] : [];
+            $shapesByLayer = [];
+            foreach ($rawMarkers as $m) {
+                if (!is_array($m)) continue;
+                $lid = (string)($m['layer_client_uid'] ?? $m['layer_id'] ?? '');
+                if ($lid === '') continue;
+                $mult = isset($m['multiplier']) && $m['multiplier'] !== '' ? (float)$m['multiplier'] : 1.0;
+                $qVal = isset($m['quantity']) && $m['quantity'] !== '' ? (float)$m['quantity'] : $mult;
+                $shapesByLayer[$lid][] = [
+                    'id' => (string)($m['client_uid'] ?? $m['id'] ?? ''),
+                    'client_uid' => (string)($m['client_uid'] ?? $m['id'] ?? ''),
+                    'layerId' => $lid,
+                    'documentId' => (string)$did,
+                    'pageNumber' => max(1, (int)($m['page_number'] ?? 1)),
+                    'type' => 'Count',
+                    'quantityValue' => $qVal,
+                    'quantity' => $qVal,
+                ];
+            }
+            foreach ($rawSegments as $s) {
+                if (!is_array($s)) continue;
+                $lid = (string)($s['layer_client_uid'] ?? $s['layer_id'] ?? '');
+                if ($lid === '') continue;
+                $isArea = strtolower((string)($s['takeoff_type'] ?? $s['type'] ?? '')) === 'area';
+                $qVal = (float)($isArea
+                    ? ($s['total_area'] ?? $s['measured_area'] ?? $s['total_length'] ?? 0)
+                    : ($s['total_length'] ?? $s['measured_length'] ?? 0));
+                $shapesByLayer[$lid][] = [
+                    'id' => (string)($s['client_uid'] ?? $s['id'] ?? ''),
+                    'client_uid' => (string)($s['client_uid'] ?? $s['id'] ?? ''),
+                    'layerId' => $lid,
+                    'documentId' => (string)$did,
+                    'pageNumber' => max(1, (int)($s['page_number'] ?? 1)),
+                    'type' => $isArea ? 'Area' : 'Linear',
+                    'quantityValue' => $qVal,
+                    'quantity' => $qVal,
+                ];
+            }
+            $compactLayers = [];
+            $seenCompactLayerIds = [];
+            foreach ($rawLayers as $rl) {
+                if (!is_array($rl)) continue;
+                $lid = (string)($rl['client_uid'] ?? $rl['id'] ?? '');
+                if ($lid === '' || isset($seenCompactLayerIds[$lid])) continue;
+                $seenCompactLayerIds[$lid] = true;
+                $meta = is_array($rl['metadata_json'] ?? null) ? $rl['metadata_json'] : [];
+                $baseQty = (float)($rl['baseQuantity'] ?? $rl['base_quantity'] ?? $rl['seed_quantity'] ?? $meta['base_quantity'] ?? 0);
+                $compactLayers[] = [
+                    'id' => $lid,
+                    'layerId' => $lid,
+                    'client_uid' => $lid,
+                    'name' => (string)($rl['name'] ?? ''),
+                    'color' => (string)($rl['color'] ?? '#2563eb'),
+                    'symbol' => (string)($rl['symbol'] ?? 'circle'),
+                    'type' => (string)($rl['takeoff_type'] ?? $rl['type'] ?? 'count'),
+                    'unit_of_measure' => (string)($rl['unit_of_measure'] ?? 'ea'),
+                    'quantity' => (float)($rl['quantity'] ?? 0),
+                    'baseQuantity' => $baseQty,
+                    'base_quantity' => $baseQty,
+                    'seed_quantity' => $baseQty,
+                    'shapes' => $shapesByLayer[$lid] ?? [],
+                ];
+            }
+            $takeoffDrawingStates[] = [
+                'estimateId' => $estKey,
+                'estimateKey' => $estKey,
+                'drawingId' => $did,
+                'documentId' => (string)$did,
+                'updatedAt' => (string)($stRow['updated_at'] ?? ''),
+                'layers' => $compactLayers,
+            ];
+        }
+    } catch (Throwable $e) {
+        // Tolerate missing migration table in older environments
+    }
 }
 
 $takeoffLocations = [];
@@ -579,6 +684,7 @@ $state = [
     'takeoffGroups' => [],
     'takeoffLayers' => $takeoffLayers,
     'takeoffLocations' => $takeoffLocations,
+    'takeoffDrawingStates' => $takeoffDrawingStates,
     'takeoffMeasurements' => [],
     'estimateItems' => $estimateItems,
     'estimateTotals' => [
@@ -935,7 +1041,7 @@ $state = [
 <body data-user-role="<?= htmlspecialchars($authRole, ENT_QUOTES, 'UTF-8') ?>" data-can-write="<?= $canWrite ? 'true' : 'false' ?>" data-read-only="<?= $canWrite ? 'false' : 'true' ?>">
     <?php include __DIR__ . '/../views/global_tools_header.php'; ?>
     <div class="workspace-shell">
-        <div class="project-subhead-wrapper <?= $activeTab === 'takeoff' ? 'is-takeoff-tab' : ($activeTab === 'documents' ? 'is-documents-tab' : '') ?>">
+        <div class="project-subhead-wrapper <?= $activeTab === 'takeoff' ? 'is-takeoff-tab' : ($activeTab === 'documents' ? 'is-documents-tab' : ($activeTab === 'estimating' ? 'is-estimating-tab' : '')) ?>">
             <header class="project-header">
                 <div class="pd-header-left">
                     <?php
@@ -1015,6 +1121,30 @@ $state = [
                                 </button>
                             </div>
                         </div>
+                        <!-- Selected Estimating Items info with quick actions (Independent from Takeoff & Documents) -->
+                        <div class="takeoff-subhead-item-info estimating-subhead-item-info" id="estimatingSubheadItemInfo" style="display:none;"
+                            title="Selected Estimate Items">
+                            <div class="takeoff-subhead-item-main">
+                                <span class="pro-active-layer-dot" id="estimatingSubheadItemDot"><i class="fas fa-list-check" style="color: #fb5a3a; font-size: 11.5px;"></i></span>
+                                <strong class="takeoff-subhead-item-name" id="estimatingSubheadItemName"></strong>
+                                <span class="takeoff-subhead-item-meta" id="estimatingSubheadItemMeta"></span>
+                            </div>
+                            <div class="takeoff-subhead-item-divider"></div>
+                            <div class="takeoff-subhead-item-actions" id="estimatingSubheadItemActions">
+                                <button type="button" class="subhead-item-act-btn" data-est-subhead-action="copy"
+                                    title="Copy selected items">
+                                    <i class="fas fa-copy"></i><span>Copy</span>
+                                </button>
+                                <button type="button" class="subhead-item-act-btn" data-est-subhead-action="move"
+                                    title="Move selected items to group">
+                                    <i class="fas fa-folder-tree"></i><span>Move to</span>
+                                </button>
+                                <button type="button" class="subhead-item-act-btn danger"
+                                    data-est-subhead-action="delete" title="Delete selected items">
+                                    <i class="fas fa-trash"></i><span>Delete</span>
+                                </button>
+                            </div>
+                        </div>
                     </div>
                     <!-- Keep hidden for script hooks -->
                     <p id="projectHeaderSubtitle" style="display:none;">
@@ -1082,6 +1212,14 @@ $state = [
                 </div>
                 <!-- Drawings & Sheets + Page Count (Point 7: right next to proposal tab) -->
                 <div class="takeoff-subhead-sheet-group" id="takeoffSubheadSheetGroup">
+                    <div class="takeoff-subhead-nav-arrows">
+                        <button class="pro-icon-btn takeoff-subhead-nav-btn" type="button" data-viewer-command="previous"
+                            title="Previous drawing / sheet" aria-label="Previous drawing or sheet"><i
+                                class="fas fa-chevron-left"></i></button>
+                        <button class="pro-icon-btn takeoff-subhead-nav-btn" type="button" data-viewer-command="next"
+                            title="Next drawing / sheet" aria-label="Next drawing or sheet"><i
+                                class="fas fa-chevron-right"></i></button>
+                    </div>
                     <div class="takeoff-subhead-drawing-wrap">
                         <div class="pro-drawing-selector">
                             <button class="pro-sheet-select pro-sheet-trigger" id="takeoffSheetSelect" type="button"
@@ -1679,37 +1817,28 @@ $state = [
                             <div>
                                 <h2 id="takeoffPanelTitle">Takeoffs (0)</h2>
                             </div>
-                            <button class="pro-add-btn" type="button" data-takeoff-action="create-layer"
-                                title="Create New Takeoff Layer" aria-label="Create New Takeoff Layer"><i
-                                    class="fas fa-plus"></i></button>
-                        </div>
-                        <div class="pro-takeoff-searchbar">
-                            <div class="pro-search-input">
-                                <input id="takeoffItemSearch" type="search" placeholder="Search Takeoffs">
-                                <i class="fas fa-magnifying-glass"></i>
+                            <div class="pro-takeoff-searchbar">
+                                <div class="pro-search-input">
+                                    <input id="takeoffItemSearch" type="search" placeholder="Search Takeoffs">
+                                    <i class="fas fa-magnifying-glass"></i>
+                                </div>
                             </div>
                         </div>
                         <div class="pro-takeoff-actions-row">
                             <button class="pro-visibility-btn pro-global-eye-btn" type="button"
                                 data-takeoff-action="toggle-global-visibility" title="Show/hide all takeoffs"
                                 aria-label="Show/hide all takeoffs"><i class="fas fa-eye"></i></button>
-                            <div class="pro-menu-wrap">
-                                <button class="pro-actions-btn" type="button"
-                                    data-takeoff-menu-toggle="takeoffItemsActions" aria-label="Takeoff actions">
-                                    Actions <i class="fas fa-caret-down"></i>
-                                </button>
-                                <div class="pro-menu" id="takeoffItemsActions">
-                                    <button type="button" data-takeoff-action="create-layer"><i class="fas fa-plus"></i>
-                                        Create New Layer</button>
-                                    <button type="button" data-takeoff-action="create-group"><i
-                                            class="fas fa-folder-plus"></i>
-                                        Create New Group</button>
-                                    <button type="button" data-takeoff-action="collapse-all"><i
-                                            class="fas fa-down-left-and-up-right-to-center"></i> Collapse All</button>
-                                    <button type="button" class="excel" data-takeoff-action="export-excel"><i
-                                            class="fas fa-file-excel"></i> Takeoff Quantities to Excel</button>
-                                </div>
-                            </div>
+                            <button class="pro-row-action-btn" type="button" data-takeoff-action="create-group"
+                                title="New Group" aria-label="New Group"><i class="fas fa-folder-plus"></i></button>
+                            <button class="pro-row-action-btn" type="button" data-takeoff-action="collapse-all"
+                                title="Collapse All Groups" aria-label="Collapse All Groups"><i
+                                    class="fas fa-down-left-and-up-right-to-center"></i></button>
+                            <button class="pro-row-action-btn excel" type="button" data-takeoff-action="export-excel"
+                                title="Takeoff Quantities to Excel" aria-label="Takeoff Quantities to Excel"><i
+                                    class="fas fa-file-excel"></i></button>
+                            <button class="pro-add-btn" type="button" data-takeoff-action="create-layer"
+                                title="Create New Takeoff Layer" aria-label="Create New Takeoff Layer"><i
+                                    class="fas fa-plus"></i></button>
                         </div>
                         <div class="pro-takeoff-tree" id="takeoffItemsTree"></div>
                     </aside>
@@ -1778,13 +1907,12 @@ $state = [
                             <?php endif; ?>
 
                             <div class="pro-floating-controls">
+                                <button class="pro-icon-btn pro-controls-collapse-toggle" type="button" id="takeoffControlsCollapseToggle"
+                                    title="Collapse floating controls" aria-label="Collapse floating controls" aria-expanded="true"><i
+                                        class="fas fa-chevron-right"></i></button>
                                 <button class="pro-icon-btn" type="button" id="takeoffControlsDockToggle"
                                     title="Dock left / right" aria-label="Dock left or right"><i
                                         class="fas fa-right-left"></i></button>
-                                <button class="pro-icon-btn" type="button" data-viewer-command="previous"
-                                    title="Previous sheet"><i class="fas fa-chevron-left"></i></button>
-                                <button class="pro-icon-btn" type="button" data-viewer-command="next"
-                                    title="Next sheet"><i class="fas fa-chevron-right"></i></button>
                                 <button class="pro-icon-btn" type="button" data-viewer-command="zoom-out"
                                     title="Zoom out"><i class="fas fa-minus"></i></button>
                                 <input id="takeoffZoomSlider" type="range" min="25" max="400" value="100"
@@ -2205,7 +2333,7 @@ $state = [
                         '#saveProjectBtn','#projectStatusButton','#markAsWonBtn','#retryWonExportBtn',
                         '#saveCustomerBtn','#editCustomerInfoBtn','#editProjectAddressBtn','#addProjectAddressBtn','#addNoteBtnHead',
                         '#docUploadArrowBtn','[data-doc-folder-action]','[data-doc-action="delete"]','[data-doc-action="move"]',
-                        '[data-subhead-item-action]','[data-scale-apply-manual]','[data-scale-clear-line]','#takeoffScaleApplyBtn',
+                        '[data-subhead-item-action]','[data-est-subhead-action]','[data-scale-apply-manual]','[data-scale-clear-line]','#takeoffScaleApplyBtn',
                         '[data-takeoff-action="create-layer"]','[data-takeoff-action="create-group"]',
                         '[data-tool-command="count"]','[data-tool-command="linear"]','[data-tool-command="area"]',
                         '[data-tool-command="measure"]','[data-tool-command="text"]','[data-tool-command="cloud"]',
@@ -2221,7 +2349,7 @@ $state = [
                     });
                 });
                 document.addEventListener('click', function (event) {
-                    var target = event.target?.closest?.('[data-subhead-item-action],[data-doc-folder-action],[data-takeoff-action],[data-scale-apply-manual],[data-scale-clear-line],[data-est-action],[data-est-option],[data-editor-cmd],#saveProjectBtn,#projectStatusButton,#markAsWonBtn,#retryWonExportBtn,#docUploadArrowBtn');
+                    var target = event.target?.closest?.('[data-subhead-item-action],[data-est-subhead-action],[data-doc-folder-action],[data-takeoff-action],[data-scale-apply-manual],[data-scale-clear-line],[data-est-action],[data-est-option],[data-editor-cmd],#saveProjectBtn,#projectStatusButton,#markAsWonBtn,#retryWonExportBtn,#docUploadArrowBtn');
                     if (!target) return;
                     event.preventDefault(); event.stopImmediatePropagation();
                 }, true);
@@ -2278,26 +2406,50 @@ $state = [
             document.querySelector('.workspace-shell')?.classList.toggle('workspace-scroll-mode', scrollTabs.includes(tab));
             const isTakeoff = (tab === 'takeoff');
             const isDocuments = (tab === 'documents');
+            const isEstimating = (tab === 'estimating');
             document.querySelector('.project-subhead-wrapper')?.classList.toggle('is-takeoff-tab', isTakeoff);
             document.querySelector('.workspace-shell')?.classList.toggle('is-takeoff-tab', isTakeoff);
             document.body.classList.toggle('is-takeoff-tab', isTakeoff);
             document.querySelector('.project-subhead-wrapper')?.classList.toggle('is-documents-tab', isDocuments);
             document.querySelector('.workspace-shell')?.classList.toggle('is-documents-tab', isDocuments);
             document.body.classList.toggle('is-documents-tab', isDocuments);
+            document.querySelector('.project-subhead-wrapper')?.classList.toggle('is-estimating-tab', isEstimating);
+            document.querySelector('.workspace-shell')?.classList.toggle('is-estimating-tab', isEstimating);
+            document.body.classList.toggle('is-estimating-tab', isEstimating);
             const footer = document.querySelector('.bb-brightronix-footer');
             if (footer) footer.style.display = isTakeoff ? 'none' : '';
             window.onDocumentsTabVisibilityChange?.(isDocuments);
-            if (isDocuments) {
-                setTimeout(() => {
-                    window.syncDocumentsSubheadInfo?.();
-                }, 0);
-            } else if (!isTakeoff) {
+            if (!isTakeoff) {
                 const info = document.getElementById('takeoffSubheadItemInfo');
                 if (info) {
                     info.style.display = 'none';
                     info.classList.remove('is-visible');
                 }
-            } else {
+            }
+            if (!isDocuments) {
+                const docInfo = document.getElementById('documentsSubheadItemInfo');
+                if (docInfo) {
+                    docInfo.style.display = 'none';
+                    docInfo.classList.remove('is-visible');
+                }
+            }
+            if (!isEstimating) {
+                const estInfo = document.getElementById('estimatingSubheadItemInfo');
+                if (estInfo) {
+                    estInfo.style.display = 'none';
+                    estInfo.classList.remove('is-visible');
+                }
+                document.getElementById('estimatingSubheadMovePopover')?.remove();
+            }
+            if (isDocuments) {
+                setTimeout(() => {
+                    window.syncDocumentsSubheadInfo?.();
+                }, 0);
+            } else if (isEstimating) {
+                setTimeout(() => {
+                    window.syncEstimatingSubheadInfo?.();
+                }, 0);
+            } else if (isTakeoff) {
                 setTimeout(() => {
                     window.updateTakeoffSubheadInfo?.();
                     window.syncTakeoffLayout?.();
@@ -2660,14 +2812,14 @@ $state = [
     <script src="../assets/estimate_calculation_service.js?v=estimating-normal-item-quantity-20260831-1"></script>
     <script src="../assets/catalog_update_preview_service.js?v=catalog-update-preview-20260827-1"></script>
     <script src="../assets/estimating_export_service.js?v=estimating-boq-export-20260820-1"></script>
-    <script src="../assets/estimating_workspace_service.js?v=workspace-primary-20261028-3"></script>
+    <script src="../assets/estimating_workspace_service.js?v=<?= filemtime(__DIR__ . '/../assets/estimating_workspace_service.js') ?>"></script>
     <script src="../assets/catalog_update_application_service.js?v=catalog-update-application-20260827-2"></script>
     <script src="../assets/estimating_catalog_adapter.js?v=estimating-catalog-snapshot-20260827-1"></script>
     <script src="../assets/project_estimating.js?v=<?= filemtime(__DIR__ . '/../assets/project_estimating.js') ?>"></script>
     <script src="../assets/catalog_update_ui.js?v=<?= filemtime(__DIR__ . '/../assets/catalog_update_ui.js') ?>"></script>
     <script src="../assets/project_proposal.js?v=<?= filemtime(__DIR__ . '/../assets/project_proposal.js') ?>"></script>
     <script src="../assets/won_project_export.js?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.js') ?>"></script>
-    <script src="../assets/global_tools.js"></script>
+    <script src="../assets/global_tools.js?v=<?= filemtime(__DIR__ . '/../assets/global_tools.js') ?>"></script>
 </body>
 
 </html>

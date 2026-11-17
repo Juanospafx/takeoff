@@ -45,6 +45,7 @@
     const takeoffObjectBaseVersions = new Map();
     const dirtyTakeoffObjectGenerations = new Map();
     let takeoffDirtyGeneration = 0;
+    let hasPendingManualCanvasCheckpoint = false;
     let missingScaleWarningShown = false;
     let selectionRectDraft = null;
     let linearPointerWorld = null;
@@ -124,11 +125,26 @@
         };
     }
 
-    function scheduleTakeoffAutosave() {
+    let takeoffAutosaveInFlight = false;
+    let takeoffAutosaveQueued = false;
+
+    function scheduleTakeoffAutosave(delayMs = 1800) {
+        const waitMs = Math.max(100, Number(delayMs) || 1800);
         clearTimeout(takeoffAutosaveTimer);
         takeoffAutosaveTimer = setTimeout(() => {
-            saveTakeoff(true);
-        }, 900);
+            if (takeoffAutosaveInFlight) {
+                takeoffAutosaveQueued = true;
+                return;
+            }
+            takeoffAutosaveInFlight = true;
+            Promise.resolve(saveTakeoff(true)).finally(() => {
+                takeoffAutosaveInFlight = false;
+                if (takeoffAutosaveQueued) {
+                    takeoffAutosaveQueued = false;
+                    scheduleTakeoffAutosave(250);
+                }
+            });
+        }, waitMs);
     }
 
     function request(action, payload, method) {
@@ -221,7 +237,8 @@
         renderNodes();
         renderAll();
         state.dirty = true;
-        emitProjectState();
+        hasPendingManualCanvasCheckpoint = true;
+        emitProjectState(true);
         scheduleTakeoffAutosave();
     }
 
@@ -285,8 +302,19 @@
         return state.tool === expectedTool ? layer : null;
     }
 
+    function layerMultiplier(layer) {
+        const raw = layer?.multiplier ?? layer?.metadata_json?.multiplier;
+        const n = num(raw);
+        return (raw !== undefined && raw !== null && raw !== '' && Number.isFinite(n) && n >= 0) ? n : 1;
+    }
+
     function calculateCountQuantity(marker) {
-        return num(marker.multiplier || 1);
+        const raw = marker?.multiplier;
+        if (raw !== undefined && raw !== null && raw !== '') {
+            const n = num(raw);
+            return Number.isFinite(n) && n >= 0 ? n : 1;
+        }
+        return 1;
     }
 
     function calculateLinearLength(segment) {
@@ -308,13 +336,27 @@
             }
         }
         const horizontal = scale > 0 ? px / scale : 0;
-        const subtype = normalizeLinearSubtype(segment.takeoff_subtype || segment.takeoff_type || segment.type);
-        const dropLength = subtype === 'linear' ? 0 : Math.max(0, num(segment.drop_length ?? segment.dropLength));
+        const layer = state.layers.find(row =>
+            String(row.client_uid) === String(segment?.layer_client_uid || '')
+            || String(row.id || '') === String(segment?.layer_id || '')
+        );
+        const subtype = normalizeLinearSubtype(
+            segment.takeoff_subtype
+            || segment.metadata_json?.takeoff_subtype
+            || layer?.takeoff_subtype
+            || layer?.original_takeoff_type
+            || segment.takeoff_type
+            || segment.type
+        );
+        const dropLength = (subtype === 'linear' || subtype === 'count_by_distance')
+            ? 0
+            : Math.max(0, num(segment.drop_length ?? segment.dropLength ?? layer?.drop_length ?? layer?.dropLength));
         // Each committed vertex is a defined drop point. Editing vertices via
         // the existing handles therefore recalculates both run and drops.
         const dropCount = subtype === 'linear' ? 0 : points.length;
         const drops = dropLength * dropCount;
         const measured = horizontal + drops;
+        segment.takeoff_subtype = subtype;
         segment.horizontal_length = horizontal;
         segment.drop_length = dropLength;
         segment.drop_count = dropCount;
@@ -323,6 +365,26 @@
         segment.total_length = measured * num(segment.multiplier || 1);
         segment.scale_pixels_per_unit = scale;
         segment.unit = 'ft';
+
+        if (subtype === 'linear_avg_with_drop') {
+            // Round drawn canvas length to whole integer first; average + single drop computes in layerQuantity().
+            const roundedHorizontal = Math.round(horizontal);
+            segment.drop_count = 0;
+            segment.drop_total = 0;
+            segment.measured_length = roundedHorizontal;
+            segment.total_length = roundedHorizontal * num(segment.multiplier || 1);
+            segment.unit = 'ft';
+        } else if (subtype === 'count_by_distance') {
+            const spacing = Math.max(0, num(segment.spacing ?? segment.metadata_json?.spacing ?? layer?.spacing ?? layer?.metadata_json?.spacing));
+            const effectiveSpacing = spacing > 0 ? spacing : 1;
+            const spacedCount = horizontal > 0 ? Math.ceil(Math.max(0, (horizontal / effectiveSpacing) - 1e-6)) : 0;
+            segment.spacing = effectiveSpacing;
+            segment.drop_count = 0;
+            segment.drop_total = 0;
+            segment.measured_length = spacedCount;
+            segment.total_length = spacedCount * num(segment.multiplier || 1);
+            segment.unit = layer?.unit_of_measure || 'ea';
+        }
         return segment.total_length;
     }
 
@@ -330,15 +392,17 @@
         const raw = String(value || '').trim().toLowerCase().replace(/\s+/g, ' ');
         if (raw === 'linear with drop') return 'linear_with_drop';
         if (raw === 'linear avg. with drop' || raw === 'linear avg with drop') return 'linear_avg_with_drop';
+        if (raw === 'count by distance' || raw === 'count_by_distance') return 'count_by_distance';
         if (raw === 'linear_with_drop' || raw === 'linear_avg_with_drop') return raw;
         return 'linear';
     }
 
     function normalizeEditorLayerType(value) {
         const raw = String(value || 'count').trim().toLowerCase();
-        if (raw === 'area') return { type: 'area', subtype: 'area' };
+        if (raw === 'area' || raw === 'area / volume' || raw === 'vertical wall area') return { type: 'area', subtype: 'area' };
         if (raw === 'linear' || raw === 'linear with drop' || raw === 'linear avg. with drop'
-            || raw === 'linear avg with drop' || raw === 'linear_with_drop' || raw === 'linear_avg_with_drop') {
+            || raw === 'linear avg with drop' || raw === 'linear_with_drop' || raw === 'linear_avg_with_drop'
+            || raw === 'count by distance' || raw === 'count_by_distance') {
             return { type: 'linear', subtype: normalizeLinearSubtype(raw) };
         }
         return { type: 'count', subtype: 'count' };
@@ -542,6 +606,15 @@
         return true;
     }
 
+    function flushKonvaCanvasDraw(immediate = false) {
+        if (!konvaLayer) return;
+        const w = document.getElementById('canvas-wrapper');
+        if (!w || w.clientWidth <= 0 || w.clientHeight <= 0 || document.hidden) return;
+        konvaLayer._waitingForDraw = false;
+        if (immediate) konvaLayer.draw();
+        else konvaLayer.batchDraw();
+    }
+
     function screenToWorld(pos) {
         const vpt = canvas.viewportTransform || [1, 0, 0, 1, 0, 0];
         return { x: (pos.x - vpt[4]) / vpt[0], y: (pos.y - vpt[5]) / vpt[3] };
@@ -567,15 +640,62 @@
         return start ? snapPointTo45(start, cursor, Boolean(shiftPressed)) : cursor;
     }
 
+    function activeDraftLayerSubtype(layer = null) {
+        const resolved = layer || activeLayer();
+        return normalizeLinearSubtype(
+            resolved?.takeoff_subtype
+            || resolved?.original_takeoff_type
+            || resolved?.takeoff_type
+            || resolved?.type
+        );
+    }
+
+    function positionLinearDraftLabel(lastPoint, nextPoint) {
+        const label = state.draftLine?.lengthLabel;
+        if (!label || !lastPoint || !nextPoint) return;
+        const dx = nextPoint.x - lastPoint.x;
+        const dy = nextPoint.y - lastPoint.y;
+        const dist = Math.hypot(dx, dy);
+        if (dist < 2) {
+            label.visible(false);
+            return;
+        }
+        const partial = pointsLength([lastPoint, nextPoint]);
+        const draftSub = state.draftLine?.subtype || activeDraftLayerSubtype();
+        label.text(draftSub === 'linear_avg_with_drop' ? `${Math.round(partial)} ft` : formatFeetLabel(partial));
+        const viewportScale = Number(canvas?.viewportTransform?.[0] || 1);
+        const factor = viewportScale > 0 ? 1 / viewportScale : 1;
+        const labelScale = Math.max(0.45, Math.min(1.6, factor));
+        label.scale({ x: labelScale, y: labelScale });
+        label.offsetX(label.width() / 2);
+        label.offsetY(label.height() / 2);
+        const midX = (lastPoint.x + nextPoint.x) / 2;
+        const midY = (lastPoint.y + nextPoint.y) / 2;
+        const isVertical = Math.abs(dy) > Math.abs(dx) * 1.5;
+        const scaledH = label.height() * labelScale;
+        if (isVertical) {
+            const scaledW = label.width() * labelScale;
+            label.position({ x: midX + (scaledW * 0.5 + 8 * labelScale), y: midY });
+        } else {
+            let nx = -dy / dist;
+            let ny = dx / dist;
+            if (ny > 0 || (Math.abs(ny) < 0.001 && nx < 0)) {
+                nx = -nx;
+                ny = -ny;
+            }
+            const offsetDist = Math.max(8 * labelScale, scaledH * 0.65 + 4 * labelScale);
+            label.position({ x: midX + nx * offsetDist, y: midY + ny * offsetDist });
+        }
+        label.visible(true);
+        label.moveToTop();
+    }
+
     function renderLinearPreview(cursor = linearPointerWorld, shiftPressed = linearShiftPressed) {
         if (state.tool !== 'takeoff_linear' || !state.draftLine?.preview || !state.draftLine.points.length || !cursor) return false;
         const point = linearPointForPointer(cursor, shiftPressed);
         state.draftLine.preview.points([...state.draftLine.points, point].flatMap(value => [value.x, value.y]));
         const last = state.draftLine.points[state.draftLine.points.length - 1];
-        const partial = pointsLength([last, point]);
-        const total = pointsLength(state.draftLine.points) + partial;
-        state.draftLine.lengthLabel.position({ x: point.x + 12, y: point.y - 28 });
-        state.draftLine.lengthLabel.text(`${formatFeetLabel(partial)} / Total ${formatFeetLabel(total)}`);
+        positionLinearDraftLabel(last, point);
         updateDrawingStatus(point);
         konvaLayer?.batchDraw();
         return true;
@@ -612,19 +732,16 @@
     function drawSymbol(group, symbol, color, size) {
         symbol = normalizeSymbol(symbol);
         const radius = symbolRadius(size);
-        const pad = Math.max(3.5, radius * 0.35);
-        const hitRadius = radius + pad;
 
-        // 1. Hit Area: exact shape geometry with transparent fill & stroke for 100% reliable clicks
+        // 1. Hit Area: constrained strictly to the visible symbol geometry
         const hitCommon = {
             fill: 'rgba(0,0,0,0.001)',
-            stroke: 'rgba(0,0,0,0.001)',
-            strokeWidth: Math.max(8, pad * 2),
-            hitStrokeWidth: Math.max(8, pad * 2),
+            strokeWidth: 0,
+            hitStrokeWidth: 0,
             listening: true
         };
 
-        // 2. Selection Ring: exact shape geometry outline that highlights upon selection
+        // 2. Selection Ring: non-listening visual outline that highlights upon selection
         const ringCommon = {
             name: 'takeoff-selection-ring',
             stroke: '#38bdf8',
@@ -640,60 +757,53 @@
             fillOpacity: 0.42,
             stroke: color,
             strokeWidth: 1.5,
+            hitStrokeWidth: 1.5,
             listening: true
         };
 
         if (symbol === 'square') {
-            group.add(new Konva.Rect({ x: -hitRadius, y: -hitRadius, width: hitRadius * 2, height: hitRadius * 2, ...hitCommon }));
             group.add(new Konva.Rect({ x: -(radius + 3), y: -(radius + 3), width: (radius + 3) * 2, height: (radius + 3) * 2, cornerRadius: 2, ...ringCommon }));
             group.add(new Konva.Rect({ x: -radius, y: -radius, width: radius * 2, height: radius * 2, ...common }));
         } else if (symbol === 'triangle') {
-            group.add(new Konva.RegularPolygon({ sides: 3, radius: hitRadius + 2, ...hitCommon }));
             group.add(new Konva.RegularPolygon({ sides: 3, radius: radius + 4, ...ringCommon }));
             group.add(new Konva.RegularPolygon({ sides: 3, radius: radius + 2, ...common }));
         } else if (symbol === 'diamond') {
-            group.add(new Konva.RegularPolygon({ sides: 4, radius: hitRadius + 2, rotation: 45, ...hitCommon }));
             group.add(new Konva.RegularPolygon({ sides: 4, radius: radius + 4, rotation: 45, ...ringCommon }));
             group.add(new Konva.RegularPolygon({ sides: 4, radius: radius + 2, rotation: 45, ...common }));
         } else if (symbol === 'cross') {
             const crossW = Math.max(3, radius / 2);
-            group.add(new Konva.RegularPolygon({ sides: 4, radius: hitRadius + 3, rotation: 45, ...hitCommon }));
             group.add(new Konva.RegularPolygon({ sides: 4, radius: radius + 4, rotation: 45, ...ringCommon }));
-            group.add(new Konva.Line({ points: [-radius, 0, radius, 0], stroke: color, strokeWidth: crossW, lineCap: 'round', listening: true }));
-            group.add(new Konva.Line({ points: [0, -radius, 0, radius], stroke: color, strokeWidth: crossW, lineCap: 'round', listening: true }));
+            group.add(new Konva.Line({ points: [-radius, 0, radius, 0], stroke: color, strokeWidth: crossW, hitStrokeWidth: crossW, lineCap: 'round', listening: true }));
+            group.add(new Konva.Line({ points: [0, -radius, 0, radius], stroke: color, strokeWidth: crossW, hitStrokeWidth: crossW, lineCap: 'round', listening: true }));
         } else if (symbol === 'octagon') {
-            group.add(new Konva.RegularPolygon({ sides: 8, radius: hitRadius + 2, rotation: 22.5, ...hitCommon }));
             group.add(new Konva.RegularPolygon({ sides: 8, radius: radius + 4, rotation: 22.5, ...ringCommon }));
             group.add(new Konva.RegularPolygon({ sides: 8, radius: radius + 2, rotation: 22.5, ...common }));
         } else if (symbol === 'pentagon') {
-            group.add(new Konva.RegularPolygon({ sides: 5, radius: hitRadius + 2, rotation: 0, ...hitCommon }));
             group.add(new Konva.RegularPolygon({ sides: 5, radius: radius + 4, rotation: 0, ...ringCommon }));
             group.add(new Konva.RegularPolygon({ sides: 5, radius: radius + 2, rotation: 0, ...common }));
         } else if (symbol === 'hollow circle') {
-            group.add(new Konva.Circle({ radius: hitRadius, ...hitCommon }));
+            group.add(new Konva.Circle({ radius, ...hitCommon }));
             group.add(new Konva.Circle({ radius: radius + 3, ...ringCommon }));
-            group.add(new Konva.Circle({ radius, fill: 'transparent', stroke: color, strokeWidth: 2.2, listening: true }));
+            group.add(new Konva.Circle({ radius, fill: 'transparent', stroke: color, strokeWidth: 2.2, hitStrokeWidth: 2.2, listening: true }));
         } else if (symbol === 'target') {
-            group.add(new Konva.Circle({ radius: hitRadius, ...hitCommon }));
+            group.add(new Konva.Circle({ radius, ...hitCommon }));
             group.add(new Konva.Circle({ radius: radius + 3, ...ringCommon }));
-            group.add(new Konva.Circle({ radius, fill: 'rgba(0,0,0,0.001)', stroke: color, strokeWidth: 1.8, listening: true }));
-            group.add(new Konva.Circle({ radius: Math.max(2.5, radius * 0.38), fill: color, stroke: color, strokeWidth: 1, listening: true }));
+            group.add(new Konva.Circle({ radius, fill: 'rgba(0,0,0,0.001)', stroke: color, strokeWidth: 1.8, hitStrokeWidth: 1.8, listening: true }));
+            group.add(new Konva.Circle({ radius: Math.max(2.5, radius * 0.38), fill: color, stroke: color, strokeWidth: 1, hitStrokeWidth: 1, listening: true }));
             group.add(new Konva.Line({ points: [-radius * 0.75, 0, radius * 0.75, 0], stroke: color, strokeWidth: 1, listening: false }));
             group.add(new Konva.Line({ points: [0, -radius * 0.75, 0, radius * 0.75], stroke: color, strokeWidth: 1, listening: false }));
         } else if (symbol === 'checkmark') {
-            group.add(new Konva.Circle({ radius: hitRadius, ...hitCommon }));
             group.add(new Konva.Circle({ radius: radius + 3, ...ringCommon }));
-            group.add(new Konva.Circle({ radius, fill: color, fillOpacity: 0.20, stroke: color, strokeWidth: 1.2, listening: true }));
+            group.add(new Konva.Circle({ radius, fill: color, fillOpacity: 0.20, stroke: color, strokeWidth: 1.2, hitStrokeWidth: 1.2, listening: true }));
             const checkPoints = [-radius * 0.55, 0, -radius * 0.15, radius * 0.50, radius * 0.65, -radius * 0.50];
             group.add(new Konva.Line({ points: checkPoints, stroke: color, strokeWidth: Math.max(2.2, radius * 0.26), lineCap: 'round', lineJoin: 'round', listening: false }));
         } else if (symbol === 'dimension') {
-            group.add(new Konva.Rect({ x: -hitRadius, y: -hitRadius, width: hitRadius * 2, height: hitRadius * 2, ...hitCommon }));
+            group.add(new Konva.Rect({ x: -radius, y: -(radius * 0.6), width: radius * 2, height: radius * 1.2, ...hitCommon }));
             group.add(new Konva.Rect({ x: -(radius + 3), y: -(radius + 3), width: (radius + 3) * 2, height: (radius + 3) * 2, ...ringCommon }));
-            group.add(new Konva.Line({ points: [-radius, 0, radius, 0], stroke: color, strokeWidth: 2, lineCap: 'round', listening: true }));
-            group.add(new Konva.Line({ points: [-radius, -radius * 0.6, -radius, radius * 0.6], stroke: color, strokeWidth: 2, listening: true }));
-            group.add(new Konva.Line({ points: [radius, -radius * 0.6, radius, radius * 0.6], stroke: color, strokeWidth: 2, listening: true }));
+            group.add(new Konva.Line({ points: [-radius, 0, radius, 0], stroke: color, strokeWidth: 2, hitStrokeWidth: 2, lineCap: 'round', listening: true }));
+            group.add(new Konva.Line({ points: [-radius, -radius * 0.6, -radius, radius * 0.6], stroke: color, strokeWidth: 2, hitStrokeWidth: 2, listening: true }));
+            group.add(new Konva.Line({ points: [radius, -radius * 0.6, radius, radius * 0.6], stroke: color, strokeWidth: 2, hitStrokeWidth: 2, listening: true }));
         } else {
-            group.add(new Konva.Circle({ radius: hitRadius, ...hitCommon }));
             group.add(new Konva.Circle({ radius: radius + 3, ...ringCommon }));
             group.add(new Konva.Circle({ radius, ...common }));
         }
@@ -739,7 +849,7 @@
             (segment.handles || []).forEach(handle => handle.listening(listening));
             (segment.handles || []).forEach(handle => handle.draggable(listening && !panning && !isElementLocked(segment)));
         });
-        konvaLayer?.batchDraw();
+        flushKonvaCanvasDraw();
     }
 
     function isColorLight(color) {
@@ -850,7 +960,7 @@
                 if (origin) handle.position({ x: origin.x + dx, y: origin.y + dy });
             });
         });
-        konvaLayer?.batchDraw();
+        flushKonvaCanvasDraw();
     }
 
     function finishTakeoffSelectionDrag(ref) {
@@ -925,7 +1035,7 @@
         group.add(symbol);
         // Quantity remains on the marker model and in layer roll-ups; it is not
         // a visual label. Only render text explicitly entered by the user.
-        group.add(new Konva.Text({ x: 12, y: -10, text: marker.label || '', fill: marker.color || '#2563eb', fontSize: 14, fontStyle: 'bold' }));
+        group.add(new Konva.Text({ x: 12, y: -10, text: marker.label || '', fill: marker.color || '#2563eb', fontSize: 14, fontStyle: 'bold', listening: Boolean(marker.label) }));
         
         // Compact, refined hover tooltip badge positioned close above the icon
         const tooltip = new Konva.Label({
@@ -1000,63 +1110,27 @@
         group.on('dragend', () => finishTakeoffSelectionDrag(marker));
         konvaLayer.add(group);
 
-        const transformer = new Konva.Transformer({
-            node: symbol,
-            enabledAnchors: ['top-left', 'top-right', 'bottom-left', 'bottom-right'],
-            rotateEnabled: false,
-            keepRatio: true,
-            flipEnabled: false,
-            borderStroke: marker.color || '#38bdf8',
-            borderStrokeWidth: 1.5,
-            anchorFill: '#fff',
-            anchorStroke: marker.color || '#2563eb',
-            anchorStrokeWidth: 2,
-            anchorSize: 8,
-            visible: false,
-            boundBoxFunc: (oldBox, newBox) => {
-                const side = Math.max(Math.abs(newBox.width), Math.abs(newBox.height));
-                return side < 8 || side > 192 ? oldBox : newBox;
-            }
-        });
-        transformer.on('transformstart', () => {
-            if (isElementLocked(marker)) {
-                transformer.stopTransform?.();
-                return;
-            }
-            snapshot();
-        });
-        transformer.on('transformend', () => {
-            if (isElementLocked(marker)) return;
-            const scale = Math.max(Math.abs(symbol.scaleX()), Math.abs(symbol.scaleY()));
-            const nextRadius = Math.max(4, Math.min(96, symbolRadius(marker.symbol_size || marker.size) * scale));
-            symbol.scale({ x: 1, y: 1 });
-            marker.symbol_size = Number(nextRadius.toFixed(4));
-            marker.size = marker.symbol_size;
-            marker.metadata_json = { ...(marker.metadata_json || {}), symbol_size: marker.symbol_size };
-            marker.updatedAt = timestamp();
-            marker.updated_at = marker.updatedAt;
-            transformer.destroy();
-            group.destroy();
-            delete marker.node;
-            delete marker.symbolNode;
-            delete marker.transformer;
-            createMarkerNode(marker);
-            selectElement('marker', marker);
-            markDirty();
-        });
-        konvaLayer.add(transformer);
-
+        // Count sizes are controlled exclusively via the layer's Size input
+        // rather than canvas corner resize handles.
         marker.node = group;
         marker.symbolNode = symbol;
-        marker.transformer = transformer;
         applyMarkerLockVisual(marker);
         konvaLayer.batchDraw();
     }
 
-    function refreshSegment(segment, draggingHandleIndex = -1) {
+    function refreshSegment(segment, draggingHandleIndex = -1, options = {}) {
         if (!segment.node) return;
         const isArea = String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area';
         segment.node.points((segment.points_json || []).flatMap(p => [p.x, p.y]));
+        if (options && options.deferMeasurement && !isArea) {
+            (segment.handles || []).forEach((handle, index) => {
+                if (index !== draggingHandleIndex && segment.points_json[index]) {
+                    handle.position(segment.points_json[index]);
+                }
+            });
+            konvaLayer.batchDraw();
+            return;
+        }
         if (isArea) calculateAreaQuantity(segment);
         else calculateLinearLength(segment);
         const points = segment.points_json || [];
@@ -1064,13 +1138,153 @@
             ? { x: (points[0].x + points[points.length - 1].x) / 2, y: (points[0].y + points[points.length - 1].y) / 2 }
             : (points[0] || { x: 0, y: 0 });
         segment.labelNode.position({ x: mid.x + 8, y: mid.y - 18 });
-        segment.labelNode.text(isArea ? formatAreaLabel(segment.total_area) : formatFeetLabel(segment.total_length));
+        const segSubtype = normalizeLinearSubtype(segment.takeoff_subtype || segment.takeoff_type || segment.type);
+        let segLabelText = isArea ? formatAreaLabel(segment.total_area) : formatFeetLabel(segment.total_length);
+        if (!isArea && segSubtype === 'linear_avg_with_drop') {
+            segLabelText = `${Math.round(num(segment.horizontal_length || 0))} ft`;
+        } else if (!isArea && segSubtype === 'count_by_distance') {
+            segLabelText = `${num(segment.total_length || 0)} ${segment.unit || 'ea'}`;
+        }
+        segment.labelNode.text(segLabelText);
         (segment.handles || []).forEach((handle, index) => {
             if (index !== draggingHandleIndex && segment.points_json[index]) {
                 handle.position(segment.points_json[index]);
             }
         });
         konvaLayer.batchDraw();
+    }
+
+    function createVertexHandleNode(point, subtype, color, radius, strokeW, options = {}) {
+        const draggable = Boolean(options.draggable);
+        const listening = options.listening !== undefined ? Boolean(options.listening) : true;
+        const visible = options.visible !== undefined ? Boolean(options.visible) : true;
+        const hitW = num(options.hitStrokeWidth || 32);
+        if (subtype === 'linear') {
+            const side = radius * 2;
+            return new Konva.Rect({
+                x: point.x,
+                y: point.y,
+                width: side,
+                height: side,
+                offsetX: radius,
+                offsetY: radius,
+                cornerRadius: 1,
+                fill: '#ffffff',
+                stroke: color || '#2563eb',
+                strokeWidth: strokeW,
+                shadowColor: 'rgba(0,0,0,0.25)',
+                shadowBlur: 2,
+                hitStrokeWidth: hitW,
+                draggable,
+                listening,
+                visible
+            });
+        }
+        if (subtype === 'linear_with_drop') {
+            const group = new Konva.Group({
+                x: point.x,
+                y: point.y,
+                name: 'vertex-x',
+                draggable,
+                listening,
+                visible
+            });
+            group.add(new Konva.Circle({
+                name: 'vertex-x-hit',
+                x: 0,
+                y: 0,
+                radius: Math.max(radius * 1.45, 7),
+                fill: 'rgba(0,0,0,0.001)',
+                hitStrokeWidth: hitW
+            }));
+            const arm = Math.max(radius * 0.95, 4);
+            group.add(new Konva.Line({
+                name: 'vertex-x-halo1',
+                points: [-arm, -arm, arm, arm],
+                stroke: '#ffffff',
+                strokeWidth: strokeW * 2.2,
+                lineCap: 'round',
+                listening: false
+            }));
+            group.add(new Konva.Line({
+                name: 'vertex-x-halo2',
+                points: [-arm, arm, arm, -arm],
+                stroke: '#ffffff',
+                strokeWidth: strokeW * 2.2,
+                lineCap: 'round',
+                listening: false
+            }));
+            group.add(new Konva.Line({
+                name: 'vertex-x-line1',
+                points: [-arm, -arm, arm, arm],
+                stroke: color || '#2563eb',
+                strokeWidth: strokeW * 1.3,
+                lineCap: 'round',
+                listening: false
+            }));
+            group.add(new Konva.Line({
+                name: 'vertex-x-line2',
+                points: [-arm, arm, arm, -arm],
+                stroke: color || '#2563eb',
+                strokeWidth: strokeW * 1.3,
+                lineCap: 'round',
+                listening: false
+            }));
+            return group;
+        }
+        return new Konva.Circle({
+            x: point.x,
+            y: point.y,
+            radius,
+            fill: '#ffffff',
+            stroke: color || '#2563eb',
+            strokeWidth: strokeW,
+            shadowColor: 'rgba(0,0,0,0.25)',
+            shadowBlur: 2,
+            hitStrokeWidth: hitW,
+            draggable,
+            listening,
+            visible
+        });
+    }
+
+    function resizeVertexHandleNode(handle, handleR, handleStroke, handleHit = 24) {
+        if (!handle) return;
+        if (typeof handle.radius === 'function') {
+            handle.radius(handleR);
+            handle.strokeWidth(handleStroke);
+            handle.hitStrokeWidth(handleHit);
+            return;
+        }
+        if (typeof handle.name === 'function' && handle.name() === 'vertex-x') {
+            const arm = Math.max(handleR * 0.95, 4);
+            const hitNode = handle.findOne?.('.vertex-x-hit');
+            if (hitNode) {
+                hitNode.radius(Math.max(handleR * 1.45, 7));
+                hitNode.hitStrokeWidth(handleHit);
+            }
+            ['.vertex-x-halo1', '.vertex-x-line1'].forEach(sel => {
+                const n = handle.findOne?.(sel);
+                if (n) {
+                    n.points([-arm, -arm, arm, arm]);
+                    n.strokeWidth(sel.includes('halo') ? handleStroke * 2.2 : handleStroke * 1.3);
+                }
+            });
+            ['.vertex-x-halo2', '.vertex-x-line2'].forEach(sel => {
+                const n = handle.findOne?.(sel);
+                if (n) {
+                    n.points([-arm, arm, arm, -arm]);
+                    n.strokeWidth(sel.includes('halo') ? handleStroke * 2.2 : handleStroke * 1.3);
+                }
+            });
+            return;
+        }
+        if (typeof handle.size === 'function') {
+            handle.size({ width: handleR * 2, height: handleR * 2 });
+            handle.offset({ x: handleR, y: handleR });
+            handle.strokeWidth(handleStroke);
+            handle.hitStrokeWidth(handleHit);
+        }
     }
 
     function getLinearNodeRadius() {
@@ -1085,6 +1299,12 @@
         return Math.max(1.2, Math.min(2.4, 1.6 * factor));
     }
 
+    function segmentHitStrokeWidth(segment, isArea, factor = 1) {
+        const baseStroke = Math.max(1, num(segment?.stroke_width || (isArea ? 2 : 2.5)));
+        if (isArea) return Math.max(12, Math.min(24, 14 * factor));
+        return Number((baseStroke * 1.03).toFixed(4));
+    }
+
     function syncTakeoffHandleScale(inverseScale) {
         const viewportScale = Number(canvas?.viewportTransform?.[0] || 1);
         const factor = Number.isFinite(Number(inverseScale)) && Number(inverseScale) > 0
@@ -1094,32 +1314,43 @@
         const handleR = Math.max(4.4, Math.min(8.0, 5.2 * factor));
         const handleStroke = Math.max(1.2, Math.min(2.4, 1.6 * factor));
         const handleHit = Math.max(22, Math.min(38, 24 * factor));
-        const lineHit = Math.max(12, Math.min(24, 14 * factor));
 
         state.segments.forEach(segment => {
             if (segment.node) {
-                segment.node.hitStrokeWidth(lineHit);
+                const isAreaSeg = String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area';
+                segment.node.hitStrokeWidth(segmentHitStrokeWidth(segment, isAreaSeg, factor));
             }
             (segment.handles || []).forEach(handle => {
-                handle.radius(handleR);
-                handle.strokeWidth(handleStroke);
-                handle.hitStrokeWidth(handleHit);
+                if (typeof handle.radius === 'function') {
+                    handle.radius(handleR);
+                    handle.strokeWidth(handleStroke);
+                    handle.hitStrokeWidth(handleHit);
+                } else {
+                    resizeVertexHandleNode(handle, handleR, handleStroke, handleHit);
+                }
             });
         });
         (state.draftLine?.vertices || []).forEach(vertex => {
-            vertex.radius(handleR);
-            vertex.strokeWidth(handleStroke);
+            resizeVertexHandleNode(vertex, handleR, handleStroke, handleHit);
         });
+        (state.draftArea?.vertices || []).forEach(vertex => {
+            resizeVertexHandleNode(vertex, handleR, handleStroke, handleHit);
+        });
+        if (state.draftLine?.points?.length && linearPointerWorld) {
+            const lastPt = state.draftLine.points[state.draftLine.points.length - 1];
+            const nextPt = linearPointForPointer(linearPointerWorld, linearShiftPressed);
+            positionLinearDraftLabel(lastPt, nextPt);
+        }
         state.markers.forEach(marker => {
             const r = symbolRadius(marker.symbol_size || marker.size);
             const tooltip = marker.node?.findOne?.('.takeoff-marker-tooltip');
-            if (tooltip) {
+            if (tooltip && typeof tooltip.scale === 'function') {
                 const tScale = Math.max(0.5, Math.min(1.4, factor));
                 tooltip.scale({ x: tScale, y: tScale });
                 tooltip.position({ x: 0, y: -(r + 4 * tScale) });
             }
         });
-        konvaLayer?.batchDraw();
+        flushKonvaCanvasDraw(true);
     }
 
     function destroySegmentNodes(segment) {
@@ -1167,14 +1398,30 @@
         if (!ensureKonva()) return;
         const visible = Number(segment.page_number) === Number(pageNum);
         const isArea = String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area';
+        const segLayer = state.layers.find(row =>
+            String(row.client_uid) === String(segment.layer_client_uid || '')
+            || String(row.id || '') === String(segment.layer_id || '')
+        );
+        const segSubtype = isArea ? 'area' : normalizeLinearSubtype(
+            segment.takeoff_subtype
+            || segment.metadata_json?.takeoff_subtype
+            || segLayer?.takeoff_subtype
+            || segLayer?.original_takeoff_type
+            || segLayer?.takeoff_type
+            || segLayer?.type
+        );
+        const strokeW = num(segment.stroke_width || (isArea ? 2 : 2.5));
+        const viewportScale = Number(canvas?.viewportTransform?.[0] || 1);
+        const scaleFactor = viewportScale > 0 ? 1 / viewportScale : 1;
         const line = new Konva.Line({
             points: (segment.points_json || []).flatMap(p => [p.x, p.y]),
             stroke: segment.color || '#2563eb',
-            strokeWidth: num(segment.stroke_width || (isArea ? 2 : 2.5)),
+            strokeWidth: strokeW,
+            dash: segSubtype === 'count_by_distance' ? [8, 6] : [],
             closed: isArea,
             fill: isArea ? segment.color || '#2563eb' : undefined,
             opacity: isArea ? 0.28 : 1,
-            hitStrokeWidth: Math.max(20, num(segment.stroke_width || 2.5) + 20),
+            hitStrokeWidth: segmentHitStrokeWidth(segment, isArea, scaleFactor),
             lineCap: 'round',
             lineJoin: 'round',
             draggable: !isElementLocked(segment),
@@ -1185,20 +1432,27 @@
         const handleR = getLinearNodeRadius();
         const handleStroke = getLinearNodeStroke();
         const handles = (segment.points_json || []).map((point, index) => {
-            const handle = new Konva.Circle({
-                x: point.x,
-                y: point.y,
-                radius: handleR,
-                fill: '#ffffff',
-                stroke: segment.color || '#2563eb',
-                strokeWidth: handleStroke,
-                shadowColor: 'rgba(0,0,0,0.25)',
-                shadowBlur: 2,
-                hitStrokeWidth: 32,
-                draggable: !isElementLocked(segment),
-                listening: !isTakeoffObjectInteractionBlocked(),
-                visible: false
-            });
+            const handle = (segSubtype === 'linear' || segSubtype === 'linear_with_drop')
+                ? createVertexHandleNode(point, segSubtype, segment.color || '#2563eb', handleR, handleStroke, {
+                    draggable: !isElementLocked(segment),
+                    listening: !isTakeoffObjectInteractionBlocked(),
+                    visible: false,
+                    hitStrokeWidth: 32
+                })
+                : new Konva.Circle({
+                    x: point.x,
+                    y: point.y,
+                    radius: handleR,
+                    fill: '#ffffff',
+                    stroke: segment.color || '#2563eb',
+                    strokeWidth: handleStroke,
+                    shadowColor: 'rgba(0,0,0,0.25)',
+                    shadowBlur: 2,
+                    hitStrokeWidth: 32,
+                    draggable: !isElementLocked(segment),
+                    listening: !isTakeoffObjectInteractionBlocked(),
+                    visible: false
+                });
             handle.on('pointerdown mousedown touchstart', (e) => {
                 e.cancelBubble = true;
                 handle.moveToTop();
@@ -1212,9 +1466,12 @@
                 e.cancelBubble = true;
                 const position = handle.position();
                 segment.points_json[index] = { x: position.x, y: position.y };
-                refreshSegment(segment, index);
-                renderProperties();
-                emitProjectState();
+                const isAreaSeg = String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area';
+                refreshSegment(segment, index, { deferMeasurement: !isAreaSeg });
+                if (isAreaSeg) {
+                    renderProperties();
+                    emitProjectState();
+                }
             });
             handle.on('dragend', (e) => {
                 e.cancelBubble = true;
@@ -1343,7 +1600,10 @@
             selectionRectDraft = null;
         }
         state.markers.forEach(m => {
-            const layer = state.layers.find(l => String(l.client_uid) === String(m.layer_client_uid));
+            if (!m.node) createMarkerNode(m);
+            const layer = state.layers.find(l => String(l.client_uid) === String(m.layer_client_uid)
+                || String(l.integration_key || '') === String(m.layer_client_uid)
+                || String(l.metadata_json?.project_layer_id || '') === String(m.layer_client_uid));
             const isVisible = Number(m.page_number) === targetPage && Number(layer?.visible ?? 1) !== 0;
             if (m.node) m.node.visible(isVisible);
             m.transformer?.visible(isVisible && !isElementLocked(m) && state.selectedObjectUids.has(String(m.client_uid)));
@@ -1353,7 +1613,10 @@
             }
         });
         state.segments.forEach(s => {
-            const layer = state.layers.find(l => String(l.client_uid) === String(s.layer_client_uid));
+            if (!s.node) createSegmentNode(s);
+            const layer = state.layers.find(l => String(l.client_uid) === String(s.layer_client_uid)
+                || String(l.integration_key || '') === String(s.layer_client_uid)
+                || String(l.metadata_json?.project_layer_id || '') === String(s.layer_client_uid));
             const isVisible = Number(s.page_number) === targetPage && Number(layer?.visible ?? 1) !== 0;
             if (s.node) s.node.visible(isVisible);
             if (s.labelNode) s.labelNode.visible(false);
@@ -1362,7 +1625,7 @@
             });
         });
         applyObjectSelectionVisuals();
-        if (konvaLayer) konvaLayer.batchDraw();
+        flushKonvaCanvasDraw();
     }
     window.setTakeoffPage = setTakeoffPage;
 
@@ -1439,7 +1702,7 @@
             if (typeof segment.node.shadowColor === 'function') segment.node.shadowColor('#38bdf8');
             if (typeof segment.node.shadowBlur === 'function') segment.node.shadowBlur(selected ? 8 : 0);
         });
-        konvaLayer?.batchDraw();
+        flushKonvaCanvasDraw();
     }
 
     function findTakeoffObjectByUid(objectUid) {
@@ -1462,6 +1725,7 @@
             showToast('Layer is locked', 'error');
             return;
         }
+        const markerMultiplier = layerMultiplier(layer);
         const marker = {
             client_uid: uid(),
             layer_client_uid: layer.client_uid,
@@ -1477,8 +1741,8 @@
             size: layer.symbol_size || 'Medium',
             color: layer.color || '#2563eb',
             label: '',
-            multiplier: 1,
-            quantity: 1,
+            multiplier: markerMultiplier,
+            quantity: markerMultiplier,
             notes: '',
             project_id: currentProjectId(),
             document_id: currentDocumentId(),
@@ -1492,8 +1756,10 @@
         marker.quantity = calculateCountQuantity(marker);
         state.markers.push(marker);
         createMarkerNode(marker);
+        trackTakeoffObjects([{ type: 'marker', ref: marker }], false);
+        dirtyTakeoffPages.add(Number(marker.page_number || pageNum || 1));
         selectElement('marker', marker);
-        markDirty();
+        markDirty({ objectsTracked: true });
         finishToolUse();
     }
 
@@ -1543,36 +1809,38 @@
         if (!state.draftLine) {
             const handleR = getLinearNodeRadius();
             const handleStroke = getLinearNodeStroke();
-            const vertex = new Konva.Circle({
-                x: pos.x,
-                y: pos.y,
-                radius: handleR,
-                fill: '#ffffff',
-                stroke: layer.color || '#22c55e',
-                strokeWidth: handleStroke,
-                shadowColor: 'rgba(0,0,0,0.25)',
-                shadowBlur: 2,
-                listening: false
+            const draftSubtype = activeDraftLayerSubtype(layer);
+            const vertex = createVertexHandleNode(pos, draftSubtype, layer.color || '#22c55e', handleR, handleStroke, {
+                draggable: false,
+                listening: false,
+                visible: true
             });
             state.draftLine = {
                 points: [pos],
                 layerUid: layer.client_uid,
+                subtype: draftSubtype,
                 vertices: [vertex],
                 preview: new Konva.Line({
                     points: [pos.x, pos.y, pos.x, pos.y],
                     stroke: layer.color || '#22c55e',
-                    strokeWidth: 2.5,
+                    strokeWidth: Math.max(1, num(layer.stroke_width || layer.strokeWidth || 2.5)),
+                    dash: draftSubtype === 'count_by_distance' ? [8, 6] : [],
                     lineCap: 'round',
                     lineJoin: 'round',
                     listening: false
                 }),
                 lengthLabel: new Konva.Text({
-                    x: pos.x + 12,
-                    y: pos.y - 28,
+                    x: pos.x,
+                    y: pos.y,
                     text: '',
                     fill: layer.color || '#22c55e',
-                    fontSize: 14,
+                    fontSize: 13.5,
+                    fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
                     fontStyle: 'bold',
+                    stroke: '#ffffff',
+                    strokeWidth: 3,
+                    fillAfterStrokeEnabled: true,
+                    padding: 2,
                     visible: false,
                     listening: false
                 })
@@ -1588,16 +1856,10 @@
         state.draftLine.preview.points(state.draftLine.points.flatMap(p => [p.x, p.y]));
         const handleR = getLinearNodeRadius();
         const handleStroke = getLinearNodeStroke();
-        const vertex = new Konva.Circle({
-            x: pos.x,
-            y: pos.y,
-            radius: handleR,
-            fill: '#ffffff',
-            stroke: layer.color || '#22c55e',
-            strokeWidth: handleStroke,
-            shadowColor: 'rgba(0,0,0,0.25)',
-            shadowBlur: 2,
-            listening: false
+        const vertex = createVertexHandleNode(pos, state.draftLine.subtype || activeDraftLayerSubtype(layer), layer.color || '#22c55e', handleR, handleStroke, {
+            draggable: false,
+            listening: false,
+            visible: true
         });
         state.draftLine.vertices.push(vertex);
         konvaLayer.add(vertex);
@@ -1632,6 +1894,8 @@
             }
         }
         const subtype = normalizeLinearSubtype(layer.takeoff_subtype || layer.original_takeoff_type || layer.takeoff_type || layer.type);
+        const spacingVal = subtype === 'count_by_distance' ? Math.max(0, num(layer.spacing ?? layer.metadata_json?.spacing ?? 0)) : 0;
+        const segmentDropLength = subtype === 'count_by_distance' ? 0 : Math.max(0, num(layer.drop_length ?? layer.dropLength));
         const segment = {
             client_uid: uid(),
             layer_client_uid: layer.client_uid,
@@ -1643,12 +1907,13 @@
             page_number: Number(pageNum || 1),
             points_json: points,
             measured_length: 0,
-            drop_length: subtype === 'linear' ? 0 : Math.max(0, num(layer.drop_length ?? layer.dropLength)),
-            multiplier: 1,
+            drop_length: subtype === 'linear' ? 0 : segmentDropLength,
+            spacing: spacingVal,
+            multiplier: layerMultiplier(layer),
             total_length: 0,
-            unit: 'ft',
+            unit: subtype === 'count_by_distance' ? (layer.unit_of_measure || 'ea') : 'ft',
             color: layer.color || '#2563eb',
-            stroke_width: 2.5,
+            stroke_width: Math.max(1, num(layer.stroke_width || layer.strokeWidth || 2.5)),
             label: '',
             project_id: currentProjectId(),
             document_id: currentDocumentId(),
@@ -1663,20 +1928,17 @@
         destroyLinearDraftNodes();
         state.segments.push(segment);
         createSegmentNode(segment);
-        selectElement('segment', segment);
-        markDirty();
+        trackTakeoffObjects([{ type: 'segment', ref: segment }], false);
+        dirtyTakeoffPages.add(Number(segment.page_number || pageNum || 1));
+        clearTakeoffSelection();
+        markDirty({ objectsTracked: true });
         updateDrawingStatus();
-        state.selectedLayerUid = null;
-        state.selectedLayerUids.clear();
-        state.continuousTool = false;
-        setTool('smart');
+        applyTakeoffDrawingInteractivity();
+        if (konvaStage?.container()) konvaStage.container().style.cursor = 'crosshair';
         renderLayers();
         emitProjectState();
-        scheduleTakeoffAutosave();
-        try {
-            window.parent?.postMessage({ type: 'project-takeoff-clear-active-layer' }, '*');
-            window.parent?.postMessage({ type: 'project-takeoff-tool-state', payload: { tool: 'smart', continuous: false } }, '*');
-        } catch (e) {}
+        emitToolState();
+        scheduleTakeoffAutosave(250);
         return true;
     }
 
@@ -1686,7 +1948,7 @@
         state.draftLine.lengthLabel?.destroy();
         (state.draftLine.vertices || []).forEach(vertex => vertex.destroy());
         state.draftLine = null;
-        konvaLayer?.batchDraw();
+        flushKonvaCanvasDraw();
     }
 
     function cancelLinearDraft() {
@@ -1703,14 +1965,49 @@
         state.draftLine.points.pop();
         state.draftLine.vertices.pop()?.destroy();
         state.draftLine.preview.points(state.draftLine.points.flatMap(point => [point.x, point.y]));
-        state.draftLine.lengthLabel?.text('');
-        updateDrawingStatus();
-        konvaLayer?.batchDraw();
+        if (linearPointerWorld) {
+            renderLinearPreview(linearPointerWorld, linearShiftPressed);
+        } else {
+            state.draftLine.lengthLabel?.text('');
+            state.draftLine.lengthLabel?.visible(false);
+            updateDrawingStatus();
+            konvaLayer?.batchDraw();
+        }
         return true;
     }
 
+    function updateAreaDraftPreview(points) {
+        if (!state.draftArea?.preview) return;
+        state.draftArea.preview.points((points || []).flatMap(p => [p.x, p.y]));
+        const lbl = state.draftArea.areaLabel;
+        if (lbl && points && points.length >= 3) {
+            let pxArea = 0;
+            for (let i = 0; i < points.length; i++) {
+                const next = points[(i + 1) % points.length];
+                pxArea += points[i].x * next.y - next.x * points[i].y;
+            }
+            pxArea = Math.abs(pxArea) / 2;
+            const scale = getPlanScale(pageNum);
+            const areaFt = scale > 0 ? pxArea / (scale * scale) : 0;
+            const cx = points.reduce((s, p) => s + p.x, 0) / points.length;
+            const cy = points.reduce((s, p) => s + p.y, 0) / points.length;
+            const viewportScale = Number(canvas?.viewportTransform?.[0] || 1);
+            const factor = viewportScale > 0 ? 1 / viewportScale : 1;
+            const lScale = Math.max(0.45, Math.min(1.6, factor));
+            lbl.text(formatAreaLabel(areaFt));
+            lbl.scale({ x: lScale, y: lScale });
+            lbl.offsetX(lbl.width() / 2);
+            lbl.offsetY(lbl.height() / 2);
+            lbl.position({ x: cx, y: cy });
+            lbl.visible(true);
+            lbl.moveToTop();
+        } else if (lbl) {
+            lbl.visible(false);
+        }
+    }
+
     function addAreaPoint(pos) {
-        warnMissingScale();
+        if (!requirePlanScale('area')) return false;
         const layer = activeLayer();
         if (!layer) {
             showToast('Select a takeoff layer before drawing.', 'error');
@@ -1720,33 +2017,84 @@
             showToast('Layer is locked', 'error');
             return;
         }
+        const handleR = getLinearNodeRadius();
+        const handleStroke = getLinearNodeStroke();
         if (!state.draftArea) {
+            const vertex = createVertexHandleNode(pos, 'area', layer.color || '#2563eb', handleR, handleStroke, {
+                draggable: false,
+                listening: false,
+                visible: true
+            });
             state.draftArea = {
                 points: [pos],
+                layerUid: layer.client_uid,
+                vertices: [vertex],
                 preview: new Konva.Line({
                     points: [pos.x, pos.y, pos.x, pos.y],
                     stroke: layer.color || '#2563eb',
-                    strokeWidth: 3,
+                    strokeWidth: Math.max(1, num(layer.stroke_width || layer.strokeWidth || 2.5)),
                     fill: layer.color || '#2563eb',
                     opacity: 0.28,
                     closed: true,
-                    lineJoin: 'round'
+                    lineJoin: 'round',
+                    listening: false
                 }),
+                areaLabel: new Konva.Text({
+                    x: pos.x,
+                    y: pos.y,
+                    text: '',
+                    fill: layer.color || '#2563eb',
+                    fontSize: 13.5,
+                    fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+                    fontStyle: 'bold',
+                    stroke: '#ffffff',
+                    strokeWidth: 3,
+                    fillAfterStrokeEnabled: true,
+                    padding: 2,
+                    visible: false,
+                    listening: false
+                })
             };
-            konvaLayer.add(state.draftArea.preview);
+            konvaLayer.add(state.draftArea.preview, vertex, state.draftArea.areaLabel);
+            konvaLayer.batchDraw();
             return;
         }
+        const last = state.draftArea.points[state.draftArea.points.length - 1];
+        if (Math.hypot(pos.x - last.x, pos.y - last.y) < 0.5) return;
         state.draftArea.points.push(pos);
-        state.draftArea.preview.points(state.draftArea.points.flatMap(p => [p.x, p.y]));
+        const vertex = createVertexHandleNode(pos, 'area', layer.color || '#2563eb', handleR, handleStroke, {
+            draggable: false,
+            listening: false,
+            visible: true
+        });
+        state.draftArea.vertices.push(vertex);
+        konvaLayer.add(vertex);
+        updateAreaDraftPreview(state.draftArea.points);
         konvaLayer.batchDraw();
+        if (state.draftArea.points.length >= 4) {
+            finishArea();
+        }
+    }
+
+    function destroyAreaDraftNodes() {
+        if (!state.draftArea) return;
+        state.draftArea.preview?.destroy();
+        state.draftArea.areaLabel?.destroy();
+        (state.draftArea.vertices || []).forEach(v => v.destroy());
+        state.draftArea = null;
+        flushKonvaCanvasDraw();
     }
 
     function finishArea() {
-        if (!state.draftArea || state.draftArea.points.length < 3) return;
-        const layer = activeLayer();
+        if (!state.draftArea || state.draftArea.points.length < 3) return false;
+        if (!requirePlanScale('area')) {
+            destroyAreaDraftNodes();
+            return false;
+        }
+        const layer = state.layers.find(row => row.client_uid === state.draftArea.layerUid) || activeLayer();
         if (!layer) {
             showToast('Select a takeoff layer before drawing.', 'error');
-            return;
+            return false;
         }
         snapshot();
         const segment = {
@@ -1757,14 +2105,14 @@
             takeoff_type: 'area',
             type: 'area',
             page_number: Number(pageNum || 1),
-            points_json: state.draftArea.points,
+            points_json: state.draftArea.points.map(p => ({ ...p })),
             measured_area: 0,
-            multiplier: 1,
+            multiplier: layerMultiplier(layer),
             total_area: 0,
             total_length: 0,
-            unit: 'sq ft',
+            unit: layer.unit_of_measure || 'sq ft',
             color: layer.color || '#2563eb',
-            stroke_width: 3,
+            stroke_width: Math.max(1, num(layer.stroke_width || layer.strokeWidth || 2.5)),
             label: '',
             project_id: currentProjectId(),
             document_id: currentDocumentId(),
@@ -1776,21 +2124,27 @@
         segment.created_at = segment.createdAt;
         segment.updated_at = segment.updatedAt;
         calculateAreaQuantity(segment);
-        state.draftArea.preview.destroy();
-        state.draftArea = null;
+        destroyAreaDraftNodes();
         state.segments.push(segment);
         createSegmentNode(segment);
-        selectElement('segment', segment);
-        markDirty();
-        finishToolUse();
+        trackTakeoffObjects([{ type: 'segment', ref: segment }], false);
+        dirtyTakeoffPages.add(Number(segment.page_number || pageNum || 1));
+        clearTakeoffSelection();
+        markDirty({ objectsTracked: true });
+        applyTakeoffDrawingInteractivity();
+        if (konvaStage?.container()) konvaStage.container().style.cursor = 'crosshair';
+        renderLayers();
+        emitProjectState();
+        emitToolState();
+        scheduleTakeoffAutosave(250);
+        return true;
     }
 
     function clearDrafts() {
         if (state.draftLine) destroyLinearDraftNodes();
-        if (state.draftArea?.preview) state.draftArea.preview.destroy();
-        state.draftArea = null;
+        if (state.draftArea) destroyAreaDraftNodes();
         updateDrawingStatus();
-        konvaLayer?.batchDraw();
+        flushKonvaCanvasDraw();
     }
 
     function selectedTakeoffObjectIds() {
@@ -1846,6 +2200,7 @@
 
     function markDirty(options = {}) {
         state.dirty = true;
+        hasPendingManualCanvasCheckpoint = true;
         if (options.pageFallback) {
             dirtyTakeoffPages.add(Number(pageNum || 1));
             dirtyTakeoffPageGenerations.set(Number(pageNum || 1), ++takeoffDirtyGeneration);
@@ -1860,16 +2215,30 @@
         renderSummary();
         renderLayers();
         scheduleTakeoffAutosave();
-        emitProjectState();
+        emitProjectState(true);
     }
 
     function layerQuantity(layer) {
         const countQty = state.markers
             .filter(marker => marker.layer_client_uid === layer.client_uid)
             .reduce((sum, marker) => sum + calculateCountQuantity(marker), 0);
-        const linearQty = state.segments
-            .filter(segment => segment.layer_client_uid === layer.client_uid && String(segment.takeoff_type || segment.type || '').toLowerCase() !== 'area')
-            .reduce((sum, segment) => sum + calculateLinearLength(segment), 0);
+        const linearSegments = state.segments
+            .filter(segment => segment.layer_client_uid === layer.client_uid && String(segment.takeoff_type || segment.type || '').toLowerCase() !== 'area');
+        const layerSub = normalizeLinearSubtype(layer.takeoff_subtype || layer.original_takeoff_type || layer.takeoff_type || layer.type);
+        let linearQty = 0;
+        if (layerSub === 'linear_avg_with_drop') {
+            if (linearSegments.length > 0) {
+                const roundedSum = linearSegments.reduce((sum, segment) => {
+                    calculateLinearLength(segment);
+                    return sum + Math.round(num(segment.horizontal_length || 0));
+                }, 0);
+                const avgRounded = roundedSum / linearSegments.length;
+                const singleDrop = Math.max(0, num(layer.drop_length ?? layer.dropLength ?? 0));
+                linearQty = (avgRounded + singleDrop) * layerMultiplier(layer);
+            }
+        } else {
+            linearQty = linearSegments.reduce((sum, segment) => sum + calculateLinearLength(segment), 0);
+        }
         const areaQty = state.segments
             .filter(segment => segment.layer_client_uid === layer.client_uid && String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area')
             .reduce((sum, segment) => sum + calculateAreaQuantity(segment), 0);
@@ -1884,10 +2253,11 @@
     function layerType(layer) {
         const raw = String(layer.takeoff_type || layer.type || layer.layer_type || '').toLowerCase();
         if (['linear', 'line', 'lines', 'lf', 'ft', 'linear with drop', 'linear avg. with drop',
-            'linear avg with drop', 'linear_with_drop', 'linear_avg_with_drop'].includes(raw)) return 'linear';
+            'linear avg with drop', 'linear_with_drop', 'linear_avg_with_drop',
+            'count by distance', 'count_by_distance'].includes(raw)) return 'linear';
         if (['count', 'counts', 'point', 'points', 'ea'].includes(raw)) return 'count';
-        if (['area', 'sf'].includes(raw)) return 'area';
-        if (['volume', 'cy'].includes(raw)) return 'volume';
+        if (['area', 'sf', 'area / volume', 'vertical wall area'].includes(raw)) return 'area';
+        if (['volume', 'cy'].includes(raw)) return 'area';
         if (['lump_sum', 'lump sum', 'lot'].includes(raw)) return 'lump_sum';
         const uom = String(layer.unit_of_measure || '').toLowerCase();
         if (['lf', 'ft'].includes(uom)) return 'linear';
@@ -1957,6 +2327,7 @@
             quantity: layerQuantity(layer),
             baseQuantity,
             seed_quantity: baseQuantity,
+            multiplier: layerMultiplier(layer),
             catalog_item_id: layer.catalog_item_id || null,
             catalogMetadata: window.CatalogMetadata.fromLayer(layer),
             unit_cost: num(layer.unit_cost || 0),
@@ -1965,6 +2336,8 @@
             estimating_item_id: layer.metadata_json?.estimating_item_id || null,
             estimating_group_id: layer.metadata_json?.estimating_group_id || null,
             dropLength: Math.max(0, num(layer.drop_length ?? layer.dropLength)),
+            spacing: Math.max(0, num(layer.spacing ?? layer.metadata_json?.spacing)),
+            subtype: normalizeLinearSubtype(layer.takeoff_subtype || layer.original_takeoff_type || layer.takeoff_type || layer.type),
             shapes: [
                 ...state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).map(marker => ({
                     id: marker.client_uid,
@@ -1985,6 +2358,8 @@
                 })),
                 ...state.segments.filter(segment => segment.layer_client_uid === layer.client_uid).map(segment => {
                     const isArea = String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area';
+                    const qtyVal = isArea ? calculateAreaQuantity(segment) : calculateLinearLength(segment);
+                    const sub = normalizeLinearSubtype(segment.takeoff_subtype || layer.takeoff_subtype || layer.original_takeoff_type || layer.type);
                     return {
                         id: segment.client_uid,
                         projectId: String(segment.project_id || currentProjectId()),
@@ -1993,10 +2368,13 @@
                         sheetId: segment.sheet_id || sheetIdFor(segment.page_number),
                         pageNumber: segment.page_number,
                         type: isArea ? 'Area' : 'Linear',
+                        subtype: isArea ? 'area' : sub,
+                        horizontalLength: num(segment.horizontal_length || 0),
+                        roundedLength: Math.round(num(segment.horizontal_length || 0)),
                         points: segment.points_json || [],
                         color: segment.color,
                         size: segment.symbol_size || segment.size || layer.symbol_size || 'Medium',
-                        quantityValue: isArea ? calculateAreaQuantity(segment) : calculateLinearLength(segment),
+                        quantityValue: qtyVal,
                         uom: layerUnit(layer),
                         createdAt: segment.createdAt || segment.created_at || null,
                         updatedAt: segment.updatedAt || segment.updated_at || null
@@ -2006,7 +2384,21 @@
         };
     }
 
-    function projectSnapshot() {
+    function isEditorTakeoffDirty() {
+        return Boolean(
+            state.dirty
+            || hasPendingManualCanvasCheckpoint
+            || dirtyTakeoffPages.size > 0
+            || dirtyTakeoffObjects.size > 0
+            || deletedTakeoffObjects.size > 0
+        );
+    }
+    window.isEditorTakeoffDirty = isEditorTakeoffDirty;
+    window.clearEditorTakeoffDirtyCheckpoint = function () {
+        hasPendingManualCanvasCheckpoint = false;
+    };
+
+    function projectSnapshot(isUserDirty = false) {
         return {
             estimateKey: currentEstimateKey(),
             estimate_key: currentEstimateKey(),
@@ -2014,15 +2406,17 @@
             drawing_id: typeof fileId !== 'undefined' ? fileId : null,
             projectId: typeof projectId !== 'undefined' ? projectId : 0,
             activeLayerId: state.selectedLayerUid,
+            dirty: isEditorTakeoffDirty(),
+            userDirty: Boolean(isUserDirty),
             layers: state.layers.map(projectLayerPayload),
             summary: calculateTakeoffSummary()
         };
     }
 
-    function emitProjectState() {
+    function emitProjectState(isUserDirty = false) {
         if (window.parent && window.parent !== window) {
             try {
-                window.parent.postMessage({ type: 'project-takeoff-state', payload: projectSnapshot() }, '*');
+                window.parent.postMessage({ type: 'project-takeoff-state', payload: projectSnapshot(isUserDirty) }, '*');
             } catch (e) {}
         }
     }
@@ -2112,12 +2506,27 @@
         if (name === null) return;
         const group = prompt('Group', layerGroup(layer));
         if (group === null) return;
+        const previousType = normalizeEditorLayerType(layer.takeoff_type || layer.type || layer.layer_type).type;
+        const nextTypeRaw = prompt('Takeoff type: count, linear, area, volume, lump_sum', layerType(layer)) || layerType(layer);
+        const nextNorm = normalizeEditorLayerType(nextTypeRaw);
+        if (previousType !== nextNorm.type) {
+            const msg = previousType === 'count'
+                ? `Changing "${layer.name}" from Count to ${nextTypeRaw} will delete all existing count markers from the canvas and reset its quantity to 0.`
+                : `Changing "${layer.name}" from ${previousType} to ${nextTypeRaw} will delete its existing measurements from the canvas and reset its quantity to 0.`;
+            if (!window.confirm(msg)) return;
+        }
         snapshot();
         layer.name = name.trim() || layer.name;
         layer.group_name = group.trim() || 'Ungrouped';
-        layer.takeoff_type = prompt('Takeoff type: count, linear, area, volume, lump_sum', layerType(layer)) || layerType(layer);
+        layer.takeoff_type = nextNorm.type;
+        layer.type = nextNorm.type;
+        layer.takeoff_subtype = nextNorm.subtype;
         layer.unit_of_measure = prompt('Unit of measure', layerUnit(layer)) || layerUnit(layer);
-        markDirty({ pageFallback: true });
+        if (previousType !== nextNorm.type) {
+            purgeIncompatibleLayerObjects(layer, nextNorm.type);
+        } else {
+            markDirty({ pageFallback: true });
+        }
         renderAll();
     }
 
@@ -2194,14 +2603,16 @@
         } else {
             targetLayer = createLayer(payload);
         }
-        if (targetLayer && previousType && previousType !== layerType(targetLayer)) {
-            clearIncompatibleMeasurements(targetLayer, layerType(targetLayer));
+        if (targetLayer && previousType && previousType !== normalizeEditorLayerType(targetLayer.takeoff_type || targetLayer.type).type) {
+            purgeIncompatibleLayerObjects(targetLayer, normalizeEditorLayerType(targetLayer.takeoff_type || targetLayer.type).type);
         }
         if (targetLayer && state.createLayerMode) {
             // Editing a layer changes its drawing contract as well as its row.
             // Apply the same values to already-created geometry so the canvas
             // and the persisted marker/segment rows cannot retain stale values.
             window.projectTakeoffUpdateLayerObjects?.(targetLayer.client_uid, {
+                type: payload.takeoff_type,
+                uom: payload.unit_of_measure,
                 symbol: payload.symbol,
                 color: payload.color,
                 symbolSize: symbolRadius(payload.symbol_size),
@@ -2215,14 +2626,66 @@
         renderAll();
     }
 
-    function clearIncompatibleMeasurements(layer, nextType) {
-        if (nextType === 'linear') {
-            state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).forEach(destroyMarkerNodes);
-            state.markers = state.markers.filter(marker => marker.layer_client_uid !== layer.client_uid);
-        } else if (nextType === 'count') {
-            state.segments.filter(segment => segment.layer_client_uid === layer.client_uid).forEach(destroySegmentNodes);
-            state.segments = state.segments.filter(segment => segment.layer_client_uid !== layer.client_uid);
+    function purgeIncompatibleLayerObjects(layer, nextType, layerKeys = null) {
+        if (!layer) return 0;
+        const targetType = normalizeEditorLayerType(nextType).type;
+        const keys = layerKeys instanceof Set ? new Set(layerKeys) : new Set([
+            String(layer.client_uid || ''),
+            String(layer.id || ''),
+            String(layer.metadata_json?.project_layer_id || ''),
+            String(layer.integration_key || '')
+        ].filter(Boolean));
+        if (state.draftLine && keys.has(String(state.draftLine.layerUid || ''))) {
+            if (targetType !== 'linear') cancelLinearDraft();
         }
+        if (state.draftArea && keys.has(String(state.draftArea.layerUid || ''))) {
+            if (targetType !== 'area') clearDrafts();
+        }
+        const matchesLayer = (obj) => keys.has(String(obj?.layer_client_uid || '')) || keys.has(String(obj?.layer_id || ''));
+        const removedMarkers = targetType === 'count' ? [] : state.markers.filter(matchesLayer);
+        const removedSegments = state.segments.filter(segment => {
+            if (!matchesLayer(segment)) return false;
+            if (targetType === 'count') return true;
+            const segType = normalizeEditorLayerType(segment.takeoff_type || segment.type).type;
+            return segType !== targetType;
+        });
+        const removedTargets = [
+            ...removedMarkers.map(ref => ({ type: 'marker', ref })),
+            ...removedSegments.map(ref => ({ type: 'segment', ref }))
+        ];
+        if (removedTargets.length) {
+            trackTakeoffObjects(removedTargets, true);
+            const removedUidSet = new Set(removedTargets.map(item => String(item.ref?.client_uid || '')).filter(Boolean));
+            removedMarkers.forEach(ref => {
+                dirtyTakeoffPages.add(Number(ref.page_number || pageNum || 1));
+                destroyMarkerNodes(ref);
+            });
+            removedSegments.forEach(ref => {
+                dirtyTakeoffPages.add(Number(ref.page_number || pageNum || 1));
+                destroySegmentNodes(ref);
+            });
+            const removedSet = new Set(removedTargets.map(item => item.ref));
+            state.markers = state.markers.filter(marker => !removedSet.has(marker));
+            state.segments = state.segments.filter(segment => !removedSet.has(segment));
+            removedUidSet.forEach(uidVal => state.selectedObjectUids?.delete(uidVal));
+            if (state.selectedElement?.ref && removedSet.has(state.selectedElement.ref)) {
+                state.selectedElement = null;
+            }
+        }
+        layer.seed_quantity = 0;
+        layer.base_quantity = 0;
+        layer.baseQuantity = 0;
+        layer.quantity = 0;
+        if (layer.metadata_json && typeof layer.metadata_json === 'object') {
+            layer.metadata_json.base_quantity = 0;
+        }
+        markDirty({ pageFallback: true, objectsTracked: true });
+        flushKonvaCanvasDraw();
+        return removedTargets.length;
+    }
+
+    function clearIncompatibleMeasurements(layer, nextType) {
+        return purgeIncompatibleLayerObjects(layer, nextType);
     }
 
     function openCatalogBrowser() {
@@ -2364,9 +2827,6 @@
         }
         const leavingLinear = state.tool === 'takeoff_linear' && tool !== 'takeoff_linear';
         if (leavingLinear && state.draftLine) {
-            if (state.draftLine.points.length === 1 && linearPointerWorld) {
-                addLinearPoint(linearPointerWorld);
-            }
             if (state.draftLine.points.length >= 2) {
                 finishLinear();
             } else {
@@ -2577,7 +3037,7 @@
             linearShiftPressed = Boolean(evt.evt?.shiftKey);
             renderLinearPreview(world, linearShiftPressed);
             if (state.tool === 'takeoff_area' && state.draftArea?.preview && state.draftArea.points.length) {
-                state.draftArea.preview.points([...state.draftArea.points, world].flatMap(p => [p.x, p.y]));
+                updateAreaDraftPreview([...state.draftArea.points, world]);
                 konvaLayer.batchDraw();
             }
         });
@@ -3105,7 +3565,11 @@
                 emitProjectState();
                 return false;
             }
-            warnMissingScale();
+            requirePlanScale('area');
+            setTool('smart');
+            renderLayers();
+            emitProjectState();
+            return false;
         }
         setTool(type === 'linear' ? 'takeoff_linear' : (type === 'area' ? 'takeoff_area' : 'takeoff_count'));
         showToast(`${layer.name} active`, 'success');
@@ -3454,39 +3918,120 @@
         emitProjectState();
     }
 
-    function saveTakeoff(silent = false, rejectOnError = false) {
+    function normalizePointsJson(rawPoints) {
+        let parsed = rawPoints;
+        if (typeof parsed === 'string') {
+            try { parsed = JSON.parse(parsed); } catch (_) { parsed = []; }
+        }
+        if (!Array.isArray(parsed)) return [];
+        return parsed
+            .filter(p => p && typeof p === 'object')
+            .map(p => ({ x: num(p.x), y: num(p.y) }));
+    }
+
+    function buildSaveTakeoffPayload() {
         state.layers.forEach(persistLayerCostSnapshot);
         const sentPages = dirtyTakeoffPages.size ? [...dirtyTakeoffPages] : [Number(pageNum || 1)];
         const sentGenerations = new Map(sentPages.map(page => [page, dirtyTakeoffPageGenerations.get(page) || 0]));
         const sentObjectIds = Array.from(new Set([...dirtyTakeoffObjects.keys(), ...deletedTakeoffObjects.keys()]));
         const sentObjectGenerations = new Map(sentObjectIds.map(id => [id, dirtyTakeoffObjectGenerations.get(id) || 0]));
         const objectBaseVersions = Object.fromEntries(sentObjectIds.map(id => [id, takeoffObjectBaseVersions.get(id) ?? null]));
-        // Object patches are more precise than the page fallback. A page is
-        // included only for layer/global edits that could not be attributed to
-        // stable geometry IDs.
         const fallbackPages = dirtyTakeoffPages.size ? [...dirtyTakeoffPages] : (sentObjectIds.length ? [] : sentPages);
-        return request('save_state', {
-            drawing_id: fileId,
-            project_id: typeof projectId !== 'undefined' ? projectId : 0,
-            estimate_key: currentEstimateKey(),
-            layers: state.layers,
-            markers: state.markers.map(marker => ({
-                ...stripNodes(marker),
-                metadata_json: { ...(marker.metadata_json || {}), element_locked: isObjectIndividuallyLocked(marker) ? 1 : 0,
-                    symbol_size: symbolRadius(marker.symbol_size || marker.size) }
-            })),
-            segments: state.segments.map(segment => ({
-                ...stripNodes(segment),
-                metadata_json: { ...(segment.metadata_json || {}), element_locked: isObjectIndividuallyLocked(segment) ? 1 : 0,
-                    takeoff_subtype: normalizeLinearSubtype(segment.takeoff_subtype || segment.takeoff_type || segment.type),
-                    drop_length: Math.max(0, num(segment.drop_length ?? segment.dropLength)) }
-            })),
-            summary: calculateTakeoffSummary(),
-            dirty_page_numbers: fallbackPages,
-            dirty_object_ids: [...dirtyTakeoffObjects.keys()],
-            deleted_object_ids: [...deletedTakeoffObjects.keys()],
-            object_base_versions: objectBaseVersions,
-        }).then(res => {
+        return {
+            sentPages,
+            sentGenerations,
+            sentObjectIds,
+            sentObjectGenerations,
+            body: {
+                drawing_id: fileId,
+                project_id: typeof projectId !== 'undefined' ? projectId : 0,
+                estimate_key: currentEstimateKey(),
+                layers: state.layers,
+                markers: state.markers.map(marker => ({
+                    ...stripNodes(marker),
+                    metadata_json: { ...(marker.metadata_json || {}), element_locked: isObjectIndividuallyLocked(marker) ? 1 : 0,
+                        symbol_size: symbolRadius(marker.symbol_size || marker.size) }
+                })),
+                segments: state.segments.map(segment => ({
+                    ...stripNodes(segment),
+                    metadata_json: { ...(segment.metadata_json || {}), element_locked: isObjectIndividuallyLocked(segment) ? 1 : 0,
+                        takeoff_subtype: normalizeLinearSubtype(segment.takeoff_subtype || segment.takeoff_type || segment.type),
+                        drop_length: Math.max(0, num(segment.drop_length ?? segment.dropLength)),
+                        spacing: Math.max(0, num(segment.spacing ?? segment.metadata_json?.spacing)) }
+                })),
+                summary: calculateTakeoffSummary(),
+                dirty_page_numbers: fallbackPages,
+                dirty_object_ids: [...dirtyTakeoffObjects.keys()],
+                deleted_object_ids: [...deletedTakeoffObjects.keys()],
+                object_base_versions: objectBaseVersions,
+            }
+        };
+    }
+
+    function compactLayerForKeepalive(layer) {
+        if (!layer || typeof layer !== 'object') return layer;
+        const meta = layer.metadata_json && typeof layer.metadata_json === 'object'
+            ? { ...layer.metadata_json } : {};
+        delete meta.catalog_item;
+        delete meta.catalogSnapshot;
+        return {
+            ...layer,
+            metadata_json: meta,
+        };
+    }
+
+    function flushTakeoffKeepalive() {
+        if (!state.dirty || typeof fetch !== 'function' || typeof fileId === 'undefined' || !fileId) return;
+        const { sentPages, sentObjectIds, body } = buildSaveTakeoffPayload();
+        let serialized = JSON.stringify({ action: 'save_state', ...body });
+        if (serialized.length > 48000) {
+            const dirtyObjectSet = new Set(sentObjectIds.map(String));
+            const dirtyPageSet = new Set(sentPages.map(Number));
+            const dirtySegments = (body.segments || []).filter(seg =>
+                dirtyObjectSet.has(String(seg.client_uid || '')) || (!dirtyObjectSet.size && dirtyPageSet.has(Number(seg.page_number || 1)))
+            );
+            const dirtyMarkers = (body.markers || []).filter(m =>
+                dirtyObjectSet.has(String(m.client_uid || '')) || (!dirtyObjectSet.size && dirtyPageSet.has(Number(m.page_number || 1)))
+            );
+            const referencedLayers = new Set([
+                ...dirtySegments.map(s => String(s.layer_client_uid || '')),
+                ...dirtyMarkers.map(m => String(m.layer_client_uid || ''))
+            ]);
+            const compactLayers = (body.layers || [])
+                .filter(l => !dirtyObjectSet.size || referencedLayers.has(String(l.client_uid || l.id || '')))
+                .map(compactLayerForKeepalive);
+            const compactSummary = (body.summary || []).filter(row =>
+                !referencedLayers.size || referencedLayers.has(String(row.layerUid || ''))
+            );
+            const compactBody = {
+                drawing_id: body.drawing_id,
+                project_id: body.project_id,
+                estimate_key: body.estimate_key,
+                partial_keepalive: 1,
+                layers: compactLayers,
+                markers: dirtyMarkers,
+                segments: dirtySegments,
+                summary: compactSummary,
+                dirty_page_numbers: dirtyObjectSet.size ? [] : (body.dirty_page_numbers || []),
+                dirty_object_ids: body.dirty_object_ids || [],
+                deleted_object_ids: body.deleted_object_ids || [],
+                object_base_versions: body.object_base_versions || {},
+            };
+            serialized = JSON.stringify({ action: 'save_state', ...compactBody });
+        }
+        try {
+            fetch(apiUrl, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: serialized,
+                keepalive: true
+            });
+        } catch (_) {}
+    }
+
+    function saveTakeoff(silent = false, rejectOnError = false) {
+        const { sentPages, sentGenerations, sentObjectIds, sentObjectGenerations, body } = buildSaveTakeoffPayload();
+        return request('save_state', body).then(res => {
             if (res.status !== 'success') throw new Error(res.msg || 'Save failed');
             sentPages.forEach(page => {
                 if ((dirtyTakeoffPageGenerations.get(page) || 0) !== sentGenerations.get(page)) return;
@@ -3505,7 +4050,10 @@
                 } else takeoffObjectBaseVersions.delete(id);
             });
             state.dirty = dirtyTakeoffPages.size > 0 || dirtyTakeoffObjects.size > 0 || deletedTakeoffObjects.size > 0;
-            if (!silent) showToast('Takeoff saved', 'success');
+            if (!silent) {
+                hasPendingManualCanvasCheckpoint = false;
+                showToast('Takeoff saved', 'success');
+            }
             renderSummary();
         }).catch(err => {
             if (!silent) showToast(err.message, 'error');
@@ -3533,20 +4081,67 @@
                     if (page > 0 && pixelsPerUnit > 0) window.sheetScales[page] = pixelsPerUnit;
                 });
                 const dbLayerIdMap = new Map();
-                state.layers = (data.layers || []).map(l => {
+                const dedupedLayers = [];
+                const seenLayerIdx = new Map();
+                (data.layers || []).forEach(l => {
                     const metadata = l.metadata_json || {};
-                    const stableUid = String(metadata.project_layer_id || l.client_uid || l.id);
-                    dbLayerIdMap.set(String(l.id), stableUid);
-                    return restoreLayerCostSnapshot({ ...l, client_uid: stableUid, metadata_json: { ...metadata, project_layer_id: stableUid } });
+                    const stableUid = String(metadata.project_layer_id || l.client_uid || l.integration_key || l.id);
+                    [l.id, l.client_uid, l.integration_key, metadata.project_layer_id].forEach(k => {
+                        if (k !== undefined && k !== null && String(k) !== '') dbLayerIdMap.set(String(k), stableUid);
+                    });
+                    const normalizedLayer = restoreLayerCostSnapshot({
+                        ...l,
+                        client_uid: stableUid,
+                        metadata_json: { ...metadata, project_layer_id: stableUid }
+                    });
+                    if (seenLayerIdx.has(stableUid)) {
+                        const idx = seenLayerIdx.get(stableUid);
+                        const prev = dedupedLayers[idx];
+                        const nextQty = Math.max(num(prev?.quantity), num(normalizedLayer.quantity));
+                        dedupedLayers[idx] = { ...prev, ...normalizedLayer, quantity: nextQty };
+                    } else {
+                        seenLayerIdx.set(stableUid, dedupedLayers.length);
+                        dedupedLayers.push(normalizedLayer);
+                    }
                 });
-                state.markers = (data.markers || []).map(m => ({ ...m, client_uid: m.client_uid || String(m.id), layer_client_uid: String(m.layer_client_uid || dbLayerIdMap.get(String(m.layer_id)) || m.layer_id || ''), metadata_json: m.metadata_json || {}, symbol_size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, locked: Number(m.locked ?? m.metadata_json?.element_locked ?? 0), _serverUpdatedAt: m.updated_at || m.updatedAt || null }));
-                state.segments = (data.segments || []).map(s => ({ ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: String(s.layer_client_uid || dbLayerIdMap.get(String(s.layer_id)) || s.layer_id || ''), points_json: s.points_json || [], metadata_json: s.metadata_json || {}, takeoff_subtype: s.takeoff_subtype || s.metadata_json?.takeoff_subtype || 'linear', drop_length: Math.max(0, num(s.drop_length ?? s.metadata_json?.drop_length)), locked: Number(s.locked ?? s.metadata_json?.element_locked ?? 0), _serverUpdatedAt: s.updated_at || s.updatedAt || null }));
+                state.layers = dedupedLayers;
+                const seenMarkerIds = new Set();
+                state.markers = (data.markers || []).map(m => {
+                    const rawLayerKey = String(m.layer_client_uid || dbLayerIdMap.get(String(m.layer_id)) || m.layer_id || '');
+                    const resolvedLayerUid = dbLayerIdMap.get(rawLayerKey) || rawLayerKey;
+                    return { ...m, client_uid: m.client_uid || String(m.id), layer_client_uid: resolvedLayerUid, metadata_json: m.metadata_json || {}, symbol_size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, size: m.symbol_size ?? m.metadata_json?.symbol_size ?? m.size, locked: Number(m.locked ?? m.metadata_json?.element_locked ?? 0), _serverUpdatedAt: m.updated_at || m.updatedAt || null };
+                }).filter(m => {
+                    const uidKey = String(m.client_uid || '');
+                    if (!uidKey || seenMarkerIds.has(uidKey)) return false;
+                    seenMarkerIds.add(uidKey);
+                    return true;
+                });
+                const seenSegmentIds = new Set();
+                state.segments = (data.segments || []).map(s => {
+                    const rawLayerKey = String(s.layer_client_uid || dbLayerIdMap.get(String(s.layer_id)) || s.layer_id || '');
+                    const resolvedLayerUid = dbLayerIdMap.get(rawLayerKey) || rawLayerKey;
+                    return { ...s, client_uid: s.client_uid || String(s.id), layer_client_uid: resolvedLayerUid, page_number: Math.max(1, Number(s.page_number || 1)), points_json: normalizePointsJson(s.points_json), metadata_json: s.metadata_json || {}, takeoff_subtype: s.takeoff_subtype || s.metadata_json?.takeoff_subtype || 'linear', drop_length: Math.max(0, num(s.drop_length ?? s.metadata_json?.drop_length)), spacing: Math.max(0, num(s.spacing ?? s.metadata_json?.spacing)), locked: Number(s.locked ?? s.metadata_json?.element_locked ?? 0), _serverUpdatedAt: s.updated_at || s.updatedAt || null };
+                }).filter(s => {
+                    const uidKey = String(s.client_uid || '');
+                    if (!uidKey || seenSegmentIds.has(uidKey)) return false;
+                    seenSegmentIds.add(uidKey);
+                    return true;
+                });
             }
             if (!state.selectedItemId && state.catalog.items[0]) state.selectedItemId = state.catalog.items[0].id;
             // An empty server snapshot is intentional. Never treat zero layers as
             // a first run or deleted starter groups will return after refresh.
             renderNodes();
             renderAll();
+            try {
+                window.parent?.postMessage({
+                    type: 'takeoff-editor-state-loaded',
+                    payload: {
+                        drawingId: typeof fileId !== 'undefined' ? fileId : null,
+                        estimateKey: currentEstimateKey()
+                    }
+                }, '*');
+            } catch (_) {}
         }).catch(err => {
             console.error(err);
             showToast(err?.message || 'Takeoff could not load. Please retry or contact an administrator.', 'error');
@@ -3606,15 +4201,25 @@
                     copy.y = num(copy.y) + 18;
                     state.markers.push(copy);
                     createMarkerNode(copy);
+                    trackTakeoffObjects([{ type: 'marker', ref: copy }], false);
                     selectElement('marker', copy);
                 } else {
                     copy.points_json = (copy.points_json || []).map(p => ({ x: p.x + 18, y: p.y + 18 }));
                     state.segments.push(copy);
                     createSegmentNode(copy);
+                    trackTakeoffObjects([{ type: 'segment', ref: copy }], false);
                     selectElement('segment', copy);
                 }
-                markDirty();
+                dirtyTakeoffPages.add(Number(copy.page_number || pageNum || 1));
+                markDirty({ objectsTracked: true });
             }
+        });
+        window.addEventListener('pagehide', flushTakeoffKeepalive);
+        window.addEventListener('beforeunload', event => {
+            flushTakeoffKeepalive();
+            if (state.projectControlled || !isEditorTakeoffDirty()) return;
+            event.preventDefault();
+            event.returnValue = '';
         });
         window.addEventListener('keyup', e => {
             if (e.key !== 'Shift') return;
@@ -3664,6 +4269,7 @@
         const type = normalizedLayerType.type;
         const seedQuantity = num(payload.baseQuantity ?? payload.base_quantity ?? payload.seedQuantity
             ?? payload.seed_quantity ?? layer?.seed_quantity ?? layer?.metadata_json?.base_quantity ?? 0);
+        const layerMultiplierVal = Math.max(0, num(payload.multiplier ?? layer?.multiplier ?? layer?.metadata_json?.multiplier ?? 1));
         const data = {
             client_uid: externalId,
             page_number: pageNum || 1,
@@ -3673,6 +4279,7 @@
             takeoff_subtype: normalizedLayerType.subtype,
             original_takeoff_type: normalizedType,
             drop_length: Math.max(0, num(payload.drop_length ?? payload.dropLength)),
+            spacing: Math.max(0, num(payload.spacing ?? payload.metadata_json?.spacing)),
             group_name: payload.group_name || payload.category || 'Project Takeoff',
             unit_of_measure: payload.unit_of_measure || payload.uom || (type === 'linear' ? 'ft' : (type === 'area' ? 'sq ft' : 'ea')),
             catalog_item_id: payload.catalog_item_id || payload.catalogItemId || null,
@@ -3683,12 +4290,14 @@
             unit_cost: num(payload.unit_cost || payload.unitCost || 0),
             unit_labor_time: num(payload.labor_hours || payload.laborHours || payload.unit_labor_time || 0),
             cost_code: payload.cost_code || payload.catalogNumber || '',
+            multiplier: layerMultiplierVal,
             visible: payload.visible === false ? 0 : 1,
             locked: payload.locked ? 1 : 0,
             seed_quantity: seedQuantity,
             metadata_json: window.CatalogMetadata.mergeMetadata(layer?.metadata_json,
                 payload.catalogMetadata || payload.metadata_json?.catalog_item, { project_layer_id: externalId,
                 base_quantity: seedQuantity,
+                multiplier: layerMultiplierVal,
                 estimate_id: payload.estimate_id || payload.estimateId || null,
                 estimating_item_id: payload.estimating_item_id || payload.estimatingItemId || null,
                 estimating_group_id: payload.estimating_group_id || payload.estimatingGroupId || null }),
@@ -3718,15 +4327,17 @@
             const type = normalizedLayerType.type;
             const seedQuantity = num(payload.baseQuantity ?? payload.base_quantity ?? payload.seedQuantity
                 ?? payload.seed_quantity ?? layer?.seed_quantity ?? layer?.metadata_json?.base_quantity ?? 0);
+            const syncedMultiplier = Math.max(0, num(payload.multiplier ?? layer?.multiplier ?? layer?.metadata_json?.multiplier ?? 1));
             const data = {
                 client_uid: layer?.client_uid || externalId,
-                page_number: pageNum || 1,
+                page_number: Number(layer?.page_number || payload.page_number || payload.pageNumber || pageNum || 1),
                 name: payload.name || 'Takeoff Layer',
                 type,
                 takeoff_type: type,
                 takeoff_subtype: normalizedLayerType.subtype,
                 original_takeoff_type: normalizedType,
                 drop_length: Math.max(0, num(payload.drop_length ?? payload.dropLength)),
+                spacing: Math.max(0, num(payload.spacing ?? payload.metadata_json?.spacing)),
                 group_name: payload.group_name || payload.category || 'Project Takeoff',
                 unit_of_measure: payload.unit_of_measure || payload.uom || (type === 'linear' ? 'ft' : (type === 'area' ? 'sq ft' : 'ea')),
                 catalog_item_id: payload.catalog_item_id || payload.catalogItemId || null,
@@ -3737,23 +4348,50 @@
                 unit_cost: num(payload.unit_cost || payload.unitCost || 0),
                 unit_labor_time: num(payload.labor_hours || payload.laborHours || payload.unit_labor_time || 0),
                 cost_code: payload.cost_code || payload.catalogNumber || '',
+                multiplier: syncedMultiplier,
                 visible: payload.visible === false ? 0 : 1,
                 locked: payload.locked ? 1 : 0,
                 seed_quantity: seedQuantity,
                 metadata_json: window.CatalogMetadata.mergeMetadata(layer?.metadata_json,
                     payload.catalogMetadata || payload.metadata_json?.catalog_item, { project_layer_id: layer?.client_uid || externalId,
                     base_quantity: seedQuantity,
+                    multiplier: syncedMultiplier,
                     estimate_id: payload.estimate_id || payload.estimateId || null,
                     estimating_item_id: payload.estimating_item_id || payload.estimatingItemId || null,
                     estimating_group_id: payload.estimating_group_id || payload.estimatingGroupId || null }),
             };
             if (layer) {
+                const layerKeys = new Set([externalId, String(layer.client_uid || ''), String(layer.id || ''), String(layer.metadata_json?.project_layer_id || ''), String(layer.integration_key || '')].filter(Boolean));
+                const prevType = normalizeEditorLayerType(layer.takeoff_type || layer.type || layer.layer_type).type;
+                const prevSubtype = normalizeLinearSubtype(layer.takeoff_subtype || layer.original_takeoff_type || layer.takeoff_type || layer.type);
+                const prevDrop = Math.max(0, num(layer.drop_length ?? layer.dropLength ?? 0));
+                const prevSpacing = Math.max(0, num(layer.spacing ?? layer.metadata_json?.spacing ?? 0));
+                const typeFamilyChanged = prevType !== type;
+                const subtypeChanged = !typeFamilyChanged && type === 'linear' && prevSubtype !== data.takeoff_subtype;
+                const dropChanged = Math.abs(prevDrop - data.drop_length) > 0.0001;
+                const spacingChanged = Math.abs(prevSpacing - data.spacing) > 0.0001;
+                const groupChanged = String(layer.group_name || '') !== String(data.group_name || '');
+                const nameChanged = String(layer.name || '') !== String(data.name || '');
                 const colorChanged = layer.color !== data.color;
                 const symbolChanged = layer.symbol !== data.symbol;
                 const sizeChanged = symbolRadius(layer.symbol_size) !== symbolRadius(data.symbol_size);
+                const multiplierChanged = payload.multiplier !== undefined && Math.abs(layerMultiplier(layer) - syncedMultiplier) > 0.0001;
+                if (typeFamilyChanged) {
+                    data.seed_quantity = 0;
+                    if (data.metadata_json && typeof data.metadata_json === 'object') {
+                        data.metadata_json.base_quantity = 0;
+                    }
+                }
                 Object.assign(layer, data);
-                if (colorChanged || symbolChanged || sizeChanged) {
-                    const layerKeys = new Set([externalId, String(layer.client_uid || ''), String(layer.id || ''), String(layer.metadata_json?.project_layer_id || '')].filter(Boolean));
+                if (typeFamilyChanged) {
+                    purgeIncompatibleLayerObjects(layer, type, layerKeys);
+                    scheduleTakeoffAutosave(200);
+                } else if (groupChanged || nameChanged || subtypeChanged || dropChanged || spacingChanged) {
+                    state.dirty = true;
+                    hasPendingManualCanvasCheckpoint = true;
+                    scheduleTakeoffAutosave();
+                }
+                if (colorChanged || symbolChanged || sizeChanged || multiplierChanged || subtypeChanged || dropChanged || spacingChanged) {
                     state.markers.filter(m => layerKeys.has(String(m.layer_client_uid || '')) || layerKeys.has(String(m.layer_id || ''))).forEach(ref => {
                         if (colorChanged) ref.color = data.color;
                         if (symbolChanged) ref.symbol = data.symbol;
@@ -3761,13 +4399,31 @@
                             ref.symbol_size = data.symbol_size;
                             ref.size = data.symbol_size;
                         }
+                        if (multiplierChanged) {
+                            ref.multiplier = syncedMultiplier;
+                            ref.quantity = calculateCountQuantity(ref);
+                        }
                         destroyMarkerNodes(ref);
                         createMarkerNode(ref);
                     });
                     state.segments.filter(s => layerKeys.has(String(s.layer_client_uid || '')) || layerKeys.has(String(s.layer_id || ''))).forEach(ref => {
-                        if (colorChanged) {
-                            ref.color = data.color;
-                            ref.node?.stroke(String(ref.color || layer.color));
+                        if (colorChanged) ref.color = data.color;
+                        if (subtypeChanged) ref.takeoff_subtype = data.takeoff_subtype;
+                        if (dropChanged || subtypeChanged) {
+                            ref.drop_length = data.takeoff_subtype === 'linear' || data.takeoff_subtype === 'count_by_distance' ? 0 : data.drop_length;
+                        }
+                        if (spacingChanged || subtypeChanged) {
+                            ref.spacing = data.takeoff_subtype === 'count_by_distance' ? data.spacing : 0;
+                        }
+                        if (multiplierChanged) ref.multiplier = syncedMultiplier;
+                        if (subtypeChanged) {
+                            destroySegmentNodes(ref);
+                            createSegmentNode(ref);
+                        } else if (!ref.node) {
+                            createSegmentNode(ref);
+                        } else {
+                            if (colorChanged) ref.node.stroke(String(ref.color || layer.color));
+                            refreshSegment(ref);
                         }
                     });
                 }
@@ -3777,6 +4433,9 @@
         });
         setTakeoffPage(pageNum);
         renderLayers();
+        if (typeof window.syncKonvaToFabric === 'function') {
+            window.syncKonvaToFabric();
+        }
         return projectSnapshot();
     };
 
@@ -3846,6 +4505,39 @@
         return projectSnapshot();
     };
 
+    window.projectTakeoffResolveDraftOnPointer = function () {
+        if (state.draftLine) {
+            if (state.draftLine.points.length >= 2) {
+                finishLinear();
+                return 'finished';
+            }
+            cancelLinearDraft();
+            return 'cancelled';
+        }
+        if (state.draftArea) {
+            if (state.draftArea.points?.length >= 3) {
+                finishArea();
+                return 'finished';
+            }
+            clearDrafts();
+            return 'cancelled';
+        }
+        return 'none';
+    };
+
+    window.projectTakeoffCancelActiveDraft = function () {
+        let cancelled = false;
+        if (state.draftLine) {
+            cancelLinearDraft();
+            cancelled = true;
+        }
+        if (state.draftArea) {
+            clearDrafts();
+            cancelled = true;
+        }
+        return cancelled;
+    };
+
     window.projectTakeoffSetTool = function (tool) {
         const normalized = String(tool || '').toLowerCase();
         if (normalized === 'pan') {
@@ -3861,9 +4553,6 @@
         window.setTakeoffPanMode?.(false, true);
         if (normalized === 'select' || normalized === 'smart') {
             if (state.draftLine) {
-                if (state.draftLine.points.length === 1 && linearPointerWorld) {
-                    addLinearPoint(linearPointerWorld);
-                }
                 if (state.draftLine.points.length >= 2) {
                     finishLinear();
                 } else {
@@ -3970,7 +4659,7 @@
                 renderLinearPreview(world, linearShiftPressed);
             }
             if (state.tool === 'takeoff_area' && state.draftArea?.preview && state.draftArea.points.length) {
-                state.draftArea.preview.points([...state.draftArea.points, world].flatMap(p => [p.x, p.y]));
+                updateAreaDraftPreview([...state.draftArea.points, world]);
                 konvaLayer?.batchDraw();
             }
         }
@@ -4125,21 +4814,56 @@
             String(layer?.metadata_json?.project_layer_id || ''),
             String(layer?.integration_key || '')
         ].filter(Boolean));
-        const targets = [
+        let targets = [
             ...state.markers.filter(marker => layerKeys.has(String(marker.layer_client_uid || '')) || layerKeys.has(String(marker.layer_id || ''))),
             ...state.segments.filter(segment => layerKeys.has(String(segment.layer_client_uid || '')) || layerKeys.has(String(segment.layer_id || '')))
         ];
         if (!layer) return false;
         snapshot();
+        const prevType = normalizeEditorLayerType(layer.takeoff_type || layer.type || layer.layer_type).type;
+        const prevSubtype = normalizeLinearSubtype(layer.takeoff_subtype || layer.original_takeoff_type || layer.takeoff_type || layer.type);
+        let nextType = prevType;
+        let nextSubtype = prevSubtype;
+        if (patch.type !== undefined || patch.takeoff_type !== undefined) {
+            const rawNext = patch.takeoff_type ?? patch.type;
+            const normNext = normalizeEditorLayerType(rawNext);
+            nextType = normNext.type;
+            nextSubtype = normNext.subtype;
+            layer.takeoff_type = normNext.type;
+            layer.type = normNext.type;
+            layer.takeoff_subtype = normNext.subtype;
+            layer.original_takeoff_type = String(rawNext || normNext.type).toLowerCase();
+        }
+        const subtypeChanged = prevType === nextType && nextType === 'linear' && prevSubtype !== nextSubtype;
+        if (patch.uom !== undefined) layer.unit_of_measure = String(patch.uom);
+        const hasDropPatch = patch.dropLength !== undefined && Number.isFinite(Number(patch.dropLength)) && Number(patch.dropLength) >= 0;
+        const nextDropLength = hasDropPatch ? Math.max(0, num(patch.dropLength)) : null;
+        if (hasDropPatch) layer.drop_length = nextDropLength;
+        const hasSpacingPatch = patch.spacing !== undefined && Number.isFinite(Number(patch.spacing)) && Number(patch.spacing) >= 0;
+        const nextSpacing = hasSpacingPatch ? Math.max(0, num(patch.spacing)) : null;
+        if (hasSpacingPatch) layer.spacing = nextSpacing;
+        const typeFamilyChanged = prevType !== nextType || Boolean(patch.purgeIncompatibleGeometry);
+        if (typeFamilyChanged) {
+            purgeIncompatibleLayerObjects(layer, nextType, layerKeys);
+        }
+        targets = targets.filter(ref => state.markers.includes(ref) || state.segments.includes(ref));
         if (patch.symbol !== undefined) layer.symbol = normalizeSymbol(patch.symbol);
         if (patch.color !== undefined) layer.color = String(patch.color);
         if (patch.symbolSize !== undefined) layer.symbol_size = symbolRadius(patch.symbolSize);
         if (patch.strokeWidth !== undefined) layer.stroke_width = Math.max(1, Math.min(3, num(patch.strokeWidth)));
+        const hasMultiplierPatch = patch.multiplier !== undefined && Number.isFinite(Number(patch.multiplier)) && Number(patch.multiplier) >= 0;
+        const nextMultiplier = hasMultiplierPatch ? Math.max(0, Number(patch.multiplier)) : null;
+        if (hasMultiplierPatch) {
+            layer.multiplier = nextMultiplier;
+            layer.metadata_json = { ...(layer.metadata_json || {}), multiplier: nextMultiplier };
+        }
         targets.forEach(ref => {
             if (isElementLocked(ref)) return;
             const marker = state.markers.includes(ref);
             if (patch.color !== undefined) ref.color = String(patch.color);
+            if (hasMultiplierPatch) ref.multiplier = nextMultiplier;
             if (marker) {
+                if (hasMultiplierPatch) ref.quantity = calculateCountQuantity(ref);
                 if (patch.symbol !== undefined) ref.symbol = normalizeSymbol(patch.symbol);
                 if (patch.symbolSize !== undefined) {
                     ref.symbol_size = symbolRadius(patch.symbolSize);
@@ -4151,22 +4875,58 @@
                 destroyMarkerNodes(ref);
                 createMarkerNode(ref);
             } else {
+                if (subtypeChanged) ref.takeoff_subtype = nextSubtype;
+                if (hasDropPatch || subtypeChanged) {
+                    const effectiveSub = normalizeLinearSubtype(ref.takeoff_subtype || layer.takeoff_subtype || layer.type);
+                    ref.drop_length = effectiveSub === 'linear' || effectiveSub === 'count_by_distance'
+                        ? 0
+                        : Math.max(0, nextDropLength !== null ? nextDropLength : num(layer.drop_length || 0));
+                }
+                if (hasSpacingPatch || subtypeChanged) {
+                    const effectiveSub = normalizeLinearSubtype(ref.takeoff_subtype || layer.takeoff_subtype || layer.type);
+                    ref.spacing = effectiveSub === 'count_by_distance'
+                        ? Math.max(0, nextSpacing !== null ? nextSpacing : num(layer.spacing || 0))
+                        : 0;
+                }
                 if (patch.strokeWidth !== undefined) ref.stroke_width = Math.max(1, Math.min(3, num(patch.strokeWidth)));
-                ref.metadata_json = { ...(ref.metadata_json || {}), thickness: ref.stroke_width };
-                ref.node?.stroke(String(ref.color || layer.color));
-                ref.node?.strokeWidth(ref.stroke_width);
-                refreshSegment(ref);
+                ref.metadata_json = { ...(ref.metadata_json || {}),
+                    thickness: ref.stroke_width,
+                    takeoff_subtype: normalizeLinearSubtype(ref.takeoff_subtype || layer.takeoff_subtype || ref.type),
+                    drop_length: Math.max(0, num(ref.drop_length ?? ref.dropLength)),
+                    spacing: Math.max(0, num(ref.spacing ?? 0)) };
+                if (hasMultiplierPatch || hasDropPatch || hasSpacingPatch || subtypeChanged) {
+                    if (String(ref.takeoff_type || ref.type || '').toLowerCase() === 'area') calculateAreaQuantity(ref);
+                    else calculateLinearLength(ref);
+                }
+                const isAreaSeg = String(ref.takeoff_type || ref.type || '').toLowerCase() === 'area';
+                const viewportScale = Number(canvas?.viewportTransform?.[0] || 1);
+                const scaleFactor = viewportScale > 0 ? 1 / viewportScale : 1;
+                if (subtypeChanged) {
+                    destroySegmentNodes(ref);
+                    createSegmentNode(ref);
+                } else {
+                    ref.node?.stroke(String(ref.color || layer.color));
+                    ref.node?.strokeWidth(ref.stroke_width);
+                    ref.node?.hitStrokeWidth(segmentHitStrokeWidth(ref, isAreaSeg, scaleFactor));
+                    refreshSegment(ref);
+                }
             }
             ref.updatedAt = timestamp();
             ref.updated_at = ref.updatedAt;
         });
         applyObjectSelectionVisuals();
-        trackTakeoffObjects(targets.map(ref => ({ type: state.markers.includes(ref) ? 'marker' : 'segment', ref })));
+        if (targets.length) {
+            trackTakeoffObjects(targets.map(ref => ({ type: state.markers.includes(ref) ? 'marker' : 'segment', ref })));
+        }
         // A layer edit must persist even when the duplicate has no geometry yet.
         // The page fallback carries the layer row, while tracked objects carry
         // marker/segment appearance changes with their stable identities.
         markDirty({ pageFallback: true, objectsTracked: true });
         renderProperties();
+        if (typeFamilyChanged || subtypeChanged || hasDropPatch || hasSpacingPatch) {
+            renderLayers();
+            emitProjectState(true);
+        }
         return true;
     };
 
@@ -4194,7 +4954,10 @@
     };
 
     window.projectTakeoffSave = function () {
-        return saveTakeoff(true, true);
+        return saveTakeoff(true, true).then(result => {
+            hasPendingManualCanvasCheckpoint = false;
+            return result;
+        });
     };
 
     window.projectTakeoffDeleteCurrentSelection = function () {
@@ -4235,18 +4998,21 @@
                 copy.y = num(target.ref.y) + 16;
                 state.markers.push(copy);
                 createMarkerNode(copy);
+                trackTakeoffObjects([{ type: 'marker', ref: copy }], false);
             } else {
                 copy.points_json = (target.ref.points_json || []).map(point => ({ x: point.x + 16, y: point.y + 16 }));
                 state.segments.push(copy);
                 createSegmentNode(copy);
+                trackTakeoffObjects([{ type: 'segment', ref: copy }], false);
             }
+            dirtyTakeoffPages.add(Number(copy.page_number || pageNum || 1));
             return copy;
         });
         state.selectedElement = null;
         state.selectedObjectUids = new Set(copies.map(copy => String(copy.client_uid)));
         applyObjectSelectionVisuals();
         renderProperties();
-        markDirty();
+        markDirty({ objectsTracked: true });
         return copies.map(copy => String(copy.client_uid));
     };
 

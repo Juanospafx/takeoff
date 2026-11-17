@@ -38,9 +38,9 @@
             unitMaterialCost: number(layer.unitMaterialCost ?? layer.unitCost ?? layer.unit_cost ?? previous?.unitMaterialCost),
             unitLabor: number(layer.unitLabor ?? layer.laborHours ?? layer.labor_hours ?? previous?.unitLabor),
             laborUnitType: layer.laborUnitType || previous?.laborUnitType || 'hrs',
-            difficulty: (layer.difficulty !== undefined && layer.difficulty !== null)
+            difficulty: (layer.difficulty !== undefined && layer.difficulty !== null && layer.difficulty !== '')
                 ? number(layer.difficulty)
-                : (previous?.difficulty !== undefined ? number(previous.difficulty) : 1),
+                : (previous?.difficulty !== undefined ? previous.difficulty : null),
             groupId: stringId(group.id),
             groupName: group.name || 'Default Group'
         };
@@ -134,23 +134,47 @@
 
     function reconcileLinkedOnly(existingGroups = [], incomingGroups = []) {
         const incomingByLayer = new Map();
-        (incomingGroups || []).forEach(group => (group.items || group.layers || []).forEach(layer => {
-            const layerId = stringId(layer.takeoffLayerId ?? layer.id);
-            if (layerId) incomingByLayer.set(layerId, { layer, group });
-        }));
+        const incomingGroupById = new Map();
+        const incomingGroupByTakeoffId = new Map();
+        (incomingGroups || []).forEach(group => {
+            const gId = stringId(group.id);
+            const tgId = stringId(group.takeoffGroupId);
+            if (gId) incomingGroupById.set(gId, group);
+            if (tgId) incomingGroupByTakeoffId.set(tgId, group);
+            (group.items || group.layers || []).forEach(layer => {
+                const layerId = stringId(layer.takeoffLayerId ?? layer.id);
+                if (layerId) incomingByLayer.set(layerId, { layer, group });
+            });
+        });
         const consumed = new Set();
-        const result = (existingGroups || []).map((group, groupIndex) => ({
-            ...group,
-            items: (group.items || []).flatMap(existing => {
+        const result = (existingGroups || []).map((group, groupIndex) => {
+            const gId = stringId(group.id);
+            const tgId = stringId(group.takeoffGroupId);
+            let matchedIncomingGroup = (gId && incomingGroupById.get(gId))
+                || (tgId && incomingGroupByTakeoffId.get(tgId))
+                || null;
+            const items = (group.items || []).flatMap(existing => {
                 const layerId = stringId(existing.takeoffLayerId);
                 if (!layerId) return [{ ...existing }];
                 const incoming = incomingByLayer.get(layerId);
                 if (!incoming) return [];
+                if (!matchedIncomingGroup && incoming.group) matchedIncomingGroup = incoming.group;
                 consumed.add(layerId);
                 return [takeoffItem({ ...incoming.layer, id: layerId }, incoming.group, existing)];
-            }),
-            sortOrder: group.sortOrder ?? groupIndex
-        }));
+            });
+            const isTakeoffLinkedGroup = Boolean(
+                group.source === 'takeoff'
+                || group.takeoffMirror
+                || group.takeoffGroupId
+                || String(group.id || '').startsWith('takeoff_')
+            );
+            return {
+                ...group,
+                name: (isTakeoffLinkedGroup && matchedIncomingGroup?.name) ? matchedIncomingGroup.name : group.name,
+                items,
+                sortOrder: group.sortOrder ?? groupIndex
+            };
+        });
         (incomingGroups || []).forEach((incomingGroup, groupIndex) => {
             const pending = (incomingGroup.items || incomingGroup.layers || []).filter(layer => {
                 const layerId = stringId(layer.takeoffLayerId ?? layer.id);

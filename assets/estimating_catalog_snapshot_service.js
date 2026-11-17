@@ -73,7 +73,18 @@
     function refreshEffectiveLegacyFields(item) {
         if (!item || typeof item !== 'object') return item;
         if (!item.catalogSnapshot && !FIELDS.some(field => hasCatalogOverride(item, field))) return item;
-        FIELDS.forEach(field => { item[LEGACY_FIELDS[field]] = getEffectiveCatalogValue(item, field); });
+        FIELDS.forEach(field => {
+            if (field === 'laborRate'
+                && !hasCatalogOverride(item, 'laborRate')
+                && !(Number(item?.catalogSnapshot?.pricing?.laborRate || 0) > 0)) {
+                const manualZero = item._manualFields?.laborRate === true && Number(item.laborRate) === 0;
+                if (!manualZero && (item.laborRate === undefined || Number(item.laborRate) === 0)) {
+                    item.laborRate = null;
+                }
+                return;
+            }
+            item[LEGACY_FIELDS[field]] = getEffectiveCatalogValue(item, field);
+        });
         item.laborUnitType = 'hrs';
         return item;
     }

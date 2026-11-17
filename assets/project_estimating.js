@@ -41,6 +41,7 @@
     const deletingEstimateIds = new Set();
     let dirtyGeneration = 0;
     const pendingTakeoffByEstimate = new Map();
+    let estimatingHasUnsavedCheckpoint = false;
 
     function restoreDirtyTracking() {
         dirtyEstimateIds.clear();
@@ -67,6 +68,63 @@
     function ensureDefaultMarkups(estimate) {
         if (!estimate) return estimate;
         if (!estimate.settings) estimate.settings = {};
+        const hasVal = v => v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v));
+        if (!hasVal(estimate.settings.globalLaborCost)) estimate.settings.globalLaborCost = 36;
+        if (!hasVal(estimate.settings.globalLaborMargin)) estimate.settings.globalLaborMargin = 34.6;
+        if (!hasVal(estimate.settings.materialMargin)) estimate.settings.materialMargin = 15;
+        if (!hasVal(estimate.settings.equipmentMargin)) estimate.settings.equipmentMargin = 15;
+        if (!hasVal(estimate.settings.laborWaste)) estimate.settings.laborWaste = 0;
+        if (!hasVal(estimate.settings.materialWaste)) estimate.settings.materialWaste = 0;
+        if (!hasVal(estimate.settings.equipmentWaste)) estimate.settings.equipmentWaste = 0;
+        if (!hasVal(estimate.settings.laborDifficulty)) estimate.settings.laborDifficulty = 1;
+        const gCost = Number(estimate.settings.globalLaborCost);
+        const gMargin = Number(estimate.settings.globalLaborMargin);
+        if (!hasVal(estimate.settings.globalLaborSales) || Number(estimate.settings.globalLaborSales) === 110) {
+            estimate.settings.globalLaborSales = gMargin < 100
+                ? Number((gCost / (1 - gMargin / 100)).toFixed(2))
+                : gCost;
+        }
+        if (projectId > 0 && (!estimate.settings._defaultsActivated || !estimate.settings._laborDefaultsActivated)) {
+            const unlockMargins = !estimate.settings._defaultsActivated;
+            const unlockLabor = !estimate.settings._laborDefaultsActivated;
+            const unlockLegacyDefaults = items => {
+                (items || []).forEach(it => {
+                    if (!it || typeof it !== 'object') return;
+                    const manual = it._manualFields || {};
+                    if (unlockMargins) {
+                        if (!manual.materialMargin && it.materialMargin === 0) {
+                            it.materialMargin = null;
+                            if (it.margin === 0) delete it.margin;
+                        }
+                        if (!manual.equipmentMargin && it.equipmentMargin === 0) it.equipmentMargin = null;
+                        if (!manual.laborMargin && it.laborMargin === 0) it.laborMargin = null;
+                        if (!manual.waste && it.waste === 0) it.waste = null;
+                        if (!manual.difficulty && it.difficulty === 1) it.difficulty = null;
+                    }
+                    if (unlockLabor) {
+                        const snapRate = Number(it.catalogSnapshot?.pricing?.laborRate || 0);
+                        if (!manual.laborRate) {
+                            if (Number(it.laborRate) === 0 && !(snapRate > 0)) {
+                                it.laborRate = null;
+                                if (it.overrides && Number(it.overrides.laborRate) === 0) it.overrides.laborRate = null;
+                            } else if (Number(it.laborRate) === 85 && !(snapRate === 85) && gCost !== 85) {
+                                it.laborRate = null;
+                                if (it.overrides && Number(it.overrides.laborRate) === 85) it.overrides.laborRate = null;
+                            }
+                        }
+                        if (String(it.laborUnitType || '').toLowerCase() === 'mins' && !manual.laborUnitType
+                            && (it.catalogSnapshot || it.catalogItemId || it.takeoffLayerId || it.laborHours !== undefined || it.labor_hours !== undefined || it.parentItemId || it.assemblyComponentId)) {
+                            it.laborUnitType = 'hrs';
+                        }
+                    }
+                    if (Array.isArray(it.children) && it.children.length) unlockLegacyDefaults(it.children);
+                    if (Array.isArray(it.assemblyItems) && it.assemblyItems.length) unlockLegacyDefaults(it.assemblyItems);
+                });
+            };
+            (estimate.groups || []).forEach(g => unlockLegacyDefaults(g.items));
+            estimate.settings._defaultsActivated = true;
+            estimate.settings._laborDefaultsActivated = true;
+        }
         if (!estimate.settings._markupsSeeded) {
             if (!Array.isArray(estimate.settings.preTaxMarkups) || estimate.settings.preTaxMarkups.length === 0) {
                 estimate.settings.preTaxMarkups = [
@@ -217,8 +275,64 @@
         state.dirtyEstimateIds = [...dirtyEstimateIds];
         state.takeoffSyncDirtyIds = [...takeoffSyncDirtyIds];
     }
+    function buildEstimateSummaryPayload(est) {
+        if (!est) {
+            return { subtotal: 0, directSales: 0, preTaxMarkup: 0, postTaxMarkup: 0, taxes: 0, total: 0, estimateTotal: 0, laborHours: 0 };
+        }
+        const calc = Calc.calculateSummary(est.groups || [], est.settings || {});
+        const total = Number(calc.estimateTotal || 0);
+        return {
+            subtotal: Number(calc.direct?.totalCost || 0),
+            directSales: Number(calc.direct?.totalSales || 0),
+            preTaxMarkup: Number(calc.preTaxTotal || 0),
+            postTaxMarkup: Number(calc.postTaxTotal || 0),
+            taxes: Number(calc.totalTax || 0),
+            total,
+            estimateTotal: total,
+            laborHours: Number(calc.direct?.adjustedLaborHours || 0)
+        };
+    }
+
+    function syncPrimaryEstimateProjectMeta() {
+        const list = Array.isArray(state?.estimates) ? state.estimates : [];
+        if (!list.length) return null;
+        const metaPrimaryId = String(window.ProjectState?.projectMeta?.primary_estimate_id || '');
+        const primaryEst = list.find(row => Boolean(row.is_primary || row.isPrimary))
+            || list.find(row => metaPrimaryId && String(row.id) === metaPrimaryId)
+            || list[0];
+        if (!primaryEst) return null;
+        const primarySummary = buildEstimateSummaryPayload(primaryEst);
+        primaryEst.is_primary = true;
+        primaryEst.isPrimary = true;
+        primaryEst.estimateSummary = primarySummary;
+        primaryEst.estimateTotal = primarySummary.estimateTotal;
+        primaryEst.totalSales = primarySummary.estimateTotal;
+        primaryEst.grand_total = primarySummary.estimateTotal;
+        primaryEst.total_amount = primarySummary.estimateTotal;
+        if (window.ProjectState) {
+            if (!window.ProjectState.projectMeta) window.ProjectState.projectMeta = {};
+            window.ProjectState.projectMeta.primary_estimate_id = primaryEst.id;
+            window.ProjectState.projectMeta.primary_estimate_total = primarySummary.estimateTotal;
+            window.ProjectState.projectMeta.primary_quote_value = primarySummary.estimateTotal;
+            window.ProjectState.projectMeta.total_sales = primarySummary.estimateTotal;
+            window.ProjectState.projectMeta.estimate_total = primarySummary.estimateTotal;
+            window.ProjectState.projectMeta.primary_estimate_updated_at = state.clientUiUpdatedAt || Workspace.now();
+        }
+        return primaryEst;
+    }
+
     function saveLocal(options = {}) {
         state.groups = current().groups;
+        const curEst = current();
+        if (curEst) {
+            const curSummary = buildEstimateSummaryPayload(curEst);
+            curEst.estimateSummary = curSummary;
+            curEst.estimateTotal = curSummary.estimateTotal;
+            curEst.totalSales = curSummary.estimateTotal;
+            curEst.grand_total = curSummary.estimateTotal;
+            curEst.total_amount = curSummary.estimateTotal;
+        }
+        syncPrimaryEstimateProjectMeta();
         state.dirtyEstimateIds = [...dirtyEstimateIds];
         state.takeoffSyncDirtyIds = [...takeoffSyncDirtyIds];
         state.clientUiUpdatedAt = Workspace.now();
@@ -274,6 +388,9 @@
         const activeId = String(state.activeEstimateId || '');
         if (action === 'Synchronized items from Takeoff') takeoffSyncDirtyIds.add(activeId);
         else takeoffSyncDirtyIds.delete(activeId);
+        if (action && action !== 'Synchronized items from Takeoff') {
+            estimatingHasUnsavedCheckpoint = true;
+        }
         conflictedEstimateIds.delete(activeId);
         conflictRemoteEstimates.delete(activeId);
         Workspace.touch(state, action);
@@ -283,6 +400,7 @@
     }
 
     function reactiveChanged(target) {
+        estimatingHasUnsavedCheckpoint = true;
         takeoffSyncDirtyIds.delete(String(state.activeEstimateId || ''));
         conflictedEstimateIds.delete(String(state.activeEstimateId || ''));
         conflictRemoteEstimates.delete(String(state.activeEstimateId || ''));
@@ -302,6 +420,16 @@
         return null;
     }
 
+    function resolvedCategorySummaryMargin(catName, settings = {}, total = {}) {
+        const cat = total?.byCategory?.[catName];
+        if (cat && Math.abs(Number(cat.totalSales || 0)) > 0.0001 && Math.abs(Number(cat.totalCost || 0)) > 0.0001) {
+            return Number(cat.marginPercent || 0);
+        }
+        if (catName === 'Labor') return Number(settings.globalLaborMargin ?? 34.6);
+        if (catName === 'Equipment') return Number(settings.equipmentMargin ?? 15);
+        return Number(settings.materialMargin ?? 15);
+    }
+
     function renderLiveSummary() {
         const total = summary();
         const totalElement = $('estimateTotal');
@@ -315,25 +443,28 @@
                 const el = aside.querySelector(`[data-live-summary="${key}"]`);
                 if (el) el.textContent = val;
             };
+            const setSummaryInput = (selector, formatted) => {
+                const el = aside.querySelector(selector);
+                if (el && document.activeElement !== el) {
+                    el.value = formatted;
+                    el.dataset.auditPrevValue = formatted;
+                }
+            };
             const settings = current()?.settings || {};
             const gCost = Number(settings.globalLaborCost ?? 36);
-            const gMargin = Number(settings.globalLaborMargin ?? 34.6);
+            const gMargin = resolvedCategorySummaryMargin('Labor', settings, total);
+            const effMatMargin = resolvedCategorySummaryMargin('Materials', settings, total);
+            const effEqMargin = resolvedCategorySummaryMargin('Equipment', settings, total);
             const gSales = gMargin < 100 ? (gCost / (1 - gMargin / 100)) : gCost;
-            const salesInput = aside.querySelector('[data-summary-rate="globalLaborSales"]');
-            if (salesInput && document.activeElement !== salesInput) {
-                salesInput.value = gSales.toFixed(2);
-                salesInput.dataset.auditPrevValue = salesInput.value;
-            }
-            const laborMarginInput = aside.querySelector('[data-summary-type="Labor"][data-field="margin"]');
-            if (laborMarginInput && document.activeElement !== laborMarginInput) {
-                laborMarginInput.value = gMargin.toFixed(1);
-                laborMarginInput.dataset.auditPrevValue = laborMarginInput.value;
-            }
-            const laborWasteInput = aside.querySelector('[data-summary-type="Labor"][data-field="waste"]');
-            if (laborWasteInput && document.activeElement !== laborWasteInput) {
-                laborWasteInput.value = String(Number(settings.laborWaste ?? 0));
-                laborWasteInput.dataset.auditPrevValue = laborWasteInput.value;
-            }
+            setSummaryInput('[data-summary-rate="globalLaborCost"]', gCost.toFixed(2));
+            setLive('global-labor-sales', gSales.toFixed(2));
+            setSummaryInput('[data-summary-type="Labor"][data-field="margin"]', gMargin.toFixed(1));
+            setSummaryInput('[data-summary-type="Labor"][data-field="difficulty"]', String(Number(settings.laborDifficulty ?? 1)));
+            setSummaryInput('[data-summary-type="Labor"][data-field="waste"]', String(Number(settings.laborWaste ?? 0)));
+            setSummaryInput('[data-summary-type="Materials"][data-field="margin"]', effMatMargin.toFixed(1));
+            setSummaryInput('[data-summary-type="Materials"][data-field="waste"]', String(Number(settings.materialWaste ?? 0)));
+            setSummaryInput('[data-summary-type="Equipment"][data-field="margin"]', effEqMargin.toFixed(1));
+            setSummaryInput('[data-summary-type="Equipment"][data-field="waste"]', String(Number(settings.equipmentWaste ?? 0)));
             setLive('labor-hrs', `${number(byCat.Labor?.adjustedLaborHours || 0, 2)} hrs`);
             setLive('labor-cost', money(byCat.Labor?.totalCost || 0));
             setLive('labor-sales', money(byCat.Labor?.totalSales || 0));
@@ -359,9 +490,8 @@
         if (tableBody && Array.isArray(total?.rows)) {
             const totalSummaryCost = total?.direct?.totalCost || 0;
             const calcById = new Map(total.rows.map(r => [String(r.item.id), r.calc]));
-            total.rows.forEach(({ item: rowItem, calc: rowCalc }) => {
-                const tr = tableBody.querySelector(`tr[data-item-id="${selectorValue(rowItem.id)}"]`);
-                if (!tr) return;
+            const updateRowCells = (tr, rowItem, rowCalc) => {
+                if (!tr || !rowCalc) return;
                 const setCell = (colKey, textVal, colorVal = '') => {
                     const cell = tr.querySelector(`[data-live-item-cell="${colKey}"]`);
                     if (cell) {
@@ -369,8 +499,12 @@
                         if (colorVal) cell.style.color = colorVal;
                     }
                 };
+                const eqRow = isEquipmentItem(rowItem);
+                const unitSalesVal = eqRow && !rowCalc.unitMaterialSales
+                    ? ((rowCalc.equipmentSales || 0) / (rowCalc.equipmentQuantity || rowCalc.baseQuantity || 1))
+                    : (rowCalc.unitMaterialSales || 0);
                 setCell('subtotal_item_cost', number(rowCalc.materialCost || 0, 2));
-                setCell('unit_sales', number(rowCalc.unitMaterialSales || 0, 2));
+                setCell('unit_sales', number(unitSalesVal, 2));
                 setCell('subtotal_item_sales', number(rowCalc.materialSales || 0, 2));
                 const profitVal = rowCalc.profit || 0;
                 setCell('profit', number(profitVal, 2), profitVal >= 0 ? '#10b981' : '#ef4444');
@@ -380,37 +514,54 @@
                 const pct = totalSummaryCost > 0 ? ((rowCalc.totalCost || 0) / totalSummaryCost) * 100 : 0;
                 setCell('total_cost_percent', `${number(pct, 1)}%`);
                 setCell('total_sales', number(rowCalc.totalSales || 0, 2));
+            };
+            total.rows.forEach(({ item: rowItem, calc: rowCalc }) => {
+                const tr = tableBody.querySelector(`tr[data-item-id="${selectorValue(rowItem.id)}"]`);
+                updateRowCells(tr, rowItem, rowCalc);
+                if (Array.isArray(rowCalc?.childRows) && rowCalc.childRows.length) {
+                    rowCalc.childRows.forEach((childEntry, idx) => {
+                        const childSource = findDirectAssemblyChild(rowItem, childEntry.item, idx);
+                        const childKey = `${rowItem.id}:component:${childSource?.id || idx}`;
+                        const childTr = tableBody.querySelector(`tr[data-item-id="${selectorValue(childKey)}"]`);
+                        updateRowCells(childTr, childEntry.item, childEntry.calc);
+                    });
+                }
             });
+            const grpLaborMargin = resolvedCategorySummaryMargin('Labor', current()?.settings || {}, total);
             (current()?.groups || []).forEach(grp => {
                 const subCell = tableBody.querySelector(`[data-live-group-subtotal="${selectorValue(grp.id)}"]`);
-                if (!subCell) return;
-                const grpSum = (grp.items || []).reduce((acc, it) => {
-                    if (it.parentItemId || it.parent_item_id || it.assemblyParentId) return acc;
-                    const c = calcById.get(String(it.id)) || Calc.calculateItem(it, current().settings);
-                    return acc + (c.materialCost || 0);
-                }, 0);
-                subCell.textContent = number(grpSum, 2);
+                if (subCell) {
+                    const grpSum = (grp.items || []).reduce((acc, it) => {
+                        if (it.parentItemId || it.parent_item_id || it.assemblyParentId) return acc;
+                        const c = calcById.get(String(it.id)) || Calc.calculateItem(it, current().settings);
+                        return acc + (c.materialCost || 0);
+                    }, 0);
+                    subCell.textContent = number(grpSum, 2);
+                }
+                const grpLmCell = tableBody.querySelector(`[data-live-group-labor-margin="${selectorValue(grp.id)}"]`);
+                if (grpLmCell) {
+                    grpLmCell.textContent = `${Number(current()?.settings?.globalLaborMargin ?? grpLaborMargin).toFixed(1)}%`;
+                }
             });
         }
         const cur = current();
         if (cur) {
+            cur.estimateSummary = {
+                subtotal: Number(total.direct?.totalCost || 0),
+                directSales: Number(total.direct?.totalSales || 0),
+                preTaxMarkup: Number(total.preTaxTotal || 0),
+                postTaxMarkup: Number(total.postTaxTotal || 0),
+                taxes: Number(total.totalTax || 0),
+                total: Number(total.estimateTotal || 0),
+                estimateTotal: Number(total.estimateTotal || 0),
+                laborHours: Number(total.direct?.adjustedLaborHours || 0)
+            };
             cur.estimateTotal = total.estimateTotal;
             cur.totalSales = total.estimateTotal;
             cur.grand_total = total.estimateTotal;
             cur.total_amount = total.estimateTotal;
         }
-        if (cur && window.ProjectState) {
-            if (!window.ProjectState.projectMeta) window.ProjectState.projectMeta = {};
-            const metaPrimaryId = String(window.ProjectState.projectMeta.primary_estimate_id || '');
-            const isCurPrimary = metaPrimaryId ? String(cur.id) === metaPrimaryId : Boolean(cur.is_primary || cur.isPrimary);
-            if (isCurPrimary) {
-                window.ProjectState.projectMeta.primary_estimate_id = cur.id;
-                window.ProjectState.projectMeta.primary_estimate_total = total.estimateTotal;
-                window.ProjectState.projectMeta.primary_quote_value = total.estimateTotal;
-                window.ProjectState.projectMeta.total_sales = total.estimateTotal;
-                window.ProjectState.projectMeta.estimate_total = total.estimateTotal;
-            }
-        }
+        syncPrimaryEstimateProjectMeta();
         renderFooter();
         renderStatus();
     }
@@ -553,20 +704,13 @@
         ui.explicitSaveRequested = false;
         if (showModal) showSaveProgressModal(1, 'Saving Estimating workspace...');
         const sentGenerations = new Map(sentIds.map(id => [id, dirtyGenerations.get(id) || 0]));
-        const sent = {
-            schemaVersion: state.schemaVersion,
-            projectId: state.projectId,
-            activeEstimateId: state.activeEstimateId,
-            clientUiUpdatedAt: state.clientUiUpdatedAt,
-            estimates: Workspace.clone(state.estimates.filter(estimate => sentIds.includes(String(estimate.id))))
-        };
+        const savePayload = estimates => buildEstimatePatchPayload(estimates);
+        const sent = savePayload(sentIds);
         try {
-            const savePayload = estimates => ({ action: 'save', mode: 'patch', project_id: projectId,
-                updates: estimates, state: { ...sent, estimates }, summary: summary() });
             let result;
             try {
                 result = await request('save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(savePayload(sent.estimates)) });
+                    body: JSON.stringify(sent) });
             } catch (error) {
                 if (error.status !== 404 || !['estimate_not_found', 'stale_estimate_id'].includes(error.code)) throw error;
                 // Reconcile against the database before retrying. A 404 can mean
@@ -584,7 +728,7 @@
                 const hasNewDraft = recoverable.some(estimate => !remoteByClientId.has(String(estimate.id)));
                 result = await request(hasNewDraft ? 'create' : 'save', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(savePayload(recoverable))
+                    body: JSON.stringify({ ...sent, updates: recoverable, estimates: recoverable, state: { ...sent.state, estimates: recoverable } })
                 });
             }
             const acknowledgedRows = result.updates || result.state?.estimates || result.estimates || [];
@@ -608,6 +752,11 @@
                 }
             });
             Workspace.selectEstimate(state, state.activeEstimateId);
+            syncPrimaryEstimateProjectMeta();
+            if (showModal || ui.explicitSaveRequested) {
+                estimatingHasUnsavedCheckpoint = false;
+                ui.explicitSaveRequested = false;
+            }
             ui.loadState = dirtyEstimateIds.size ? 'pending' : 'saved';
             ui.message = dirtyEstimateIds.size ? 'Unsaved changes' : 'Saved';
             saveLocal({ publish: !activeEditingElement() });
@@ -698,6 +847,7 @@
                 ui.message = 'Loaded from server';
                 render();
                 drainPendingTakeoff();
+                hydrateBrokenAssembliesInCurrentEstimate();
                 return;
             }
             // A newer local timestamp alone does not prove there are unsaved edits:
@@ -748,6 +898,7 @@
         }
         render();
         drainPendingTakeoff();
+        hydrateBrokenAssembliesInCurrentEstimate();
     }
 
     function groupsContentSignature(groups) {
@@ -780,16 +931,26 @@
                 .map(Workspace.group);
         }
         const incomingByLayer = new Map();
-        (incomingGroups || []).forEach(group => (group.items || group.layers || []).forEach(item => {
-            const layerId = String(item.takeoffLayerId ?? item.id ?? '');
-            if (layerId) incomingByLayer.set(layerId, { item, group });
-        }));
-        return (existingGroups || []).map((group, groupIndex) => Workspace.group({
-            ...Workspace.clone(group),
-            items: (group.items || []).flatMap(existing => {
+        const incomingGroupById = new Map();
+        const incomingGroupByTakeoffId = new Map();
+        (incomingGroups || []).forEach(group => {
+            if (group?.id) incomingGroupById.set(String(group.id), group);
+            if (group?.takeoffGroupId) incomingGroupByTakeoffId.set(String(group.takeoffGroupId), group);
+            (group.items || group.layers || []).forEach(item => {
+                const layerId = String(item.takeoffLayerId ?? item.id ?? '');
+                if (layerId) incomingByLayer.set(layerId, { item, group });
+            });
+        });
+        return (existingGroups || []).map((group, groupIndex) => {
+            const matchedById = (group?.id && incomingGroupById.get(String(group.id)))
+                || (group?.takeoffGroupId && incomingGroupByTakeoffId.get(String(group.takeoffGroupId)))
+                || null;
+            let matchedIncomingGroup = matchedById;
+            const items = (group.items || []).flatMap(existing => {
                 if (!existing.takeoffLayerId) return [existing];
                 const incoming = incomingByLayer.get(String(existing.takeoffLayerId));
                 if (!incoming) return [];
+                if (!matchedIncomingGroup && incoming.group) matchedIncomingGroup = incoming.group;
                 if (window.TakeoffEstimatingSyncService?.takeoffItem) {
                     return [window.TakeoffEstimatingSyncService.takeoffItem({
                         ...incoming.item, id: existing.takeoffLayerId
@@ -805,8 +966,19 @@
                     quantityOverride: isOverridden,
                     quantitySyncStatus: isOverridden ? 'overridden' : 'synced'
                 }];
-            })
-        }, groupIndex));
+            });
+            const isTakeoffLinked = Boolean(
+                group.source === 'takeoff'
+                || group.takeoffMirror
+                || group.takeoffGroupId
+                || String(group.id || '').startsWith('takeoff_')
+            );
+            return Workspace.group({
+                ...Workspace.clone(group),
+                name: (isTakeoffLinked && matchedIncomingGroup?.name) ? matchedIncomingGroup.name : group.name,
+                items
+            }, groupIndex);
+        });
     }
 
     function preserveQuantityOverrides(existingGroups, nextGroups) {
@@ -1194,6 +1366,13 @@
         return [];
     }
 
+    const PLACEHOLDER_COMPONENT_NAMES = new Set(['assembly part', 'assembly component', 'cost item', 'item']);
+
+    function isPlaceholderComponentName(name) {
+        const clean = String(name || '').trim().toLowerCase();
+        return !clean || PLACEHOLDER_COMPONENT_NAMES.has(clean);
+    }
+
     function resolveAssemblyComponentName(component, catalogItem = null) {
         const candidates = [
             component?.itemName, component?.item_name,
@@ -1202,80 +1381,297 @@
             component?.catalogSnapshot?.name,
             catalogItem?.itemName, catalogItem?.item_name, catalogItem?.name
         ];
-        const resolved = candidates.find(value => String(value || '').trim());
+        const resolved = candidates.find(value => {
+            const trimmed = String(value || '').trim();
+            return trimmed && !PLACEHOLDER_COMPONENT_NAMES.has(trimmed.toLowerCase());
+        });
         if (resolved) return String(resolved).trim();
         const currentName = String(component?.name || '').trim();
-        const placeholders = new Set(['assembly part', 'assembly component', 'cost item', 'item']);
-        return currentName && !placeholders.has(currentName.toLowerCase())
+        return currentName && !PLACEHOLDER_COMPONENT_NAMES.has(currentName.toLowerCase())
             ? currentName
             : 'Assembly component';
     }
 
-    async function hydrateAssemblyPartsFromCatalog(item, catalogId) {
-        if (typeof fetch !== 'function') return false;
-        if (!item) return;
-        if (getItemChildren(item).length > 0) return;
-        try {
-            // First try CatalogService snapshot
-            if (window.CatalogService?.getSnapshot) {
-                const snapshot = await window.CatalogService.getSnapshot({ enabledForProjectsOnly: false });
-                const items = snapshot?.items || [];
-                const catItem = items.find(it => (catalogId && String(it.id) === String(catalogId)) || (it.name && it.name.trim().toLowerCase() === String(item.name || '').trim().toLowerCase()));
-                if (catItem && Array.isArray(catItem.assemblyComponents) && catItem.assemblyComponents.length > 0) {
+    function assemblyComponentNeedsHydration(child) {
+        if (!child || typeof child !== 'object') return false;
+        if (isPlaceholderComponentName(child.name)) return true;
+        const hasAnyCostOrLabor = Number(child.unitMaterialCost || 0) > 0
+            || Number(child.unitEquipmentCost || 0) > 0
+            || Number(child.unitSubcontractorCost || 0) > 0
+            || Number(child.unitLabor || 0) > 0;
+        return !hasAnyCostOrLabor && Boolean(child.catalogItemId || child.catalog_item_id || child.pricingSnapshot);
+    }
+
+    function repairAssemblyChildrenFromSnapshot(item) {
+        if (!item || !Array.isArray(item.children) || !item.children.length) return false;
+        const snapComps = Array.isArray(item.catalogSnapshot?.assemblyComponents)
+            ? item.catalogSnapshot.assemblyComponents
+            : (Array.isArray(item.catalogMetadata?.assemblyComponents) ? item.catalogMetadata.assemblyComponents : []);
+        let changedAny = false;
+        item.children.forEach((child, idx) => {
+            const snapComp = snapComps.find(sc =>
+                (child.assemblyComponentId && String(sc.id) === String(child.assemblyComponentId))
+                || (child.catalogItemId && String(sc.catalogItemId ?? sc.part_catalog_item_id ?? '') === String(child.catalogItemId))
+            ) || snapComps[idx] || null;
+            const snap = child.pricingSnapshot || snapComp?.pricingSnapshot || {};
+            if (isPlaceholderComponentName(child.name) && snapComp?.name && !isPlaceholderComponentName(snapComp.name)) {
+                child.name = String(snapComp.name).trim();
+                changedAny = true;
+            }
+            if (!child.uom && snapComp?.uom) {
+                child.uom = String(snapComp.uom);
+                changedAny = true;
+            }
+            if (!Number(child.unitMaterialCost || 0) && Number(snap.materialUnitCost || 0) > 0) {
+                child.unitMaterialCost = Number(snap.materialUnitCost);
+                child.unitCost = Number(snap.materialUnitCost);
+                changedAny = true;
+            }
+            if (!Number(child.unitEquipmentCost || 0) && Number(snap.equipmentUnitCost || 0) > 0) {
+                child.unitEquipmentCost = Number(snap.equipmentUnitCost);
+                changedAny = true;
+            }
+            if (!Number(child.unitSubcontractorCost || 0) && Number(snap.subcontractorUnitCost || 0) > 0) {
+                child.unitSubcontractorCost = Number(snap.subcontractorUnitCost);
+                changedAny = true;
+            }
+            if (!Number(child.unitLabor || 0) && Number(snap.laborHoursPerUnit || 0) > 0) {
+                child.unitLabor = Number(snap.laborHoursPerUnit);
+                child.laborUnitType = 'hrs';
+                changedAny = true;
+            }
+            if ((!Number(child.laborRate || 0)) && Number(snap.laborRate || 0) > 0) {
+                child.laborRate = Number(snap.laborRate);
+                changedAny = true;
+            }
+        });
+        return changedAny;
+    }
+
+    function assemblyNeedsHydration(item) {
+        if (!item || !isAssemblyItem(item)) return false;
+        const children = getItemChildren(item);
+        if (children.length === 0) return true;
+        return children.some(assemblyComponentNeedsHydration);
+    }
+
+    async function fetchCatalogHydrationBundle() {
+        if (ui._catalogHydrationCache) return ui._catalogHydrationCache;
+        if (ui._catalogHydrationPromise) return ui._catalogHydrationPromise;
+        ui._catalogHydrationPromise = (async () => {
+            try {
+                if (window.CatalogService?.getSnapshot) {
+                    const snapshot = await window.CatalogService.getSnapshot({ enabledForProjectsOnly: false });
+                    if (snapshot && Array.isArray(snapshot.items) && snapshot.items.length) {
+                        const items = snapshot.items;
+                        const itemsById = new Map(items.map(it => [String(it.id), it]));
+                        ui._catalogHydrationCache = { mode: 'dto', items, itemsById };
+                        return ui._catalogHydrationCache;
+                    }
+                }
+                const res = await fetch('../api/cost_catalog.php?action=snapshot');
+                const data = await res.json();
+                if (data?.status === 'success') {
+                    const items = Array.isArray(data.data?.items) ? data.data.items : [];
+                    const assemblyParts = Array.isArray(data.data?.assemblyParts) ? data.data.assemblyParts : [];
                     const itemsById = new Map(items.map(it => [String(it.id), it]));
+                    ui._catalogHydrationCache = { mode: 'raw', items, assemblyParts, itemsById };
+                    return ui._catalogHydrationCache;
+                }
+            } catch (err) {
+                console.warn('Could not load catalog snapshot for assembly hydration:', err);
+            } finally {
+                ui._catalogHydrationPromise = null;
+            }
+            return null;
+        })();
+        return ui._catalogHydrationPromise;
+    }
+
+    function applyHydratedChildFields(existingChild, resolved) {
+        const next = { ...existingChild };
+        if (isPlaceholderComponentName(next.name) && resolved.name) next.name = resolved.name;
+        if (!next.description && resolved.description) next.description = resolved.description;
+        if ((!next.uom || next.uom === 'ea') && resolved.uom) next.uom = resolved.uom;
+        if (!next.costCode && resolved.costCode) next.costCode = resolved.costCode;
+        if (resolved.itemType && (!next.itemType || next.itemType === 'part')) next.itemType = resolved.itemType;
+        if (resolved.costCategory && (!next.costCategory || next.costCategory === 'Materials' || next.costCategory === 'Other')) {
+            next.costCategory = resolved.costCategory;
+        }
+        if (!Number(next.unitMaterialCost || 0) && Number(resolved.unitMaterialCost || 0) > 0) {
+            next.unitMaterialCost = Number(resolved.unitMaterialCost);
+            next.unitCost = Number(resolved.unitMaterialCost);
+        }
+        if (!Number(next.unitEquipmentCost || 0) && Number(resolved.unitEquipmentCost || 0) > 0) {
+            next.unitEquipmentCost = Number(resolved.unitEquipmentCost);
+        }
+        if (!Number(next.unitSubcontractorCost || 0) && Number(resolved.unitSubcontractorCost || 0) > 0) {
+            next.unitSubcontractorCost = Number(resolved.unitSubcontractorCost);
+        }
+        if (!Number(next.unitLabor || 0) && Number(resolved.unitLabor || 0) > 0) {
+            next.unitLabor = Number(resolved.unitLabor);
+            next.laborUnitType = 'hrs';
+        }
+        if ((!Number(next.laborRate || 0)) && Number(resolved.laborRate || 0) > 0) {
+            next.laborRate = Number(resolved.laborRate);
+        }
+        return next;
+    }
+
+    async function hydrateAssemblyPartsFromCatalog(item, catalogId) {
+        if (!item) return false;
+        const snapshotPatched = repairAssemblyChildrenFromSnapshot(item);
+        const existingChildren = getItemChildren(item);
+        if (existingChildren.length > 0 && !existingChildren.some(assemblyComponentNeedsHydration)) {
+            if (snapshotPatched) saveLocal({ publish: false });
+            return snapshotPatched;
+        }
+        if (typeof fetch !== 'function') return snapshotPatched;
+        try {
+            const bundle = await fetchCatalogHydrationBundle();
+            if (!bundle) return snapshotPatched;
+            const { mode, items, itemsById, assemblyParts = [] } = bundle;
+            const defaultLaborRate = Number(current()?.settings?.globalLaborCost || 36);
+            let hydratedAny = snapshotPatched;
+
+            const buildResolvedFromDto = (partDto, comp = {}) => {
+                const snap = comp.pricingSnapshot || {};
+                const partType = String(partDto?.type || comp.itemType || 'PART').toUpperCase();
+                return {
+                    catalogItemId: partDto?.id ?? comp.catalogItemId,
+                    name: resolveAssemblyComponentName(comp, partDto),
+                    description: partDto?.description || comp.description || '',
+                    uom: partDto?.uom || comp.uom || 'ea',
+                    costCode: partDto?.classification?.costCode || comp.costCode || '',
+                    itemType: partType.toLowerCase(),
+                    costCategory: partType === 'EQUIPMENT' ? 'Equipment' : (partType === 'LABOR' ? 'Labor' : 'Materials'),
+                    quantity: Number(comp.quantity || 1),
+                    unitMaterialCost: Number(partDto?.pricing?.materialUnitCost ?? snap.materialUnitCost ?? 0),
+                    unitEquipmentCost: Number(partDto?.pricing?.equipmentUnitCost ?? snap.equipmentUnitCost ?? 0),
+                    unitSubcontractorCost: Number(partDto?.pricing?.subcontractorUnitCost ?? snap.subcontractorUnitCost ?? 0),
+                    unitLabor: Number(partDto?.pricing?.laborHoursPerUnit ?? snap.laborHoursPerUnit ?? 0),
+                    laborUnitType: 'hrs',
+                    laborRate: (Number(partDto?.pricing?.laborRate || snap.laborRate || 0) > 0)
+                        ? Number(partDto?.pricing?.laborRate || snap.laborRate)
+                        : null,
+                    waste: Number(comp.waste || 0)
+                };
+            };
+
+            if (existingChildren.length > 0) {
+                const targetCatalogId = catalogId || item.catalogItemId || item.catalog_item_id || item.catalogSnapshot?.catalogItemId || item.catalogSnapshot?.id;
+                const catItem = targetCatalogId
+                    ? itemsById.get(String(targetCatalogId))
+                    : items.find(it => it.name && it.name.trim().toLowerCase() === String(item.name || '').trim().toLowerCase());
+                const catComps = Array.isArray(catItem?.assemblyComponents) ? catItem.assemblyComponents : [];
+
+                item.children = existingChildren.map((child, idx) => {
+                    const childCatId = String(child.catalogItemId ?? child.catalog_item_id ?? catComps[idx]?.catalogItemId ?? '');
+                    const partDto = childCatId ? itemsById.get(childCatId) : null;
+                    if (!partDto) return child;
+                    if (mode === 'dto') {
+                        const resolved = buildResolvedFromDto(partDto, catComps[idx] || child);
+                        hydratedAny = true;
+                        return applyHydratedChildFields(child, resolved);
+                    }
+                    const resolved = {
+                        name: resolveAssemblyComponentName(child, partDto),
+                        description: partDto.description || '',
+                        uom: partDto.unit_of_measure || 'ea',
+                        costCode: partDto.cost_code || '',
+                        itemType: String(partDto.item_type || 'part').toLowerCase(),
+                        costCategory: String(partDto.cost_type || 'Materials'),
+                        unitMaterialCost: Number(partDto.material_cost || partDto.unit_cost || 0),
+                        unitEquipmentCost: Number(partDto.equipment_cost || 0),
+                        unitSubcontractorCost: Number(partDto.subcontractor_cost || 0),
+                        unitLabor: Number(partDto.labor_hours || 0),
+                        laborUnitType: 'hrs',
+                        laborRate: Number(partDto.labor_rate || 0) > 0 ? Number(partDto.labor_rate) : null
+                    };
+                    hydratedAny = true;
+                    return applyHydratedChildFields(child, resolved);
+                });
+                if (hydratedAny) saveLocal({ publish: false });
+                return hydratedAny;
+            }
+
+            if (mode === 'dto') {
+                const catItem = items.find(it => (catalogId && String(it.id) === String(catalogId))
+                    || (it.name && it.name.trim().toLowerCase() === String(item.name || '').trim().toLowerCase()));
+                if (catItem && Array.isArray(catItem.assemblyComponents) && catItem.assemblyComponents.length > 0) {
                     item.children = catItem.assemblyComponents.map(comp => {
                         const partDto = itemsById.get(String(comp.catalogItemId));
-                        const snap = comp.pricingSnapshot || {};
+                        const resolved = buildResolvedFromDto(partDto, comp);
                         return {
                             id: Workspace.uid('item'),
-                            catalogItemId: comp.catalogItemId,
-                            name: resolveAssemblyComponentName(comp, partDto),
-                            description: partDto?.description || comp.description || '',
-                            quantity: Number(comp.quantity || 1),
-                            uom: partDto?.uom || comp.uom || 'ea',
-                            unitCost: Number(partDto?.pricing?.materialUnitCost ?? snap.materialUnitCost ?? 0),
-                            unitMaterialCost: Number(partDto?.pricing?.materialUnitCost ?? snap.materialUnitCost ?? 0),
-                            waste: Number(comp.waste || 0),
-                            unitLabor: Number(partDto?.pricing?.laborHoursPerUnit ?? snap.laborHoursPerUnit ?? 0),
-                            laborRate: Number(partDto?.pricing?.laborRate ?? snap.laborRate ?? 0)
+                            catalogItemId: resolved.catalogItemId,
+                            name: resolved.name,
+                            description: resolved.description,
+                            quantity: resolved.quantity,
+                            uom: resolved.uom,
+                            costCode: resolved.costCode,
+                            itemType: resolved.itemType,
+                            costCategory: resolved.costCategory,
+                            unitCost: resolved.unitMaterialCost,
+                            unitMaterialCost: resolved.unitMaterialCost,
+                            unitEquipmentCost: resolved.unitEquipmentCost,
+                            unitSubcontractorCost: resolved.unitSubcontractorCost,
+                            waste: resolved.waste,
+                            unitLabor: resolved.unitLabor,
+                            laborUnitType: 'hrs',
+                            laborRate: resolved.laborRate
                         };
                     });
                     saveLocal({ publish: false });
-                    return;
+                    return true;
                 }
+                return snapshotPatched;
             }
 
-            // Fallback: direct fetch from api/cost_catalog.php?action=snapshot
-            const res = await fetch('../api/cost_catalog.php?action=snapshot');
-            const data = await res.json();
-            if (data?.status === 'success') {
-                const assemblyParts = Array.isArray(data.data?.assemblyParts) ? data.data.assemblyParts : [];
-                const catalogItems = Array.isArray(data.data?.items) ? data.data.items : [];
-                let resolvedCatId = catalogId;
-                if (!resolvedCatId && item.name) {
-                    const matchedItem = catalogItems.find(ci => ci.name && ci.name.trim().toLowerCase() === String(item.name).trim().toLowerCase());
-                    if (matchedItem) resolvedCatId = matchedItem.id;
-                }
-                const matchingParts = assemblyParts.filter(p => String(p.assembly_catalog_item_id) === String(resolvedCatId));
-                if (matchingParts.length > 0) {
-                    const catalogItemsById = new Map(catalogItems.map(catalogItem => [String(catalogItem.id), catalogItem]));
-                    item.children = matchingParts.map(p => ({
-                        id: Workspace.uid('item'),
-                        catalogItemId: p.part_catalog_item_id,
-                        name: resolveAssemblyComponentName(p, catalogItemsById.get(String(p.part_catalog_item_id))),
-                        description: p.child_description || '',
-                        quantity: Number(p.quantity || 1),
-                        uom: p.child_unit_of_measure || 'ea',
-                        unitCost: Number(p.child_unit_cost || p.unit_cost_snapshot || 0),
-                        unitMaterialCost: Number(p.child_unit_cost || p.unit_cost_snapshot || 0),
-                        waste: Number(p.waste_percent || 0),
-                        unitLabor: Number(p.child_labor_hours || p.labor_hours_snapshot || 0)
-                    }));
-                    saveLocal({ publish: false });
-                }
+            let resolvedCatId = catalogId;
+            if (!resolvedCatId && item.name) {
+                const matchedItem = items.find(ci => ci.name && ci.name.trim().toLowerCase() === String(item.name).trim().toLowerCase());
+                if (matchedItem) resolvedCatId = matchedItem.id;
             }
+            const matchingParts = assemblyParts.filter(p => String(p.assembly_catalog_item_id) === String(resolvedCatId));
+            if (matchingParts.length > 0) {
+                item.children = matchingParts.map(p => ({
+                    id: Workspace.uid('item'),
+                    catalogItemId: p.part_catalog_item_id,
+                    name: resolveAssemblyComponentName(p, itemsById.get(String(p.part_catalog_item_id))),
+                    description: p.child_description || '',
+                    quantity: Number(p.quantity || 1),
+                    uom: p.child_unit_of_measure || 'ea',
+                    unitCost: Number(p.child_unit_cost || p.unit_cost_snapshot || 0),
+                    unitMaterialCost: Number(p.child_unit_cost || p.unit_cost_snapshot || 0),
+                    waste: Number(p.waste_percent || 0),
+                    unitLabor: Number(p.child_labor_hours || p.labor_hours_snapshot || 0),
+                    laborUnitType: 'hrs',
+                    laborRate: Number(p.labor_rate || 0) > 0 ? Number(p.labor_rate) : null
+                }));
+                saveLocal({ publish: false });
+                return true;
+            }
+            return snapshotPatched;
         } catch (err) {
             console.warn('Could not hydrate assembly components:', err);
+            return snapshotPatched;
+        }
+    }
+
+    async function hydrateBrokenAssembliesInCurrentEstimate() {
+        const broken = allItems()
+            .map(r => r.item)
+            .filter(it => assemblyNeedsHydration(it));
+        if (!broken.length) return;
+        let updatedAny = false;
+        for (const it of broken) {
+            const catId = it.catalogItemId || it.catalog_item_id || it.catalogSnapshot?.catalogItemId || it.catalogSnapshot?.id || it.catalog_id;
+            if (await hydrateAssemblyPartsFromCatalog(it, catId)) updatedAny = true;
+        }
+        if (updatedAny) {
+            renderTable();
+            renderDetails();
         }
     }
 
@@ -1288,8 +1684,9 @@
         }
         const found = findItem(id);
         const it = found?.item;
-        if (it && getItemChildren(it).length === 0 && typeof fetch === 'function') {
-            const catId = it.catalogItemId || it.catalog_item_id || it.catalogSnapshot?.id || it.catalog_id;
+        if (it && assemblyNeedsHydration(it)) {
+            const catId = it.catalogItemId || it.catalog_item_id || it.catalogSnapshot?.catalogItemId || it.catalogSnapshot?.id || it.catalog_id;
+            repairAssemblyChildrenFromSnapshot(it);
             hydrateAssemblyPartsFromCatalog(it, catId).finally(() => {
                 ui.expandedAssemblies.add(id);
                 renderTable();
@@ -1904,7 +2301,7 @@
                     }
                     if (col.id === 'labor_margin') {
                         const gMargin = Number(current()?.settings?.globalLaborMargin ?? 34.6);
-                        return `<td class="text-right" style="color: #64748b; font-size: 11.5px; font-weight: 500;">${gMargin.toFixed(1)}%</td>`;
+                        return `<td class="text-right" data-live-group-labor-margin="${esc(group.id)}" style="color: #64748b; font-size: 11.5px; font-weight: 500;">${gMargin.toFixed(1)}%</td>`;
                     }
                     return `<td></td>`;
                 }).join('')}
@@ -1960,9 +2357,301 @@
 
         const deleteButton = root.querySelector('[data-est-action="delete-selected"]');
         if (deleteButton) deleteButton.disabled = ui.selected.size === 0;
+        syncEstimatingSubheadInfo();
 
         attachTableResizeAndDragOnce();
     }
+
+    function closeEstimatingSubheadMovePopover() {
+        document.getElementById('estimatingSubheadMovePopover')?.remove();
+        document.getElementById('estimatingSubheadCopyPopover')?.remove();
+    }
+
+    function selectedEstimatingSubheadRows() {
+        return allItems().filter(({ item }) =>
+            !item.parentItemId && !item.parent_item_id && !item.assemblyParentId
+            && (ui.selected.has(item.id) || ui.selected.has(String(item.id)))
+        );
+    }
+
+    function collectDescendantIds(groupItems, rootIds) {
+        const ids = new Set(rootIds.map(String));
+        let added = true;
+        while (added) {
+            added = false;
+            (groupItems || []).forEach(it => {
+                const pid = it.parentItemId ?? it.parent_item_id ?? it.assemblyParentId;
+                if (pid !== null && pid !== undefined && ids.has(String(pid)) && !ids.has(String(it.id))) {
+                    ids.add(String(it.id));
+                    added = true;
+                }
+            });
+        }
+        return ids;
+    }
+
+    async function confirmEstimatingSubheadAction(options = {}) {
+        if (typeof window.showConfirmDialog === 'function') {
+            return await window.showConfirmDialog(options);
+        }
+        return window.confirm(options.message || 'Are you sure you want to proceed?');
+    }
+
+    async function deleteSelectedEstimatingItems() {
+        const selectedRows = selectedEstimatingSubheadRows();
+        const selectedCount = selectedRows.length;
+        if (!selectedCount) return;
+        closeEstimatingSubheadMovePopover();
+        const confirmed = await confirmEstimatingSubheadAction({
+            title: selectedCount === 1 ? 'Delete Selected Item' : 'Delete Selected Items',
+            message: `Delete ${selectedCount} selected item${selectedCount === 1 ? '' : 's'} from this estimate?`,
+            confirmText: 'Delete',
+            cancelText: 'Cancel',
+            type: 'error',
+            badge: 'CONFIRM DELETE',
+            icon: 'fas fa-trash',
+            primaryDanger: true
+        });
+        if (!confirmed) return;
+
+        const rootIds = selectedRows.map(({ item }) => item.id);
+        current().groups.forEach(group => {
+            const removeIds = collectDescendantIds(group.items || [], rootIds);
+            group.items = (group.items || []).filter(item => {
+                if (removeIds.has(String(item.id)) || ui.selected.has(item.id) || ui.selected.has(String(item.id))) {
+                    ui.expandedAssemblies.delete(String(item.id));
+                    return false;
+                }
+                return true;
+            });
+        });
+        ui.selected.clear();
+        changed('Deleted selected items');
+    }
+
+    async function copySelectedEstimatingItemsToGroup(targetGroupId) {
+        const groups = current().groups || [];
+        const targetGroup = groups.find(g => String(g.id) === String(targetGroupId));
+        if (!targetGroup) return;
+        const selectedRows = selectedEstimatingSubheadRows();
+        if (!selectedRows.length) return;
+        closeEstimatingSubheadMovePopover();
+
+        const count = selectedRows.length;
+        const targetName = targetGroup.name || 'Untitled Group';
+        const confirmed = await confirmEstimatingSubheadAction({
+            title: count === 1 ? 'Copy Item to Group' : 'Copy Items to Group',
+            message: `Copy ${count} selected item${count === 1 ? '' : 's'} to "${targetName}"?`,
+            confirmText: 'Copy',
+            cancelText: 'Cancel',
+            type: 'info',
+            badge: 'COPY ITEMS',
+            icon: 'fas fa-copy',
+            primaryDanger: false
+        });
+        if (!confirmed) return;
+
+        const assignGroupMeta = (node, grp) => {
+            node.groupId = grp.id;
+            node.groupName = grp.name;
+            if (Array.isArray(node.children)) {
+                node.children.forEach(child => assignGroupMeta(child, grp));
+            }
+            return node;
+        };
+
+        let copied = 0;
+        targetGroup.items = targetGroup.items || [];
+        selectedRows.forEach(({ item }) => {
+            const copy = isAssemblyItem(item)
+                ? duplicateAssembly(item)
+                : Workspace.item({
+                    ...Workspace.clone(item),
+                    id: Workspace.uid('item'),
+                    takeoffLayerId: null,
+                    copiedFromTakeoffLayerId: item.takeoffLayerId || null,
+                    quantitySource: 'manual',
+                    quantitySyncStatus: 'manual',
+                    name: `${item.name} (Copy)`
+                });
+            assignGroupMeta(copy, targetGroup);
+            targetGroup.items.push(copy);
+            copied += 1;
+        });
+        if (copied > 0) {
+            targetGroup.expanded = true;
+            changed(`Copied ${copied} item${copied === 1 ? '' : 's'} to "${targetName}"`);
+        }
+    }
+
+    async function moveSelectedEstimatingItemsToGroup(targetGroupId) {
+        const groups = current().groups || [];
+        const targetGroup = groups.find(g => String(g.id) === String(targetGroupId));
+        if (!targetGroup) return;
+        const selectedRows = selectedEstimatingSubheadRows();
+        if (!selectedRows.length) return;
+        closeEstimatingSubheadMovePopover();
+
+        const count = selectedRows.length;
+        const targetName = targetGroup.name || 'Untitled Group';
+        const confirmed = await confirmEstimatingSubheadAction({
+            title: count === 1 ? 'Move Item to Group' : 'Move Items to Group',
+            message: `Move ${count} selected item${count === 1 ? '' : 's'} to "${targetName}"?`,
+            confirmText: 'Move',
+            cancelText: 'Cancel',
+            type: 'warning',
+            badge: 'MOVE ITEMS',
+            icon: 'fas fa-folder-tree',
+            primaryDanger: false
+        });
+        if (!confirmed) return;
+
+        const rootIds = selectedRows.map(({ item }) => item.id);
+        const moving = [];
+        groups.forEach(group => {
+            const moveIds = collectDescendantIds(group.items || [], rootIds);
+            group.items = (group.items || []).filter(item => {
+                if (moveIds.has(String(item.id)) || ui.selected.has(item.id) || ui.selected.has(String(item.id))) {
+                    moving.push(item);
+                    return false;
+                }
+                return true;
+            });
+        });
+        if (!moving.length) return;
+        targetGroup.items = targetGroup.items || [];
+        moving.forEach(item => {
+            item.groupId = targetGroup.id;
+            item.groupName = targetGroup.name;
+            targetGroup.items.push(item);
+        });
+        targetGroup.expanded = true;
+        changed(`Moved ${count} item${count === 1 ? '' : 's'} to "${targetName}"`);
+    }
+
+    function openEstimatingSubheadGroupPopover(anchorBtn, mode = 'move') {
+        const isCopy = mode === 'copy';
+        const popId = isCopy ? 'estimatingSubheadCopyPopover' : 'estimatingSubheadMovePopover';
+        const existing = document.getElementById(popId);
+        if (existing) {
+            existing.remove();
+            return;
+        }
+        closeEstimatingSubheadMovePopover();
+        const groups = current().groups || [];
+        if (!groups.length) return;
+        const pop = document.createElement('div');
+        pop.id = popId;
+        pop.className = 'est-subhead-move-popover';
+        pop.innerHTML = `
+            <div class="est-subhead-move-popover-head">${isCopy ? 'Copy selected to group:' : 'Move selected to group:'}</div>
+            ${groups.map(grp => `
+                <button type="button" data-est-target-group="${esc(grp.id)}">
+                    <i class="fas ${isCopy ? 'fa-copy' : 'fa-folder'}"></i>
+                    <span>${esc(grp.name || 'Untitled Group')}</span>
+                </button>
+            `).join('')}
+        `;
+        document.body.appendChild(pop);
+        const rect = anchorBtn.getBoundingClientRect();
+        const popRect = pop.getBoundingClientRect();
+        let left = rect.left;
+        let top = rect.bottom + 4;
+        if (left + popRect.width > window.innerWidth - 12) {
+            left = Math.max(12, window.innerWidth - popRect.width - 12);
+        }
+        if (top + popRect.height > window.innerHeight - 12) {
+            top = Math.max(12, rect.top - popRect.height - 4);
+        }
+        pop.style.left = `${Math.round(left)}px`;
+        pop.style.top = `${Math.round(top)}px`;
+        pop.querySelectorAll('[data-est-target-group]').forEach(btn => {
+            btn.addEventListener('click', event => {
+                event.stopPropagation();
+                const targetGroupId = btn.dataset.estTargetGroup;
+                if (isCopy) copySelectedEstimatingItemsToGroup(targetGroupId);
+                else moveSelectedEstimatingItemsToGroup(targetGroupId);
+            });
+        });
+    }
+
+    function bindEstimatingSubheadActions() {
+        const info = document.getElementById('estimatingSubheadItemInfo');
+        if (!info || info.dataset.bound === '1') return;
+        info.dataset.bound = '1';
+        info.addEventListener('click', event => {
+            const btn = event.target.closest('[data-est-subhead-action]');
+            if (!btn) return;
+            event.stopPropagation();
+            const act = btn.dataset.estSubheadAction;
+            if (act === 'copy') return openEstimatingSubheadGroupPopover(btn, 'copy');
+            if (act === 'move') return openEstimatingSubheadGroupPopover(btn, 'move');
+            if (act === 'delete') return deleteSelectedEstimatingItems();
+        });
+    }
+
+    function syncEstimatingSubheadInfo() {
+        const info = document.getElementById('estimatingSubheadItemInfo');
+        if (!info) return;
+        bindEstimatingSubheadActions();
+        const isEstTab = document.body?.classList.contains('is-estimating-tab')
+            || document.querySelector('.project-subhead-wrapper')?.classList.contains('is-estimating-tab')
+            || window.ProjectState?.activeTab === 'estimating';
+        if (!isEstTab) {
+            info.classList.remove('is-visible');
+            info.style.display = 'none';
+            info.setAttribute('aria-hidden', 'true');
+            closeEstimatingSubheadMovePopover();
+            return;
+        }
+        const selectedRows = allItems().filter(({ item }) =>
+            !item.parentItemId && !item.parent_item_id && !item.assemblyParentId
+            && (ui.selected.has(item.id) || ui.selected.has(String(item.id)))
+        );
+        if (!selectedRows.length) {
+            info.classList.remove('is-visible');
+            info.style.display = 'none';
+            info.setAttribute('aria-hidden', 'true');
+            closeEstimatingSubheadMovePopover();
+            return;
+        }
+        const dot = document.getElementById('estimatingSubheadItemDot');
+        const nameEl = document.getElementById('estimatingSubheadItemName');
+        const metaEl = document.getElementById('estimatingSubheadItemMeta');
+        const count = selectedRows.length;
+        const settings = current().settings;
+        const totalSales = selectedRows.reduce((sum, { item }) => {
+            const calc = Calc.calculateItem(item, settings);
+            return sum + Number(calc?.totalSales ?? 0);
+        }, 0);
+
+        if (dot) {
+            const shapeHtml = count === 1 ? getItemLayerShapeSvg(selectedRows[0].item, 13) : '';
+            dot.style.background = 'transparent';
+            dot.style.boxShadow = 'none';
+            dot.innerHTML = shapeHtml || '<i class="fas fa-list-check" style="color: #fb5a3a; font-size: 11.5px;"></i>';
+        }
+        if (nameEl) {
+            nameEl.textContent = count === 1
+                ? (selectedRows[0].item.name || '1 item selected')
+                : `${count} items selected`;
+            nameEl.title = selectedRows.map(({ item }) => item.name || 'Item').join(', ');
+        }
+        if (metaEl) {
+            if (count === 1) {
+                const singleItem = selectedRows[0].item;
+                const calc = Calc.calculateItem(singleItem, settings);
+                const qty = calc?.baseQuantity ?? singleItem.quantity ?? 0;
+                metaEl.textContent = `${number(qty, 2)} ${singleItem.uom || 'ea'} · ${money(totalSales)}`;
+            } else {
+                metaEl.textContent = money(totalSales);
+            }
+        }
+        info.classList.add('is-visible');
+        info.style.display = 'inline-flex';
+        info.setAttribute('aria-hidden', 'false');
+    }
+    window.syncEstimatingSubheadInfo = syncEstimatingSubheadInfo;
 
     function itemMatchesQuery(item, query) {
         const ownMatch = `${item.name || ''} ${item.description || ''} ${item.costCode || ''} ${item.catalogNumber || ''}`.toLowerCase().includes(query);
@@ -2103,14 +2792,19 @@
             return `<td class="text-right"><span class="est-editable-num-wrap"><span class="est-editable-unit" style="font-size: 11px; color: ${isCostOverridden ? '#ea580c' : '#2563eb'}; margin-right: 1px; font-weight: 600;">$</span><input class="est-cell-input is-editable est-cell-blue-input ${isCostOverridden ? 'is-val-overridden' : ''}" data-item-field="unitMaterialCost" type="number" step="0.01" value="${esc(formattedCost)}" style="width: ${Math.max(4, formattedCost.length)}ch; text-align: right;"></span></td>`;
         }
         if (colId === 'waste') {
-            const waste = item.waste ?? 0;
+            const equipment = isEquipmentItem(item);
+            const fallbackWaste = Number(equipment ? (current().settings.equipmentWaste ?? 0) : (current().settings.materialWaste ?? 0));
+            const waste = (item.waste !== undefined && item.waste !== null && item.waste !== '') ? Number(item.waste) : fallbackWaste;
             const formattedWaste = Number(waste || 0).toFixed(2);
             if (readonly) return `<td class="text-right"><span>${number(waste, 2)}</span></td>`;
             const isWasteOverridden = Boolean(item._manualFields?.waste);
             return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isWasteOverridden ? 'is-val-overridden' : ''}" data-item-field="waste" type="number" step="0.01" value="${esc(formattedWaste)}" style="width: ${Math.max(3, formattedWaste.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isWasteOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">%</span></span></td>`;
         }
         if (colId === 'labor_waste') {
-            const laborWaste = item.laborWaste ?? (item.itemType === 'labor' ? item.waste : 0);
+            const fallbackLaborWaste = Number(current().settings.laborWaste ?? 0);
+            const laborWaste = (item.laborWaste !== undefined && item.laborWaste !== null && item.laborWaste !== '')
+                ? Number(item.laborWaste)
+                : ((item.itemType === 'labor' && item.waste !== undefined && item.waste !== null && item.waste !== '') ? Number(item.waste) : fallbackLaborWaste);
             const formattedLaborWaste = Number(laborWaste || 0).toFixed(2);
             if (readonly) return `<td class="text-right"><span>${number(laborWaste, 2)}</span></td>`;
             const isLaborWasteOverridden = Boolean(item._manualFields?.laborWaste);
@@ -2120,17 +2814,33 @@
             return `<td class="text-right est-money" data-live-item-cell="subtotal_item_cost">${number(calc.materialCost || 0, 2)}</td>`;
         }
         if (colId === 'margin') {
-            const margin = item.materialMargin ?? calc.marginPercent ?? 0;
+            const equipment = isEquipmentItem(item);
+            const fallbackMargin = equipment
+                ? Number(current().settings.equipmentMargin ?? 15)
+                : Number(current().settings.materialMargin ?? 15);
+            const rawMargin = equipment ? item.equipmentMargin : (item.materialMargin ?? item.margin);
+            const hasExplicitMargin = rawMargin !== undefined && rawMargin !== null && rawMargin !== '';
+            const isAssemblyRow = isAssemblyItem(item) && !options.component;
+            const margin = hasExplicitMargin
+                ? Number(rawMargin)
+                : (isAssemblyRow && Number(calc.materialSales || 0) > 0 && Number(calc.materialCost || 0) > 0
+                    ? (((calc.materialSales - calc.materialCost) / calc.materialSales) * 100)
+                    : fallbackMargin);
             const formattedMargin = Number(margin || 0).toFixed(2);
             const invalid = Number(margin) >= 100;
             if (readonly) return `<td class="text-right"><span>${number(margin, 2)}</span></td>`;
-            const isMarginOverridden = Boolean(item._manualFields?.materialMargin);
-            return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isMarginOverridden ? 'is-val-overridden' : ''}" data-item-field="materialMargin" type="number" step="0.01" max="99.99" value="${esc(formattedMargin)}" ${invalid ? 'aria-invalid="true" title="Margin must be below 100%"' : ''} style="width: ${Math.max(3, formattedMargin.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isMarginOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">%</span></span></td>`;
+            const overrideKey = equipment ? 'equipmentMargin' : 'materialMargin';
+            const isMarginOverridden = Boolean(item._manualFields?.[overrideKey]);
+            return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isMarginOverridden ? 'is-val-overridden' : ''}" data-item-field="${overrideKey}" type="number" step="0.01" max="99.99" value="${esc(formattedMargin)}" ${invalid ? 'aria-invalid="true" title="Margin must be below 100%"' : ''} style="width: ${Math.max(3, formattedMargin.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isMarginOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">%</span></span></td>`;
         }
         if (colId === 'labor_margin') {
-            const laborMargin = item.laborMargin !== undefined && item.laborMargin !== null && item.laborMargin !== ''
+            const hasExplicitLaborMargin = item.laborMargin !== undefined && item.laborMargin !== null && item.laborMargin !== '';
+            const isAssemblyRow = isAssemblyItem(item) && !options.component;
+            const laborMargin = hasExplicitLaborMargin
                 ? Number(item.laborMargin)
-                : Number(current().settings.globalLaborMargin ?? 34.6);
+                : (isAssemblyRow && Number(calc.laborSales || 0) > 0 && Number(calc.laborCost || 0) > 0
+                    ? Number(calc.laborMargin ?? current().settings.globalLaborMargin ?? 34.6)
+                    : Number(current().settings.globalLaborMargin ?? 34.6));
             const formattedLaborMargin = laborMargin.toFixed(1);
             const invalid = laborMargin >= 100;
             if (readonly) return `<td class="text-right"><span>${formattedLaborMargin}%</span></td>`;
@@ -2138,7 +2848,11 @@
             return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isLaborMarginOverridden ? 'is-val-overridden' : ''}" data-item-field="laborMargin" type="number" step="0.1" max="99.99" value="${esc(formattedLaborMargin)}" ${invalid ? 'aria-invalid="true" title="Margin must be below 100%"' : ''} style="width: ${Math.max(3, formattedLaborMargin.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isLaborMarginOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">%</span></span></td>`;
         }
         if (colId === 'unit_sales') {
-            return `<td class="text-right est-money" data-live-item-cell="unit_sales">${number(calc.unitMaterialSales || 0, 2)}</td>`;
+            const eqRow = isEquipmentItem(item);
+            const unitSalesVal = eqRow && !calc.unitMaterialSales
+                ? ((calc.equipmentSales || 0) / (calc.equipmentQuantity || calc.baseQuantity || 1))
+                : (calc.unitMaterialSales || 0);
+            return `<td class="text-right est-money" data-live-item-cell="unit_sales">${number(unitSalesVal, 2)}</td>`;
         }
         if (colId === 'subtotal_item_sales') {
             return `<td class="text-right est-money" data-live-item-cell="subtotal_item_sales">${number(calc.materialSales || 0, 2)}</td>`;
@@ -2149,19 +2863,21 @@
         }
         if (colId === 'unit_labor') {
             const ul = item.unitLabor ?? 0;
+            const unitLabel = String(item.laborUnitType || item.laborUnit || 'hrs').toLowerCase().includes('hr') ? 'hrs' : 'mins';
             const formattedUl = Number(ul || 0).toFixed(2);
             if (readonly) return `<td class="text-right"><span>${number(ul, 2)}</span></td>`;
             const isUlOverridden = Boolean(
                 (item.overrides?.laborHoursPerUnit !== null && item.overrides?.laborHoursPerUnit !== undefined)
                 || item._manualFields?.unitLabor
             );
-            return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isUlOverridden ? 'is-val-overridden' : ''}" data-item-field="unitLabor" type="number" step="0.01" value="${esc(formattedUl)}" style="width: ${Math.max(3, formattedUl.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isUlOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">hrs</span></span></td>`;
+            return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isUlOverridden ? 'is-val-overridden' : ''}" data-item-field="unitLabor" type="number" step="0.01" value="${esc(formattedUl)}" style="width: ${Math.max(3, formattedUl.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isUlOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">${unitLabel}</span></span></td>`;
         }
         if (colId === 'difficulty_factor') {
-            const diff = item.difficulty ?? 1;
+            const fallbackDiff = Number(current().settings.laborDifficulty ?? 1);
+            const diff = (item.difficulty !== undefined && item.difficulty !== null && item.difficulty !== '') ? Number(item.difficulty) : fallbackDiff;
             const formattedDiff = Number(diff || 1).toFixed(2);
             if (readonly) return `<td class="text-right"><span>${number(diff, 2)}</span></td>`;
-            const isDiffOverridden = Boolean(item._manualFields?.difficulty || (item.difficulty !== undefined && Math.abs(Number(item.difficulty) - 1.0) > 0.001));
+            const isDiffOverridden = Boolean(item._manualFields?.difficulty);
             return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isDiffOverridden ? 'is-val-overridden' : ''}" data-item-field="difficulty" type="number" step="0.01" value="${esc(formattedDiff)}" style="width: ${Math.max(3, formattedDiff.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isDiffOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">x</span></span></td>`;
         }
         if (colId === 'total_labor_hrs') {
@@ -2397,13 +3113,13 @@
     function summaryHtml(total = {}) {
         const settings = current().settings || {};
         const globalLaborCost = Number(settings.globalLaborCost ?? 36);
-        const globalLaborMargin = Number(settings.globalLaborMargin ?? 34.6);
+        const globalLaborMargin = resolvedCategorySummaryMargin('Labor', settings, total);
         const globalLaborSales = globalLaborMargin < 100
             ? (globalLaborCost / (1 - globalLaborMargin / 100))
             : globalLaborCost;
 
-        const materialMargin = Number(settings.materialMargin ?? 15);
-        const equipmentMargin = Number(settings.equipmentMargin ?? 15);
+        const materialMargin = resolvedCategorySummaryMargin('Materials', settings, total);
+        const equipmentMargin = resolvedCategorySummaryMargin('Equipment', settings, total);
         const laborWaste = Number(settings.laborWaste ?? 0);
         const materialWaste = Number(settings.materialWaste ?? 0);
         const equipmentWaste = Number(settings.equipmentWaste ?? 0);
@@ -2428,7 +3144,7 @@
                 <div class="est-summary-rate-line">
                     <span class="est-summary-rate-label">Global labor sales rate</span>
                     <div class="est-summary-rate-val-wrap">
-                        <span class="est-rate-num-col"><span class="est-rate-readonly-val">${globalLaborSales.toFixed(2)}</span></span>
+                        <span class="est-rate-num-col"><span class="est-rate-readonly-val" data-live-summary="global-labor-sales">${globalLaborSales.toFixed(2)}</span></span>
                         <span class="est-rate-unit-col est-rate-unit-readonly">$/hr</span>
                     </div>
                 </div>
@@ -3132,6 +3848,17 @@ function renderFooter() {
             </div>`;
         }
         document.body.appendChild(portal);
+        portal.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' || event.isComposing || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
+            if (event.target?.tagName === 'TEXTAREA' || event.target?.tagName === 'BUTTON') return;
+            if (ui.modal === 'new') {
+                event.preventDefault();
+                portal.querySelector('[data-create-estimate]')?.click();
+            } else if (ui.modal === 'export') {
+                event.preventDefault();
+                portal.querySelector('[data-download-estimate]')?.click();
+            }
+        });
         portal.querySelector('input, button')?.focus();
     }
 
@@ -3349,7 +4076,12 @@ function renderFooter() {
             return;
         }
         if (event.target.dataset.summaryRate) {
-            return; // Wait for change/Enter event to recalculate
+            const rateField = event.target.dataset.summaryRate;
+            const val = Workspace.numeric(event.target.value);
+            applySummaryRateSetting(estimate, rateField, val);
+            reactiveChanged(event.target);
+            renderTable();
+            return;
         }
         if (event.target.dataset.summaryType) {
             const type = event.target.dataset.summaryType;
@@ -3433,11 +4165,17 @@ function renderFooter() {
     function applySummaryRateSetting(estimate, field, val) {
         if (!estimate?.settings) return;
         if (field === 'globalLaborCost') {
-            estimate.settings.globalLaborCost = val;
+            const nextCost = Math.max(0, Number(val || 0));
+            const gMargin = Number(estimate.settings.globalLaborMargin ?? 34.6);
+            estimate.settings.globalLaborCost = nextCost;
+            estimate.settings.globalLaborSales = gMargin < 100
+                ? Number((nextCost / (1 - gMargin / 100)).toFixed(2))
+                : nextCost;
             forEachEstimateItem(estimate, it => {
-                it.laborRate = val;
+                it.laborRate = nextCost;
+                if (it._manualFields) delete it._manualFields.laborRate;
                 if (it.catalogSnapshot && window.EstimatingCatalogSnapshotService) {
-                    window.EstimatingCatalogSnapshotService.setCatalogOverride(it, 'laborRate', val);
+                    window.EstimatingCatalogSnapshotService.setCatalogOverride(it, 'laborRate', nextCost);
                 }
             });
         } else if (field === 'globalLaborSales') {
@@ -3449,6 +4187,7 @@ function renderFooter() {
                 estimate.settings.globalLaborMargin = clamped;
                 forEachEstimateItem(estimate, it => {
                     it.laborMargin = clamped;
+                    if (it._manualFields) delete it._manualFields.laborMargin;
                     if (it.itemType === 'labor' || it.type === 'labor') it.margin = clamped;
                 });
             }
@@ -3460,21 +4199,29 @@ function renderFooter() {
         if (field === 'margin') {
             const clamped = Math.min(99.9, Math.max(-999, val));
             if (type === 'Labor') {
+                const gCost = Number(estimate.settings.globalLaborCost ?? 36);
                 estimate.settings.globalLaborMargin = clamped;
+                estimate.settings.globalLaborSales = clamped < 100
+                    ? Number((gCost / (1 - clamped / 100)).toFixed(2))
+                    : gCost;
                 forEachEstimateItem(estimate, it => {
                     it.laborMargin = clamped;
+                    if (it._manualFields) delete it._manualFields.laborMargin;
                     if (it.itemType === 'labor' || it.type === 'labor') it.margin = clamped;
                 });
             } else if (type === 'Materials') {
                 estimate.settings.materialMargin = clamped;
                 forEachEstimateItem(estimate, it => {
+                    if (isEquipmentItem(it)) return;
                     it.materialMargin = clamped;
+                    if (it._manualFields) delete it._manualFields.materialMargin;
                     if (it.itemType === 'material' || it.type === 'material' || (!it.itemType && !it.type)) it.margin = clamped;
                 });
             } else if (type === 'Equipment') {
                 estimate.settings.equipmentMargin = clamped;
                 forEachEstimateItem(estimate, it => {
                     it.equipmentMargin = clamped;
+                    if (it._manualFields) delete it._manualFields.equipmentMargin;
                 });
             }
         } else if (field === 'waste') {
@@ -3482,22 +4229,32 @@ function renderFooter() {
             if (type === 'Materials') {
                 estimate.settings.materialWaste = clamped;
                 forEachEstimateItem(estimate, it => {
+                    if (isEquipmentItem(it)) return;
                     it.waste = clamped;
+                    if (it._manualFields) delete it._manualFields.waste;
                 });
             } else if (type === 'Labor') {
                 estimate.settings.laborWaste = clamped;
                 forEachEstimateItem(estimate, it => {
                     it.laborWaste = clamped;
+                    if (it._manualFields) delete it._manualFields.laborWaste;
                     if (it.itemType === 'labor' || it.type === 'labor') it.waste = clamped;
                 });
             } else if (type === 'Equipment') {
                 estimate.settings.equipmentWaste = clamped;
+                forEachEstimateItem(estimate, it => {
+                    if (isEquipmentItem(it)) {
+                        it.waste = clamped;
+                        if (it._manualFields) delete it._manualFields.waste;
+                    }
+                });
             }
         } else if (field === 'difficulty') {
             const clamped = Math.max(0.1, val);
             estimate.settings.laborDifficulty = clamped;
             forEachEstimateItem(estimate, it => {
                 it.difficulty = clamped;
+                if (it._manualFields) delete it._manualFields.difficulty;
             });
             window.dispatchEvent(new CustomEvent('estimating:global-difficulty-updated', {
                 detail: { difficulty: clamped }
@@ -3596,8 +4353,12 @@ function renderFooter() {
         if (row && field) {
             const found = findItem(row.dataset.itemId);
             if (!found) return;
-            const equipmentUnitCostEdit = field === 'unitMaterialCost' && isEquipmentItem(found.item);
-            const effectiveField = equipmentUnitCostEdit ? 'unitEquipmentCost' : field;
+            const equipmentRow = isEquipmentItem(found.item);
+            const equipmentUnitCostEdit = field === 'unitMaterialCost' && equipmentRow;
+            const equipmentMarginEdit = field === 'materialMargin' && equipmentRow;
+            const effectiveField = equipmentUnitCostEdit
+                ? 'unitEquipmentCost'
+                : (equipmentMarginEdit ? 'equipmentMargin' : field);
             const prevRaw = getAuditPrevValue(event.target);
             const nextRaw = event.target.value;
             const catalogFields = {
@@ -3611,6 +4372,11 @@ function renderFooter() {
                 window.EstimatingCatalogSnapshotService.setCatalogOverride(found.item,
                     catalogFields[effectiveField], parsedVal);
                 found.item[effectiveField] = parsedVal;
+                if (effectiveField === 'unitLabor') {
+                    found.item.laborUnitType = 'hrs';
+                    const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
+                    if (unitEl) unitEl.textContent = 'hrs';
+                }
                 found.item._manualFields[effectiveField] = true;
                 event.target.classList.add('is-val-overridden');
                 const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
@@ -3656,7 +4422,15 @@ function renderFooter() {
                     }
                 }
                 found.item[effectiveField] = parsedVal;
-                if (!isLiveTypingCommit && event.target.type === 'number' && !isNaN(parsedVal)) event.target.value = parsedVal.toFixed(2);
+                if (effectiveField === 'unitLabor') {
+                    found.item.laborUnitType = 'hrs';
+                    const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
+                    if (unitEl) unitEl.textContent = 'hrs';
+                }
+                if (effectiveField === 'materialMargin') found.item.margin = parsedVal;
+                if (!isLiveTypingCommit && event.target.type === 'number' && !isNaN(parsedVal)) {
+                    event.target.value = effectiveField === 'laborMargin' ? parsedVal.toFixed(1) : parsedVal.toFixed(2);
+                }
                 if (field === 'quantity' && isAssemblyItem(found.item)) {
                     const newParentQty = Workspace.numeric(parsedVal);
                     const children = getItemChildren(found.item);
@@ -3665,6 +4439,16 @@ function renderFooter() {
                             ? Number(child.factorOverride)
                             : (child.ratio !== undefined && child.ratio !== null ? Number(child.ratio) : Number(child.unitQuantity ?? child.quantity ?? 1));
                         child.ratio = ratio;
+                    });
+                    found.item.children = children;
+                } else if (isAssemblyItem(found.item) && ['materialMargin', 'equipmentMargin', 'laborMargin', 'waste', 'laborWaste', 'difficulty', 'laborRate'].includes(effectiveField)) {
+                    const children = getItemChildren(found.item);
+                    children.forEach(child => {
+                        child[effectiveField] = parsedVal;
+                        if (effectiveField === 'materialMargin') child.margin = parsedVal;
+                        if (effectiveField === 'laborRate' && child.catalogSnapshot && window.EstimatingCatalogSnapshotService) {
+                            window.EstimatingCatalogSnapshotService.setCatalogOverride(child, 'laborRate', parsedVal);
+                        }
                     });
                     found.item.children = children;
                 }
@@ -3691,7 +4475,7 @@ function renderFooter() {
             saveLocal({ publish: false });
             scheduleSave();
             renderLiveSummary();
-            if (field === 'quantity' && isAssemblyItem(found.item)) renderTable();
+            if (!isLiveTypingCommit && isAssemblyItem(found.item) && (field === 'quantity' || ['materialMargin', 'equipmentMargin', 'laborMargin', 'waste', 'laborWaste', 'difficulty', 'laborRate'].includes(effectiveField))) renderTable();
             return;
         }
         if (event.target.matches('[data-item-check]')) {
@@ -4031,20 +4815,19 @@ function renderFooter() {
         if (actionName === 'delete') deleteEstimateAuthoritative(estimateId);
         if (actionName === 'set-primary') {
             state.estimates.forEach(row => {
-                row.is_primary = String(row.id) === String(estimateId);
-                row.isPrimary = row.is_primary;
+                const nextPrimary = String(row.id) === String(estimateId);
+                const wasPrimary = Boolean(row.is_primary || row.isPrimary);
+                row.is_primary = nextPrimary;
+                row.isPrimary = nextPrimary;
+                if (wasPrimary !== nextPrimary || nextPrimary) {
+                    markEstimateDirty(row.id);
+                }
             });
             const targetEst = state.estimates.find(row => String(row.id) === String(estimateId)) || current();
-            const estSummary = Calc.calculateSummary(targetEst.groups, targetEst.settings);
-            const totalSales = estSummary.estimateTotal;
-            if (window.ProjectState) {
-                if (!window.ProjectState.projectMeta) window.ProjectState.projectMeta = {};
-                window.ProjectState.projectMeta.primary_estimate_id = estimateId;
-                window.ProjectState.projectMeta.primary_estimate_total = totalSales;
-                window.ProjectState.projectMeta.primary_quote_value = totalSales;
-            }
+            const primarySummary = buildEstimateSummaryPayload(targetEst);
+            const totalSales = primarySummary.estimateTotal;
+            syncPrimaryEstimateProjectMeta();
             saveLocal();
-            markEstimateDirty(estimateId);
             ui.saveRequested = true;
             clearTimeout(ui.saveTimer);
             ui.saveTimer = setTimeout(saveServer, 0);
@@ -4389,6 +5172,18 @@ function renderFooter() {
         const closeModal = () => portal.remove();
         portal.querySelectorAll('[data-close-proj-item-modal]').forEach(b => b.addEventListener('click', closeModal));
         portal.addEventListener('click', e => { if (e.target === portal) closeModal(); });
+        portal.addEventListener('keydown', event => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                closeModal();
+                return;
+            }
+            if (event.key === 'Enter' && !event.isComposing && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+                if (event.target?.tagName === 'TEXTAREA' || event.target?.tagName === 'BUTTON') return;
+                event.preventDefault();
+                portal.querySelector('#projSaveItemBtn')?.click();
+            }
+        });
 
         portal.querySelectorAll('.proj-comp-ratio-input').forEach(input => {
             input.addEventListener('input', () => {
@@ -4478,6 +5273,7 @@ function renderFooter() {
                 item.unitCost = newUnitCost;
                 item.unitLabor = newLaborHours;
                 item.laborHours = newLaborHours;
+                item.laborUnitType = 'hrs';
                 item.unitEquipmentCost = newEquipCost;
                 item.unitSubcontractorCost = newSubCost;
 
@@ -4747,16 +5543,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         if (action === 'table-settings') toggleTableSettings();
         if (action === 'create-group') createGroup();
         if (action === 'delete-selected') {
-            current().groups.forEach(group => {
-                group.items = group.items.filter(item => {
-                    if (ui.selected.has(item.id) || ui.selected.has(String(item.id))) {
-                        ui.expandedAssemblies.delete(String(item.id));
-                        return false;
-                    }
-                    return true;
-                });
-            });
-            ui.selected.clear(); changed('Deleted selected items');
+            deleteSelectedEstimatingItems();
         }
         if (action === 'reset-quantities') {
             allItems().forEach(({ item }) => {
@@ -4930,10 +5717,25 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         if (target.closest('[data-retry-save]')) saveServer();
     });
 
+    function commitEstimatingGroupRename(inputEl) {
+        if (!inputEl) return false;
+        const groupId = inputEl.dataset.groupName;
+        const group = current().groups.find(row => String(row.id) === String(groupId));
+        if (!group) return false;
+        const nextName = String(inputEl.value || '').trim().replace(/\s+/g, ' ') || 'Untitled Group';
+        if (nextName === String(group.name || '')) {
+            inputEl.value = nextName;
+            return false;
+        }
+        group.name = nextName;
+        (group.items || []).forEach(it => { it.groupName = nextName; });
+        changed('Renamed group');
+        return true;
+    }
+
     root.addEventListener('change', event => {
         if (!event.target.matches('[data-group-name]')) return;
-        const group = current().groups.find(row => row.id === event.target.dataset.groupName);
-        if (group) { group.name = event.target.value.trim() || 'Untitled Group'; changed('Renamed group'); }
+        commitEstimatingGroupRename(event.target);
     });
 
     document.addEventListener('click', async event => {
@@ -4947,6 +5749,9 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         }
         if (!target.closest('#optionsMenu') && !target.closest('[data-est-action="options"]')) {
             closeOptionsMenu();
+        }
+        if (!target.closest('#estimatingSubheadMovePopover') && !target.closest('[data-est-subhead-action="move"]')) {
+            closeEstimatingSubheadMovePopover();
         }
         if (target.closest('[data-close-markup-popover]')) {
             closeMarkupPopovers();
@@ -5027,9 +5832,20 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         if (event.target.closest('[data-close-modal]') || event.target === portal) { ui.modal = null; renderModal(); return; }
         if (event.target.closest('[data-create-estimate]')) {
             const createButton = event.target.closest('[data-create-estimate]');
+            const sourceEstimateId = String(current()?.id || '');
             const name = portal.querySelector('#copyEstimateName')?.value;
             const mode = portal.querySelector('input[name="copyEstimateMode"]:checked')?.value || 'blank';
             Workspace.createEstimate(state, name, mode); ui.modal = null; saveLocal();
+            const createdEstimate = current();
+            if (mode === 'all' && createdEstimate && typeof window.cloneTakeoffWorkspaceForEstimate === 'function') {
+                const cloneResult = window.cloneTakeoffWorkspaceForEstimate(sourceEstimateId, createdEstimate.id, createdEstimate);
+                if (cloneResult) {
+                    createdEstimate.cloneTakeoffFromEstimateId = cloneResult.sourceEstimateId;
+                    createdEstimate.cloneTakeoffLayerMap = cloneResult.layerIdMap || {};
+                    createdEstimate.cloneTakeoffGroupMap = cloneResult.groupIdMap || {};
+                    createdEstimate.cloneTakeoffItemMap = cloneResult.itemIdMap || {};
+                }
+            }
             markEstimateDirty();
             saveLocal();
             render();
@@ -5040,13 +5856,28 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                 renderStatus();
                 try {
                     await window.projectEstimatingSave();
+                    if (createdEstimate) {
+                        delete createdEstimate.cloneTakeoffFromEstimateId;
+                        delete createdEstimate.cloneTakeoffLayerMap;
+                        delete createdEstimate.cloneTakeoffGroupMap;
+                        delete createdEstimate.cloneTakeoffItemMap;
+                    }
                     ui.message = 'Estimate created';
                     renderStatus();
+                    if (mode === 'all' && createdEstimate) {
+                        window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', {
+                            detail: { projectId: String(projectId || ''), estimateId: createdEstimate.id, cloned: true }
+                        }));
+                    }
                 } catch (error) {
                     ui.loadState = 'error';
                     ui.message = `Estimate was not confirmed by the database: ${error.message}`;
                     renderStatus();
                 }
+            } else if (mode === 'all' && createdEstimate) {
+                window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', {
+                    detail: { projectId: String(projectId || ''), estimateId: createdEstimate.id, cloned: true }
+                }));
             }
         }
         const catalogId = event.target.closest('[data-est-catalog-item]')?.dataset.estCatalogItem;
@@ -5067,6 +5898,12 @@ const estimateMenu = target.closest('[data-estimate-menu]');
     });
 
     root.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && event.target.matches('.est-group-name-input')) {
+            event.preventDefault();
+            const committed = commitEstimatingGroupRename(event.target);
+            if (!committed) event.target.blur();
+            return;
+        }
         if (event.key === 'Enter' && event.target.matches('input[data-item-field], input[data-summary-rate], .est-rate-inline-input')) {
             event.target.blur();
         }
@@ -5110,7 +5947,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         // Selecting a tab is local UI state, not an estimate content edit. It
         // must not increment the estimate revision or conflict with another
         // estimator editing that same estimate.
-        ui.selected.clear(); saveLocal(); render(); publish();
+        ui.selected.clear(); syncEstimatingSubheadInfo(); saveLocal(); render(); publish();
     }
 
     window.addEventListener('takeoff:estimating-lines-updated', event => {
@@ -5128,6 +5965,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
     window.addEventListener('takeoff:project-state-updated', () => renderTable());
     window.addEventListener('takeoff:tab-activated', event => {
         if (event.detail?.tab === 'estimating') renderTable();
+        else syncEstimatingSubheadInfo();
     });
     document.addEventListener('click', e => {
         if (e.target.closest('#tabBtnEstimating, [data-tab="estimating"], [href="#tab-estimating"]')) {
@@ -5221,6 +6059,28 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         estimate.groups.push(Workspace.group(detail.group));
         changed(`Created Takeoff group ${detail.group.name || ''}`.trim());
     });
+    window.addEventListener('takeoff:estimating-group-rename-requested', event => {
+        const detail = event.detail || {};
+        if (detail.projectId && String(detail.projectId) !== String(projectId)) return;
+        if (detail.estimateId && String(detail.estimateId) !== String(state.activeEstimateId)) return;
+        const nextName = String(detail.name || '').trim().replace(/\s+/g, ' ');
+        if (!nextName) return;
+        const estimate = current();
+        const rawGroupId = String(detail.groupId || '');
+        const rawTakeoffGroupId = String(detail.takeoffGroupId || '');
+        const oldName = String(detail.oldName || '').trim();
+        const group = (estimate.groups || []).find(row =>
+            (rawGroupId && (String(row.id) === rawGroupId || String(row.takeoffGroupId || '') === rawGroupId))
+            || (rawTakeoffGroupId && (String(row.takeoffGroupId || '') === rawTakeoffGroupId
+                || String(row.id) === `takeoff_group_${rawTakeoffGroupId}`
+                || String(row.id) === rawTakeoffGroupId))
+            || (oldName && String(row.name || '').trim() === oldName)
+        );
+        if (!group || group.name === nextName) return;
+        group.name = nextName;
+        (group.items || []).forEach(it => { it.groupName = nextName; });
+        changed(`Renamed group "${nextName}"`);
+    });
         window.addEventListener('takeoff:estimating-items-reorder-requested', event => {
         const detail = event.detail || {};
         if (detail.projectId && String(detail.projectId) !== String(projectId)) return;
@@ -5253,10 +6113,24 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         if (String(detail.estimateId || '') !== String(state.activeEstimateId) || !Array.isArray(detail.groupIds)) return;
         const order = new Map(detail.groupIds.map((id, index) => [String(id), index]));
         const estimate = current();
+        let renamedDuringReorder = false;
+        if (Array.isArray(detail.groupNames)) {
+            const nameById = new Map(detail.groupNames.map(entry => [String(entry.id), entry.name]));
+            const nameByTakeoffId = new Map(detail.groupNames.map(entry => [String(entry.takeoffGroupId), entry.name]));
+            estimate.groups.forEach(group => {
+                const candidateName = nameById.get(String(group.id))
+                    || (group.takeoffGroupId ? nameByTakeoffId.get(String(group.takeoffGroupId)) : null);
+                if (candidateName && candidateName !== group.name) {
+                    group.name = candidateName;
+                    (group.items || []).forEach(it => { it.groupName = candidateName; });
+                    renamedDuringReorder = true;
+                }
+            });
+        }
         const before = estimate.groups.map(group => String(group.id)).join('|');
         estimate.groups.sort((a, b) => (order.get(String(a.id)) ?? Number.MAX_SAFE_INTEGER) - (order.get(String(b.id)) ?? Number.MAX_SAFE_INTEGER));
         estimate.groups.forEach((group, index) => { group.sortOrder = index; });
-        if (before === estimate.groups.map(group => String(group.id)).join('|')) return;
+        if (!renamedDuringReorder && before === estimate.groups.map(group => String(group.id)).join('|')) return;
         changed('Reordered Takeoff groups');
     });
     window.addEventListener('takeoff:estimating-action-requested', event => {
@@ -5284,9 +6158,13 @@ const estimateMenu = target.closest('[data-estimate-menu]');
     });
 
     window.projectEstimatingSave = async function () {
-        if (!projectId) return true;
+        if (!projectId) {
+            estimatingHasUnsavedCheckpoint = false;
+            return true;
+        }
         const started = Date.now();
         ui.saveRequested = true;
+        ui.explicitSaveRequested = true;
         while (ui.saving || ui.saveRequested) {
             if (Date.now() - started > 15000) throw new Error('Estimating save timed out.');
             if (ui.saving) {
@@ -5294,13 +6172,15 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                 continue;
             }
             clearTimeout(ui.saveTimer);
-            await saveServer();
+            await saveServer({ showModal: false });
             if (ui.loadState === 'error') {
                 const error = new Error(ui.message);
                 error.code = ui.lastErrorCode || 'save_failed';
                 throw error;
             }
         }
+        estimatingHasUnsavedCheckpoint = false;
+        ui.explicitSaveRequested = false;
         return true;
     };
 
@@ -5382,10 +6262,62 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         };
     };
 
-    window.isEstimatingDirty = () => Boolean(ui.saving || ui.saveRequested || dirtyEstimateIds.size);
+    window.isEstimatingDirty = () => Boolean(ui.saving || ui.saveRequested || dirtyEstimateIds.size || estimatingHasUnsavedCheckpoint);
+
+    function buildEstimatePatchPayload(sentIds) {
+        const estimates = Workspace.clone(state.estimates.filter(estimate => sentIds.includes(String(estimate.id)))).map(estimate => {
+            const estSummary = buildEstimateSummaryPayload(estimate);
+            return {
+                ...estimate,
+                is_primary: Boolean(estimate.is_primary || estimate.isPrimary),
+                isPrimary: Boolean(estimate.is_primary || estimate.isPrimary),
+                estimateSummary: estSummary,
+                estimateTotal: estSummary.estimateTotal,
+                totalSales: estSummary.estimateTotal
+            };
+        });
+        return {
+            action: 'save',
+            mode: 'patch',
+            project_id: projectId,
+            updates: estimates,
+            estimates,
+            state: {
+                schemaVersion: state.schemaVersion,
+                projectId: state.projectId,
+                activeEstimateId: state.activeEstimateId,
+                clientUiUpdatedAt: state.clientUiUpdatedAt,
+                estimates
+            },
+            summary: buildEstimateSummaryPayload(current())
+        };
+    }
+
+    function flushDirtyEstimatesKeepalive() {
+        if (!projectId || ui.saving || !dirtyEstimateIds.size || calculationErrors().length) return;
+        const sentIds = [...dirtyEstimateIds].filter(id => !conflictedEstimateIds.has(id)
+            && state.estimates.some(estimate => String(estimate.id) === id));
+        if (!sentIds.length) return;
+        const payload = buildEstimatePatchPayload(sentIds);
+        try {
+            fetch(`${apiUrl}?action=save&project_id=${projectId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                keepalive: true
+            });
+        } catch (_) {}
+    }
+
+    window.addEventListener('pagehide', flushDirtyEstimatesKeepalive);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') flushDirtyEstimatesKeepalive();
+    });
 
     window.addEventListener('beforeunload', event => {
-        if (!ui.saving && !ui.saveRequested && !dirtyEstimateIds.size) return;
+        const hasPendingBuffer = Boolean(ui.saving || ui.saveRequested || dirtyEstimateIds.size);
+        if (hasPendingBuffer) flushDirtyEstimatesKeepalive();
+        if (!hasPendingBuffer && !estimatingHasUnsavedCheckpoint) return;
         event.preventDefault();
         event.returnValue = '';
     });

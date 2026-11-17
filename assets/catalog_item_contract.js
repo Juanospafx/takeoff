@@ -106,16 +106,22 @@
         return {
             id: nullableId(raw.id),
             catalogItemId: nullableId(raw.catalogItemId ?? raw.catalog_item_id ?? raw.part_catalog_item_id),
+            name: text(firstDefined(raw, ['name', 'child_item_name', 'childItemName', 'componentName', 'title'])),
+            description: text(firstDefined(raw, ['description', 'child_description'])),
+            uom: text(firstDefined(raw, ['uom', 'unit_of_measure', 'child_unit_of_measure'])) || 'ea',
+            itemType: text(firstDefined(raw, ['itemType', 'item_type', 'child_item_type'])) || null,
+            costCategory: text(firstDefined(raw, ['costCategory', 'cost_category', 'cost_type'])) || null,
+            costCode: text(firstDefined(raw, ['costCode', 'cost_code'])),
             quantity: number(raw.quantity, 1),
             ratioType: text(raw.ratioType ?? raw.ratio_type) || 'per_unit',
             spacing: firstDefined(raw, ['spacing', 'spacingValue', 'spacing_value'], null) === null
                 ? null : number(firstDefined(raw, ['spacing', 'spacingValue', 'spacing_value'])),
             waste: number(raw.waste ?? raw.wasteFactorPercent ?? raw.waste_factor_percent),
             pricingSnapshot: {
-                materialUnitCost: number(firstDefined(raw, ['materialUnitCost', 'material_unit_cost', 'unit_cost_snapshot'])),
+                materialUnitCost: number(firstDefined(raw, ['materialUnitCost', 'material_unit_cost', 'unit_cost_snapshot', 'child_unit_cost', 'unit_cost'])),
                 equipmentUnitCost: number(firstDefined(raw, ['equipmentUnitCost', 'equipment_unit_cost', 'equipment_cost_snapshot'])),
                 subcontractorUnitCost: number(firstDefined(raw, ['subcontractorUnitCost', 'subcontractor_unit_cost', 'subcontractor_cost_snapshot'])),
-                laborHoursPerUnit: number(firstDefined(raw, ['laborHoursPerUnit', 'labor_hours_per_unit', 'unit_labor_time_snapshot'])),
+                laborHoursPerUnit: number(firstDefined(raw, ['laborHoursPerUnit', 'labor_hours_per_unit', 'unit_labor_time_snapshot', 'child_labor_hours', 'labor_hours'])),
                 laborRate: number(firstDefined(raw, ['laborRate', 'labor_rate', 'labor_rate_snapshot']))
             },
             overrides: raw.overrides && typeof raw.overrides === 'object'
