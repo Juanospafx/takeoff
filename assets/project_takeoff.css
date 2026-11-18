@@ -221,7 +221,7 @@ body.theme-dark .est-version-bar {
 .est-pill-btn {
     cursor: pointer !important;
     user-select: none;
-    transition: all 0.15s ease !important;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease) !important;
     font-family: inherit !important;
 }
 
@@ -281,7 +281,7 @@ body.theme-dark .est-version-bar {
     font-size: 12px;
     cursor: pointer;
     text-align: left;
-    transition: all 0.12s ease;
+    transition: background-color 0.12s var(--ds-ease, ease), border-color 0.12s var(--ds-ease, ease), color 0.12s var(--ds-ease, ease), opacity 0.12s var(--ds-ease, ease), box-shadow 0.12s var(--ds-ease, ease), transform 0.12s var(--ds-ease, ease);
     gap: 12px;
     box-sizing: border-box;
 }
@@ -306,7 +306,7 @@ body.theme-dark .est-pill-menu-header {
 
 [data-theme="dark"] .est-pill-menu-item,
 body.theme-dark .est-pill-menu-item {
-    background: #1e2432 !important;
+    background: var(--bg-input, #1f2633) !important;
     border: 1px solid #2f384a !important;
     color: #f8fafc !important;
 }
@@ -471,7 +471,7 @@ body.theme-dark .est-pill {
     cursor: pointer;
     font-family: inherit;
     text-align: left;
-    transition: all .14s ease;
+    transition: background-color .14s var(--ds-ease, ease), border-color .14s var(--ds-ease, ease), color .14s var(--ds-ease, ease), opacity .14s var(--ds-ease, ease), box-shadow .14s var(--ds-ease, ease), transform .14s var(--ds-ease, ease);
 }
 
 #takeoffEstimateTypesFooter .est-version-entry:has(.est-version-menu-toggle) .est-version-tab,
@@ -668,7 +668,7 @@ body.theme-dark .est-version-bar .est-version-tab.active small {
     align-items: center;
     justify-content: center;
     font-size: 13px;
-    transition: all .12s ease;
+    transition: background-color .12s var(--ds-ease, ease), border-color .12s var(--ds-ease, ease), color .12s var(--ds-ease, ease), opacity .12s var(--ds-ease, ease), box-shadow .12s var(--ds-ease, ease), transform .12s var(--ds-ease, ease);
 }
 
 #takeoffEstimateTypesFooter .est-version-menu-toggle:hover,
@@ -710,7 +710,7 @@ body.theme-dark .est-version-bar .est-version-menu-toggle[aria-expanded="true"] 
     cursor: pointer;
     white-space: nowrap;
     flex-shrink: 0;
-    transition: all .14s ease;
+    transition: background-color .14s var(--ds-ease, ease), border-color .14s var(--ds-ease, ease), color .14s var(--ds-ease, ease), opacity .14s var(--ds-ease, ease), box-shadow .14s var(--ds-ease, ease), transform .14s var(--ds-ease, ease);
 }
 
 #takeoffEstimateTypesFooter .est-btn:hover:not(:disabled),
@@ -798,7 +798,7 @@ body.theme-dark .est-version-bar .est-version-menu-toggle[aria-expanded="true"] 
     display: flex;
     align-items: center;
     gap: 8px;
-    transition: all .12s ease;
+    transition: background-color .12s var(--ds-ease, ease), border-color .12s var(--ds-ease, ease), color .12s var(--ds-ease, ease), opacity .12s var(--ds-ease, ease), box-shadow .12s var(--ds-ease, ease), transform .12s var(--ds-ease, ease);
 }
 
 .est-version-menu:not(.est-pill-dropdown) button:hover,
@@ -856,7 +856,7 @@ body.theme-dark .est-version-bar .est-version-menu-toggle[aria-expanded="true"] 
     gap: 12px !important;
     box-sizing: border-box !important;
     margin-bottom: 0 !important;
-    transition: all 0.12s ease !important;
+    transition: background-color 0.12s var(--ds-ease, ease), border-color 0.12s var(--ds-ease, ease), color 0.12s var(--ds-ease, ease), opacity 0.12s var(--ds-ease, ease), box-shadow 0.12s var(--ds-ease, ease), transform 0.12s var(--ds-ease, ease) !important;
 }
 
 .est-version-menu.est-pill-dropdown button.est-pill-menu-item:hover,
@@ -892,7 +892,7 @@ body.theme-dark .est-version-menu button:not(.est-pill-menu-item) {
     font-weight: 600 !important;
     border-radius: 5px !important;
     padding: 6px 10px !important;
-    transition: all 0.12s ease !important;
+    transition: background-color 0.12s var(--ds-ease, ease), border-color 0.12s var(--ds-ease, ease), color 0.12s var(--ds-ease, ease), opacity 0.12s var(--ds-ease, ease), box-shadow 0.12s var(--ds-ease, ease), transform 0.12s var(--ds-ease, ease) !important;
 }
 
 [data-theme="dark"] .est-version-menu button span,
@@ -959,7 +959,7 @@ body.theme-dark .est-version-menu.est-pill-dropdown {
 
 [data-theme="dark"] .est-version-menu.est-pill-dropdown button.est-pill-menu-item,
 body.theme-dark .est-version-menu.est-pill-dropdown button.est-pill-menu-item {
-    background: #1e2432 !important;
+    background: var(--bg-input, #1f2633) !important;
     border: 1px solid #2f384a !important;
     color: #f8fafc !important;
 }
@@ -1012,7 +1012,7 @@ body.theme-dark .est-version-menu.est-pill-dropdown button.est-pill-menu-item.ac
     font-weight: 700;
     white-space: nowrap;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .project-estimate-action:hover:not(:disabled) {
@@ -1041,7 +1041,7 @@ body.theme-dark .est-version-menu.est-pill-dropdown button.est-pill-menu-item.ac
     font-size: 12px;
     font-weight: 700;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .project-estimate-option:hover {
@@ -1306,8 +1306,6 @@ body.theme-dark #takeoffCompareBtn:hover {
 [data-theme="dark"] .pro-layer-lock-btn,
 [data-theme="dark"] .pro-actions-btn,
 [data-theme="dark"] .pro-takeoff-actions-row .pro-actions-btn,
-[data-theme="dark"] .takeoff-subhead-download-btn,
-[data-theme="dark"] #takeoffDownloadDrawingBtn,
 [data-theme="dark"] .pro-floating-tools .pro-tool-btn,
 [data-theme="dark"] .pro-floating-controls .pro-icon-btn,
 [data-theme="dark"] .pro-floating-controls .pro-chip-btn,
@@ -1321,8 +1319,6 @@ body.theme-dark .pro-folder-lock-btn,
 body.theme-dark .pro-layer-lock-btn,
 body.theme-dark .pro-actions-btn,
 body.theme-dark .pro-takeoff-actions-row .pro-actions-btn,
-body.theme-dark .takeoff-subhead-download-btn,
-body.theme-dark #takeoffDownloadDrawingBtn,
 body.theme-dark .pro-floating-tools .pro-tool-btn,
 body.theme-dark .pro-floating-controls .pro-icon-btn,
 body.theme-dark .pro-floating-controls .pro-chip-btn,
@@ -1343,8 +1339,6 @@ body.theme-dark .pro-floating-controls .pro-floating-fit-btn {
 [data-theme="dark"] .pro-layer-lock-btn:hover,
 [data-theme="dark"] .pro-actions-btn:hover,
 [data-theme="dark"] .pro-takeoff-actions-row .pro-actions-btn:hover,
-[data-theme="dark"] .takeoff-subhead-download-btn:hover,
-[data-theme="dark"] #takeoffDownloadDrawingBtn:hover,
 [data-theme="dark"] .pro-floating-controls .pro-icon-btn:hover,
 body.theme-dark .pro-tree-toggle:hover,
 body.theme-dark .pro-tree-folder .pro-tree-toggle:hover,
@@ -1355,8 +1349,6 @@ body.theme-dark .pro-folder-lock-btn:hover,
 body.theme-dark .pro-layer-lock-btn:hover,
 body.theme-dark .pro-actions-btn:hover,
 body.theme-dark .pro-takeoff-actions-row .pro-actions-btn:hover,
-body.theme-dark .takeoff-subhead-download-btn:hover,
-body.theme-dark #takeoffDownloadDrawingBtn:hover,
 body.theme-dark .pro-floating-controls .pro-icon-btn:hover {
     background: rgba(255, 255, 255, 0.08) !important;
     color: #ffffff !important;
@@ -1619,7 +1611,7 @@ body.theme-dark .pro-takeoff-items {
     border-radius: 2px;
     background: var(--border, #cbd5e1);
     pointer-events: none;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-sidebar-resizer:hover .pro-resizer-handle,
@@ -1658,7 +1650,7 @@ body.theme-dark .pro-sidebar-resizer.is-dragging .pro-resizer-handle {
     z-index: 50;
     padding: 0;
     pointer-events: auto;
-    transition: all 0.2s cubic-bezier(0.4, 0, 0.2, 1);
+    transition: background-color 0.2s var(--ds-ease, ease), border-color 0.2s var(--ds-ease, ease), color 0.2s var(--ds-ease, ease), opacity 0.2s var(--ds-ease, ease), box-shadow 0.2s var(--ds-ease, ease), transform 0.2s var(--ds-ease, ease);
 }
 
 .pro-takeoff-workspace.items-collapsed .pro-sidebar-collapse-tab {
@@ -1745,7 +1737,7 @@ body.theme-dark .pro-sidebar-collapse-tab:hover {
     font-weight: 800;
     cursor: pointer;
     box-shadow: 0 1px 3px rgba(251, 90, 58, 0.2);
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-create-layer-btn:hover {
@@ -1781,7 +1773,7 @@ body.theme-dark .pro-sidebar-collapse-tab:hover {
     display: inline-grid;
     place-items: center;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-add-btn {
@@ -1887,7 +1879,7 @@ body.theme-dark .pro-sidebar-collapse-tab:hover {
     cursor: pointer;
     white-space: nowrap;
     line-height: 1;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-row-action-btn i {
@@ -1920,7 +1912,7 @@ body.theme-dark .pro-sidebar-collapse-tab:hover {
 
 [data-theme="dark"] .pro-row-action-btn,
 body.theme-dark .pro-row-action-btn {
-    background: #1e2430;
+    background: var(--bg-panel, #242a38);
     border-color: #2f384a;
     color: #e2e8f0;
 }
@@ -1960,7 +1952,7 @@ body.theme-dark .pro-row-action-btn:hover {
     align-items: center;
     gap: 6px;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-actions-btn:hover {
@@ -1986,7 +1978,7 @@ body.theme-dark .pro-row-action-btn:hover {
     place-items: center;
     padding: 20px;
     background: rgba(15, 23, 42, .65);
-    backdrop-filter: blur(4px);
+    backdrop-filter: blur(5px);
 }
 
 .pro-group-modal[hidden] {
@@ -2062,7 +2054,7 @@ body.theme-dark .pro-row-action-btn:hover {
     background: var(--tk-bg-input);
     color: var(--tk-text-main);
     font: inherit;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-group-field input:focus {
@@ -2108,7 +2100,7 @@ body.theme-dark .pro-row-action-btn:hover {
     font-size: .82rem;
     font-weight: 700;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-dialog-secondary {
@@ -2158,7 +2150,7 @@ body.theme-dark .pro-row-action-btn:hover {
     padding: 2px 24px 2px 8px;
     font: inherit;
     font-size: .74rem;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-sheet-select {
@@ -2172,7 +2164,7 @@ body.theme-dark .pro-row-action-btn:hover {
     padding: 4px 26px 4px 8px;
     font: inherit;
     font-size: .76rem;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-search-input input:focus,
@@ -2239,7 +2231,7 @@ body.theme-dark .pro-row-action-btn:hover {
     cursor: pointer;
     font-size: .75rem;
     font-weight: 600;
-    transition: all 0.12s ease;
+    transition: background-color 0.12s var(--ds-ease, ease), border-color 0.12s var(--ds-ease, ease), color 0.12s var(--ds-ease, ease), opacity 0.12s var(--ds-ease, ease), box-shadow 0.12s var(--ds-ease, ease), transform 0.12s var(--ds-ease, ease);
 }
 
 .pro-menu button:hover,
@@ -2823,10 +2815,10 @@ body.theme-dark .pro-tree-row.active {
 }
 
 .pro-row-menu-btn {
-    width: 20px !important;
-    min-width: 20px !important;
-    height: 20px !important;
-    min-height: 20px !important;
+    width: 28px !important;
+    min-width: 28px !important;
+    height: 28px !important;
+    min-height: 28px !important;
     display: inline-flex !important;
     align-items: center !important;
     justify-content: center !important;
@@ -2835,9 +2827,9 @@ body.theme-dark .pro-tree-row.active {
     box-shadow: none !important;
     outline: none !important;
     color: var(--tk-text-muted) !important;
-    font-size: 13px !important;
+    font-size: 14px !important;
     cursor: pointer !important;
-    border-radius: 0 !important;
+    border-radius: 6px !important;
     padding: 0 !important;
     margin: 0 !important;
     transition: color 0.15s ease !important;
@@ -2927,7 +2919,7 @@ body.theme-dark .pro-tree-row.active {
     display: grid;
     place-items: center;
     background: rgba(15, 23, 42, .65);
-    backdrop-filter: blur(4px);
+    backdrop-filter: blur(5px);
     padding: 20px;
 }
 
@@ -2946,7 +2938,7 @@ body.theme-dark .pro-tree-row.active {
     display: flex;
     flex-direction: column;
     overflow: hidden;
-    animation: proModalFadeIn 0.18s ease-out;
+    animation: proModalFadeIn 0.11s ease-out;
 }
 
 @keyframes proModalFadeIn {
@@ -2981,12 +2973,12 @@ body.theme-dark .pro-tree-row.active {
     border: none;
     border-bottom: 2px solid transparent;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-modal-tab.active {
-    color: #2563eb;
-    border-bottom-color: #2563eb;
+    color: var(--accent-blue, #0055b8);
+    border-bottom-color: var(--accent-blue, #0055b8);
     font-weight: 700;
 }
 
@@ -3071,7 +3063,7 @@ body.theme-dark .pro-modal-tab.active {
 .pro-layer-form input:focus,
 .pro-layer-form textarea:focus,
 .pro-layer-form select:focus {
-    border-color: #2563eb;
+    border-color: var(--accent-blue, #0055b8);
     box-shadow: 0 0 0 3px rgba(37, 99, 235, 0.12);
 }
 
@@ -3152,7 +3144,7 @@ body.theme-dark .pro-stroke-preview {
     justify-content: space-between;
     gap: 10px;
     box-sizing: border-box;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
     min-width: 0;
     width: 100%;
     overflow: hidden;
@@ -3271,7 +3263,7 @@ body.theme-dark .pro-associated-catalog-card {
     font-size: 12px;
     flex-shrink: 0;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-catalog-swap-btn:hover {
@@ -3316,7 +3308,7 @@ body.theme-dark .pro-associated-catalog-card {
     cursor: pointer;
     padding: 4px 6px;
     border-radius: 4px;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-foot-btn:hover {
@@ -3342,7 +3334,7 @@ body.theme-dark .pro-associated-catalog-card {
     cursor: pointer;
     padding: 6px 14px;
     border-radius: 6px;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-foot-btn-close:hover {
@@ -3662,7 +3654,7 @@ body.theme-dark .pro-takeoff-viewer {
     box-shadow: none !important;
     border-bottom: 1px solid var(--tk-border, #cbd5e1) !important;
     text-decoration: none !important;
-    transition: all .15s ease;
+    transition: background-color .15s var(--ds-ease, ease), border-color .15s var(--ds-ease, ease), color .15s var(--ds-ease, ease), opacity .15s var(--ds-ease, ease), box-shadow .15s var(--ds-ease, ease), transform .15s var(--ds-ease, ease);
 }
 
 .pro-drawing-filter-btn:hover:not(:disabled) {
@@ -3880,7 +3872,7 @@ body.theme-dark .pro-drawing-group-count {
     box-shadow: none !important;
     outline: none !important;
     text-decoration: none !important;
-    transition: all .15s ease;
+    transition: background-color .15s var(--ds-ease, ease), border-color .15s var(--ds-ease, ease), color .15s var(--ds-ease, ease), opacity .15s var(--ds-ease, ease), box-shadow .15s var(--ds-ease, ease), transform .15s var(--ds-ease, ease);
 }
 
 .pro-drawing-row:focus,
@@ -4461,7 +4453,7 @@ body.theme-dark .pro-preview-item-name {
     font-size: .74rem;
     font-weight: 700;
     cursor: pointer;
-    transition: all .14s ease;
+    transition: background-color .14s var(--ds-ease, ease), border-color .14s var(--ds-ease, ease), color .14s var(--ds-ease, ease), opacity .14s var(--ds-ease, ease), box-shadow .14s var(--ds-ease, ease), transform .14s var(--ds-ease, ease);
 }
 
 .pro-toolbar-btn:hover,
@@ -4494,7 +4486,7 @@ body.theme-dark .pro-preview-item-name {
     outline: none !important;
     border: 1px solid transparent;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
     background: rgba(239, 68, 68, 0.10);
     border-color: rgba(239, 68, 68, 0.30);
     color: #dc2626;
@@ -4657,7 +4649,7 @@ body.theme-dark .pro-scale-hint {
 [data-theme="dark"] .pro-scale-panel input,
 body.theme-dark .pro-scale-panel select,
 body.theme-dark .pro-scale-panel input {
-    background: #1e2432 !important;
+    background: var(--bg-input, #1f2633) !important;
     border: 1px solid #2f384a !important;
     color: #f8fafc !important;
 }
@@ -4736,7 +4728,6 @@ body.theme-dark .pro-scale-panel select option {
     border-radius: 8px;
     background: var(--tk-bg-panel, #ffffff);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.05);
-    backdrop-filter: blur(10px);
     color: var(--tk-text-main, #0f172a);
     transition: left 0.2s ease, right 0.2s ease;
     overflow-x: auto;
@@ -5126,7 +5117,7 @@ body.theme-dark .pro-status-pill {
     color: var(--tk-text-main);
     position: relative;
     border-radius: 6px;
-    transition: all .14s ease;
+    transition: background-color .14s var(--ds-ease, ease), border-color .14s var(--ds-ease, ease), color .14s var(--ds-ease, ease), opacity .14s var(--ds-ease, ease), box-shadow .14s var(--ds-ease, ease), transform .14s var(--ds-ease, ease);
 }
 
 .pro-tool-btn:hover {
@@ -5261,7 +5252,7 @@ body.theme-dark .pro-tool-btn.danger:hover {
     align-items: center;
     gap: 5px;
     cursor: pointer;
-    transition: all .14s ease;
+    transition: background-color .14s var(--ds-ease, ease), border-color .14s var(--ds-ease, ease), color .14s var(--ds-ease, ease), opacity .14s var(--ds-ease, ease), box-shadow .14s var(--ds-ease, ease), transform .14s var(--ds-ease, ease);
 }
 
 .pro-active-layer-toolbar button:hover,
@@ -5923,7 +5914,6 @@ body.theme-dark .pro-compare-actions {
 }
 
 .pro-floating-controls {
-    backdrop-filter: blur(10px);
     background: var(--tk-bg-panel);
     border: 1px solid var(--tk-border);
     box-shadow: var(--tk-shadow-md);
@@ -6060,22 +6050,9 @@ body.theme-dark .pro-icon-btn:focus-visible {
 }
 
 .project-subhead-wrapper.is-takeoff-tab .pd-project-title,
-.project-subhead-wrapper.is-documents-tab .pd-project-title {
-    max-width: 260px !important;
-    min-width: 0 !important;
-    flex-shrink: 1 !important;
-    white-space: nowrap !important;
-    overflow: hidden !important;
-    text-overflow: ellipsis !important;
-}
-
-.project-subhead-wrapper.is-estimating-tab .project-title-row {
-    gap: 8px !important;
-}
-
+.project-subhead-wrapper.is-documents-tab .pd-project-title,
 .project-subhead-wrapper.is-estimating-tab .pd-project-title {
-    font-size: 16.5px !important;
-    max-width: 190px !important;
+    max-width: 260px !important;
     min-width: 0 !important;
     flex-shrink: 1 !important;
     white-space: nowrap !important;
@@ -6087,28 +6064,6 @@ body.theme-dark .pro-icon-btn:focus-visible {
 .project-subhead-wrapper.is-documents-tab .bb-status-pill-container,
 .project-subhead-wrapper.is-estimating-tab .bb-status-pill-container {
     flex-shrink: 0 !important;
-}
-
-.project-subhead-wrapper.is-estimating-tab .bb-status-pill-wrap {
-    height: 22px !important;
-    padding: 0 8px !important;
-    gap: 5px !important;
-}
-
-.project-subhead-wrapper.is-estimating-tab .bb-status-pill-wrap .bb-status-dot {
-    width: 5px !important;
-    height: 5px !important;
-    flex: 0 0 5px !important;
-}
-
-.project-subhead-wrapper.is-estimating-tab .bb-status-pill-wrap .bb-status-pill-label {
-    font-size: 10px !important;
-    letter-spacing: 0.03em !important;
-}
-
-.project-subhead-wrapper.is-estimating-tab .bb-status-pill-wrap .bb-status-pill-caret {
-    font-size: 8.5px !important;
-    margin-left: 1px !important;
 }
 
 .takeoff-subhead-item-info {
@@ -6274,7 +6229,7 @@ body:not(.is-estimating-tab) #estimatingSubheadItemInfo,
     align-items: center;
     gap: 4px;
     cursor: pointer;
-    transition: all 0.12s ease;
+    transition: background-color 0.12s var(--ds-ease, ease), border-color 0.12s var(--ds-ease, ease), color 0.12s var(--ds-ease, ease), opacity 0.12s var(--ds-ease, ease), box-shadow 0.12s var(--ds-ease, ease), transform 0.12s var(--ds-ease, ease);
     white-space: nowrap;
 }
 
@@ -6478,7 +6433,7 @@ body.is-takeoff-tab .bb-brightronix-footer,
     text-overflow: ellipsis !important;
     white-space: nowrap !important;
     cursor: pointer !important;
-    transition: all 0.15s ease !important;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease) !important;
     background: rgba(239, 68, 68, 0.10) !important;
     border-color: rgba(239, 68, 68, 0.30) !important;
     color: #dc2626 !important;
@@ -6558,7 +6513,7 @@ body.theme-dark .takeoff-subhead-scale-slot #takeoffScaleStatus.is-set .pro-scal
     justify-content: center !important;
     cursor: pointer !important;
     box-shadow: none !important;
-    transition: all 0.15s ease !important;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease) !important;
     white-space: nowrap !important;
 }
 
@@ -6622,42 +6577,8 @@ body.theme-dark #takeoffCompareBtn:hover {
     gap: 6px;
     cursor: pointer;
     box-shadow: none;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
     white-space: nowrap;
-}
-
-.takeoff-subhead-download-btn.icon-only,
-#takeoffDownloadDrawingBtn {
-    width: 30.5px !important;
-    min-width: 30.5px !important;
-    max-width: 30.5px !important;
-    height: 30.5px !important;
-    min-height: 30.5px !important;
-    padding: 0 !important;
-    justify-content: center !important;
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    color: var(--tk-text-muted, #64748b) !important;
-    border-radius: 6px !important;
-    cursor: pointer !important;
-    display: inline-flex !important;
-    align-items: center !important;
-    font-size: 13.5px !important;
-    transition: all 0.15s ease !important;
-}
-
-.takeoff-subhead-download-btn.icon-only i,
-#takeoffDownloadDrawingBtn i {
-    font-size: 13.5px !important;
-}
-
-.takeoff-subhead-download-btn.icon-only:hover,
-#takeoffDownloadDrawingBtn:hover {
-    background: var(--tk-bg-hover, rgba(0, 0, 0, 0.05)) !important;
-    color: var(--tk-text-main, #0f172a) !important;
-    box-shadow: none !important;
-    border: none !important;
 }
 
 .takeoff-subhead-compare-btn:hover,
@@ -6679,27 +6600,6 @@ body.theme-dark .takeoff-subhead-compare-btn {
 body.theme-dark .takeoff-subhead-compare-btn:hover {
     background: rgba(255, 255, 255, 0.08) !important;
     border-color: rgba(255, 255, 255, 0.16) !important;
-    color: #ffffff !important;
-}
-
-[data-theme="dark"] .takeoff-subhead-download-btn,
-[data-theme="dark"] #takeoffDownloadDrawingBtn,
-body.theme-dark .takeoff-subhead-download-btn,
-body.theme-dark #takeoffDownloadDrawingBtn {
-    background: transparent !important;
-    border: none !important;
-    box-shadow: none !important;
-    color: #94a3b8 !important;
-    border-radius: 6px !important;
-}
-
-[data-theme="dark"] .takeoff-subhead-download-btn:hover,
-[data-theme="dark"] #takeoffDownloadDrawingBtn:hover,
-body.theme-dark .takeoff-subhead-download-btn:hover,
-body.theme-dark #takeoffDownloadDrawingBtn:hover {
-    background: rgba(255, 255, 255, 0.08) !important;
-    border: none !important;
-    box-shadow: none !important;
     color: #ffffff !important;
 }
 
@@ -6741,7 +6641,6 @@ body.theme-dark #takeoffDownloadDrawingBtn:hover {
     border-radius: 8px;
     background: var(--tk-bg-panel, #ffffff);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.10), 0 1px 3px rgba(0, 0, 0, 0.05);
-    backdrop-filter: blur(10px);
     color: var(--tk-text-main, #0f172a);
     user-select: none;
     transition: left 0.2s ease, right 0.2s ease;
@@ -6807,7 +6706,7 @@ body.theme-dark .pro-floating-tools {
     color: var(--tk-text-muted, #64748b);
     font-size: 16.8px;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
     position: relative;
 }
 
@@ -6891,8 +6790,10 @@ body.theme-dark .pro-floating-tools .pro-tool-separator {
     display: none;
     align-items: center;
     gap: 8px;
-    margin-left: 20px;
+    margin-left: 14px;
     height: 28px;
+    min-width: 0;
+    flex: 0 1 auto;
 }
 
 .project-subhead-wrapper.is-takeoff-tab .takeoff-subhead-sheet-group {
@@ -6944,9 +6845,10 @@ body.theme-dark .takeoff-subhead-nav-btn:hover {
 
 .takeoff-subhead-drawing-wrap {
     position: relative;
-    min-width: 200px;
-    max-width: 320px;
-    flex: 0 1 auto;
+    min-width: 110px;
+    width: 240px;
+    max-width: 300px;
+    flex: 0 1 240px;
 }
 
 .takeoff-subhead-drawing-wrap .pro-drawing-selector {
@@ -7021,6 +6923,7 @@ body.theme-dark .takeoff-subhead-nav-btn:hover {
     gap: 8px;
     margin-left: auto;
     min-width: 0;
+    flex: 0 0 auto;
 }
 
 .takeoff-subhead-scale-slot .pro-scale-panel {
@@ -7205,7 +7108,7 @@ body.theme-dark .pro-menu button {
     font-weight: 600 !important;
     border-radius: 5px !important;
     padding: 6px 10px !important;
-    transition: all 0.12s ease !important;
+    transition: background-color 0.12s var(--ds-ease, ease), border-color 0.12s var(--ds-ease, ease), color 0.12s var(--ds-ease, ease), opacity 0.12s var(--ds-ease, ease), box-shadow 0.12s var(--ds-ease, ease), transform 0.12s var(--ds-ease, ease) !important;
 }
 
 [data-theme="dark"] .pro-group-context-menu button i,
@@ -7317,7 +7220,7 @@ body.theme-dark .pro-group-context-menu .pro-menu-divider {
     border-radius: 8px;
     box-shadow: 0 20px 50px rgba(0, 0, 0, 0.22);
     overflow: visible !important;
-    animation: proModalPop 0.2s cubic-bezier(0.16, 1, 0.3, 1);
+    animation: dsProModalIn 150ms cubic-bezier(0.22, 1, 0.36, 1);
 }
 
 .pro-create-layer-head {
@@ -7387,7 +7290,7 @@ body.theme-dark .pro-group-context-menu .pro-menu-divider {
     cursor: pointer;
     padding: 2px 6px;
     border-radius: 4px;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-create-clear-items-btn:hover {
@@ -7410,7 +7313,7 @@ body.theme-dark .pro-group-context-menu .pro-menu-divider {
     background: transparent;
     border-bottom: 1px solid var(--tk-border, #e2e8f0);
     border-left: 3px solid transparent;
-    transition: all 0.12s ease;
+    transition: background-color 0.12s var(--ds-ease, ease), border-color 0.12s var(--ds-ease, ease), color 0.12s var(--ds-ease, ease), opacity 0.12s var(--ds-ease, ease), box-shadow 0.12s var(--ds-ease, ease), transform 0.12s var(--ds-ease, ease);
     cursor: pointer;
     user-select: none;
 }
@@ -7477,7 +7380,7 @@ body.theme-dark .pro-group-context-menu .pro-menu-divider {
     place-items: center;
     cursor: pointer;
     flex-shrink: 0;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-create-item-remove-btn:hover {
@@ -7489,7 +7392,7 @@ body.theme-dark .pro-group-context-menu .pro-menu-divider {
 [data-theme="dark"] .pro-create-added-items-wrap,
 body.theme-dark .pro-create-added-items-wrap {
     border-color: #2f384a !important;
-    background: #1e2432 !important;
+    background: var(--bg-input, #1f2633) !important;
 }
 
 [data-theme="dark"] .pro-create-added-items-header,
@@ -7545,7 +7448,7 @@ body.theme-dark .pro-create-item-badge-wrap {
     height: 36px;
     padding: 0 10px;
     border-radius: 5px;
-    border: 1.5px solid #2563eb;
+    border: 1.5px solid var(--accent-blue, #0055b8);
     font-size: 12.5px;
     background: var(--tk-bg-input, #fff);
     color: var(--tk-text-main, #0f172a);
@@ -7716,7 +7619,7 @@ body.theme-dark .pro-create-layer-modal {
 body.theme-dark .pro-create-layer-head,
 body.theme-dark .pro-create-layer-foot {
     border-color: #2f384a !important;
-    background: #1e2430 !important;
+    background: var(--bg-panel, #242a38) !important;
 }
 
 [data-theme="dark"] .pro-create-layer-head h2,
@@ -7867,7 +7770,7 @@ body.theme-dark .est-primary-star {
     color: var(--tk-text-muted, #64748b) !important;
     cursor: pointer;
     box-shadow: none;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-floating-controls .pro-floating-fit-btn:hover {
@@ -8010,7 +7913,7 @@ body.theme-dark .pro-floating-controls .pro-floating-fit-btn:hover {
     background: var(--tk-bg-input, #f7f8fa);
     border: 1px solid var(--tk-border, #d5d8dc);
     color: var(--tk-text-muted, #64748b);
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
     user-select: none;
 }
 
@@ -8021,7 +7924,7 @@ body.theme-dark .pro-floating-controls .pro-floating-fit-btn:hover {
 .pro-browse-context-badges .cc-context-badge.is-selected {
     background: var(--cat-bg-light, rgba(37, 99, 235, 0.10));
     border-color: var(--cat-border-light, rgba(37, 99, 235, 0.35));
-    color: var(--cat-text-light, #2563eb);
+    color: var(--cat-text-light, var(--accent-blue, #0055b8));
 }
 
 .pro-browse-subtitle {
@@ -8051,7 +7954,7 @@ body.theme-dark .pro-floating-controls .pro-floating-fit-btn:hover {
     align-items: center;
     gap: 6px;
     box-shadow: 0 1px 3px rgba(251, 90, 58, 0.25);
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
     white-space: nowrap;
 }
 
@@ -8073,7 +7976,7 @@ body.theme-dark .pro-floating-controls .pro-floating-fit-btn:hover {
     display: grid;
     place-items: center;
     border-radius: 6px;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-browse-catalog-head .pro-icon-btn:hover {
@@ -8171,7 +8074,7 @@ body.theme-dark .pro-floating-controls .pro-floating-fit-btn:hover {
     font-size: 12px;
     outline: none;
     box-sizing: border-box;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-browse-cat-sidebar .cc-sidebar-search input:focus {
@@ -8311,7 +8214,7 @@ body.theme-dark .pro-browse-catalog-modal .pro-browse-cat-sidebar .cc-sidebar-tr
     font-weight: 500;
     text-align: left;
     cursor: pointer;
-    transition: all 0.12s ease;
+    transition: background-color 0.12s var(--ds-ease, ease), border-color 0.12s var(--ds-ease, ease), color 0.12s var(--ds-ease, ease), opacity 0.12s var(--ds-ease, ease), box-shadow 0.12s var(--ds-ease, ease), transform 0.12s var(--ds-ease, ease);
     user-select: none;
     box-sizing: border-box;
 }
@@ -8324,12 +8227,12 @@ body.theme-dark .pro-browse-catalog-modal .pro-browse-cat-sidebar .cc-sidebar-tr
 .pro-browse-cat-sidebar .cc-tree-row.active {
     background: rgba(37, 99, 235, 0.10) !important;
     border-color: rgba(37, 99, 235, 0.35) !important;
-    color: #2563eb !important;
+    color: var(--accent-blue, #0055b8) !important;
     font-weight: 700 !important;
 }
 
 .pro-browse-cat-sidebar .cc-tree-row.active .cc-tree-icon {
-    color: #2563eb;
+    color: var(--accent-blue, #0055b8);
 }
 
 .pro-browse-cat-sidebar .cc-tree-group .cc-tree-icon {
@@ -8337,7 +8240,7 @@ body.theme-dark .pro-browse-catalog-modal .pro-browse-cat-sidebar .cc-sidebar-tr
 }
 
 .pro-browse-cat-sidebar .cc-tree-group.active .cc-tree-icon {
-    color: #2563eb !important;
+    color: var(--accent-blue, #0055b8) !important;
 }
 
 .pro-browse-cat-sidebar .cc-tree-caret {
@@ -8389,7 +8292,7 @@ body.theme-dark .pro-browse-catalog-modal .pro-browse-cat-sidebar .cc-sidebar-tr
 
 .pro-browse-cat-sidebar .cc-tree-row.active .cc-tree-count {
     background: rgba(37, 99, 235, 0.18);
-    color: #1d4ed8;
+    color: var(--accent-blue, #0055b8);
 }
 
 .pro-browse-cat-sidebar .cc-tree-children {
@@ -8445,7 +8348,7 @@ body.theme-dark .pro-browse-catalog-modal .pro-browse-cat-sidebar .cc-sidebar-tr
     font-size: 12.5px;
     outline: none;
     box-sizing: border-box;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-browse-items-controls .cc-search-procore input:focus {
@@ -8766,7 +8669,7 @@ body.theme-dark .pro-browse-catalog-modal .pro-browse-items-list::-webkit-scroll
     height: 4px;
     border-radius: 50%;
     flex: 0 0 4px;
-    background-color: var(--cat-color, #2563eb);
+    background-color: var(--cat-color, var(--accent-blue, #0055b8));
 }
 
 .cc-catalog-pill .bb-status-pill-label {
@@ -8833,7 +8736,7 @@ body.theme-dark .pro-browse-catalog-modal .pro-browse-items-list::-webkit-scroll
     color: var(--tk-text-main, #334155);
     font-size: 11px;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .cc-pagination.pro-browse-pagination .cc-page-btn:hover:not(:disabled) {
@@ -8870,7 +8773,7 @@ body.theme-dark .pro-browse-catalog-modal .pro-browse-items-list::-webkit-scroll
     font-size: 11.5px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .cc-pagination.pro-browse-pagination .cc-page-number:hover:not(.active) {
@@ -8948,7 +8851,7 @@ body.theme-dark .pro-browse-catalog-modal .pro-browse-items-list::-webkit-scroll
     font-weight: 600;
     cursor: pointer;
     border-radius: 6px;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-btn-browse-cancel:hover {
@@ -8970,7 +8873,7 @@ body.theme-dark .pro-browse-catalog-modal .pro-browse-items-list::-webkit-scroll
     align-items: center;
     gap: 7px;
     box-shadow: 0 2px 6px rgba(251, 90, 58, 0.3);
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-btn-browse-select:not(:disabled):hover {
@@ -9001,7 +8904,7 @@ body.theme-dark .pro-browse-catalog-modal {
 [data-theme="dark"] .pro-browse-catalog-foot,
 body.theme-dark .pro-browse-catalog-head,
 body.theme-dark .pro-browse-catalog-foot {
-    background: #1e2430 !important;
+    background: var(--bg-panel, #242a38) !important;
     border-color: #2f384a !important;
 }
 
@@ -9042,13 +8945,13 @@ body.theme-dark .pro-browse-context-badges .cc-context-badge.is-selected {
 
 [data-theme="dark"] .pro-browse-cat-sidebar.cc-catalog-sidebar,
 body.theme-dark .pro-browse-cat-sidebar.cc-catalog-sidebar {
-    background: #1e2430 !important;
+    background: var(--bg-panel, #242a38) !important;
     border-color: #2f384a !important;
 }
 
 [data-theme="dark"] .pro-browse-cat-sidebar .cc-sidebar-head,
 body.theme-dark .pro-browse-cat-sidebar .cc-sidebar-head {
-    background: #1e2430 !important;
+    background: var(--bg-panel, #242a38) !important;
     border-color: #2f384a !important;
 }
 
@@ -9355,8 +9258,8 @@ body.theme-dark .pro-btn-browse-cancel:hover {
     max-height: 100% !important;
     z-index: 1000020 !important;
     background: rgba(15, 23, 42, 0.65) !important;
-    backdrop-filter: blur(4px) !important;
-    -webkit-backdrop-filter: blur(4px) !important;
+    backdrop-filter: blur(5px) !important;
+    -webkit-backdrop-filter: blur(5px) !important;
     box-shadow: none !important;
     display: flex;
     align-items: center;
@@ -9498,7 +9401,7 @@ body.theme-dark aside.pro-layer-drawer .pro-layer-modal-foot {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .pro-btn-save-layer:hover {
@@ -9709,7 +9612,7 @@ body.theme-dark aside.pro-layer-drawer .pro-layer-modal-foot {
     text-transform: capitalize;
     flex-shrink: 0;
     line-height: 1;
-    transition: all 0.12s ease;
+    transition: background-color 0.12s var(--ds-ease, ease), border-color 0.12s var(--ds-ease, ease), color 0.12s var(--ds-ease, ease), opacity 0.12s var(--ds-ease, ease), box-shadow 0.12s var(--ds-ease, ease), transform 0.12s var(--ds-ease, ease);
 }
 
 .cc-pill.part,
@@ -10086,7 +9989,7 @@ body.theme-dark .cc-uom-tag {
 .pcd-symbol-item.is-selected {
     background: #e8f0fe !important;
     border: 1.5px solid #1a56db !important;
-    color: #1d4ed8 !important;
+    color: var(--accent-blue, #0055b8) !important;
 }
 
 .pcd-symbol-item span {
@@ -10123,7 +10026,7 @@ body.theme-dark .cc-uom-tag {
 .pcd-size-item.is-selected {
     background: #e8f0fe !important;
     border: 1.5px solid #1a56db !important;
-    color: #1d4ed8 !important;
+    color: var(--accent-blue, #0055b8) !important;
 }
 
 .pcd-size-item span {
@@ -10251,7 +10154,7 @@ body.theme-dark .pcd-color-custom-footer {
     border: 1px dashed var(--border, #cbd5e1) !important;
     font-size: 11px !important;
     cursor: pointer !important;
-    transition: all 0.14s ease !important;
+    transition: background-color 0.14s var(--ds-ease, ease), border-color 0.14s var(--ds-ease, ease), color 0.14s var(--ds-ease, ease), opacity 0.14s var(--ds-ease, ease), box-shadow 0.14s var(--ds-ease, ease), transform 0.14s var(--ds-ease, ease) !important;
 }
 
 .pcd-add-custom-color-btn:hover {
@@ -10418,7 +10321,7 @@ body.theme-dark .pcd-add-custom-color-btn:hover {
 .pcd-uom-item.is-selected .pcd-uom-badge {
     background: #dbeafe;
     border-color: #93c5fd;
-    color: #1d4ed8;
+    color: var(--accent-blue, #0055b8);
 }
 
 .pcd-uom-info {
@@ -10441,7 +10344,7 @@ body.theme-dark .pcd-add-custom-color-btn:hover {
 }
 
 .pcd-uom-item.is-selected .pcd-uom-name {
-    color: #1d4ed8;
+    color: var(--accent-blue, #0055b8);
 }
 
 .pcd-uom-hint {
@@ -10475,7 +10378,7 @@ body.theme-dark .pcd-add-custom-color-btn:hover {
     padding: 6px 8px;
     border: 1px dashed #3b82f6;
     background: #eff6ff;
-    color: #1d4ed8;
+    color: var(--accent-blue, #0055b8);
     border-radius: 4px;
     cursor: pointer;
     font-size: 11.5px;
@@ -10761,9 +10664,7 @@ body.theme-dark .pcd-divider {
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    background: rgba(255, 255, 255, 0.96);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    background: var(--tk-bg-panel, #ffffff);
     color: #0f172a;
     border: 1px solid rgba(0, 0, 0, 0.12);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06);
@@ -10839,7 +10740,7 @@ body.theme-dark .pro-tree-qty-override-badge i {
     font-size: 0.62rem;
     font-weight: 700;
     line-height: 1.15;
-    color: #1d4ed8;
+    color: var(--accent-blue, #0055b8);
     background: #eff6ff;
     border: 1px solid #60a5fa;
     white-space: nowrap;
@@ -10847,7 +10748,7 @@ body.theme-dark .pro-tree-qty-override-badge i {
 }
 .pro-tree-est-added-badge i {
     font-size: 0.58rem;
-    color: #2563eb;
+    color: var(--accent-blue, #0055b8);
 }
 [data-theme="dark"] .pro-tree-est-added-badge,
 body.theme-dark .pro-tree-est-added-badge {
@@ -11000,11 +10901,11 @@ body.theme-dark .pro-takeoff-panel-head .pro-takeoff-searchbar {
 }
 
 .pro-takeoff-tree .pro-row-menu-btn {
-    width: 24px !important;
-    min-width: 24px !important;
-    height: 24px !important;
-    min-height: 24px !important;
-    font-size: 15px !important;
+    width: 28px !important;
+    min-width: 28px !important;
+    height: 28px !important;
+    min-height: 28px !important;
+    font-size: 14px !important;
 }
 
 @media (max-width: 760px) {
@@ -11025,8 +10926,8 @@ body.theme-dark .pro-takeoff-panel-head .pro-takeoff-searchbar {
     justify-content: center;
     padding: 20px;
     background: rgba(15, 23, 42, 0.62);
-    backdrop-filter: blur(4px);
-    -webkit-backdrop-filter: blur(4px);
+    backdrop-filter: blur(5px);
+    -webkit-backdrop-filter: blur(5px);
     z-index: 100050;
 }
 .tk-action-modal {
@@ -11095,7 +10996,7 @@ body.theme-dark .pro-takeoff-panel-head .pro-takeoff-searchbar {
     place-items: center;
     cursor: pointer;
     flex-shrink: 0;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 .tk-action-modal-close:hover {
     background: var(--tk-bg-hover, #f1f5f9);
@@ -11275,14 +11176,14 @@ body.theme-dark .pro-takeoff-panel-head .pro-takeoff-searchbar {
 }
 [data-theme="dark"] .tk-action-modal,
 body.theme-dark .tk-action-modal {
-    background: #1f2633;
-    border-color: #2f384a;
-    color: #f8fafc;
+    background: var(--bg-panel, #242a38);
+    border-color: var(--border, #2f384a);
+    color: var(--text-main, #f8fafc);
 }
 [data-theme="dark"] .tk-action-modal-head,
 body.theme-dark .tk-action-modal-head {
-    background: #1f2633;
-    border-bottom-color: #2f384a;
+    background: var(--bg-panel, #242a38);
+    border-bottom-color: var(--border, #2f384a);
 }
 [data-theme="dark"] .tk-action-modal-title,
 body.theme-dark .tk-action-modal-title,
@@ -11296,8 +11197,8 @@ body.theme-dark .tk-check-row {
 }
 [data-theme="dark"] .tk-studio-card,
 body.theme-dark .tk-studio-card {
-    background: #181e29;
-    border-color: #2f384a;
+    background: var(--bg-surface-2, #1f2633);
+    border-color: var(--border, #2f384a);
 }
 [data-theme="dark"] .tk-studio-card.active,
 body.theme-dark .tk-studio-card.active {
@@ -11310,14 +11211,14 @@ body.theme-dark .tk-select,
 body.theme-dark .tk-input,
 [data-theme="dark"] .tk-btn-cancel,
 body.theme-dark .tk-btn-cancel {
-    background: #141923;
-    border-color: #2f384a;
-    color: #f1f5f9;
+    background: var(--bg-surface-2, #1f2633);
+    border-color: var(--border, #2f384a);
+    color: var(--text-main, #f8fafc);
 }
 [data-theme="dark"] .tk-action-modal-foot,
 body.theme-dark .tk-action-modal-foot {
-    background: #181e29;
-    border-top-color: #2f384a;
+    background: var(--bg-surface-2, #1f2633);
+    border-top-color: var(--border, #2f384a);
 }
 @media (max-width: 600px) {
     .tk-mode-grid,

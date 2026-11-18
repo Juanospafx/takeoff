@@ -84,6 +84,22 @@ function project_table_exists(PDO $pdo, string $table): bool
     }
 }
 
+function project_column_exists(PDO $pdo, string $table, string $column): bool
+{
+    static $cache = [];
+    $key = spl_object_hash($pdo) . ':' . $table . ':' . $column;
+    if (array_key_exists($key, $cache)) return $cache[$key];
+    $found = false;
+    try {
+        $stmt = $pdo->query("SHOW COLUMNS FROM `{$table}` LIKE " . $pdo->quote($column));
+        $found = (bool)($stmt && $stmt->fetch(PDO::FETCH_ASSOC));
+    } catch (Throwable $e) {
+        $found = false;
+    }
+    $cache[$key] = $found;
+    return $found;
+}
+
 function project_deep_clone(PDO $pdo, int $sourceId, int $newId): void
 {
     $inTransaction = $pdo->inTransaction();
@@ -200,7 +216,8 @@ function project_deep_clone(PDO $pdo, int $sourceId, int $newId): void
 
         // 4. Takeoff Layers
         if (project_table_exists($pdo, 'takeoff_layers')) {
-            $stmt = $pdo->prepare("SELECT * FROM takeoff_layers WHERE project_id = ? AND deleted_at IS NULL");
+            $layerOrderBy = project_column_exists($pdo, 'takeoff_layers', 'sort_order') ? 'ORDER BY sort_order ASC, id ASC' : 'ORDER BY id ASC';
+            $stmt = $pdo->prepare("SELECT * FROM takeoff_layers WHERE project_id = ? AND deleted_at IS NULL {$layerOrderBy}");
             $stmt->execute([$sourceId]);
             $layers = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
             foreach ($layers as $ly) {
@@ -317,7 +334,8 @@ function project_deep_clone(PDO $pdo, int $sourceId, int $newId): void
         if (project_table_exists($pdo, 'estimate_items') && !empty($estimateMap)) {
             $estIds = array_keys($estimateMap);
             $inClause = implode(',', array_fill(0, count($estIds), '?'));
-            $stmt = $pdo->prepare("SELECT * FROM estimate_items WHERE estimate_id IN ($inClause) AND deleted_at IS NULL");
+            $itemOrderBy = project_column_exists($pdo, 'estimate_items', 'sort_order') ? 'ORDER BY sort_order ASC, id ASC' : 'ORDER BY id ASC';
+            $stmt = $pdo->prepare("SELECT * FROM estimate_items WHERE estimate_id IN ($inClause) AND deleted_at IS NULL {$itemOrderBy}");
             $stmt->execute($estIds);
             $estItems = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
             foreach ($estItems as $ei) {

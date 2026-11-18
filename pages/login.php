@@ -171,12 +171,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     <meta charset="UTF-8">
     <meta name="viewport" content="width=device-width, initial-scale=1.0">
     <title>Iniciar Sesión - Takeoff</title>
+    <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@400;500;600;700;800&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/design_system.css?v=<?= filemtime(__DIR__ . '/../assets/design_system.css') ?>">
     <style>
         *, *::before, *::after { box-sizing: border-box; }
         body {
-            font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Oxygen, Ubuntu, Cantarell, "Helvetica Neue", sans-serif;
-            background-color: #f4f6f8;
-            color: #333333;
+            font-family: 'Outfit', -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, sans-serif;
+            background-color: var(--bg-body, #f5f6f8);
+            color: var(--text-main, #0f172a);
             margin: 0;
             padding: 0;
             display: flex;
@@ -185,9 +187,10 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             min-height: 100vh;
         }
         .login-card {
-            background: #ffffff;
-            border-radius: 8px;
-            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.08);
+            background: var(--bg-panel, #ffffff);
+            border: 1px solid var(--border, #d5d8dc);
+            border-radius: 10px;
+            box-shadow: 0 12px 32px rgba(15, 23, 42, 0.08);
             width: 100%;
             max-width: 420px;
             padding: 32px;
@@ -200,12 +203,12 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         .login-header h1 {
             margin: 0 0 8px 0;
             font-size: 24px;
-            font-weight: 600;
-            color: #1a202c;
+            font-weight: 700;
+            color: var(--text-main, #0f172a);
         }
         .login-header p {
             margin: 0;
-            color: #718096;
+            color: var(--text-muted, #64748b);
             font-size: 14px;
         }
         .alert {
@@ -216,14 +219,14 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             line-height: 1.4;
         }
         .alert-danger {
-            background-color: #feebc8;
-            border: 1px solid #fbd38d;
-            color: #742a2a;
+            background-color: #fef2f2;
+            border: 1px solid #fecaca;
+            color: #991b1b;
         }
         .alert-success {
-            background-color: #c6f6d5;
-            border: 1px solid #9ae6b4;
-            color: #22543d;
+            background-color: #ecfdf5;
+            border: 1px solid #a7f3d0;
+            color: #065f46;
         }
         .form-group {
             margin-bottom: 18px;
@@ -231,43 +234,47 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         .form-group label {
             display: block;
             margin-bottom: 6px;
-            font-size: 14px;
-            font-weight: 500;
-            color: #4a5568;
+            font-size: 13px;
+            font-weight: 600;
+            color: var(--text-main, #0f172a);
         }
         .form-group input {
             width: 100%;
             padding: 10px 12px;
-            border: 1px solid #e2e8f0;
+            border: 1px solid var(--border, #d5d8dc);
             border-radius: 6px;
             font-size: 14px;
-            color: #2d3748;
-            transition: border-color 0.15s ease-in-out;
+            color: var(--text-main, #0f172a);
+            background: var(--bg-panel, #ffffff);
+            transition: border-color 0.15s ease-in-out, box-shadow 0.15s ease-in-out;
         }
         .form-group input:focus {
             outline: none;
-            border-color: #3182ce;
-            box-shadow: 0 0 0 3px rgba(49, 130, 206, 0.15);
+            border-color: var(--primary, #fb5a3a);
+            box-shadow: 0 0 0 3px rgba(251, 90, 58, 0.18);
         }
         .btn {
-            display: inline-block;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
             width: 100%;
-            padding: 11px 16px;
-            font-size: 15px;
-            font-weight: 600;
+            min-height: 40px;
+            padding: 10px 16px;
+            font-size: 14.5px;
+            font-weight: 700;
             text-align: center;
             border-radius: 6px;
             cursor: pointer;
             text-decoration: none;
-            transition: background-color 0.15s ease-in-out;
+            transition: background-color 0.15s ease-in-out, transform 0.15s ease;
             border: none;
         }
         .btn-primary {
-            background-color: #3182ce;
+            background-color: var(--primary, #fb5a3a);
             color: #ffffff;
         }
         .btn-primary:hover {
-            background-color: #2b6cb0;
+            background-color: var(--primary-hover, #e14e32);
         }
         <?php if ($ssoEnabled): ?>
         .sso-divider {
@@ -275,24 +282,24 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             align-items: center;
             text-align: center;
             margin: 24px 0 20px 0;
-            color: #a0aec0;
+            color: var(--text-muted, #64748b);
             font-size: 13px;
         }
         .sso-divider::before, .sso-divider::after {
             content: '';
             flex: 1;
-            border-bottom: 1px solid #e2e8f0;
+            border-bottom: 1px solid var(--border, #d5d8dc);
         }
         .sso-divider span {
             padding: 0 10px;
         }
         .btn-sso {
-            background-color: #2d3748;
+            background-color: #242a38;
             color: #ffffff;
-            display: block;
+            display: inline-flex;
         }
         .btn-sso:hover {
-            background-color: #1a202c;
+            background-color: #1b212d;
             color: #ffffff;
         }
         <?php endif; ?>

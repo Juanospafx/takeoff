@@ -170,7 +170,9 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
     <!-- Center: Brand Logo & Subtitle Centered Vertically & Horizontally -->
     <div class="bt-global-center">
         <?php
-        $navReturnStage = $_GET['stage'] ?? $_GET['status'] ?? '';
+        $navReturnStage = (!empty($project['id']) && !empty($project['status']))
+            ? $project['status']
+            : ($_GET['stage'] ?? $_GET['status'] ?? '');
         $navBidBoardHref = 'bid_board.php' . (!empty($navReturnStage) ? '?status=' . urlencode($navReturnStage) : '');
         ?>
         <a class="bt-brand" href="<?= htmlspecialchars($navBidBoardHref) ?>" id="btHeaderBrandLink" aria-label="Brightronix Estimating Hub">

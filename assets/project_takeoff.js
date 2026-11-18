@@ -51,6 +51,110 @@
     }
     window.projectTakeoffEditorUrl = takeoffEditorUrl;
 
+    const pendingDeletedTakeoffLayersByEstimate = new Map();
+    let activeEstimateSwitchTimer = null;
+
+    function loadedEditorEstimateKey() {
+        const win = takeoffWindow();
+        if (win?.__projectTakeoffEstimateKey) return String(win.__projectTakeoffEstimateKey);
+        const frame = $('takeoffFrame');
+        if (!frame) return '';
+        try {
+            return String(new URL(frame.getAttribute('src') || '', window.location.href).searchParams.get('estimate_key') || '');
+        } catch (_) {
+            return '';
+        }
+    }
+
+    function collectLayerTrackingKeys(layer) {
+        if (!layer || typeof layer !== 'object') return [];
+        const meta = layer.metadata_json && typeof layer.metadata_json === 'object' ? layer.metadata_json : {};
+        return [...new Set([
+            layer.id,
+            layer.integration_key,
+            layer.client_uid,
+            meta.project_layer_id,
+            layer.metadata?.project_layer_id
+        ].map(v => String(v || '').trim()).filter(Boolean))];
+    }
+
+    function queueDeletedLayersForEstimate(estimateId, keys) {
+        const estKey = String(estimateId || '').trim();
+        if (!estKey || !Array.isArray(keys) || !keys.length) return;
+        const set = pendingDeletedTakeoffLayersByEstimate.get(estKey) || new Set();
+        keys.forEach(k => {
+            const val = String(k || '').trim();
+            if (val) set.add(val);
+        });
+        if (set.size) pendingDeletedTakeoffLayersByEstimate.set(estKey, set);
+    }
+
+    function unqueueDeletedLayerKeys(estimateId, layer) {
+        const set = pendingDeletedTakeoffLayersByEstimate.get(String(estimateId || '').trim());
+        if (!set || !set.size) return;
+        collectLayerTrackingKeys(layer).forEach(k => set.delete(k));
+        if (!set.size) pendingDeletedTakeoffLayersByEstimate.delete(String(estimateId || '').trim());
+    }
+
+    async function purgeDeletedLayersOnServer(estKey, keySet) {
+        const pid = Number(window.ProjectState?.projectId || 0);
+        const targetEst = String(estKey || '').trim();
+        if (pid <= 0 || !targetEst || !keySet || !keySet.size) return;
+        const layerIds = [...keySet];
+        try {
+            const res = await fetch('../api/takeoff.php', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({
+                    action: 'purge_deleted_layers',
+                    project_id: pid,
+                    estimate_key: targetEst,
+                    layer_ids: layerIds
+                })
+            });
+            if (res.ok) {
+                const currentSet = pendingDeletedTakeoffLayersByEstimate.get(targetEst);
+                if (currentSet) {
+                    layerIds.forEach(id => currentSet.delete(id));
+                    if (!currentSet.size) pendingDeletedTakeoffLayersByEstimate.delete(targetEst);
+                }
+            }
+        } catch (err) {
+            console.warn('Could not purge deleted layers for estimate', targetEst, err);
+        }
+    }
+
+    async function flushPendingDeletedEstimateLayers() {
+        if (!pendingDeletedTakeoffLayersByEstimate.size) return;
+        const entries = [...pendingDeletedTakeoffLayersByEstimate.entries()].filter(([, set]) => set && set.size > 0);
+        for (const [estKey, keySet] of entries) {
+            await purgeDeletedLayersOnServer(estKey, keySet);
+        }
+    }
+
+    window.flushTakeoffDeletedLayersForEstimate = (estimateId = null) => {
+        if (!estimateId) return flushPendingDeletedEstimateLayers();
+        const estKey = String(estimateId || '').trim();
+        return purgeDeletedLayersOnServer(estKey, pendingDeletedTakeoffLayersByEstimate.get(estKey));
+    };
+
+    function removeLayersFromEditorAndQueue(estimateId, layersOrKeys, options = {}) {
+        const estId = String(estimateId || activeEstimateId() || '').trim();
+        const keys = [...new Set((Array.isArray(layersOrKeys) ? layersOrKeys : []).flatMap(entry =>
+            typeof entry === 'object' && entry !== null ? collectLayerTrackingKeys(entry) : [String(entry || '').trim()]
+        ).filter(Boolean))];
+        if (!keys.length) return { keys: [], deleted: null };
+        let deleted = null;
+        if (estId && estId === loadedEditorEstimateKey()) {
+            deleted = callEditor('projectTakeoffDeleteLayers', keys, { force: Boolean(options?.force) });
+            if (deleted === false && !options?.force) {
+                return { keys, deleted: false };
+            }
+        }
+        queueDeletedLayersForEstimate(estId, keys);
+        return { keys, deleted };
+    }
+
     function ensureEditorEstimate(estimateId = activeEstimateId(), forceReload = false) {
         const frame = $('takeoffFrame');
         const documentId = activeDrawingDoc()?.id || window.ProjectState?.selectedDocumentId;
@@ -64,6 +168,10 @@
         const generation = ++editorEstimateGeneration;
         frame.addEventListener('load', () => {
             if (generation !== editorEstimateGeneration || requestedEstimateId !== activeEstimateId()) return;
+            const pendingDel = pendingDeletedTakeoffLayersByEstimate.get(requestedEstimateId);
+            if (pendingDel && pendingDel.size > 0) {
+                callEditor('projectTakeoffDeleteLayers', [...pendingDel]);
+            }
             syncAllLayersToCanvas({ suppressEstimatingSync: true });
             renderTakeoffPanel();
             notifyEditorVisible();
@@ -172,6 +280,11 @@
         const pId = String(window.ProjectState?.projectId || 0);
         safeSetTakeoffLocalStorage('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
         syncTakeoffToEstimating();
+        const win = takeoffWindow();
+        const loadedEst = win?.__projectTakeoffEstimateKey ? String(win.__projectTakeoffEstimateKey) : '';
+        if (loadedEst && pendingDeletedTakeoffLayersByEstimate.get(loadedEst)?.size) {
+            callEditor('projectTakeoffDeleteLayers', [...pendingDeletedTakeoffLayersByEstimate.get(loadedEst)], { force: true });
+        }
         syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
         try {
             await callEditor('projectTakeoffSave');
@@ -179,6 +292,7 @@
         } catch (e) {
             console.warn('Canvas save ignored or complete:', e);
         }
+        await flushPendingDeletedEstimateLayers();
     };
 
     const viewerState = {
@@ -265,9 +379,9 @@
         if (isBrowsingAttachmentFolder()) {
             const imgs = attachmentImageDocs();
             return imgs.find(doc => Number(doc.id) === Number(drawingState.previewAttachmentDocId)) ||
-                   imgs.find(doc => Number(doc.id) === Number(drawingState.selectedDocumentId)) ||
-                   imgs[0] ||
-                   null;
+                imgs.find(doc => Number(doc.id) === Number(drawingState.selectedDocumentId)) ||
+                imgs[0] ||
+                null;
         }
         return drawingState.documents.find(doc => Number(doc.id) === Number(drawingState.browseDocumentId)) || activeDrawingDoc();
     }
@@ -1142,7 +1256,7 @@
         const textPreview = $(`${prefix}UomText`);
         const trigger = $(`${prefix}UomTrigger`);
         const menu = $(`${prefix}UomMenu`);
-        
+
         const matchedItem = TAKEOFF_UOM_ITEMS.find(it => it.id && (
             it.id.toLowerCase() === norm.toLowerCase() ||
             (norm.toLowerCase() === 'm²' && it.id === 'm2') ||
@@ -1455,8 +1569,20 @@
     }
 
     function takeoffLayerMetadata(layer) {
-        if (layer?.metadata_json && typeof layer.metadata_json === 'object') return layer.metadata_json;
-        try { return JSON.parse(layer?.metadata_json || '{}') || {}; } catch (_) { return {}; }
+        let meta = null;
+        if (layer?.metadata_json && typeof layer.metadata_json === 'object') {
+            meta = layer.metadata_json;
+        } else {
+            try { meta = JSON.parse(layer?.metadata_json || '{}') || {}; } catch (_) { meta = {}; }
+        }
+        if (meta && !meta.catalog_item && meta.catalog_item_ref) {
+            const shared = window.ProjectState?.catalogItemMetaMap?.[meta.catalog_item_ref];
+            if (shared && typeof shared === 'object') {
+                meta = { ...meta, catalog_item: window.CatalogMetadata.clone(shared) };
+                delete meta.catalog_item_ref;
+            }
+        }
+        return meta || {};
     }
 
     function layerCatalogMetadata(layer) {
@@ -1707,7 +1833,7 @@
                 globalVisible: takeoffState.globalVisible
             });
             if (redoHistoryState.length > 10) redoHistoryState.shift();
-        } catch (_) {}
+        } catch (_) { }
         takeoffState.groups = previous.groups;
         takeoffState.activeGroupId = previous.activeGroupId;
         takeoffState.activeLayerId = previous.activeLayerId;
@@ -1741,7 +1867,7 @@
                 globalVisible: takeoffState.globalVisible
             });
             if (historyState.length > 10) historyState.shift();
-        } catch (_) {}
+        } catch (_) { }
         takeoffState.groups = next.groups;
         takeoffState.activeGroupId = next.activeGroupId;
         takeoffState.activeLayerId = next.activeLayerId;
@@ -1794,29 +1920,91 @@
 
     function adoptAuthoritativeEstimateFromEstimating(detail = {}) {
         const incomingEstId = String(detail.activeEstimateId || '');
-        if (!incomingEstId || incomingEstId === 'est_primary') return;
+        if (!incomingEstId || incomingEstId === 'est_primary') return false;
         const estimatesList = Array.isArray(detail.estimates) ? detail.estimates : (latestEstimatingState?.estimates || []);
         const estListIds = new Set(estimatesList.map(row => String(row?.id || '')));
-        const currentEstId = String(takeoffState.activeEstimateId || '');
+        const prevEstId = String(takeoffState.activeEstimateId || '');
         const currentLayersCount = takeoffState.groups
-            .filter(g => groupBelongsToEstimate(g, currentEstId))
+            .filter(g => groupBelongsToEstimate(g, prevEstId))
             .reduce((sum, g) => sum + ((g.items || g.layers || []).length), 0);
-        if (!currentEstId || currentEstId === 'est_primary' || (estListIds.size && !estListIds.has(currentEstId))
-            || (currentEstId !== incomingEstId && currentLayersCount === 0 && !takeoffIsDirty)) {
+        if (!prevEstId || prevEstId === 'est_primary' || (estListIds.size && !estListIds.has(prevEstId))
+            || (prevEstId !== incomingEstId && currentLayersCount === 0 && !takeoffIsDirty)) {
             takeoffState.activeEstimateId = incomingEstId;
             if (takeoffDomInitialized && typeof ensureEstimateTakeoffWorkspace === 'function') {
                 ensureEstimateTakeoffWorkspace(incomingEstId, false);
             }
+            return prevEstId !== incomingEstId;
         }
+        return false;
     }
 
     window.addEventListener('takeoff:estimating-state-updated', event => {
         const detail = event.detail || {};
         updateLatestEstimatingState(detail, false);
         if (!takeoffDomInitialized) return;
-        adoptAuthoritativeEstimateFromEstimating(detail);
+        const switchedEstimate = adoptAuthoritativeEstimateFromEstimating(detail);
         if (typeof renderTakeoffEstimateFooter === 'function') renderTakeoffEstimateFooter();
-        if (detail.syncSource !== 'takeoff-sync' && typeof renderTakeoffPanel === 'function') renderTakeoffPanel();
+        if (switchedEstimate && detail.syncSource !== 'takeoff-sync' && typeof renderTakeoffPanel === 'function') renderTakeoffPanel();
+    });
+
+    function removeLayersDeletedFromEstimating(detail = {}) {
+        const estId = String(detail.estimateId || detail.activeEstimateId || '').trim();
+        if (!estId) return;
+        const itemIdSet = new Set((Array.isArray(detail.itemIds) ? detail.itemIds : []).map(String).filter(Boolean));
+        const keySet = new Set((Array.isArray(detail.layerKeys) ? detail.layerKeys : []).map(String).filter(Boolean));
+        const removedKeys = new Set(keySet);
+        const removedLayerIds = new Set();
+
+        takeoffState.groups.forEach(group => {
+            if (!groupBelongsToEstimate(group, estId)) return;
+            group.layers = (group.layers || []).filter(layer => {
+                const layerItemId = String(layer.estimatingItemId || layer.metadata_json?.estimating_item_id || layer.estimate_item_id || '').trim();
+                const layerKeys = collectLayerTrackingKeys(layer);
+                const matchesItem = layerItemId && itemIdSet.has(layerItemId);
+                const matchesKey = layerKeys.some(k => keySet.has(k));
+                if (!matchesItem && !matchesKey) return true;
+                if (layer?.id) removedLayerIds.add(String(layer.id));
+                layerKeys.forEach(k => removedKeys.add(k));
+                return false;
+            });
+        });
+
+        const keysList = [...removedKeys];
+        if (!keysList.length && !removedLayerIds.size) return;
+        removeLayersFromEditorAndQueue(estId, keysList, { force: true });
+        if (estId === activeEstimateId()) {
+            const activeKey = String(takeoffState.activeLayerId || '');
+            if (activeKey && (removedLayerIds.has(activeKey) || removedKeys.has(activeKey))) {
+                takeoffState.activeLayerId = null;
+                callEditor('projectTakeoffClearActiveLayer');
+                setActiveTool('smart');
+            }
+            selectionState.selectedLayerIds = (selectionState.selectedLayerIds || []).filter(id => !removedLayerIds.has(String(id)) && !removedKeys.has(String(id)));
+            if (selectionState.activeLayerId && (removedLayerIds.has(String(selectionState.activeLayerId)) || removedKeys.has(String(selectionState.activeLayerId)))) {
+                selectionState.activeLayerId = null;
+            }
+        }
+        if (canWrite()) {
+            takeoffIsDirty = true;
+            try {
+                const pId = String(window.ProjectState?.projectId || 0);
+                safeSetTakeoffLocalStorage('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
+            } catch (_) { }
+        }
+        if (takeoffDomInitialized) {
+            renderTakeoffPanel();
+            updateSubheadSelectedItem();
+        }
+    }
+
+    window.addEventListener('takeoff:estimating-items-deleted', event => {
+        const detail = event.detail || {};
+        if (detail.projectId && window.ProjectState?.projectId && String(detail.projectId) !== String(window.ProjectState.projectId)) return;
+        if (!takeoffDomInitialized) {
+            const estId = String(detail.estimateId || '').trim();
+            queueDeletedLayersForEstimate(estId, detail.layerKeys || []);
+        }
+        removeLayersDeletedFromEstimating(detail);
     });
 
     window.addEventListener('takeoff:estimating-items-updated', event => {
@@ -1853,7 +2041,7 @@
                         evictable.push(k);
                     }
                 }
-                evictable.forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+                evictable.forEach(k => { try { localStorage.removeItem(k); } catch (_) { } });
                 localStorage.setItem(key, value);
                 return true;
             } catch (_) {
@@ -2084,15 +2272,23 @@
         if (detail.projectId && window.ProjectState?.projectId && String(detail.projectId) !== String(window.ProjectState.projectId)) return;
         scopeLegacyTakeoffGroupsOnce();
         const estimateId = String(detail.activeEstimateId || '');
-        if (!estimateId || estimateId !== activeEstimateId() || !Array.isArray(detail.groups)) return;
+        if (!estimateId || !Array.isArray(detail.groups)) return;
+        const isCurrentActiveEstimate = estimateId === activeEstimateId();
+        const hasWorkspaceForEst = takeoffState.groups.some(row => groupBelongsToEstimate(row, estimateId));
+        if (!isCurrentActiveEstimate && !hasWorkspaceForEst) return;
+        if (detail.syncSource && detail.syncSource !== 'takeoff-sync' && estimatingSyncTimer) {
+            clearTimeout(estimatingSyncTimer);
+            estimatingSyncTimer = null;
+        }
         ensureEstimateTakeoffWorkspace(estimateId);
         const seen = new Set();
         const pendingLinks = [];
         const orderedGroupIds = [];
+        const orderedLayerIdsByGroup = new Map();
         let didMutateGroupMeta = false;
         const previousOrderSignature = takeoffState.groups
             .filter(group => groupBelongsToEstimate(group, estimateId))
-            .map(group => String(group.id))
+            .map(group => `${group.id}:${(group.layers || []).map(row => String(row.id)).join(',')}`)
             .join('|');
         detail.groups.forEach((estimateGroup, groupIndex) => {
             const groupKey = String(estimateGroup.id || `group_${groupIndex}`);
@@ -2118,6 +2314,10 @@
             }
             group.sortOrder = groupIndex;
             orderedGroupIds.push(String(group.id));
+            if (!orderedLayerIdsByGroup.has(group)) {
+                orderedLayerIdsByGroup.set(group, []);
+            }
+            const groupOrderedLayerIds = orderedLayerIdsByGroup.get(group);
             (estimateGroup.items || []).forEach(item => {
                 const itemId = String(item.id || '');
                 if (!itemId || item.parentItemId || item.parent_item_id || item.assemblyParentId) return;
@@ -2192,15 +2392,44 @@
                     });
                 }
                 seen.add(String(layer.id));
+                unqueueDeletedLayerKeys(estimateId, layer);
+                groupOrderedLayerIds.push(String(layer.id));
                 if (!item.takeoffLayerId) pendingLinks.push({ itemId, layerId: String(layer.id) });
             });
         });
-        const existingEstLayerCount = allLayers().filter(row => String(row.estimateId || '') === estimateId && row.estimatingItemId).length;
+        const existingEstLayerCount = allLayers().filter(row => String(row.estimateId || '') === estimateId && (row.estimatingItemId || row.metadata_json?.estimating_item_id)).length;
+        const removedLayerIds = [];
+        const removedLayerKeys = [];
         takeoffState.groups.forEach(group => {
-            group.layers = (group.layers || []).filter(layer => String(layer.estimateId || '') !== estimateId
-                || !layer.estimatingItemId || seen.has(String(layer.id)));
+            group.layers = (group.layers || []).filter(layer => {
+                const linkedEstItemId = String(layer.estimatingItemId || layer.metadata_json?.estimating_item_id || layer.estimate_item_id || '');
+                const keep = String(layer.estimateId || '') !== estimateId
+                    || !linkedEstItemId || seen.has(String(layer.id));
+                if (!keep && layer?.id) {
+                    removedLayerIds.push(String(layer.id));
+                    collectLayerTrackingKeys(layer).forEach(k => removedLayerKeys.push(k));
+                }
+                return keep;
+            });
         });
-        const nextEstLayerCount = allLayers().filter(row => String(row.estimateId || '') === estimateId && row.estimatingItemId).length;
+        if (removedLayerIds.length > 0) {
+            removeLayersFromEditorAndQueue(estimateId, removedLayerKeys, { force: true });
+            const removedIdSet = new Set(removedLayerIds.map(String));
+            const removedKeySet = new Set(removedLayerKeys.map(String));
+            if (isCurrentActiveEstimate && takeoffState.activeLayerId
+                && (removedIdSet.has(String(takeoffState.activeLayerId)) || removedKeySet.has(String(takeoffState.activeLayerId)))) {
+                takeoffState.activeLayerId = null;
+                callEditor('projectTakeoffClearActiveLayer');
+                setActiveTool('smart');
+            }
+            if (canWrite()) takeoffIsDirty = true;
+        }
+        orderedLayerIdsByGroup.forEach((layerIds, group) => {
+            const layerOrder = new Map(layerIds.map((id, idx) => [id, idx]));
+            group.layers = (group.layers || []).slice().sort((a, b) =>
+                (layerOrder.get(String(a.id)) ?? Number.MAX_SAFE_INTEGER) - (layerOrder.get(String(b.id)) ?? Number.MAX_SAFE_INTEGER));
+        });
+        const nextEstLayerCount = allLayers().filter(row => String(row.estimateId || '') === estimateId && (row.estimatingItemId || row.metadata_json?.estimating_item_id)).length;
         if (nextEstLayerCount !== existingEstLayerCount) didMutateGroupMeta = true;
         const scopedIndexes = takeoffState.groups.map((group, index) => groupBelongsToEstimate(group, estimateId) ? index : -1).filter(index => index >= 0);
         const order = new Map(orderedGroupIds.map((id, index) => [id, index]));
@@ -2209,7 +2438,7 @@
         scopedGroups.forEach((group, index) => { takeoffState.groups[scopedIndexes[index]] = group; });
         const nextOrderSignature = takeoffState.groups
             .filter(group => groupBelongsToEstimate(group, estimateId))
-            .map(group => String(group.id))
+            .map(group => `${group.id}:${(group.layers || []).map(row => String(row.id)).join(',')}`)
             .join('|');
         if (didMutateGroupMeta || nextOrderSignature !== previousOrderSignature) {
             if (canWrite()) {
@@ -2220,7 +2449,7 @@
                 } catch (_) { }
             }
         }
-        if (takeoffState.activeLayerId && !layerBelongsToEstimate(findLayer(takeoffState.activeLayerId), estimateId)) {
+        if (isCurrentActiveEstimate && takeoffState.activeLayerId && !layerBelongsToEstimate(findLayer(takeoffState.activeLayerId), estimateId)) {
             takeoffState.activeLayerId = null;
         }
         if (pendingLinks.length) window.dispatchEvent(new CustomEvent('takeoff:estimating-links-requested', {
@@ -2242,16 +2471,31 @@
 
     function estimateLineFromLayer(layer) {
         const group = groupForLayer(layer);
-        const itemType = layer.itemType || layer.item_type || (String(layer.category || '').toLowerCase().includes('labor') ? 'Labor' : 'Materials');
+        const resolvedMeta = layerCatalogMetadata(layer);
+        const isAsm = Boolean(
+            layer.isAssembly === true
+            || Number(layer.is_assembly ?? 0) === 1
+            || String(layer.itemType || layer.item_type || '').toLowerCase() === 'assembly'
+            || String(resolvedMeta?.type || '').toLowerCase() === 'assembly'
+            || (Array.isArray(layer.copiedAssemblyChildren) && layer.copiedAssemblyChildren.length > 0)
+            || (Array.isArray(resolvedMeta?.assemblyComponents) && resolvedMeta.assemblyComponents.length > 0)
+            || (Array.isArray(layer.catalogSnapshot?.assemblyComponents) && layer.catalogSnapshot.assemblyComponents.length > 0)
+        );
+        const itemType = isAsm
+            ? 'assembly'
+            : (layer.itemType || layer.item_type || (String(layer.category || '').toLowerCase().includes('labor') ? 'Labor' : 'Materials'));
         return {
             id: `takeoff_${layer.id}`,
             takeoffLayerId: String(layer.id),
+            copiedFromTakeoffLayerId: layer.copiedFromTakeoffLayerId || null,
             catalogItemId: layer.catalogItemId || layer.catalog_item_id || null,
-            catalogMetadata: layerCatalogMetadata(layer),
+            catalogMetadata: resolvedMeta,
+            ...(layer.catalogSnapshot && !resolvedMeta ? { catalogSnapshot: window.CatalogMetadata.clone(layer.catalogSnapshot) } : {}),
             name: layer.name || 'Takeoff item',
             description: layer.description || '',
             type: itemType,
             itemType,
+            isAssembly: isAsm,
             budgetCode: layer.catalogNumber || layer.catalog_number || '',
             costCode: layer.catalogNumber || layer.catalog_number || '',
             costCategory: itemType,
@@ -2368,10 +2612,16 @@
                     || (layer.client_uid ? existingByLayerId.get(String(layer.client_uid)) : null)
                     || (layer.metadata_json?.project_layer_id ? existingByLayerId.get(String(layer.metadata_json.project_layer_id)) : null)
                     || (layer.estimatingItemId ? existingByLayerId.get(String(layer.estimatingItemId)) : null);
+                if (!existing && Array.isArray(layer.copiedAssemblyChildren) && layer.copiedAssemblyChildren.length > 0) {
+                    line.children = cloneAssemblyChildrenTree(layer.copiedAssemblyChildren);
+                }
                 const synchronized = window.TakeoffEstimatingSyncService?.takeoffItem
                     ? window.TakeoffEstimatingSyncService.takeoffItem({ ...line, id: layer.id },
                         { id: groupId, name: groupName }, existing)
                     : { ...(existing || {}), ...line };
+                if (!layer.estimatingItemId && (existing?.id || synchronized.id || line.id)) {
+                    layer.estimatingItemId = String(existing?.id || synchronized.id || line.id);
+                }
                 const isOverridden = Boolean(
                     synchronized.quantityOverride
                     || existing?.quantityOverride
@@ -2815,15 +3065,15 @@
                 </div>
                 <div class="pro-tree-children" ${mExpanded ? '' : 'hidden'}>
                     ${visibleRulers.map((r) => {
-                        const qtyStr = String(r.sidebarQuantityText || r.lengthText || '0');
-                        const rowTitle = `Measurement #${r.index}: "${qtyStr}"`;
-                        const isSelected = Boolean(selectionState.selectedRuler && String(selectionState.selectedRuler.id || '') === String(r.id || ''));
-                        return `<div class="pro-tree-row pro-measurement-row ${r.hidden ? 'is-hidden-measurement' : ''} ${isSelected ? 'active' : ''}" data-measurement-row="${esc(r.id)}" title="${esc(rowTitle)}">
+            const qtyStr = String(r.sidebarQuantityText || r.lengthText || '0');
+            const rowTitle = `Measurement #${r.index}: "${qtyStr}"`;
+            const isSelected = Boolean(selectionState.selectedRuler && String(selectionState.selectedRuler.id || '') === String(r.id || ''));
+            return `<div class="pro-tree-row pro-measurement-row ${r.hidden ? 'is-hidden-measurement' : ''} ${isSelected ? 'active' : ''}" data-measurement-row="${esc(r.id)}" title="${esc(rowTitle)}">
                             <button class="pro-visibility-btn ${r.hidden ? 'is-off' : ''}" type="button" data-measurement-visibility="${esc(r.id)}" title="${r.hidden ? 'Show measurement' : 'Hide measurement'}" aria-label="Show or hide measurement"><i class="fas ${r.hidden ? 'fa-eye-slash' : 'fa-eye'}"></i></button>
                             <span class="pro-measurement-color-dot" style="background:${esc(r.color || '#22c55e')};"></span>
                             <span class="pro-measurement-title">${esc(rowTitle)}</span>
                         </div>`;
-                    }).join('')}
+        }).join('')}
                 </div>
             </div>
         ` : '';
@@ -2908,13 +3158,13 @@
                 <h3>Takeoff metrics</h3>
                 <div class="pro-property-row"><span>Quantity</span><strong>${esc(quantityLabel(layer))}</strong></div>
                 ${(() => {
-                    const ov = getLayerEstimatingOverride(layer);
-                    if (!ov.overridden) return '';
-                    const uom = layer.uom || typeToUom(layer.type) || 'ea';
-                    const eq = Number(ov.estimatingQuantity || 0);
-                    const fmt = eq % 1 === 0 ? eq.toFixed(0) : eq.toFixed(2);
-                    return `<div class="pro-property-row"><span>Estimating qty</span><strong style="color:#d97706;"><i class="fas fa-pen-to-square"></i> ${esc(fmt)} ${esc(uom)}</strong></div>`;
-                })()}
+                const ov = getLayerEstimatingOverride(layer);
+                if (!ov.overridden) return '';
+                const uom = layer.uom || typeToUom(layer.type) || 'ea';
+                const eq = Number(ov.estimatingQuantity || 0);
+                const fmt = eq % 1 === 0 ? eq.toFixed(0) : eq.toFixed(2);
+                return `<div class="pro-property-row"><span>Estimating qty</span><strong style="color:#d97706;"><i class="fas fa-pen-to-square"></i> ${esc(fmt)} ${esc(uom)}</strong></div>`;
+            })()}
                 <div class="pro-property-row"><span>Type</span><strong>${esc(layer.type)}</strong></div>
                 <div class="pro-property-row"><span>Unit</span><strong>${esc(layer.uom || typeToUom(layer.type))}</strong></div>
                 <div class="pro-property-row"><span>Selected</span><strong>${selectionCount} element${selectionCount === 1 ? '' : 's'}</strong></div>
@@ -3019,7 +3269,7 @@
                 const group = findGroup(button.dataset.groupToggle);
                 if (!group) return;
                 group.isExpanded = group.isExpanded === false;
-                saveTakeoffState();
+                saveTakeoffState({ skipEstimatingSync: true, suppressDirty: true, debounceLocalSave: true });
                 renderTakeoffPanel();
             });
             button.addEventListener('dragstart', event => {
@@ -3607,12 +3857,12 @@
         });
 
         $('layerCatalogCard')?.addEventListener('click', () => {
-            openCatalogModal();
+            openCatalogModal({ singleSelect: true });
         });
 
         $('layerSwapCatalogBtn')?.addEventListener('click', event => {
             event.stopPropagation();
-            openCatalogModal();
+            openCatalogModal({ singleSelect: true });
         });
 
         modal.querySelector('[data-layer-act="delete"]')?.addEventListener('click', () => {
@@ -4164,7 +4414,7 @@
                     newLayer.symbol = itemSymbol;
                     newLayer.size = itemSize;
                     newLayer.color = itemColor;
-                } catch (e) {}
+                } catch (e) { }
 
                 group.layers.push(newLayer);
                 createdLayers.push(newLayer);
@@ -4938,18 +5188,18 @@
             </div>
             <div class="pro-create-added-items-list">
                 ${items.map(item => {
-                    const isActive = String(item.id) === String(takeoffState.activeAddedItemId);
-                    const isAssembly = item.type === 'assembly';
-                    const unitCost = getCatalogItemUnitCost(item);
-                    const laborHours = getCatalogItemLaborHours(item);
-                    const costStr = unitCost > 0 ? `$${unitCost.toFixed(2)}` : '$0.00';
-                    const laborStr = laborHours > 0 ? `${laborHours % 1 === 0 ? laborHours.toFixed(0) : laborHours.toFixed(2)} hrs` : '0.00 hrs';
-                    const catalogName = item.catalog?.name || '';
-                    const catalogId = item.catalog?.id || '';
-                    const groupName = item.category?.name || '';
-                    const groupId = item.category?.id || '';
-                    const code = item.supplier?.catalogNumber || item.classification?.costCode || 'n/a';
-                    return `
+            const isActive = String(item.id) === String(takeoffState.activeAddedItemId);
+            const isAssembly = item.type === 'assembly';
+            const unitCost = getCatalogItemUnitCost(item);
+            const laborHours = getCatalogItemLaborHours(item);
+            const costStr = unitCost > 0 ? `$${unitCost.toFixed(2)}` : '$0.00';
+            const laborStr = laborHours > 0 ? `${laborHours % 1 === 0 ? laborHours.toFixed(0) : laborHours.toFixed(2)} hrs` : '0.00 hrs';
+            const catalogName = item.catalog?.name || '';
+            const catalogId = item.catalog?.id || '';
+            const groupName = item.category?.name || '';
+            const groupId = item.category?.id || '';
+            const code = item.supplier?.catalogNumber || item.classification?.costCode || 'n/a';
+            return `
                         <div class="pro-create-added-item-row ${isActive ? 'is-active-item' : ''}" data-added-item-id="${esc(item.id)}">
                             <div class="pro-create-item-badge-wrap" data-item-badge-wrap="${esc(item.id)}">
                                 ${getLayerBadgeSvg(item, 18)}
@@ -4990,7 +5240,7 @@
                             </button>
                         </div>
                     `;
-                }).join('')}
+        }).join('')}
             </div>
         `;
 
@@ -5549,6 +5799,7 @@
         selectedCatalogId: null,
         selectedGroupId: null,
         selectedItemIds: new Set(),
+        singleSelect: false,
         itemQuery: '',
         catalogQuery: '',
         page: 1,
@@ -5738,7 +5989,7 @@
         });
 
         $('proBrowseCreateNewItemBtn')?.addEventListener('click', () => {
-            window.open('/pages/cost_catalog.php', '_blank');
+            window.open('cost_catalog.php', '_blank');
         });
 
         $('ccPageFirst')?.addEventListener('click', () => goToBrowseCatalogPage(1));
@@ -5758,6 +6009,7 @@
         if (!requireWrite()) return false;
         ensureTakeoffModal();
         ensureCatalogModal();
+        browseCatalogState.singleSelect = Boolean(options?.singleSelect);
         browseCatalogState.onSelect = typeof options?.onSelect === 'function' ? options.onSelect : null;
         browseCatalogState.targetGroupId = options?.groupId || null;
         const createModal = $('takeoffCreateLayerModal');
@@ -5765,7 +6017,10 @@
             createModal.classList.add('is-behind');
             createModal.style.visibility = 'hidden';
         }
-        browseCatalogState.selectedItemIds = new Set((takeoffState.pendingCatalogItems || []).map(i => String(i.id)));
+        const preselectedIds = browseCatalogState.singleSelect
+            ? (takeoffState.pendingCatalogItem?.id ? [String(takeoffState.pendingCatalogItem.id)] : [])
+            : (takeoffState.pendingCatalogItems || []).map(i => String(i.id));
+        browseCatalogState.selectedItemIds = new Set(preselectedIds);
         browseCatalogState.page = 1;
         browseCatalogState.itemQuery = '';
         browseCatalogState.catalogQuery = '';
@@ -5773,6 +6028,7 @@
         if ($('proBrowseCatSearch')) $('proBrowseCatSearch').value = '';
         const modal = $('takeoffCatalogModal');
         if (modal) {
+            modal.classList.toggle('is-single-select', browseCatalogState.singleSelect);
             modal.hidden = false;
             modal.style.display = 'flex';
         }
@@ -5781,8 +6037,10 @@
     }
 
     function closeCatalogModal() {
+        browseCatalogState.singleSelect = false;
         const modal = $('takeoffCatalogModal');
         if (modal) {
+            modal.classList.remove('is-single-select');
             modal.hidden = true;
             modal.style.display = 'none';
         }
@@ -6274,7 +6532,7 @@
             return `
                 <div class="pro-catalog-item-card ${isSelected ? 'is-selected' : ''}" data-browse-item="${esc(item.id)}">
                     <div class="pro-catalog-item-select-col">
-                        <input type="checkbox" class="pro-catalog-item-checkbox" ${isSelected ? 'checked' : ''} data-item-check="${esc(item.id)}" aria-label="Select ${esc(item.name)}">
+                        <input type="${browseCatalogState.singleSelect ? 'radio' : 'checkbox'}" ${browseCatalogState.singleSelect ? 'name="proBrowseSingleSelect"' : ''} class="pro-catalog-item-checkbox" ${isSelected ? 'checked' : ''} data-item-check="${esc(item.id)}" aria-label="Select ${esc(item.name)}">
                     </div>
                     <div class="pro-catalog-item-content">
                         <div class="pro-catalog-item-top cc-item-primary-row">
@@ -6321,8 +6579,11 @@
         list.querySelectorAll('[data-browse-item]').forEach(card => {
             const id = String(card.dataset.browseItem);
             card.addEventListener('click', (e) => {
-                if (e.target.matches('input[type="checkbox"]')) return;
-                if (browseCatalogState.selectedItemIds.has(id)) {
+                if (e.target.matches('input[type="checkbox"], input[type="radio"]')) return;
+                if (browseCatalogState.singleSelect) {
+                    browseCatalogState.selectedItemIds.clear();
+                    browseCatalogState.selectedItemIds.add(id);
+                } else if (browseCatalogState.selectedItemIds.has(id)) {
                     browseCatalogState.selectedItemIds.delete(id);
                 } else {
                     browseCatalogState.selectedItemIds.add(id);
@@ -6330,6 +6591,7 @@
                 updateBrowseSelectionUi();
             });
             card.addEventListener('dblclick', () => {
+                if (browseCatalogState.singleSelect) browseCatalogState.selectedItemIds.clear();
                 browseCatalogState.selectedItemIds.add(id);
                 updateBrowseSelectionUi();
                 const selectedItems = getSelectedCatalogItems();
@@ -6341,7 +6603,10 @@
             check.addEventListener('change', (e) => {
                 e.stopPropagation();
                 const id = String(check.dataset.itemCheck);
-                if (check.checked) {
+                if (browseCatalogState.singleSelect) {
+                    browseCatalogState.selectedItemIds.clear();
+                    if (check.checked) browseCatalogState.selectedItemIds.add(id);
+                } else if (check.checked) {
                     browseCatalogState.selectedItemIds.add(id);
                 } else {
                     browseCatalogState.selectedItemIds.delete(id);
@@ -6358,6 +6623,11 @@
         const selectBtn = $('proBrowseSelectBtn');
         const footerSelection = $('proBrowseFooterSelection');
         const selectedIds = browseCatalogState.selectedItemIds || new Set();
+        if (browseCatalogState.singleSelect && selectedIds.size > 1) {
+            const lastId = Array.from(selectedIds).pop();
+            selectedIds.clear();
+            if (lastId) selectedIds.add(lastId);
+        }
         const selectedItems = getSelectedCatalogItems();
         const count = selectedItems.length;
 
@@ -6366,19 +6636,20 @@
                 const cardId = String(card.dataset.browseItem || '');
                 const isSelected = selectedIds.has(cardId);
                 card.classList.toggle('is-selected', isSelected);
-                const checkbox = card.querySelector('input[type="checkbox"]');
+                const checkbox = card.querySelector('input[type="checkbox"], input[type="radio"]');
                 if (checkbox) checkbox.checked = isSelected;
             });
         }
 
         if (footerSelection) {
             if (count === 0) {
-                footerSelection.textContent = 'No items selected';
+                footerSelection.textContent = browseCatalogState.singleSelect ? 'Select 1 catalog item to replace' : 'No items selected';
             } else if (count === 1) {
                 const item = selectedItems[0];
                 const cost = getCatalogItemUnitCost(item);
                 const costStr = cost > 0 ? `$${cost.toFixed(2)}` : '$0.00';
-                footerSelection.innerHTML = `Selected 1 item: <strong>${esc(item.name)}</strong> · ${costStr} / ${esc(item.uom || 'ea')}`;
+                const labelPrefix = browseCatalogState.singleSelect ? 'Replacement item' : 'Selected 1 item';
+                footerSelection.innerHTML = `${labelPrefix}: <strong>${esc(item.name)}</strong> · ${costStr} / ${esc(item.uom || 'ea')}`;
             } else {
                 let totalCost = 0;
                 selectedItems.forEach(it => { totalCost += getCatalogItemUnitCost(it); });
@@ -6390,7 +6661,9 @@
             const hasSelected = count > 0;
             selectBtn.disabled = !hasSelected;
             selectBtn.classList.toggle('is-active', hasSelected);
-            if (count > 1) {
+            if (browseCatalogState.singleSelect) {
+                selectBtn.innerHTML = `<i class="fas fa-check"></i> Replace Item`;
+            } else if (count > 1) {
                 selectBtn.innerHTML = `<i class="fas fa-check"></i> Add Selected Items (${count})`;
             } else {
                 selectBtn.innerHTML = `<i class="fas fa-check"></i> Select Item`;
@@ -6548,7 +6821,7 @@
 
     function collapseAllTakeoffGroups() {
         takeoffState.groups.filter(group => groupBelongsToEstimate(group)).forEach(group => { group.isExpanded = false; });
-        saveTakeoffState();
+        saveTakeoffState({ skipEstimatingSync: true, suppressDirty: true, debounceLocalSave: true });
         renderTakeoffPanel();
     }
 
@@ -6885,7 +7158,9 @@
         const groups = takeoffState.groups.filter(group => wanted.has(String(group.id))
             && groupBelongsToEstimate(group));
         if (!groups.length) return false;
-        const layerIds = groups.flatMap(group => (group.layers || []).map(layer => String(layer.id)));
+        const estId = activeEstimateId();
+        const groupLayers = groups.flatMap(group => group.layers || []);
+        const layerIds = groupLayers.map(layer => String(layer.id));
         if (ask) {
             const msg = `Delete ${groups.length} group(s) and ${layerIds.length} takeoff layer(s)?`;
             let confirmed = false;
@@ -6901,8 +7176,9 @@
             }
             if (!confirmed) return false;
         }
-        const deleted = callEditor('projectTakeoffDeleteLayers', layerIds);
-        if (layerIds.length && !deleted) return showPrepared('Unlock the selected groups before deleting them.');
+        const delRes = removeLayersFromEditorAndQueue(estId, groupLayers, { force: false });
+        if (groupLayers.length && delRes.deleted === false) return showPrepared('Unlock the selected groups before deleting them.');
+        const removedKeySet = new Set([...layerIds, ...(delRes.keys || [])]);
         pushTakeoffHistory('delete-groups');
         const estimatingGroupIds = groups.map(group => String(group.estimatingGroupId || `takeoff_group_${group.id}`));
         takeoffState.groups = takeoffState.groups.filter(group => !wanted.has(String(group.id)));
@@ -6910,7 +7186,11 @@
         selectionState.selectedLayerIds = [];
         selectionState.selectedObjectIds = [];
         if (wanted.has(String(takeoffState.activeGroupId))) takeoffState.activeGroupId = takeoffState.groups.find(group => groupBelongsToEstimate(group))?.id || null;
-        if (layerIds.includes(String(takeoffState.activeLayerId))) takeoffState.activeLayerId = null;
+        if (takeoffState.activeLayerId && removedKeySet.has(String(takeoffState.activeLayerId))) {
+            takeoffState.activeLayerId = null;
+            callEditor('projectTakeoffClearActiveLayer');
+            setActiveTool('smart');
+        }
         window.dispatchEvent(new CustomEvent('takeoff:estimating-groups-delete-requested', {
             detail: {
                 projectId: String(window.ProjectState?.projectId || ''), estimateId: activeEstimateId(), groupIds: estimatingGroupIds
@@ -7042,7 +7322,11 @@
     async function deleteLayer(layerId) {
         if (!requireWrite()) return false;
         const layer = findLayer(layerId);
-        if (!layer) return;
+        if (!layer) return false;
+        const editorState = callEditor('projectTakeoffGetLayerLockState', layer.id) || {};
+        if (layer.locked || editorState.locked) {
+            return showPrepared('Unlock the selected item before deleting it.');
+        }
         let confirmed = false;
         if (typeof window.showConfirmDialog === 'function') {
             confirmed = await window.showConfirmDialog({
@@ -7054,15 +7338,30 @@
         } else {
             confirmed = confirm(`Delete this takeoff layer "${layer.name}"?`);
         }
-        if (!confirmed) return;
+        if (!confirmed) return false;
+        const estId = layer.estimateId || activeEstimateId();
+        const delRes = removeLayersFromEditorAndQueue(estId, [layer], { force: false });
+        if (delRes.deleted === false) {
+            return showPrepared('Unlock the selected item before deleting it.');
+        }
         pushTakeoffHistory('delete-layer');
-        callEditor('projectTakeoffDeleteLayer', layer.id);
         const group = findGroup(layer.groupId);
-        if (group) group.layers = group.layers.filter(item => item.id !== layerId);
-        if (takeoffState.activeLayerId === layerId) takeoffState.activeLayerId = null;
+        if (group) group.layers = group.layers.filter(item => String(item.id) !== String(layerId));
+        selectionState.selectedLayerIds = (selectionState.selectedLayerIds || []).filter(id => String(id) !== String(layerId));
+        if (String(takeoffState.activeLayerId || '') === String(layerId)) {
+            takeoffState.activeLayerId = null;
+            callEditor('projectTakeoffClearActiveLayer');
+            setActiveTool('smart');
+        }
+        if (String(selectionState.activeLayerId || '') === String(layerId)) {
+            selectionState.activeLayerId = null;
+        }
         saveTakeoffState();
         renderTakeoffPanel();
+        renderSelectionBar();
+        renderInspector();
         updateSubheadSelectedItem();
+        return true;
     }
 
     function selectedValidLayerIds() {
@@ -7083,9 +7382,9 @@
         });
         if (!targetIds.length) return false;
         const targetSet = new Set(targetIds);
-        const lockedLayers = targetIds.filter(id => {
-            const layer = findLayer(id);
-            const editorState = callEditor('projectTakeoffGetLayerLockState', id) || {};
+        const targetLayers = targetIds.map(id => findLayer(id)).filter(Boolean);
+        const lockedLayers = targetLayers.filter(layer => {
+            const editorState = callEditor('projectTakeoffGetLayerLockState', layer.id) || {};
             return Boolean(layer?.locked || editorState.locked);
         });
         if (lockedLayers.length) {
@@ -7106,8 +7405,8 @@
             confirmed = confirm(msg);
         }
         if (!confirmed) return false;
-        const deleted = callEditor('projectTakeoffDeleteLayers', targetIds);
-        if (deleted === false) {
+        const delRes = removeLayersFromEditorAndQueue(estId, targetLayers, { force: false });
+        if (delRes.deleted === false) {
             return showPrepared('Unlock the selected items before deleting them.');
         }
         pushTakeoffHistory('delete-layers');
@@ -7130,8 +7429,127 @@
         renderTakeoffPanel();
         renderSelectionBar();
         renderInspector();
+        updateSubheadSelectedItem();
         showPrepared(targetIds.length === 1 ? 'Takeoff item deleted.' : `${targetIds.length} takeoff items deleted.`);
         return true;
+    }
+
+    function insertCopiedLayerAfterSource(targetGroup, sourceLayer, copyLayer) {
+        if (!targetGroup || !copyLayer) return;
+        targetGroup.layers = targetGroup.layers || [];
+        const srcIdx = sourceLayer ? targetGroup.layers.indexOf(sourceLayer) : -1;
+        if (srcIdx >= 0) {
+            targetGroup.layers.splice(srcIdx + 1, 0, copyLayer);
+        } else {
+            targetGroup.layers.push(copyLayer);
+        }
+    }
+
+    function cloneAssemblyChildrenTree(children = [], parentItemId = null) {
+        if (!Array.isArray(children) || !children.length) return [];
+        return children.map(child => {
+            const nextId = makeId('item');
+            const cloned = JSON.parse(JSON.stringify(child || {}));
+            delete cloned.dbEstimateItemId;
+            delete cloned.estimateItemId;
+            const nested = Array.isArray(cloned.children) && cloned.children.length
+                ? cloned.children
+                : (Array.isArray(cloned.assemblyItems) && cloned.assemblyItems.length ? cloned.assemblyItems : []);
+            cloned.id = nextId;
+            if (parentItemId !== null && parentItemId !== undefined) {
+                cloned.parentItemId = parentItemId;
+            } else {
+                delete cloned.parentItemId;
+                delete cloned.parent_item_id;
+                delete cloned.assemblyParentId;
+            }
+            cloned.children = nested.length ? cloneAssemblyChildrenTree(nested, nextId) : [];
+            return cloned;
+        });
+    }
+
+    function findEstimatingSourceItemForLayer(layer, explicitEstId = null) {
+        if (!layer) return null;
+        const estState = loadEstimatingStateForSync();
+        const targetEstId = String(explicitEstId || layer.estimateId || activeEstimateId() || '');
+        const est = Array.isArray(estState?.estimates)
+            ? (estState.estimates.find(row => String(row.id) === targetEstId) || estState.estimates[0])
+            : null;
+        const groups = est?.groups || estState?.groups || [];
+        const candidateKeys = new Set([
+            layer.id,
+            layer.integration_key,
+            layer.client_uid,
+            layer.metadata_json?.project_layer_id
+        ].filter(Boolean).map(String));
+        const estItemId = layer.estimatingItemId || layer.metadata_json?.estimating_item_id || null;
+        for (const grp of groups) {
+            for (const item of (grp?.items || [])) {
+                const tkKey = String(item.takeoffLayerId || item.takeoff_layer_id || '');
+                const rawId = String(item.id || '');
+                const strippedId = rawId.startsWith('takeoff_') ? rawId.slice(8) : '';
+                if (candidateKeys.has(tkKey) || candidateKeys.has(strippedId) || (estItemId && rawId === String(estItemId))) {
+                    return item;
+                }
+            }
+        }
+        return null;
+    }
+
+    function copyAssemblyContextOntoLayer(srcLayer, copyLayer, sourceEstId = null) {
+        if (!srcLayer || !copyLayer) return copyLayer;
+        const resolvedMeta = layerCatalogMetadata(srcLayer);
+        if (resolvedMeta && window.CatalogMetadata) {
+            copyLayer.catalogMetadata = window.CatalogMetadata.clone(resolvedMeta);
+            copyLayer.metadata_json = copyLayer.metadata_json && typeof copyLayer.metadata_json === 'object' ? copyLayer.metadata_json : {};
+            copyLayer.metadata_json.catalog_item = window.CatalogMetadata.clone(resolvedMeta);
+            delete copyLayer.metadata_json.catalog_item_ref;
+        }
+        const sourceEstItem = findEstimatingSourceItemForLayer(srcLayer, sourceEstId);
+        const estChildren = Array.isArray(sourceEstItem?.children) && sourceEstItem.children.length
+            ? sourceEstItem.children
+            : (Array.isArray(sourceEstItem?.assemblyItems) && sourceEstItem.assemblyItems.length
+                ? sourceEstItem.assemblyItems
+                : (Array.isArray(srcLayer.copiedAssemblyChildren) ? srcLayer.copiedAssemblyChildren : []));
+        const snapComps = Array.isArray(sourceEstItem?.catalogSnapshot?.assemblyComponents) && sourceEstItem.catalogSnapshot.assemblyComponents.length
+            ? sourceEstItem.catalogSnapshot.assemblyComponents
+            : (Array.isArray(copyLayer.catalogMetadata?.assemblyComponents) ? copyLayer.catalogMetadata.assemblyComponents : []);
+        const isAsm = Boolean(
+            sourceEstItem?.isAssembly === true
+            || Number(sourceEstItem?.is_assembly ?? 0) === 1
+            || String(sourceEstItem?.itemType ?? sourceEstItem?.item_type ?? '').toLowerCase() === 'assembly'
+            || String(sourceEstItem?.catalogSnapshot?.type ?? '').toLowerCase() === 'assembly'
+            || srcLayer.isAssembly === true
+            || String(srcLayer.itemType || srcLayer.item_type || '').toLowerCase() === 'assembly'
+            || String(resolvedMeta?.type || '').toLowerCase() === 'assembly'
+            || estChildren.length > 0
+            || snapComps.length > 0
+        );
+        if (!isAsm) return copyLayer;
+        copyLayer.isAssembly = true;
+        copyLayer.itemType = 'assembly';
+        copyLayer.item_type = 'assembly';
+        copyLayer.copiedFromTakeoffLayerId = String(srcLayer.id);
+        if (!copyLayer.catalogItemId && sourceEstItem?.catalogItemId) {
+            copyLayer.catalogItemId = sourceEstItem.catalogItemId;
+            copyLayer.catalog_item_id = sourceEstItem.catalogItemId;
+        }
+        if (sourceEstItem?.catalogSnapshot) {
+            copyLayer.catalogSnapshot = JSON.parse(JSON.stringify(sourceEstItem.catalogSnapshot));
+            if (!copyLayer.catalogMetadata) {
+                copyLayer.catalogMetadata = JSON.parse(JSON.stringify(sourceEstItem.catalogSnapshot));
+            } else if (!Array.isArray(copyLayer.catalogMetadata.assemblyComponents) || !copyLayer.catalogMetadata.assemblyComponents.length) {
+                copyLayer.catalogMetadata.assemblyComponents = JSON.parse(JSON.stringify(snapComps));
+            }
+            if (copyLayer.metadata_json && typeof copyLayer.metadata_json === 'object') {
+                copyLayer.metadata_json.catalog_item = JSON.parse(JSON.stringify(copyLayer.catalogMetadata));
+                delete copyLayer.metadata_json.catalog_item_ref;
+            }
+        }
+        if (estChildren.length > 0) {
+            copyLayer.copiedAssemblyChildren = cloneAssemblyChildrenTree(estChildren);
+        }
+        return copyLayer;
     }
 
     function duplicateLayer(layerId) {
@@ -7144,6 +7562,8 @@
         const copy = {
             ...JSON.parse(JSON.stringify(layer)),
             id: copyId,
+            client_uid: copyId,
+            integration_key: copyId,
             name: `${layer.name} Copy`,
             color: window.TakeoffColorPalette.duplicateColor(layer.color, (group.layers || []).map(item => item.color)),
             quantity: 0,
@@ -7155,10 +7575,12 @@
         };
         delete copy.estimatingItemId;
         if (copy.metadata_json) delete copy.metadata_json.estimating_item_id;
-        group.layers.push(copy);
+        copyAssemblyContextOntoLayer(layer, copy);
+        insertCopiedLayerAfterSource(group, layer, copy);
         setActiveTakeoffLayer(copy.id, false);
         saveTakeoffState();
         renderTakeoffPanel();
+        updateSubheadSelectedItem();
     }
 
     function renameLayer(layerId) {
@@ -7288,10 +7710,10 @@
                         </label>
                         <select id="tkMoveTargetGroup" class="tk-select">
                             ${groups.map(g => {
-                                const isCurrent = currentGroupIds.size === 1 && currentGroupIds.has(String(g.id));
-                                const count = (g.layers || []).length;
-                                return `<option value="${esc(g.id)}" ${defaultTarget && String(defaultTarget.id) === String(g.id) ? 'selected' : ''}>${esc(g.name)} (${count} ${count === 1 ? 'item' : 'items'})${isCurrent ? ' — current' : ''}</option>`;
-                            }).join('')}
+            const isCurrent = currentGroupIds.size === 1 && currentGroupIds.has(String(g.id));
+            const count = (g.layers || []).length;
+            return `<option value="${esc(g.id)}" ${defaultTarget && String(defaultTarget.id) === String(g.id) ? 'selected' : ''}>${esc(g.name)} (${count} ${count === 1 ? 'item' : 'items'})${isCurrent ? ' — current' : ''}</option>`;
+        }).join('')}
                         </select>
                     </div>
                     <div class="tk-field-group" id="tkMoveNewGroupWrap" hidden>
@@ -7400,8 +7822,8 @@
                 metadata_json: clonedMeta
             };
             delete copy.estimatingItemId;
-            targetGroup.layers = targetGroup.layers || [];
-            targetGroup.layers.push(copy);
+            copyAssemblyContextOntoLayer(layer, copy, estId);
+            insertCopiedLayerAfterSource(targetGroup, layer, copy);
             created.push(copy);
         });
         targetGroup.isExpanded = true;
@@ -7567,8 +7989,8 @@
                 metadata_json: clonedMeta
             };
             delete newLayer.estimatingItemId;
-            targetGroup.layers = targetGroup.layers || [];
-            targetGroup.layers.push(newLayer);
+            copyAssemblyContextOntoLayer(srcLayer, newLayer, srcEstId);
+            insertCopiedLayerAfterSource(targetGroup, srcLayer, newLayer);
             createdLayers.push(newLayer);
 
             if (dstDrawingId > 0) {
@@ -8011,25 +8433,22 @@
             itemInfo.style.marginLeft = '';
         }
 
-        // 3: Match drawing scale button width with save project button & center in exact same location
+        // Align #takeoffScaleStatus directly underneath #saveProjectBtn without flickering or jumping on click
         const saveBtn = document.getElementById('saveProjectBtn');
         const scaleBtn = document.getElementById('takeoffScaleStatus');
         const scaleSlot = document.getElementById('takeoffSubheadScaleSlot');
         if (saveBtn && scaleBtn && scaleSlot) {
+            if (scaleBtn.getClientRects().length === 0 || scaleSlot.getClientRects().length === 0) {
+                return;
+            }
+            const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || parseFloat(getComputedStyle(document.body).zoom) || 1;
             const btnLabel = (saveBtn.textContent || '').trim();
             const isTransientSaveState = Boolean(saveBtn.disabled || /^(saving\b|saved\b)/i.test(btnLabel));
+            if (forceResetCache && !isTransientSaveState) {
+                delete saveBtn.dataset.intrinsicWidth;
+                saveBtn.style.minWidth = '';
+            }
             if (!isTransientSaveState) {
-                if (forceResetCache || !saveBtn.dataset.intrinsicWidth) {
-                    saveBtn.style.minWidth = '';
-                    saveBtn.style.boxSizing = 'border-box';
-                    const intrinsicRect = saveBtn.getBoundingClientRect();
-                    if (intrinsicRect.width > 0) {
-                        const intrinsicPx = Math.ceil(intrinsicRect.width);
-                        saveBtn.dataset.intrinsicWidth = String(intrinsicPx);
-                        saveBtn.style.minWidth = `${intrinsicPx}px`;
-                        saveBtn.style.justifyContent = 'center';
-                    }
-                }
                 const liveRect = saveBtn.getBoundingClientRect();
                 if (liveRect.width > 0) {
                     cachedSaveBtnMetrics = {
@@ -8038,30 +8457,31 @@
                     };
                 }
             }
-            const saveRect = (!isTransientSaveState && cachedSaveBtnMetrics) ? cachedSaveBtnMetrics : cachedSaveBtnMetrics;
+            const saveRect = cachedSaveBtnMetrics;
             if (saveRect && saveRect.width > 0) {
-                // 1. Give scale button the width of save project minus 2px (1px each side)
-                const targetW = Math.max(20, Math.round(saveRect.width) - 2);
-                const widthPx = `${targetW}px`;
-                scaleBtn.style.width = widthPx;
-                scaleBtn.style.minWidth = widthPx;
-                scaleBtn.style.maxWidth = widthPx;
-                scaleBtn.style.overflow = 'hidden';
-                scaleBtn.style.textOverflow = 'ellipsis';
-                scaleBtn.style.whiteSpace = 'nowrap';
+                const targetW = Math.max(20, Math.round(saveRect.width / zoom));
+                const prevW = parseFloat(scaleBtn.style.width) || 0;
+                if (Math.abs(prevW - targetW) > 0.5) {
+                    const widthPx = `${targetW}px`;
+                    scaleBtn.style.width = widthPx;
+                    scaleBtn.style.minWidth = widthPx;
+                    scaleBtn.style.maxWidth = widthPx;
+                    scaleBtn.style.overflow = 'hidden';
+                    scaleBtn.style.textOverflow = 'ellipsis';
+                    scaleBtn.style.whiteSpace = 'nowrap';
+                }
 
-                // 2. Reset marginRight to 0 to read the natural unshifted layout position
-                scaleSlot.style.marginRight = '0px';
-                const scaleRect = scaleBtn.getBoundingClientRect();
-
-                // 3. Align centers: calculate how much scale is further right than save, nudged 2.5px right
-                const saveCenter = saveRect.left + (saveRect.width / 2);
-                const scaleCenter = scaleRect.left + (scaleRect.width / 2);
-                const diff = Number(((scaleCenter - saveCenter) - 2.5).toFixed(1));
-                if (diff > 0) {
-                    scaleSlot.style.marginRight = `${diff}px`;
-                } else {
-                    scaleSlot.style.marginRight = '0px';
+                // Read current position and infer unshifted right edge without resetting marginRight to '0px'
+                const appliedMarginCss = parseFloat(scaleSlot.style.marginRight) || 0;
+                const slotRect = scaleSlot.getBoundingClientRect();
+                if (slotRect.width > 0) {
+                    const unshiftedRight = slotRect.right + (appliedMarginCss * zoom);
+                    const saveCenter = saveRect.left + (saveRect.width / 2);
+                    const desiredRight = saveCenter + ((targetW * zoom) / 2);
+                    const targetMarginCss = Math.max(0, Number(((unshiftedRight - desiredRight) / zoom).toFixed(1)));
+                    if (Math.abs(appliedMarginCss - targetMarginCss) > 0.25) {
+                        scaleSlot.style.marginRight = `${targetMarginCss}px`;
+                    }
                 }
             }
         }
@@ -8382,29 +8802,38 @@
         if ($('takeoffDrawingDropdown')?.classList.contains('open')) renderDrawingDropdown();
     }
 
+    function syncVisibilityToEditorBatch(layers, visible) {
+        const list = (layers || []).filter(Boolean);
+        if (!list.length) return;
+        const win = takeoffWindow();
+        if (win && typeof win.projectTakeoffSetLayersVisibility === 'function') {
+            win.projectTakeoffSetLayersVisibility(list.map(layer => ({ id: layer.id, visible: Boolean(visible) })));
+        } else {
+            list.forEach(layer => callEditor('projectTakeoffSetLayerVisibility', layer.id, Boolean(visible)));
+        }
+    }
+
     function toggleLayerVisibility(layerId, visible) {
         const layer = findLayer(layerId);
         if (!layer) return;
         layer.visible = Boolean(visible);
         pushTakeoffHistory('toggle-layer-visibility');
-        callEditor('projectTakeoffSetLayerVisibility', layer.id, layer.visible);
-
-        saveTakeoffState();
+        syncVisibilityToEditorBatch([layer], layer.visible);
+        saveTakeoffState({ skipEstimatingSync: true, debounceLocalSave: true });
         renderTakeoffPanel();
-        syncAllLayersToCanvas();
     }
 
     function toggleGroupVisibility(groupId, visible) {
         const group = findGroup(groupId);
         if (!group) return;
+        const targetVisible = Boolean(visible);
         pushTakeoffHistory('toggle-group-visibility');
         (group.layers || []).forEach(layer => {
-            layer.visible = Boolean(visible);
-            callEditor('projectTakeoffSetLayerVisibility', layer.id, layer.visible);
+            layer.visible = targetVisible;
         });
-        saveTakeoffState();
+        syncVisibilityToEditorBatch(group.layers || [], targetVisible);
+        saveTakeoffState({ skipEstimatingSync: true, debounceLocalSave: true });
         renderTakeoffPanel();
-        syncAllLayersToCanvas();
     }
 
     function applyLayerToCanvas(layer, options = {}) {
@@ -9135,15 +9564,17 @@
     function toggleGlobalVisibility() {
         pushTakeoffHistory('toggle-global-visibility');
         takeoffState.globalVisible = !takeoffState.globalVisible;
+        const targetVisible = Boolean(takeoffState.globalVisible);
+        const activeLayers = [];
         allLayers().forEach(layer => {
-            layer.visible = takeoffState.globalVisible;
-            callEditor('projectTakeoffSetLayerVisibility', layer.id, layer.visible);
+            layer.visible = targetVisible;
+            if (layerBelongsToEstimate(layer)) activeLayers.push(layer);
         });
-        saveTakeoffState();
+        syncVisibilityToEditorBatch(activeLayers, targetVisible);
+        saveTakeoffState({ skipEstimatingSync: true, debounceLocalSave: true });
         renderTakeoffPanel();
-        syncAllLayersToCanvas();
         const button = document.querySelector('[data-takeoff-action="toggle-global-visibility"] i');
-        if (button) button.className = takeoffState.globalVisible ? 'fas fa-eye' : 'fas fa-eye-slash';
+        if (button) button.className = targetVisible ? 'fas fa-eye' : 'fas fa-eye-slash';
     }
 
     function exportTakeoffQuantities() {
@@ -9372,7 +9803,7 @@
             try {
                 frame.contentWindow.postMessage({ type: 'editor-show-toast', message: text, toastType: type }, '*');
                 return;
-            } catch (_) {}
+            } catch (_) { }
         }
 
         const old = document.querySelector('.toast-lite');
@@ -9492,6 +9923,7 @@
         if (icon) icon.style.display = 'none';
         if (label) label.textContent = hasScale ? `Scale: ${scaleText}` : 'Not Drawing Scale';
         button.title = hasScale ? `Drawing scale: ${scaleText}` : 'Set drawing scale';
+        syncTakeoffSubheadAlignment();
 
         const panel = $('takeoffScalePanel');
         const isPanelOpen = panel?.classList.contains('open');
@@ -10537,6 +10969,11 @@
                 handleFastLayerQtyUpdate(event.data.payload);
                 return;
             }
+            if (event.data?.type === 'project-takeoff-layer-qty') {
+                if (event.source !== takeoffWindow()) return;
+                handleFastLayerQtyUpdate(event.data.payload);
+                return;
+            }
             if (event.data?.type === 'project-takeoff-state') {
                 if (event.source !== takeoffWindow()) return;
                 syncTakeoffFromCanvasSnapshot(event.data.payload);
@@ -10678,6 +11115,11 @@
             }
             if (event.data?.type === 'takeoff-editor-state-loaded') {
                 if (event.source !== takeoffWindow()) return;
+                const loadedEstKey = String(event.data?.payload?.estimateKey || activeEstimateId() || '').trim();
+                const pendingDel = loadedEstKey ? pendingDeletedTakeoffLayersByEstimate.get(loadedEstKey) : null;
+                if (pendingDel && pendingDel.size > 0) {
+                    callEditor('projectTakeoffDeleteLayers', [...pendingDel], { force: true });
+                }
                 syncAllLayersToCanvas({ suppressEstimatingSync: true });
                 const active = findLayer(takeoffState.activeLayerId);
                 if (active) applyLayerToCanvas(active, { skipLayerSync: true });
@@ -11149,6 +11591,13 @@
         $('takeoffZoomSlider')?.addEventListener('input', event => setZoom(event.target.value));
         initTakeoffState();
         takeoffDomInitialized = true;
+        if (pendingDeletedTakeoffLayersByEstimate.size > 0) {
+            pendingDeletedTakeoffLayersByEstimate.forEach((keySet, estKey) => {
+                if (keySet && keySet.size > 0) {
+                    removeLayersDeletedFromEstimating({ estimateId: estKey, layerKeys: [...keySet] });
+                }
+            });
+        }
         if (pendingInitialEstimatingItemsDetail) {
             const queuedDetail = pendingInitialEstimatingItemsDetail;
             pendingInitialEstimatingItemsDetail = null;
@@ -11178,12 +11627,20 @@
             if (event.key === estimatingStoreKey()) renderTakeoffEstimateFooter();
         });
         window.addEventListener('takeoff:active-estimate-changed', (event) => {
-            const estimateId = event.detail?.estimateId || activeEstimateId();
+            const prevEstId = String(takeoffState.activeEstimateId || '');
+            const estimateId = String(event.detail?.estimateId || activeEstimateId());
             const forceReload = Boolean(event.detail?.cloned);
-            takeoffState.activeEstimateId = String(estimateId);
+            if (prevEstId && prevEstId !== estimateId && estimatingSyncTimer) {
+                clearTimeout(estimatingSyncTimer);
+                estimatingSyncTimer = null;
+                syncTakeoffToEstimating(prevEstId);
+            }
+            takeoffState.activeEstimateId = estimateId;
             setSelectedObjects([]);
             renderTakeoffEstimateFooter();
-            setTimeout(() => {
+            clearTimeout(activeEstimateSwitchTimer);
+            activeEstimateSwitchTimer = setTimeout(() => {
+                activeEstimateSwitchTimer = null;
                 ensureEstimateTakeoffWorkspace(estimateId, true);
                 ensureEditorEstimate(estimateId, forceReload);
                 renderTakeoffPanel();
@@ -11263,9 +11720,17 @@
             syncTakeoffSubheadAlignment(true);
             repositionLayerModal();
         });
-        setTimeout(syncTakeoffSubheadAlignment, 200);
+        syncTakeoffSubheadAlignment(true);
+        setTimeout(() => syncTakeoffSubheadAlignment(true), 60);
+        if (document.fonts && typeof document.fonts.ready?.then === 'function') {
+            document.fonts.ready.then(() => syncTakeoffSubheadAlignment(true));
+        }
         document.querySelector('[data-tab="takeoff"]')?.addEventListener('click', () => {
-            setTimeout(syncTakeoffSubheadAlignment, 50);
+            syncTakeoffSubheadAlignment(true);
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(() => syncTakeoffSubheadAlignment(true));
+            }
+            setTimeout(() => syncTakeoffSubheadAlignment(true), 50);
             updateSubheadSelectedItem();
         });
         document.querySelectorAll('[data-tab="estimating"], [data-tab="proposal"], #saveProjectBtn, [data-takeoff-estimating-action]').forEach(el => {
@@ -11282,6 +11747,11 @@
             });
             const viewer = document.querySelector('.pro-takeoff-viewer');
             if (viewer) observer.observe(viewer);
+            const subheadAlignObserver = new ResizeObserver(() => syncTakeoffSubheadAlignment(true));
+            const saveBtnEl = document.getElementById('saveProjectBtn');
+            const topTabsEl = document.querySelector('.top-tabs');
+            if (saveBtnEl) subheadAlignObserver.observe(saveBtnEl);
+            if (topTabsEl) subheadAlignObserver.observe(topTabsEl);
         }
         syncWorkspaceDensity();
         document.addEventListener('fullscreenchange', () => {

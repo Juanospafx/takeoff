@@ -14,15 +14,16 @@ class ProjectTemplateService
     public static function tableExists(PDO $pdo, string $table): bool
     {
         try {
-            $driver = (string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+            $driver = (string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
             if ($driver === 'sqlite') {
                 $stmt = $pdo->prepare("SELECT 1 FROM sqlite_master WHERE type='table' AND name=? LIMIT 1");
                 $stmt->execute([$table]);
-                return (bool)$stmt->fetchColumn();
+                return (bool) $stmt->fetchColumn();
             }
             $stmt = $pdo->prepare("SELECT 1 FROM information_schema.tables WHERE table_schema = DATABASE() AND table_name = ? LIMIT 1");
             $stmt->execute([$table]);
-            if ($stmt->fetchColumn()) return true;
+            if ($stmt->fetchColumn())
+                return true;
         } catch (Throwable $e) {
         }
         try {
@@ -37,19 +38,22 @@ class ProjectTemplateService
     {
         static $cache = [];
         $key = spl_object_hash($pdo) . ':' . $table;
-        if (isset($cache[$key])) return $cache[$key];
+        if (isset($cache[$key]))
+            return $cache[$key];
         $cols = [];
         try {
-            $driver = (string)$pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
+            $driver = (string) $pdo->getAttribute(PDO::ATTR_DRIVER_NAME);
             if ($driver === 'sqlite') {
                 $stmt = $pdo->query("PRAGMA table_info(`{$table}`)");
                 foreach (($stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : []) as $row) {
-                    if (!empty($row['name'])) $cols[(string)$row['name']] = true;
+                    if (!empty($row['name']))
+                        $cols[(string) $row['name']] = true;
                 }
             } else {
                 $stmt = $pdo->query("SHOW COLUMNS FROM `{$table}`");
                 foreach (($stmt ? $stmt->fetchAll(PDO::FETCH_ASSOC) : []) as $row) {
-                    if (!empty($row['Field'])) $cols[(string)$row['Field']] = true;
+                    if (!empty($row['Field']))
+                        $cols[(string) $row['Field']] = true;
                 }
             }
         } catch (Throwable $e) {
@@ -68,11 +72,11 @@ class ProjectTemplateService
             try {
                 $row = $pdo->query("SELECT * FROM company_settings ORDER BY id ASC LIMIT 1")->fetch(PDO::FETCH_ASSOC);
                 if (is_array($row)) {
-                    if (isset($row['labor_cost_rate']) && is_numeric($row['labor_cost_rate']) && (float)$row['labor_cost_rate'] > 0) {
-                        $laborCost = (float)$row['labor_cost_rate'];
+                    if (isset($row['labor_cost_rate']) && is_numeric($row['labor_cost_rate']) && (float) $row['labor_cost_rate'] > 0) {
+                        $laborCost = (float) $row['labor_cost_rate'];
                     }
-                    if (isset($row['labor_margin_percent']) && is_numeric($row['labor_margin_percent']) && (float)$row['labor_margin_percent'] > 0) {
-                        $laborMargin = (float)$row['labor_margin_percent'];
+                    if (isset($row['labor_margin_percent']) && is_numeric($row['labor_margin_percent']) && (float) $row['labor_margin_percent'] > 0) {
+                        $laborMargin = (float) $row['labor_margin_percent'];
                     }
                 }
             } catch (Throwable $e) {
@@ -110,7 +114,8 @@ class ProjectTemplateService
 
     public static function decodeJson(?string $raw): array
     {
-        if (!$raw) return [];
+        if (!$raw)
+            return [];
         $decoded = json_decode($raw, true);
         return is_array($decoded) ? $decoded : [];
     }
@@ -124,7 +129,8 @@ class ProjectTemplateService
     {
         $out = [];
         foreach ($items as $item) {
-            if (!is_array($item)) continue;
+            if (!is_array($item))
+                continue;
             $item['quantity'] = 0;
             $item['originalQuantity'] = 0;
             $item['lastSyncedTakeoffQuantity'] = 0;
@@ -134,7 +140,7 @@ class ProjectTemplateService
             $item['quantitySyncStatus'] = 'synced';
             $item['equipmentQuantity'] = 0;
             if ($projectId !== null && $projectId > 0) {
-                $item['projectId'] = (string)$projectId;
+                $item['projectId'] = (string) $projectId;
             }
             if ($clientEstimateId !== null && $clientEstimateId !== '') {
                 $item['estimateId'] = $clientEstimateId;
@@ -150,7 +156,7 @@ class ProjectTemplateService
     public static function zeroWorkspaceData(array $workspace, ?int $projectId = null, ?string $clientEstimateId = null, ?int $dbEstimateId = null): array
     {
         if ($projectId !== null && $projectId > 0) {
-            $workspace['projectId'] = (string)$projectId;
+            $workspace['projectId'] = (string) $projectId;
         }
         if ($clientEstimateId !== null && $clientEstimateId !== '') {
             $workspace['id'] = $clientEstimateId;
@@ -175,7 +181,8 @@ class ProjectTemplateService
         ];
         if (!empty($workspace['groups']) && is_array($workspace['groups'])) {
             foreach ($workspace['groups'] as &$group) {
-                if (!is_array($group)) continue;
+                if (!is_array($group))
+                    continue;
                 if ($clientEstimateId !== null && $clientEstimateId !== '' && !empty($group['estimateId'])) {
                     $group['estimateId'] = $clientEstimateId;
                 }
@@ -190,7 +197,8 @@ class ProjectTemplateService
 
     public static function resetProjectQuantitiesToZero(PDO $pdo, int $projectId): void
     {
-        if ($projectId <= 0) return;
+        if ($projectId <= 0)
+            return;
 
         if (self::tableExists($pdo, 'takeoff_layers')) {
             $layerIdsStmt = $pdo->prepare("SELECT id FROM takeoff_layers WHERE project_id = ?");
@@ -213,11 +221,13 @@ class ProjectTemplateService
             $stStmt->execute([$projectId]);
             $upd = $pdo->prepare("UPDATE takeoff_estimate_states SET state_json = ?, revision = COALESCE(revision, 0) + 1 WHERE estimate_key = ? AND drawing_id = ?");
             foreach ($stStmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
-                $decoded = self::decodeJson((string)($row['state_json'] ?? ''));
-                if (!$decoded) continue;
+                $decoded = self::decodeJson((string) ($row['state_json'] ?? ''));
+                if (!$decoded)
+                    continue;
                 $layers = is_array($decoded['layers'] ?? null) ? $decoded['layers'] : [];
                 foreach ($layers as &$ly) {
-                    if (!is_array($ly)) continue;
+                    if (!is_array($ly))
+                        continue;
                     $ly['quantity'] = 0;
                     $ly['baseQuantity'] = 0;
                     $ly['base_quantity'] = 0;
@@ -242,20 +252,23 @@ class ProjectTemplateService
             $estCols = self::tableColumns($pdo, 'estimates');
             $setParts = [];
             foreach (['subtotal_cost', 'markup_total', 'tax_total', 'total_cost', 'labor_hours_total'] as $col) {
-                if (isset($estCols[$col])) $setParts[] = "`$col` = 0";
+                if (isset($estCols[$col]))
+                    $setParts[] = "`$col` = 0";
             }
             if ($setParts) {
                 $pdo->prepare("UPDATE estimates SET " . implode(', ', $setParts) . " WHERE project_id = ?")->execute([$projectId]);
             }
 
-            $estIds = array_map('intval', $pdo->query("SELECT id FROM estimates WHERE project_id = " . (int)$projectId)->fetchAll(PDO::FETCH_COLUMN) ?: []);
+            $estIds = array_map('intval', $pdo->query("SELECT id FROM estimates WHERE project_id = " . (int) $projectId)->fetchAll(PDO::FETCH_COLUMN) ?: []);
             if ($estIds && self::tableExists($pdo, 'estimate_items')) {
                 $eiCols = self::tableColumns($pdo, 'estimate_items');
                 $eiSets = [];
                 foreach (['quantity', 'material_cost', 'labor_cost', 'equipment_cost', 'subcontractor_cost', 'labor_hours', 'subtotal_cost', 'total_cost'] as $col) {
-                    if (isset($eiCols[$col])) $eiSets[] = "`$col` = 0";
+                    if (isset($eiCols[$col]))
+                        $eiSets[] = "`$col` = 0";
                 }
-                if (isset($eiCols['is_quantity_locked_from_takeoff'])) $eiSets[] = "is_quantity_locked_from_takeoff = 1";
+                if (isset($eiCols['is_quantity_locked_from_takeoff']))
+                    $eiSets[] = "is_quantity_locked_from_takeoff = 1";
                 if ($eiSets) {
                     $in = implode(',', array_fill(0, count($estIds), '?'));
                     $pdo->prepare("UPDATE estimate_items SET " . implode(', ', $eiSets) . " WHERE estimate_id IN ($in)")->execute($estIds);
@@ -266,12 +279,13 @@ class ProjectTemplateService
                 $wsStmt->execute([$projectId]);
                 $wsUpd = $pdo->prepare("UPDATE estimate_workspace_states SET state_json = ?, revision = COALESCE(revision, 0) + 1 WHERE estimate_id = ?");
                 foreach ($wsStmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $ws) {
-                    $decoded = self::decodeJson((string)($ws['state_json'] ?? ''));
-                    if (!$decoded) continue;
-                    $zeroed = self::zeroWorkspaceData($decoded, $projectId, (string)$ws['client_estimate_id'], (int)$ws['estimate_id']);
+                    $decoded = self::decodeJson((string) ($ws['state_json'] ?? ''));
+                    if (!$decoded)
+                        continue;
+                    $zeroed = self::zeroWorkspaceData($decoded, $projectId, (string) $ws['client_estimate_id'], (int) $ws['estimate_id']);
                     $encoded = json_encode($zeroed, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
                     if ($encoded !== false) {
-                        $wsUpd->execute([$encoded, (int)$ws['estimate_id']]);
+                        $wsUpd->execute([$encoded, (int) $ws['estimate_id']]);
                     }
                 }
             }
@@ -285,7 +299,8 @@ class ProjectTemplateService
      */
     public static function listTemplates(PDO $pdo): array
     {
-        if (!self::tableExists($pdo, 'project_templates')) return [];
+        if (!self::tableExists($pdo, 'project_templates'))
+            return [];
 
         $tplRows = $pdo->query("SELECT * FROM project_templates WHERE deleted_at IS NULL ORDER BY id ASC")->fetchAll(PDO::FETCH_ASSOC) ?: [];
         $projRows = self::tableExists($pdo, 'projects')
@@ -295,9 +310,9 @@ class ProjectTemplateService
         $projById = [];
         $projByName = [];
         foreach ($projRows as $pr) {
-            $pid = (int)$pr['id'];
+            $pid = (int) $pr['id'];
             $projById[$pid] = $pr;
-            $key = strtolower(trim((string)$pr['name']));
+            $key = strtolower(trim((string) $pr['name']));
             if ($key !== '' && !isset($projByName[$key])) {
                 $projByName[$key] = $pid;
             }
@@ -311,21 +326,23 @@ class ProjectTemplateService
 
         foreach ($tplRows as &$tpl) {
             $settings = self::decodeJson($tpl['settings_json'] ?? null);
-            $sourcePid = isset($settings['source_project_id']) ? (int)$settings['source_project_id'] : 0;
+            $sourcePid = isset($settings['source_project_id']) ? (int) $settings['source_project_id'] : 0;
             if ($sourcePid <= 0 || !isset($projById[$sourcePid])) {
-                $nameKey = strtolower(trim((string)($tpl['name'] ?? '')));
+                $nameKey = strtolower(trim((string) ($tpl['name'] ?? '')));
                 if ($nameKey !== '' && isset($projByName[$nameKey])) {
-                    $sourcePid = (int)$projByName[$nameKey];
+                    $sourcePid = (int) $projByName[$nameKey];
                     $settings['source_project_id'] = $sourcePid;
                     $tpl['settings_json'] = json_encode($settings, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-                    if ($updSettings) $updSettings->execute([$tpl['settings_json'], (int)$tpl['id']]);
+                    if ($updSettings)
+                        $updSettings->execute([$tpl['settings_json'], (int) $tpl['id']]);
                 } else {
                     foreach ($projRows as $pr) {
-                        if ((int)($pr['project_template_id'] ?? 0) === (int)$tpl['id'] && strtolower(trim((string)$pr['status'])) === 'templates') {
-                            $sourcePid = (int)$pr['id'];
+                        if ((int) ($pr['project_template_id'] ?? 0) === (int) $tpl['id'] && strtolower(trim((string) $pr['status'])) === 'templates') {
+                            $sourcePid = (int) $pr['id'];
                             $settings['source_project_id'] = $sourcePid;
                             $tpl['settings_json'] = json_encode($settings, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
-                            if ($updSettings) $updSettings->execute([$tpl['settings_json'], (int)$tpl['id']]);
+                            if ($updSettings)
+                                $updSettings->execute([$tpl['settings_json'], (int) $tpl['id']]);
                             break;
                         }
                     }
@@ -333,7 +350,7 @@ class ProjectTemplateService
             }
             if ($sourcePid > 0 && isset($projById[$sourcePid])) {
                 $tpl['source_project_id'] = $sourcePid;
-                $linkedProjectIds[$sourcePid] = (int)$tpl['id'];
+                $linkedProjectIds[$sourcePid] = (int) $tpl['id'];
             } else {
                 $tpl['source_project_id'] = null;
             }
@@ -342,9 +359,11 @@ class ProjectTemplateService
 
         // Auto-register any project with status = 'templates' not yet represented
         foreach ($projRows as $pr) {
-            if (strtolower(trim((string)($pr['status'] ?? ''))) !== 'templates') continue;
-            $pid = (int)$pr['id'];
-            if (isset($linkedProjectIds[$pid])) continue;
+            if (strtolower(trim((string) ($pr['status'] ?? ''))) !== 'templates')
+                continue;
+            $pid = (int) $pr['id'];
+            if (isset($linkedProjectIds[$pid]))
+                continue;
             $newId = self::upsertTemplateEntryForProject($pdo, $pid, $pr['name'], $pr['description'] ?? null);
             if ($newId > 0) {
                 $tplRows[] = [
@@ -360,25 +379,27 @@ class ProjectTemplateService
         }
 
         $active = array_values(array_filter($tplRows, function ($t) {
-            if ((int)($t['active'] ?? 1) !== 1) return false;
+            if ((int) ($t['active'] ?? 1) !== 1)
+                return false;
             return !empty($t['source_project_id']);
         }));
         usort($active, function ($a, $b) {
-            return strcasecmp((string)($a['name'] ?? ''), (string)($b['name'] ?? ''));
+            return strcasecmp((string) ($a['name'] ?? ''), (string) ($b['name'] ?? ''));
         });
         return $active;
     }
 
     public static function upsertTemplateEntryForProject(PDO $pdo, int $projectId, string $name, ?string $description = null): int
     {
-        if (!self::tableExists($pdo, 'project_templates') || $projectId <= 0) return 0;
+        if (!self::tableExists($pdo, 'project_templates') || $projectId <= 0)
+            return 0;
         $rows = $pdo->query("SELECT id, name, settings_json FROM project_templates WHERE deleted_at IS NULL")->fetchAll(PDO::FETCH_ASSOC) ?: [];
         $matchedId = 0;
         $matchedSettings = [];
         foreach ($rows as $row) {
             $s = self::decodeJson($row['settings_json'] ?? null);
-            if ((int)($s['source_project_id'] ?? 0) === $projectId || strcasecmp(trim((string)$row['name']), trim($name)) === 0) {
-                $matchedId = (int)$row['id'];
+            if ((int) ($s['source_project_id'] ?? 0) === $projectId || strcasecmp(trim((string) $row['name']), trim($name)) === 0) {
+                $matchedId = (int) $row['id'];
                 $matchedSettings = $s;
                 break;
             }
@@ -392,43 +413,46 @@ class ProjectTemplateService
         }
         $stmt = $pdo->prepare("INSERT INTO project_templates (name, description, trade, settings_json, active) VALUES (?, ?, 'Electrical', ?, 1)");
         $stmt->execute([trim($name), $description, $settingsJson]);
-        return (int)$pdo->lastInsertId();
+        return (int) $pdo->lastInsertId();
     }
 
     public static function syncTemplateStatusForProject(PDO $pdo, int $projectId): void
     {
-        if ($projectId <= 0 || !self::tableExists($pdo, 'projects') || !self::tableExists($pdo, 'project_templates')) return;
+        if ($projectId <= 0 || !self::tableExists($pdo, 'projects') || !self::tableExists($pdo, 'project_templates'))
+            return;
         $stmt = $pdo->prepare("SELECT id, name, description, status FROM projects WHERE id = ? AND deleted_at IS NULL LIMIT 1");
         $stmt->execute([$projectId]);
         $proj = $stmt->fetch(PDO::FETCH_ASSOC);
-        if (!$proj) return;
-        $isTemplate = strtolower(trim((string)($proj['status'] ?? ''))) === 'templates';
+        if (!$proj)
+            return;
+        $isTemplate = strtolower(trim((string) ($proj['status'] ?? ''))) === 'templates';
         if ($isTemplate) {
-            self::upsertTemplateEntryForProject($pdo, $projectId, (string)$proj['name'], $proj['description'] ?? null);
+            self::upsertTemplateEntryForProject($pdo, $projectId, (string) $proj['name'], $proj['description'] ?? null);
             return;
         }
         $rows = $pdo->query("SELECT id, settings_json FROM project_templates WHERE deleted_at IS NULL")->fetchAll(PDO::FETCH_ASSOC) ?: [];
         $deact = $pdo->prepare("UPDATE project_templates SET active = 0 WHERE id = ?");
         foreach ($rows as $row) {
             $s = self::decodeJson($row['settings_json'] ?? null);
-            if ((int)($s['source_project_id'] ?? 0) === $projectId) {
-                $deact->execute([(int)$row['id']]);
+            if ((int) ($s['source_project_id'] ?? 0) === $projectId) {
+                $deact->execute([(int) $row['id']]);
             }
         }
     }
 
     public static function resolveTemplateSource(PDO $pdo, int $templateOrProjectId): array
     {
-        if ($templateOrProjectId <= 0) return [0, 'Template'];
+        if ($templateOrProjectId <= 0)
+            return [0, 'Template'];
         $templates = self::listTemplates($pdo);
         foreach ($templates as $tpl) {
-            if ((int)$tpl['id'] === $templateOrProjectId) {
-                return [(int)$tpl['source_project_id'], (string)$tpl['name']];
+            if ((int) $tpl['id'] === $templateOrProjectId) {
+                return [(int) $tpl['source_project_id'], (string) $tpl['name']];
             }
         }
         foreach ($templates as $tpl) {
-            if ((int)($tpl['source_project_id'] ?? 0) === $templateOrProjectId) {
-                return [$templateOrProjectId, (string)$tpl['name']];
+            if ((int) ($tpl['source_project_id'] ?? 0) === $templateOrProjectId) {
+                return [$templateOrProjectId, (string) $tpl['name']];
             }
         }
         $stmt = $pdo->prepare("SELECT id, name FROM project_templates WHERE id = ? AND deleted_at IS NULL LIMIT 1");
@@ -438,25 +462,27 @@ class ProjectTemplateService
             $settings = [];
             $pStmt = $pdo->prepare("SELECT id FROM projects WHERE LOWER(TRIM(name)) = LOWER(TRIM(?)) AND deleted_at IS NULL LIMIT 1");
             $pStmt->execute([$rawTpl['name']]);
-            $pid = (int)$pStmt->fetchColumn();
-            if ($pid > 0) return [$pid, (string)$rawTpl['name']];
+            $pid = (int) $pStmt->fetchColumn();
+            if ($pid > 0)
+                return [$pid, (string) $rawTpl['name']];
         }
         $stmtP = $pdo->prepare("SELECT id, name, status FROM projects WHERE id = ? AND deleted_at IS NULL LIMIT 1");
         $stmtP->execute([$templateOrProjectId]);
         $proj = $stmtP->fetch(PDO::FETCH_ASSOC);
-        if ($proj && strtolower(trim((string)$proj['status'])) === 'templates') {
-            return [(int)$proj['id'], (string)$proj['name']];
+        if ($proj && strtolower(trim((string) $proj['status'])) === 'templates') {
+            return [(int) $proj['id'], (string) $proj['name']];
         }
         return [0, $rawTpl['name'] ?? 'Template'];
     }
 
     public static function deepCloneProjectWorkspace(PDO $pdo, int $sourceId, int $newId, array $options = []): void
     {
-        $includeDocuments = array_key_exists('includeDocuments', $options) ? (bool)$options['includeDocuments'] : true;
+        $includeDocuments = array_key_exists('includeDocuments', $options) ? (bool) $options['includeDocuments'] : true;
         $resetQuantities = !empty($options['resetQuantities']);
 
         $inTransaction = $pdo->inTransaction();
-        if (!$inTransaction) $pdo->beginTransaction();
+        if (!$inTransaction)
+            $pdo->beginTransaction();
 
         try {
             $folderMap = [];
@@ -474,63 +500,63 @@ class ProjectTemplateService
                     $stmt = $pdo->prepare("SELECT * FROM folders WHERE project_id = ? ORDER BY COALESCE(parent_id, 0) ASC, id ASC");
                     $stmt->execute([$sourceId]);
                     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $f) {
-                        $oldFid = (int)$f['id'];
+                        $oldFid = (int) $f['id'];
                         unset($f['id'], $f['created_at'], $f['updated_at']);
                         $f['project_id'] = $newId;
-                        if (isset($f['parent_id']) && $f['parent_id'] !== null && isset($folderMap[(int)$f['parent_id']])) {
-                            $f['parent_id'] = $folderMap[(int)$f['parent_id']];
+                        if (isset($f['parent_id']) && $f['parent_id'] !== null && isset($folderMap[(int) $f['parent_id']])) {
+                            $f['parent_id'] = $folderMap[(int) $f['parent_id']];
                         }
                         $cols = array_keys($f);
                         $pdo->prepare("INSERT INTO folders (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute(array_values($f));
-                        $folderMap[$oldFid] = (int)$pdo->lastInsertId();
+                        $folderMap[$oldFid] = (int) $pdo->lastInsertId();
                     }
                 }
                 if (self::tableExists($pdo, 'document_folders')) {
                     $stmt = $pdo->prepare("SELECT * FROM document_folders WHERE project_id = ? ORDER BY COALESCE(parent_folder_id, 0) ASC, id ASC");
                     $stmt->execute([$sourceId]);
                     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $df) {
-                        $oldDfid = (int)$df['id'];
+                        $oldDfid = (int) $df['id'];
                         unset($df['id'], $df['created_at'], $df['updated_at'], $df['deleted_at']);
                         $df['project_id'] = $newId;
-                        if (isset($df['parent_folder_id']) && $df['parent_folder_id'] !== null && isset($docFolderMap[(int)$df['parent_folder_id']])) {
-                            $df['parent_folder_id'] = $docFolderMap[(int)$df['parent_folder_id']];
+                        if (isset($df['parent_folder_id']) && $df['parent_folder_id'] !== null && isset($docFolderMap[(int) $df['parent_folder_id']])) {
+                            $df['parent_folder_id'] = $docFolderMap[(int) $df['parent_folder_id']];
                         }
                         $cols = array_keys($df);
                         $pdo->prepare("INSERT INTO document_folders (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute(array_values($df));
-                        $docFolderMap[$oldDfid] = (int)$pdo->lastInsertId();
+                        $docFolderMap[$oldDfid] = (int) $pdo->lastInsertId();
                     }
                 }
                 if (self::tableExists($pdo, 'files')) {
                     $stmt = $pdo->prepare("SELECT * FROM files WHERE project_id = ? AND deleted_at IS NULL");
                     $stmt->execute([$sourceId]);
                     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $fl) {
-                        $oldFlId = (int)$fl['id'];
+                        $oldFlId = (int) $fl['id'];
                         unset($fl['id'], $fl['created_at'], $fl['updated_at'], $fl['deleted_at']);
                         $fl['project_id'] = $newId;
-                        if (isset($fl['folder_id']) && $fl['folder_id'] !== null && isset($folderMap[(int)$fl['folder_id']])) {
-                            $fl['folder_id'] = $folderMap[(int)$fl['folder_id']];
+                        if (isset($fl['folder_id']) && $fl['folder_id'] !== null && isset($folderMap[(int) $fl['folder_id']])) {
+                            $fl['folder_id'] = $folderMap[(int) $fl['folder_id']];
                         }
                         $cols = array_keys($fl);
                         $pdo->prepare("INSERT INTO files (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute(array_values($fl));
-                        $fileMap[$oldFlId] = (int)$pdo->lastInsertId();
+                        $fileMap[$oldFlId] = (int) $pdo->lastInsertId();
                     }
                 }
                 if (self::tableExists($pdo, 'project_documents')) {
                     $stmt = $pdo->prepare("SELECT * FROM project_documents WHERE project_id = ? AND deleted_at IS NULL");
                     $stmt->execute([$sourceId]);
                     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $dc) {
-                        $oldDcId = (int)$dc['id'];
+                        $oldDcId = (int) $dc['id'];
                         unset($dc['id'], $dc['created_at'], $dc['updated_at'], $dc['deleted_at']);
                         $dc['project_id'] = $newId;
-                        if (isset($dc['document_folder_id']) && $dc['document_folder_id'] !== null && isset($docFolderMap[(int)$dc['document_folder_id']])) {
-                            $dc['document_folder_id'] = $docFolderMap[(int)$dc['document_folder_id']];
+                        if (isset($dc['document_folder_id']) && $dc['document_folder_id'] !== null && isset($docFolderMap[(int) $dc['document_folder_id']])) {
+                            $dc['document_folder_id'] = $docFolderMap[(int) $dc['document_folder_id']];
                         }
-                        if (isset($dc['file_id']) && $dc['file_id'] !== null && isset($fileMap[(int)$dc['file_id']])) {
-                            $dc['file_id'] = $fileMap[(int)$dc['file_id']];
+                        if (isset($dc['file_id']) && $dc['file_id'] !== null && isset($fileMap[(int) $dc['file_id']])) {
+                            $dc['file_id'] = $fileMap[(int) $dc['file_id']];
                         }
                         $cols = array_keys($dc);
                         $pdo->prepare("INSERT INTO project_documents (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute(array_values($dc));
-                        $docMap[$oldDcId] = (int)$pdo->lastInsertId();
+                        $docMap[$oldDcId] = (int) $pdo->lastInsertId();
                     }
                 }
             }
@@ -540,17 +566,18 @@ class ProjectTemplateService
                 $stmt = $pdo->prepare("SELECT * FROM estimates WHERE project_id = ? AND deleted_at IS NULL");
                 $stmt->execute([$sourceId]);
                 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $est) {
-                    $oldEstId = (int)$est['id'];
+                    $oldEstId = (int) $est['id'];
                     unset($est['id'], $est['created_at'], $est['updated_at'], $est['deleted_at']);
                     $est['project_id'] = $newId;
                     if ($resetQuantities) {
                         foreach (['subtotal_cost', 'markup_total', 'tax_total', 'total_cost', 'labor_hours_total'] as $zc) {
-                            if (array_key_exists($zc, $est)) $est[$zc] = 0;
+                            if (array_key_exists($zc, $est))
+                                $est[$zc] = 0;
                         }
                     }
                     $cols = array_keys($est);
                     $pdo->prepare("INSERT INTO estimates (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute(array_values($est));
-                    $estimateMap[$oldEstId] = (int)$pdo->lastInsertId();
+                    $estimateMap[$oldEstId] = (int) $pdo->lastInsertId();
                 }
             }
 
@@ -561,22 +588,28 @@ class ProjectTemplateService
                 $stmt->execute($estIds);
                 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $mkp) {
                     unset($mkp['id'], $mkp['created_at'], $mkp['updated_at']);
-                    $mkp['estimate_id'] = $estimateMap[(int)$mkp['estimate_id']] ?? $mkp['estimate_id'];
+                    $mkp['estimate_id'] = $estimateMap[(int) $mkp['estimate_id']] ?? $mkp['estimate_id'];
                     $cols = array_keys($mkp);
                     $pdo->prepare("INSERT INTO estimate_markups (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute(array_values($mkp));
                 }
             }
 
+            // 5. Estimate Workspace States (preserving primary estimate, markups, summary rates & group/item order)
+            $wsLayerOrderByEst = [];
+            $wsHasGroupsByEst = [];
+            $wsLiveItemIdsByEst = [];
+            $wsSyncModeByEst = [];
             if (self::tableExists($pdo, 'estimate_workspace_states') && !empty($estimateMap)) {
                 $estIds = array_keys($estimateMap);
                 $inClause = implode(',', array_fill(0, count($estIds), '?'));
                 $stmt = $pdo->prepare("SELECT * FROM estimate_workspace_states WHERE estimate_id IN ($inClause)");
                 $stmt->execute($estIds);
                 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $ws) {
-                    $oldEstId = (int)$ws['estimate_id'];
+                    $oldEstId = (int) $ws['estimate_id'];
                     $newEstId = $estimateMap[$oldEstId] ?? null;
-                    if (!$newEstId) continue;
-                    $oldClientId = (string)($ws['client_estimate_id'] ?? '');
+                    if (!$newEstId)
+                        continue;
+                    $oldClientId = (string) ($ws['client_estimate_id'] ?? '');
                     unset($ws['id'], $ws['created_at'], $ws['updated_at']);
                     $ws['estimate_id'] = $newEstId;
                     $ws['project_id'] = $newId;
@@ -585,16 +618,45 @@ class ProjectTemplateService
                     if ($oldClientId !== '') {
                         $estimateClientKeyMap[$oldClientId] = $newClientId;
                     }
-                    $estimateClientKeyMap[(string)$oldEstId] = $newClientId;
+                    $estimateClientKeyMap[(string) $oldEstId] = $newClientId;
                     if (!empty($ws['state_json'])) {
-                        $decoded = json_decode((string)$ws['state_json'], true);
+                        $decoded = json_decode((string) $ws['state_json'], true);
                         if (is_array($decoded)) {
                             $decoded['id'] = $newClientId;
                             $decoded['dbEstimateId'] = $newEstId;
                             $decoded['estimateItemId'] = $newEstId;
-                            $decoded['projectId'] = (string)$newId;
+                            $decoded['projectId'] = (string) $newId;
                             if ($resetQuantities) {
                                 $decoded = self::zeroWorkspaceData($decoded, $newId, $newClientId, $newEstId);
+                            }
+                            if (isset($decoded['groups']) && is_array($decoded['groups'])) {
+                                $seq = 0;
+                                $wsHasGroupsByEst[$newClientId] = true;
+                                $wsSyncModeByEst[$newClientId] = (string) ($decoded['takeoffSyncMode'] ?? 'mirror');
+                                $wsLayerOrderByEst[$newClientId] = [];
+                                $wsLiveItemIdsByEst[$newClientId] = [];
+                                foreach ($decoded['groups'] as $grp) {
+                                    if (!is_array($grp))
+                                        continue;
+                                    $gName = trim((string) ($grp['name'] ?? ''));
+                                    foreach (($grp['items'] ?? []) as $it) {
+                                        if (!is_array($it))
+                                            continue;
+                                        if (!empty($it['parentItemId']) || !empty($it['parent_item_id']) || !empty($it['assemblyParentId']))
+                                            continue;
+                                        $estItemId = trim((string) ($it['id'] ?? ''));
+                                        if ($estItemId !== '') {
+                                            $wsLiveItemIdsByEst[$newClientId][$estItemId] = true;
+                                        }
+                                        $lk = trim((string) ($it['takeoffLayerId'] ?? ''));
+                                        if ($lk !== '' && !isset($wsLayerOrderByEst[$newClientId][$lk])) {
+                                            $wsLayerOrderByEst[$newClientId][$lk] = [
+                                                'order' => $seq++,
+                                                'group_name' => $gName,
+                                            ];
+                                        }
+                                    }
+                                }
                             }
                             $ws['state_json'] = json_encode($decoded, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
                         }
@@ -611,15 +673,18 @@ class ProjectTemplateService
                 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $tk) {
                     if (!$includeDocuments && !empty($tk['drawing_id'])) {
                         // Still allow one base takeoff container when copying without PDFs
-                        if (!empty($takeoffMap)) continue;
+                        if (!empty($takeoffMap))
+                            continue;
                     }
-                    $oldTkId = (int)$tk['id'];
+                    $oldTkId = (int) $tk['id'];
                     unset($tk['id'], $tk['created_at'], $tk['updated_at'], $tk['deleted_at']);
                     $tk['project_id'] = $newId;
                     if ($includeDocuments) {
                         if (isset($tk['drawing_id']) && $tk['drawing_id'] !== null) {
-                            if (isset($fileMap[(int)$tk['drawing_id']])) $tk['drawing_id'] = $fileMap[(int)$tk['drawing_id']];
-                            elseif (isset($docMap[(int)$tk['drawing_id']])) $tk['drawing_id'] = $docMap[(int)$tk['drawing_id']];
+                            if (isset($fileMap[(int) $tk['drawing_id']]))
+                                $tk['drawing_id'] = $fileMap[(int) $tk['drawing_id']];
+                            elseif (isset($docMap[(int) $tk['drawing_id']]))
+                                $tk['drawing_id'] = $docMap[(int) $tk['drawing_id']];
                         }
                     } else {
                         $tk['drawing_id'] = null;
@@ -628,40 +693,88 @@ class ProjectTemplateService
                     }
                     $cols = array_keys($tk);
                     $pdo->prepare("INSERT INTO takeoffs (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute(array_values($tk));
-                    $takeoffMap[$oldTkId] = (int)$pdo->lastInsertId();
+                    $takeoffMap[$oldTkId] = (int) $pdo->lastInsertId();
                 }
             }
 
             // Takeoff Layers (deduped by integration_key + estimate_key if cloning without documents)
             if (self::tableExists($pdo, 'takeoff_layers')) {
-                $stmt = $pdo->prepare("SELECT * FROM takeoff_layers WHERE project_id = ? AND deleted_at IS NULL ORDER BY sort_order ASC, id ASC");
+                $layerCols = self::tableColumns($pdo, 'takeoff_layers');
+                $layerOrderBy = !empty($layerCols['sort_order']) ? 'ORDER BY sort_order ASC, id ASC' : 'ORDER BY id ASC';
+                $stmt = $pdo->prepare("SELECT * FROM takeoff_layers WHERE project_id = ? AND deleted_at IS NULL {$layerOrderBy}");
                 $stmt->execute([$sourceId]);
                 $defaultTargetTakeoffId = $takeoffMap ? reset($takeoffMap) : null;
                 $seenWithoutDocs = [];
-                foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $ly) {
-                    $oldLyId = (int)$ly['id'];
-                    $oldEstimateKey = (string)($ly['estimate_key'] ?? '');
+                $rawLayers = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+                $indexedLayers = [];
+                foreach ($rawLayers as $origIdx => $ly) {
+                    $oldEstimateKey = (string) ($ly['estimate_key'] ?? '');
                     $mappedEstKey = $estimateClientKeyMap[$oldEstimateKey] ?? $oldEstimateKey;
-                    $oldIntegrationKey = (string)($ly['integration_key'] ?? '');
+                    $metaTmp = self::decodeJson($ly['metadata_json'] ?? null);
+                    $ik = (string) ($ly['integration_key'] ?? '');
+                    $plk = (string) ($metaTmp['project_layer_id'] ?? '');
+                    $orderInfo = $wsLayerOrderByEst[$mappedEstKey][$ik] ?? ($plk !== '' ? ($wsLayerOrderByEst[$mappedEstKey][$plk] ?? null) : null);
+                    if ($resetQuantities && !empty($wsHasGroupsByEst[$mappedEstKey])) {
+                        $linkedEstItemId = trim((string) ($metaTmp['estimating_item_id'] ?? ''));
+                        $inWsByLayerKey = ($ik !== '' && isset($wsLayerOrderByEst[$mappedEstKey][$ik]))
+                            || ($plk !== '' && isset($wsLayerOrderByEst[$mappedEstKey][$plk]));
+                        $inWsByEstItem = $linkedEstItemId !== '' && isset($wsLiveItemIdsByEst[$mappedEstKey][$linkedEstItemId]);
+                        $estIsMirror = ($wsSyncModeByEst[$mappedEstKey] ?? 'mirror') !== 'linked-only';
+                        if (!$inWsByLayerKey && !$inWsByEstItem && ($linkedEstItemId !== '' || $estIsMirror || !empty($wsLayerOrderByEst[$mappedEstKey]))) {
+                            // Do not resurrect layers removed from the authoritative estimating workspace when cloning templates
+                            continue;
+                        }
+                    }
+                    $indexedLayers[] = [
+                        'ly' => $ly,
+                        'origIdx' => $origIdx,
+                        'mappedEstKey' => $mappedEstKey,
+                        'orderInfo' => $orderInfo,
+                    ];
+                }
+                usort($indexedLayers, function ($a, $b) {
+                    $oa = $a['orderInfo'] ? (int) $a['orderInfo']['order'] : PHP_INT_MAX;
+                    $ob = $b['orderInfo'] ? (int) $b['orderInfo']['order'] : PHP_INT_MAX;
+                    if ($oa !== $ob)
+                        return $oa <=> $ob;
+                    return $a['origIdx'] <=> $b['origIdx'];
+                });
+                $nextLayerSortByEst = [];
+                foreach ($indexedLayers as $entry) {
+                    $ly = $entry['ly'];
+                    $oldLyId = (int) $ly['id'];
+                    $oldEstimateKey = (string) ($ly['estimate_key'] ?? '');
+                    $mappedEstKey = $entry['mappedEstKey'];
+                    $oldIntegrationKey = (string) ($ly['integration_key'] ?? '');
                     if (!$includeDocuments && $oldIntegrationKey !== '') {
                         $dedupe = $mappedEstKey . '|' . $oldIntegrationKey;
-                        if (isset($seenWithoutDocs[$dedupe])) continue;
+                        if (isset($seenWithoutDocs[$dedupe]))
+                            continue;
                         $seenWithoutDocs[$dedupe] = true;
                     }
                     unset($ly['id'], $ly['created_at'], $ly['updated_at'], $ly['deleted_at']);
                     $ly['project_id'] = $newId;
-                    if (isset($ly['takeoff_id']) && isset($takeoffMap[(int)$ly['takeoff_id']])) {
-                        $ly['takeoff_id'] = $takeoffMap[(int)$ly['takeoff_id']];
+                    if (isset($ly['takeoff_id']) && isset($takeoffMap[(int) $ly['takeoff_id']])) {
+                        $ly['takeoff_id'] = $takeoffMap[(int) $ly['takeoff_id']];
                     } elseif (!$includeDocuments && $defaultTargetTakeoffId) {
                         $ly['takeoff_id'] = $defaultTargetTakeoffId;
                     }
                     if ($mappedEstKey !== '') {
                         $ly['estimate_key'] = $mappedEstKey;
                     }
+                    if (!isset($nextLayerSortByEst[$mappedEstKey])) {
+                        $nextLayerSortByEst[$mappedEstKey] = 0;
+                    }
+                    $ly['sort_order'] = $nextLayerSortByEst[$mappedEstKey]++;
+                    if (!empty($entry['orderInfo']['group_name'])) {
+                        $ly['group_name'] = $entry['orderInfo']['group_name'];
+                    }
                     if ($includeDocuments) {
                         if (isset($ly['drawing_id']) && $ly['drawing_id'] !== null) {
-                            if (isset($fileMap[(int)$ly['drawing_id']])) $ly['drawing_id'] = $fileMap[(int)$ly['drawing_id']];
-                            elseif (isset($docMap[(int)$ly['drawing_id']])) $ly['drawing_id'] = $docMap[(int)$ly['drawing_id']];
+                            if (isset($fileMap[(int) $ly['drawing_id']]))
+                                $ly['drawing_id'] = $fileMap[(int) $ly['drawing_id']];
+                            elseif (isset($docMap[(int) $ly['drawing_id']]))
+                                $ly['drawing_id'] = $docMap[(int) $ly['drawing_id']];
                         }
                     } else {
                         $ly['drawing_id'] = null;
@@ -671,14 +784,17 @@ class ProjectTemplateService
                     }
                     $meta = self::decodeJson($ly['metadata_json'] ?? null);
                     if ($meta) {
-                        if ($mappedEstKey !== '') $meta['estimate_id'] = $mappedEstKey;
-                        if (!$includeDocuments) unset($meta['file_drawing_id']);
-                        if ($resetQuantities) $meta['base_quantity'] = 0;
+                        if ($mappedEstKey !== '')
+                            $meta['estimate_id'] = $mappedEstKey;
+                        if (!$includeDocuments)
+                            unset($meta['file_drawing_id']);
+                        if ($resetQuantities)
+                            $meta['base_quantity'] = 0;
                         $ly['metadata_json'] = json_encode($meta, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
                     }
                     $cols = array_keys($ly);
                     $pdo->prepare("INSERT INTO takeoff_layers (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute(array_values($ly));
-                    $layerMap[$oldLyId] = (int)$pdo->lastInsertId();
+                    $layerMap[$oldLyId] = (int) $pdo->lastInsertId();
                     if ($oldIntegrationKey !== '') {
                         $layerUidMap[$oldIntegrationKey] = $oldIntegrationKey;
                     }
@@ -694,9 +810,11 @@ class ProjectTemplateService
                     $stmt->execute($layerIds);
                     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $mk) {
                         unset($mk['id'], $mk['created_at'], $mk['updated_at']);
-                        $mk['layer_id'] = $layerMap[(int)$mk['layer_id']] ?? $mk['layer_id'];
-                        if (isset($mk['file_id']) && isset($fileMap[(int)$mk['file_id']])) $mk['file_id'] = $fileMap[(int)$mk['file_id']];
-                        if (isset($mk['drawing_id']) && isset($fileMap[(int)$mk['drawing_id']])) $mk['drawing_id'] = $fileMap[(int)$mk['drawing_id']];
+                        $mk['layer_id'] = $layerMap[(int) $mk['layer_id']] ?? $mk['layer_id'];
+                        if (isset($mk['file_id']) && isset($fileMap[(int) $mk['file_id']]))
+                            $mk['file_id'] = $fileMap[(int) $mk['file_id']];
+                        if (isset($mk['drawing_id']) && isset($fileMap[(int) $mk['drawing_id']]))
+                            $mk['drawing_id'] = $fileMap[(int) $mk['drawing_id']];
                         $cols = array_keys($mk);
                         $pdo->prepare("INSERT INTO takeoff_count_markers (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute(array_values($mk));
                     }
@@ -708,9 +826,11 @@ class ProjectTemplateService
                     $stmt->execute($layerIds);
                     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $sg) {
                         unset($sg['id'], $sg['created_at'], $sg['updated_at']);
-                        $sg['layer_id'] = $layerMap[(int)$sg['layer_id']] ?? $sg['layer_id'];
-                        if (isset($sg['file_id']) && isset($fileMap[(int)$sg['file_id']])) $sg['file_id'] = $fileMap[(int)$sg['file_id']];
-                        if (isset($sg['drawing_id']) && isset($fileMap[(int)$sg['drawing_id']])) $sg['drawing_id'] = $fileMap[(int)$sg['drawing_id']];
+                        $sg['layer_id'] = $layerMap[(int) $sg['layer_id']] ?? $sg['layer_id'];
+                        if (isset($sg['file_id']) && isset($fileMap[(int) $sg['file_id']]))
+                            $sg['file_id'] = $fileMap[(int) $sg['file_id']];
+                        if (isset($sg['drawing_id']) && isset($fileMap[(int) $sg['drawing_id']]))
+                            $sg['drawing_id'] = $fileMap[(int) $sg['drawing_id']];
                         $cols = array_keys($sg);
                         $pdo->prepare("INSERT INTO takeoff_linear_segments (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute(array_values($sg));
                     }
@@ -721,7 +841,8 @@ class ProjectTemplateService
                     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $sc) {
                         unset($sc['id'], $sc['created_at'], $sc['updated_at']);
                         $sc['project_id'] = $newId;
-                        if (isset($sc['drawing_id']) && isset($fileMap[(int)$sc['drawing_id']])) $sc['drawing_id'] = $fileMap[(int)$sc['drawing_id']];
+                        if (isset($sc['drawing_id']) && isset($fileMap[(int) $sc['drawing_id']]))
+                            $sc['drawing_id'] = $fileMap[(int) $sc['drawing_id']];
                         $cols = array_keys($sc);
                         $pdo->prepare("INSERT INTO takeoff_sheet_scales (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute(array_values($sc));
                     }
@@ -732,7 +853,8 @@ class ProjectTemplateService
                     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $dsc) {
                         unset($dsc['id'], $dsc['created_at'], $dsc['updated_at']);
                         $dsc['project_id'] = $newId;
-                        if (isset($dsc['drawing_id']) && isset($fileMap[(int)$dsc['drawing_id']])) $dsc['drawing_id'] = $fileMap[(int)$dsc['drawing_id']];
+                        if (isset($dsc['drawing_id']) && isset($fileMap[(int) $dsc['drawing_id']]))
+                            $dsc['drawing_id'] = $fileMap[(int) $dsc['drawing_id']];
                         $cols = array_keys($dsc);
                         $pdo->prepare("INSERT INTO drawing_scales (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute(array_values($dsc));
                     }
@@ -743,12 +865,12 @@ class ProjectTemplateService
                     foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $tes) {
                         unset($tes['created_at'], $tes['updated_at']);
                         $tes['project_id'] = $newId;
-                        $oldKey = (string)($tes['estimate_key'] ?? '');
+                        $oldKey = (string) ($tes['estimate_key'] ?? '');
                         if ($oldKey !== '' && isset($estimateClientKeyMap[$oldKey])) {
                             $tes['estimate_key'] = $estimateClientKeyMap[$oldKey];
                         }
-                        if (isset($tes['drawing_id']) && isset($fileMap[(int)$tes['drawing_id']])) {
-                            $tes['drawing_id'] = $fileMap[(int)$tes['drawing_id']];
+                        if (isset($tes['drawing_id']) && isset($fileMap[(int) $tes['drawing_id']])) {
+                            $tes['drawing_id'] = $fileMap[(int) $tes['drawing_id']];
                         }
                         $cols = array_keys($tes);
                         $pdo->prepare("INSERT INTO takeoff_estimate_states (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute(array_values($tes));
@@ -760,22 +882,26 @@ class ProjectTemplateService
             if (self::tableExists($pdo, 'estimate_items') && !empty($estimateMap)) {
                 $estIds = array_keys($estimateMap);
                 $inClause = implode(',', array_fill(0, count($estIds), '?'));
-                $stmt = $pdo->prepare("SELECT * FROM estimate_items WHERE estimate_id IN ($inClause) AND deleted_at IS NULL");
+                $itemCols = self::tableColumns($pdo, 'estimate_items');
+                $itemOrderBy = !empty($itemCols['sort_order']) ? 'ORDER BY sort_order ASC, id ASC' : 'ORDER BY id ASC';
+                $stmt = $pdo->prepare("SELECT * FROM estimate_items WHERE estimate_id IN ($inClause) AND deleted_at IS NULL {$itemOrderBy}");
                 $stmt->execute($estIds);
                 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $ei) {
                     unset($ei['id'], $ei['created_at'], $ei['updated_at'], $ei['deleted_at']);
-                    if (array_key_exists('project_id', $ei)) $ei['project_id'] = $newId;
-                    if (isset($ei['estimate_id']) && isset($estimateMap[(int)$ei['estimate_id']])) {
-                        $ei['estimate_id'] = $estimateMap[(int)$ei['estimate_id']];
+                    if (array_key_exists('project_id', $ei))
+                        $ei['project_id'] = $newId;
+                    if (isset($ei['estimate_id']) && isset($estimateMap[(int) $ei['estimate_id']])) {
+                        $ei['estimate_id'] = $estimateMap[(int) $ei['estimate_id']];
                     }
-                    if (isset($ei['takeoff_layer_id']) && isset($layerMap[(int)$ei['takeoff_layer_id']])) {
-                        $ei['takeoff_layer_id'] = $layerMap[(int)$ei['takeoff_layer_id']];
+                    if (isset($ei['takeoff_layer_id']) && isset($layerMap[(int) $ei['takeoff_layer_id']])) {
+                        $ei['takeoff_layer_id'] = $layerMap[(int) $ei['takeoff_layer_id']];
                     } else {
                         $ei['takeoff_layer_id'] = null;
                     }
                     if ($resetQuantities) {
                         foreach (['quantity', 'material_cost', 'labor_cost', 'equipment_cost', 'subcontractor_cost', 'labor_hours', 'subtotal_cost', 'total_cost'] as $col) {
-                            if (array_key_exists($col, $ei)) $ei[$col] = 0;
+                            if (array_key_exists($col, $ei))
+                                $ei[$col] = 0;
                         }
                     }
                     $cols = array_keys($ei);
@@ -788,9 +914,11 @@ class ProjectTemplateService
                 self::ensureTakeoffLayersFromWorkspace($pdo, $newId);
             }
 
-            if (!$inTransaction) $pdo->commit();
+            if (!$inTransaction)
+                $pdo->commit();
         } catch (Throwable $e) {
-            if (!$inTransaction && $pdo->inTransaction()) $pdo->rollBack();
+            if (!$inTransaction && $pdo->inTransaction())
+                $pdo->rollBack();
             error_log('Project template deep clone warning');
         }
     }
@@ -805,10 +933,10 @@ class ProjectTemplateService
         }
         $tkStmt = $pdo->prepare("SELECT id FROM takeoffs WHERE project_id = ? AND deleted_at IS NULL ORDER BY id ASC LIMIT 1");
         $tkStmt->execute([$projectId]);
-        $takeoffId = (int)$tkStmt->fetchColumn();
+        $takeoffId = (int) $tkStmt->fetchColumn();
         if ($takeoffId <= 0) {
             $pdo->prepare("INSERT INTO takeoffs (project_id, name, status) VALUES (?, 'Project Takeoff', 'draft')")->execute([$projectId]);
-            $takeoffId = (int)$pdo->lastInsertId();
+            $takeoffId = (int) $pdo->lastInsertId();
         }
 
         $sql = "SELECT estimate_id, client_estimate_id, state_json FROM estimate_workspace_states WHERE project_id = ?";
@@ -824,61 +952,68 @@ class ProjectTemplateService
         $palette = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#ea580c', '#4f46e5'];
 
         foreach ($wsStmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $ws) {
-            $cid = (string)$ws['client_estimate_id'];
+            $cid = (string) $ws['client_estimate_id'];
             $decoded = self::decodeJson($ws['state_json'] ?? '');
-            if (!$decoded || empty($decoded['groups']) || !is_array($decoded['groups'])) continue;
+            if (!$decoded || empty($decoded['groups']) || !is_array($decoded['groups']))
+                continue;
 
             $existsStmt = $pdo->prepare("SELECT COUNT(*) FROM takeoff_layers WHERE project_id = ? AND estimate_key = ? AND deleted_at IS NULL");
             $existsStmt->execute([$projectId, $cid]);
-            if ((int)$existsStmt->fetchColumn() > 0) continue;
+            if ((int) $existsStmt->fetchColumn() > 0)
+                continue;
 
             $sort = 0;
             $changedState = false;
             foreach ($decoded['groups'] as &$group) {
-                if (!is_array($group)) continue;
-                $groupName = trim((string)($group['name'] ?? 'Default Group')) ?: 'Default Group';
-                $groupId = (string)($group['id'] ?? ($group['takeoffGroupId'] ?? self::uid('grp')));
+                if (!is_array($group))
+                    continue;
+                $groupName = trim((string) ($group['name'] ?? 'Default Group')) ?: 'Default Group';
+                $groupId = (string) ($group['id'] ?? ($group['takeoffGroupId'] ?? self::uid('grp')));
                 if (empty($group['takeoffGroupId'])) {
                     $group['takeoffGroupId'] = $groupId;
                     $changedState = true;
                 }
                 foreach (($group['items'] ?? []) as &$item) {
-                    if (!is_array($item)) continue;
+                    if (!is_array($item))
+                        continue;
                     if (!empty($item['parentItemId']) || !empty($item['parent_item_id']) || !empty($item['assemblyParentId'])) {
                         continue;
                     }
-                    $layerKey = trim((string)($item['takeoffLayerId'] ?? ''));
+                    $layerKey = trim((string) ($item['takeoffLayerId'] ?? ''));
                     if ($layerKey === '') {
                         $layerKey = self::uid('layer');
                         $item['takeoffLayerId'] = $layerKey;
                         $changedState = true;
                     }
-                    if ((string)($item['estimateId'] ?? '') !== $cid) {
+                    if ((string) ($item['estimateId'] ?? '') !== $cid) {
                         $item['estimateId'] = $cid;
                         $changedState = true;
                     }
-                    if ((string)($item['projectId'] ?? '') !== (string)$projectId) {
-                        $item['projectId'] = (string)$projectId;
+                    if ((string) ($item['projectId'] ?? '') !== (string) $projectId) {
+                        $item['projectId'] = (string) $projectId;
                         $changedState = true;
                     }
-                    $color = trim((string)($item['color'] ?? $item['catalogMetadata']['takeoffDefaults']['color'] ?? ''));
-                    if ($color === '') $color = $palette[$sort % count($palette)];
-                    $uom = trim((string)($item['uom'] ?? 'ea')) ?: 'ea';
+                    $color = trim((string) ($item['color'] ?? $item['catalogMetadata']['takeoffDefaults']['color'] ?? ''));
+                    if ($color === '')
+                        $color = $palette[$sort % count($palette)];
+                    $uom = trim((string) ($item['uom'] ?? 'ea')) ?: 'ea';
                     $type = self::inferTakeoffTypeFromItem($item);
                     $meta = [
                         'project_layer_id' => $layerKey,
                         'base_quantity' => 0,
-                        'multiplier' => (float)($item['multiplier'] ?? 1) ?: 1,
+                        'multiplier' => (float) ($item['multiplier'] ?? 1) ?: 1,
                         'estimate_id' => $cid,
-                        'estimating_item_id' => (string)($item['id'] ?? ''),
+                        'estimating_item_id' => (string) ($item['id'] ?? ''),
                         'estimating_group_id' => $groupId,
-                        'unit_cost' => (float)($item['unitCost'] ?? $item['unitMaterialCost'] ?? 0),
-                        'unit_labor_time' => (float)($item['unitLabor'] ?? 0),
-                        'difficulty' => (float)($item['difficulty'] ?? 1) ?: 1,
-                        'cost_code' => (string)($item['costCode'] ?? $item['budgetCode'] ?? ''),
+                        'unit_cost' => (float) ($item['unitCost'] ?? $item['unitMaterialCost'] ?? 0),
+                        'unit_labor_time' => (float) ($item['unitLabor'] ?? 0),
+                        'difficulty' => (float) ($item['difficulty'] ?? 1) ?: 1,
+                        'cost_code' => (string) ($item['costCode'] ?? $item['budgetCode'] ?? ''),
                     ];
-                    if (!empty($item['catalogItemId'])) $meta['catalog_item_id'] = $item['catalogItemId'];
-                    if (!empty($item['catalogMetadata'])) $meta['catalog_item'] = $item['catalogMetadata'];
+                    if (!empty($item['catalogItemId']))
+                        $meta['catalog_item_id'] = $item['catalogItemId'];
+                    if (!empty($item['catalogMetadata']))
+                        $meta['catalog_item'] = $item['catalogMetadata'];
                     if (!empty($item['addedFromEstimating']) || !empty($item['quantityOverride'])) {
                         $meta['addedFromEstimating'] = true;
                     }
@@ -891,17 +1026,17 @@ class ProjectTemplateService
                         'project_id' => $projectId,
                         'estimate_key' => $cid,
                         'group_name' => $groupName,
-                        'name' => substr((string)($item['name'] ?? 'Cost item'), 0, 191),
+                        'name' => substr((string) ($item['name'] ?? 'Cost item'), 0, 191),
                         'type' => strtolower($type),
                         'layer_type' => in_array(strtolower($type), ['linear', 'area', 'count', 'volume'], true) ? strtolower($type) : 'mixed',
                         'takeoff_type' => $type,
                         'unit_of_measure' => $uom,
-                        'catalog_item_id' => !empty($item['catalogItemId']) && is_numeric($item['catalogItemId']) ? (int)$item['catalogItemId'] : null,
+                        'catalog_item_id' => !empty($item['catalogItemId']) && is_numeric($item['catalogItemId']) ? (int) $item['catalogItemId'] : null,
                         'assembly_id' => null,
-                        'assembly_catalog_item_id' => !empty($item['isAssembly']) && !empty($item['catalogItemId']) && is_numeric($item['catalogItemId']) ? (int)$item['catalogItemId'] : null,
+                        'assembly_catalog_item_id' => !empty($item['isAssembly']) && !empty($item['catalogItemId']) && is_numeric($item['catalogItemId']) ? (int) $item['catalogItemId'] : null,
                         'color' => $color,
                         'symbol' => 'Solid Circle',
-                        'tag' => !empty($item['tag']) ? substr((string)$item['tag'], 0, 100) : null,
+                        'tag' => !empty($item['tag']) ? substr((string) $item['tag'], 0, 100) : null,
                         'symbol_size' => 'Medium',
                         'quantity' => 0,
                         'visible' => 1,
@@ -922,7 +1057,7 @@ class ProjectTemplateService
             if ($changedState) {
                 $enc = json_encode($decoded, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
                 if ($enc !== false) {
-                    $pdo->prepare("UPDATE estimate_workspace_states SET state_json = ? WHERE estimate_id = ?")->execute([$enc, (int)$ws['estimate_id']]);
+                    $pdo->prepare("UPDATE estimate_workspace_states SET state_json = ? WHERE estimate_id = ?")->execute([$enc, (int) $ws['estimate_id']]);
                 }
             }
         }
@@ -930,15 +1065,22 @@ class ProjectTemplateService
 
     public static function inferTakeoffTypeFromItem(array $item): string
     {
-        $raw = strtolower(trim((string)($item['type'] ?? $item['itemType'] ?? $item['catalogMetadata']['type'] ?? '')));
-        if (str_contains($raw, 'linear avg')) return 'Linear avg. with drop';
-        if (str_contains($raw, 'linear with drop')) return 'Linear with drop';
-        if (str_contains($raw, 'count by distance')) return 'Count by distance';
-        if (str_contains($raw, 'linear')) return 'Linear';
-        if (str_contains($raw, 'area') || str_contains($raw, 'volume')) return 'Area / Volume';
-        $uom = strtolower(trim((string)($item['uom'] ?? 'ea')));
-        if (in_array($uom, ['ft', 'lf', 'linear ft', 'linear feet', 'm', 'lm'], true)) return 'Linear';
-        if (in_array($uom, ['sq ft', 'sf', 'sqft', 'ft2', 'm2', 'sqm'], true)) return 'Area / Volume';
+        $raw = strtolower(trim((string) ($item['type'] ?? $item['itemType'] ?? $item['catalogMetadata']['type'] ?? '')));
+        if (str_contains($raw, 'linear avg'))
+            return 'Linear avg. with drop';
+        if (str_contains($raw, 'linear with drop'))
+            return 'Linear with drop';
+        if (str_contains($raw, 'count by distance'))
+            return 'Count by distance';
+        if (str_contains($raw, 'linear'))
+            return 'Linear';
+        if (str_contains($raw, 'area') || str_contains($raw, 'volume'))
+            return 'Area / Volume';
+        $uom = strtolower(trim((string) ($item['uom'] ?? 'ea')));
+        if (in_array($uom, ['ft', 'lf', 'linear ft', 'linear feet', 'm', 'lm'], true))
+            return 'Linear';
+        if (in_array($uom, ['sq ft', 'sf', 'sqft', 'ft2', 'm2', 'sqm'], true))
+            return 'Area / Volume';
         return 'Count';
     }
 
@@ -950,7 +1092,8 @@ class ProjectTemplateService
         $pStmt = $pdo->prepare("SELECT metadata_json FROM projects WHERE id = ? AND deleted_at IS NULL LIMIT 1");
         $pStmt->execute([$projectId]);
         $rawMeta = $pStmt->fetchColumn();
-        if ($rawMeta === false) return;
+        if ($rawMeta === false)
+            return;
         $meta = self::decodeJson(is_string($rawMeta) ? $rawMeta : null);
 
         $rows = [];
@@ -971,7 +1114,7 @@ class ProjectTemplateService
 
         $chosen = null;
         foreach ($rows as $r) {
-            $snap = self::decodeJson((string)($r['state_json'] ?? ''));
+            $snap = self::decodeJson((string) ($r['state_json'] ?? ''));
             if (!empty($snap['isPrimary']) || !empty($snap['is_primary'])) {
                 $chosen = $r;
                 break;
@@ -979,7 +1122,7 @@ class ProjectTemplateService
         }
         if (!$chosen) {
             $chosen = $rows[0];
-            $snap = self::decodeJson((string)($chosen['state_json'] ?? ''));
+            $snap = self::decodeJson((string) ($chosen['state_json'] ?? ''));
             if ($snap) {
                 $snap['isPrimary'] = true;
                 $snap['is_primary'] = true;
@@ -989,14 +1132,14 @@ class ProjectTemplateService
                 $enc = json_encode($snap, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
                 if ($enc !== false) {
                     $pdo->prepare("UPDATE estimate_workspace_states SET state_json = ? WHERE estimate_id = ?")
-                        ->execute([$enc, (int)$chosen['id']]);
+                        ->execute([$enc, (int) $chosen['id']]);
                 }
             }
         }
 
-        $chosenCid = !empty($chosen['client_estimate_id']) ? (string)$chosen['client_estimate_id'] : (string)$chosen['id'];
-        $chosenSnap = self::decodeJson((string)($chosen['state_json'] ?? ''));
-        $total = $resetTotal ? 0.0 : (float)($chosenSnap['estimateTotal'] ?? $chosenSnap['totalSales'] ?? $chosen['total_cost'] ?? 0);
+        $chosenCid = !empty($chosen['client_estimate_id']) ? (string) $chosen['client_estimate_id'] : (string) $chosen['id'];
+        $chosenSnap = self::decodeJson((string) ($chosen['state_json'] ?? ''));
+        $total = $resetTotal ? 0.0 : (float) ($chosenSnap['estimateTotal'] ?? $chosenSnap['totalSales'] ?? $chosen['total_cost'] ?? 0);
 
         $meta['primary_estimate_id'] = $chosenCid;
         $meta['primary_estimate_total'] = $total;
@@ -1013,8 +1156,9 @@ class ProjectTemplateService
 
     public static function instantiateTemplateIntoProject(PDO $pdo, int $templateId, int $newProjectId, string $projectName = ''): bool
     {
-        [$sourcePid, ] = self::resolveTemplateSource($pdo, $templateId);
-        if ($sourcePid <= 0 || $sourcePid === $newProjectId) return false;
+        [$sourcePid,] = self::resolveTemplateSource($pdo, $templateId);
+        if ($sourcePid <= 0 || $sourcePid === $newProjectId)
+            return false;
         self::deepCloneProjectWorkspace($pdo, $sourcePid, $newProjectId, [
             'includeDocuments' => false,
             'resetQuantities' => true,
@@ -1035,14 +1179,15 @@ class ProjectTemplateService
             throw new RuntimeException('Source project not found');
         }
 
-        $baseName = trim((string)($templateName ?? ''));
+        $baseName = trim((string) ($templateName ?? ''));
         if ($baseName === '') {
-            $orig = trim((string)($source['name'] ?? 'Project Template'));
+            $orig = trim((string) ($source['name'] ?? 'Project Template'));
             $baseName = preg_match('/template$/i', $orig) ? $orig : ($orig . ' Template');
         }
 
         $inTx = $pdo->inTransaction();
-        if (!$inTx) $pdo->beginTransaction();
+        if (!$inTx)
+            $pdo->beginTransaction();
         try {
             $copy = $source;
             unset($copy['id'], $copy['created_at'], $copy['updated_at'], $copy['deleted_at']);
@@ -1056,7 +1201,7 @@ class ProjectTemplateService
 
             $cols = array_keys($copy);
             $pdo->prepare("INSERT INTO projects (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute(array_values($copy));
-            $newProjectId = (int)$pdo->lastInsertId();
+            $newProjectId = (int) $pdo->lastInsertId();
 
             self::deepCloneProjectWorkspace($pdo, $sourceProjectId, $newProjectId, [
                 'includeDocuments' => false,
@@ -1070,7 +1215,8 @@ class ProjectTemplateService
                 $pdo->prepare("UPDATE projects SET project_template_id = ? WHERE id = ?")->execute([$tplId, $newProjectId]);
             }
 
-            if (!$inTx) $pdo->commit();
+            if (!$inTx)
+                $pdo->commit();
             return [
                 'project_id' => $newProjectId,
                 'template_id' => $tplId,
@@ -1078,7 +1224,8 @@ class ProjectTemplateService
                 'status' => 'templates',
             ];
         } catch (Throwable $e) {
-            if (!$inTx && $pdo->inTransaction()) $pdo->rollBack();
+            if (!$inTx && $pdo->inTransaction())
+                $pdo->rollBack();
             throw $e;
         }
     }
@@ -1119,14 +1266,16 @@ class ProjectTemplateService
             }
         }
 
-        $cleanName = trim((string)$tplName);
-        if ($cleanName === '') $cleanName = 'Template';
+        $cleanName = trim((string) $tplName);
+        if ($cleanName === '')
+            $cleanName = 'Template';
         $estimateName = str_starts_with($cleanName, 'TMPLT_') ? $cleanName : ('TMPLT_' . $cleanName);
         $estimateName = substr($estimateName, 0, 191);
         $newClientEstimateId = 'estimate_' . substr(md5($targetProjectId . '_' . $templateId . '_' . uniqid('', true)), 0, 14);
 
         $inTx = $pdo->inTransaction();
-        if (!$inTx) $pdo->beginTransaction();
+        if (!$inTx)
+            $pdo->beginTransaction();
         try {
             $estCols = self::tableColumns($pdo, 'estimates');
             $estInsert = [
@@ -1147,7 +1296,7 @@ class ProjectTemplateService
             $estFiltered = array_filter($estInsert, fn($k) => isset($estCols[$k]), ARRAY_FILTER_USE_KEY);
             $cols = array_keys($estFiltered);
             $pdo->prepare("INSERT INTO estimates (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute(array_values($estFiltered));
-            $newEstId = (int)$pdo->lastInsertId();
+            $newEstId = (int) $pdo->lastInsertId();
 
             // Build fresh workspace state with new group/item/layer IDs & 0 quantities
             $srcState = self::decodeJson($srcEst['state_json'] ?? '');
@@ -1158,32 +1307,78 @@ class ProjectTemplateService
                     'settings' => self::defaultEstimateSettings($pdo),
                 ];
             }
+            // Carry over project-level estimatingTableSettings if source project has them
+            try {
+                $srcProjMetaStmt = $pdo->prepare("SELECT metadata_json FROM projects WHERE id = ? LIMIT 1");
+                $srcProjMetaStmt->execute([$sourceProjectId]);
+                $srcProjMeta = self::decodeJson($srcProjMetaStmt->fetchColumn() ?: null);
+                $tblSettings = is_array($srcProjMeta['estimatingTableSettings'] ?? null) ? $srcProjMeta['estimatingTableSettings'] : null;
+                if ($tblSettings) {
+                    if (!isset($srcState['settings']) || !is_array($srcState['settings'])) {
+                        $srcState['settings'] = self::defaultEstimateSettings($pdo);
+                    }
+                    if (
+                        !empty($tblSettings['visibleColumns']) && is_array($tblSettings['visibleColumns'])
+                        && (empty($srcState['settings']['visibleColumns']) || !empty($tblSettings['applyAll']))
+                    ) {
+                        $srcState['settings']['visibleColumns'] = array_values(array_map('strval', $tblSettings['visibleColumns']));
+                    }
+                    if (
+                        !empty($tblSettings['columnsOrder']) && is_array($tblSettings['columnsOrder'])
+                        && (empty($srcState['settings']['columnsOrder']) || !empty($tblSettings['applyAll']))
+                    ) {
+                        $srcState['settings']['columnsOrder'] = array_values(array_map('strval', $tblSettings['columnsOrder']));
+                    }
+                    if (isset($estCols['settings_json'])) {
+                        $pdo->prepare("UPDATE estimates SET settings_json = ? WHERE id = ?")
+                            ->execute([json_encode($srcState['settings'], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE), $newEstId]);
+                    }
+                }
+            } catch (Throwable $e) {
+            }
 
-            $srcClientKey = (string)($srcEst['client_estimate_id'] ?? '');
+            $srcClientKey = (string) ($srcEst['client_estimate_id'] ?? '');
             $tkStmt = $pdo->prepare("SELECT * FROM takeoff_layers WHERE project_id = ? AND deleted_at IS NULL" . ($srcClientKey !== '' ? " AND (estimate_key = ? OR estimate_key IS NULL OR estimate_key = '')" : "") . " ORDER BY sort_order ASC, id ASC");
             $tkStmt->execute($srcClientKey !== '' ? [$sourceProjectId, $srcClientKey] : [$sourceProjectId]);
             $srcLayers = $tkStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
             $srcLayerByKey = [];
             foreach ($srcLayers as $sl) {
-                $ik = (string)($sl['integration_key'] ?? '');
-                if ($ik !== '' && !isset($srcLayerByKey[$ik])) $srcLayerByKey[$ik] = $sl;
+                $ik = (string) ($sl['integration_key'] ?? '');
+                $metaTmp = self::decodeJson($sl['metadata_json'] ?? null);
+                $plk = (string) ($metaTmp['project_layer_id'] ?? '');
+                if ($ik !== '' && !isset($srcLayerByKey[$ik]))
+                    $srcLayerByKey[$ik] = $sl;
+                if ($plk !== '' && !isset($srcLayerByKey[$plk]))
+                    $srcLayerByKey[$plk] = $sl;
             }
 
             $layerUidRemap = [];
             $layerMetaLinks = [];
+            $orderedSrcLayerPlan = [];
             $newGroups = [];
             foreach (($srcState['groups'] ?? []) as $grp) {
-                if (!is_array($grp)) continue;
+                if (!is_array($grp))
+                    continue;
                 $newGrpId = self::uid('estgrp');
                 $newTkGrpId = 'takeoff_group_' . self::uid('grp');
+                $grpName = trim((string) ($grp['name'] ?? '')) ?: 'Default Group';
                 $newItems = [];
                 foreach (($grp['items'] ?? []) as $it) {
-                    if (!is_array($it)) continue;
+                    if (!is_array($it))
+                        continue;
                     $newItId = self::uid('estitem');
-                    $oldLayerUid = (string)($it['takeoffLayerId'] ?? '');
+                    $oldLayerUid = (string) ($it['takeoffLayerId'] ?? '');
                     $newLayerUid = self::uid('layer');
+                    $isChildItem = !empty($it['parentItemId']) || !empty($it['parent_item_id']) || !empty($it['assemblyParentId']);
                     if ($oldLayerUid !== '') {
                         $layerUidRemap[$oldLayerUid] = $newLayerUid;
+                        if (!$isChildItem) {
+                            $orderedSrcLayerPlan[] = [
+                                'oldKey' => $oldLayerUid,
+                                'newKey' => $newLayerUid,
+                                'groupName' => $grpName,
+                            ];
+                        }
                     }
                     $layerMetaLinks[$newLayerUid] = [
                         'estimating_group_id' => $newGrpId,
@@ -1192,7 +1387,7 @@ class ProjectTemplateService
                     $it['id'] = $newItId;
                     $it['groupId'] = $newGrpId;
                     $it['estimateId'] = $newClientEstimateId;
-                    $it['projectId'] = (string)$targetProjectId;
+                    $it['projectId'] = (string) $targetProjectId;
                     $it['takeoffLayerId'] = $newLayerUid;
                     $it['estimatingItemId'] = $newItId;
                     if (!empty($it['children']) && is_array($it['children'])) {
@@ -1217,7 +1412,7 @@ class ProjectTemplateService
             $otherEstimates = $existingEstStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
             $targetHasPrimary = false;
             foreach ($otherEstimates as $oe) {
-                $oeSnap = self::decodeJson((string)($oe['state_json'] ?? ''));
+                $oeSnap = self::decodeJson((string) ($oe['state_json'] ?? ''));
                 if (!empty($oeSnap['isPrimary']) || !empty($oeSnap['is_primary'])) {
                     $targetHasPrimary = true;
                     break;
@@ -1245,7 +1440,7 @@ class ProjectTemplateService
             // Copy estimate_markups from source estimate
             if ($srcEst && self::tableExists($pdo, 'estimate_markups')) {
                 $mkpStmt = $pdo->prepare("SELECT * FROM estimate_markups WHERE estimate_id = ?");
-                $mkpStmt->execute([(int)$srcEst['id']]);
+                $mkpStmt->execute([(int) $srcEst['id']]);
                 foreach ($mkpStmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $mkp) {
                     unset($mkp['id'], $mkp['created_at'], $mkp['updated_at']);
                     $mkp['estimate_id'] = $newEstId;
@@ -1258,13 +1453,12 @@ class ProjectTemplateService
             if (!empty($srcLayerByKey) && self::tableExists($pdo, 'takeoff_layers') && self::tableExists($pdo, 'takeoffs')) {
                 $tkRowStmt = $pdo->prepare("SELECT id FROM takeoffs WHERE project_id = ? AND deleted_at IS NULL ORDER BY id ASC LIMIT 1");
                 $tkRowStmt->execute([$targetProjectId]);
-                $targetTakeoffId = (int)$tkRowStmt->fetchColumn();
+                $targetTakeoffId = (int) $tkRowStmt->fetchColumn();
                 if ($targetTakeoffId <= 0) {
                     $pdo->prepare("INSERT INTO takeoffs (project_id, name, status) VALUES (?, 'Project Takeoff', 'draft')")->execute([$targetProjectId]);
-                    $targetTakeoffId = (int)$pdo->lastInsertId();
+                    $targetTakeoffId = (int) $pdo->lastInsertId();
                 }
-                foreach ($srcLayerByKey as $oldKey => $sl) {
-                    $newKey = $layerUidRemap[$oldKey] ?? self::uid('layer');
+                $insertLayerRow = function (array $sl, string $newKey, ?string $groupNameOverride, int $sortOrder) use ($pdo, $targetProjectId, $targetTakeoffId, $newClientEstimateId, $layerMetaLinks): void {
                     unset($sl['id'], $sl['created_at'], $sl['updated_at'], $sl['deleted_at']);
                     $sl['project_id'] = $targetProjectId;
                     $sl['takeoff_id'] = $targetTakeoffId;
@@ -1273,6 +1467,10 @@ class ProjectTemplateService
                     $sl['integration_key'] = $newKey;
                     $sl['quantity'] = 0;
                     $sl['estimate_item_id'] = null;
+                    $sl['sort_order'] = $sortOrder;
+                    if ($groupNameOverride !== null && $groupNameOverride !== '') {
+                        $sl['group_name'] = $groupNameOverride;
+                    }
                     $meta = self::decodeJson($sl['metadata_json'] ?? null);
                     $meta['project_layer_id'] = $newKey;
                     $meta['estimate_id'] = $newClientEstimateId;
@@ -1285,6 +1483,31 @@ class ProjectTemplateService
                     $sl['metadata_json'] = json_encode($meta, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
                     $lCols = array_keys($sl);
                     $pdo->prepare("INSERT INTO takeoff_layers (" . implode(', ', $lCols) . ") VALUES (" . implode(', ', array_fill(0, count($lCols), '?')) . ")")->execute(array_values($sl));
+                };
+                $emittedSourceIds = [];
+                $nextSortOrder = 0;
+                foreach ($orderedSrcLayerPlan as $planRow) {
+                    $oldKey = $planRow['oldKey'];
+                    if (!isset($srcLayerByKey[$oldKey]))
+                        continue;
+                    $sl = $srcLayerByKey[$oldKey];
+                    $srcIdMark = (int) ($sl['id'] ?? 0);
+                    if ($srcIdMark > 0) {
+                        if (isset($emittedSourceIds[$srcIdMark]))
+                            continue;
+                        $emittedSourceIds[$srcIdMark] = true;
+                    }
+                    $insertLayerRow($sl, $planRow['newKey'], $planRow['groupName'], $nextSortOrder++);
+                }
+                foreach ($srcLayers as $sl) {
+                    $srcIdMark = (int) ($sl['id'] ?? 0);
+                    if ($srcIdMark > 0 && isset($emittedSourceIds[$srcIdMark]))
+                        continue;
+                    if ($srcIdMark > 0)
+                        $emittedSourceIds[$srcIdMark] = true;
+                    $oldKey = (string) ($sl['integration_key'] ?? '');
+                    $newKey = ($oldKey !== '' && isset($layerUidRemap[$oldKey])) ? $layerUidRemap[$oldKey] : self::uid('layer');
+                    $insertLayerRow($sl, $newKey, null, $nextSortOrder++);
                 }
             }
             self::ensureTakeoffLayersFromWorkspace($pdo, $targetProjectId, $newClientEstimateId);
@@ -1292,7 +1515,8 @@ class ProjectTemplateService
                 self::syncPrimaryEstimateMetadata($pdo, $targetProjectId, true);
             }
 
-            if (!$inTx) $pdo->commit();
+            if (!$inTx)
+                $pdo->commit();
             return [
                 'estimate_id' => $newEstId,
                 'client_estimate_id' => $newClientEstimateId,
@@ -1301,7 +1525,8 @@ class ProjectTemplateService
                 'source_project_id' => $sourceProjectId,
             ];
         } catch (Throwable $e) {
-            if (!$inTx && $pdo->inTransaction()) $pdo->rollBack();
+            if (!$inTx && $pdo->inTransaction())
+                $pdo->rollBack();
             throw $e;
         }
     }
@@ -1310,12 +1535,13 @@ class ProjectTemplateService
     {
         $out = [];
         foreach ($children as $ch) {
-            if (!is_array($ch)) continue;
+            if (!is_array($ch))
+                continue;
             $newChId = self::uid('estchild');
             $ch['id'] = $newChId;
             $ch['parentItemId'] = $parentId;
             $ch['estimateId'] = $estClientId;
-            $ch['projectId'] = (string)$projectId;
+            $ch['projectId'] = (string) $projectId;
             $ch['quantity'] = 0;
             $ch['originalQuantity'] = 0;
             if (!empty($ch['children']) && is_array($ch['children'])) {

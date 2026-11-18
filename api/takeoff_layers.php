@@ -406,7 +406,7 @@ function tl_layers($pdo, $projectId)
         LEFT JOIN takeoffs t ON t.id = tl.takeoff_id
         LEFT JOIN catalog_items ci ON ci.id = tl.catalog_item_id
         WHERE tl.deleted_at IS NULL AND (tl.project_id = ? OR t.project_id = ?)
-        ORDER BY COALESCE(tl.group_name, 'Ungrouped'), tl.sort_order, tl.name";
+        ORDER BY tl.sort_order ASC, tl.id ASC";
     $stmt = $pdo->prepare($sql);
     $stmt->execute(array($projectId, $projectId));
     return $stmt->fetchAll(PDO::FETCH_ASSOC);

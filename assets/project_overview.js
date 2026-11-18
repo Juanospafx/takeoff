@@ -114,18 +114,24 @@
         };
     }
 
-    async function saveProject() {
+    async function saveProject(options = {}) {
+        const opts = (options && typeof options === 'object' && !('target' in options) && !('preventDefault' in options)) ? options : {};
+        const silent = Boolean(opts.silent);
+        const throwOnError = Boolean(opts.throwOnError);
         const payload = collectProjectPayload();
         if (!payload.name.trim()) {
-            if (window.TakeoffAnnouncement) {
+            if (!silent && window.TakeoffAnnouncement) {
                 window.TakeoffAnnouncement.warning({
                     title: 'Estimate Name Required',
                     badge: 'REQUIRED FIELD',
                     content: '<p>Please enter an <strong>Estimate Name</strong> before saving the project.</p>',
                     primaryText: 'Understood'
                 });
-            } else {
+            } else if (!silent) {
                 showToast('Estimate Name is required.');
+            }
+            if (throwOnError) {
+                throw new Error('Estimate Name is required.');
             }
             return;
         }
@@ -150,6 +156,14 @@
         }
 
         try {
+            if (typeof window.hasPendingTakeoffEstimatingSync === 'function' && window.hasPendingTakeoffEstimatingSync()
+                && typeof window.flushTakeoffEstimatingSync === 'function') {
+                try {
+                    await window.flushTakeoffEstimatingSync();
+                } catch (syncErr) {
+                    console.warn('Takeoff/Estimating sync flush warning:', syncErr);
+                }
+            }
             try {
                 const takeoffFrame = document.getElementById('takeoffFrame');
                 const saveTakeoff = takeoffFrame?.contentWindow?.projectTakeoffSave;
@@ -186,7 +200,7 @@
             window._historyDirtyGuarded = false;
             localStorage.removeItem('takeoff.projectDraft');
 
-            if (window.TakeoffAnnouncement) {
+            if (!silent && window.TakeoffAnnouncement) {
                 window.TakeoffAnnouncement.success({
                     title: 'Project Saved Successfully',
                     badge: 'PROJECT SAVED',
@@ -220,6 +234,9 @@
                     content: `<p>An unexpected error occurred while saving the project:</p><div class="g-announcement-highlight-box" style="border-left-color: #ef4444; color: #ef4444;"><strong>${escapeHtml(errText)}</strong></div><p>Please verify all required fields or check your database connection and try again.</p>`,
                     primaryText: 'Dismiss'
                 });
+            }
+            if (throwOnError) {
+                throw error;
             }
         } finally {
             if (saveButton) {
@@ -413,15 +430,42 @@
         });
     }
 
+    function syncProjectBidBoardReturnStage(isExplicitChange = false) {
+        const label = statusLabel();
+        const code = currentStatus || normalizeStatus(label);
+        try {
+            localStorage.setItem('takeoff.bidBoardStage', label);
+            sessionStorage.setItem('takeoff.bidBoardStage', label);
+            if (isExplicitChange) {
+                sessionStorage.setItem('takeoff.bidBoardStageOverride', JSON.stringify({
+                    stage: label,
+                    code,
+                    projectId: Number(window.ProjectState?.projectId || 0),
+                    at: Date.now()
+                }));
+            }
+        } catch (e) { }
+        try {
+            const brandLink = document.getElementById('btHeaderBrandLink');
+            if (brandLink) {
+                brandLink.setAttribute('href', `bid_board.php?status=${encodeURIComponent(code)}`);
+            }
+            if (window.history && typeof window.history.replaceState === 'function') {
+                const url = new URL(window.location.href);
+                if (url.searchParams.has('stage') || isExplicitChange) {
+                    url.searchParams.set('stage', code);
+                    window.history.replaceState(null, '', url.toString());
+                }
+            }
+        } catch (e) { }
+    }
+
     function changeProjectStatus(status) {
         currentStatus = normalizeStatus(status);
         if (window.ProjectState?.projectInfo) {
             window.ProjectState.projectInfo.status = currentStatus;
         }
-        try {
-            localStorage.setItem('takeoff.bidBoardStage', statusLabel());
-            sessionStorage.setItem('takeoff.bidBoardStage', statusLabel());
-        } catch (e) { }
+        syncProjectBidBoardReturnStage(true);
         renderStatusDropdown();
         $('projectStatusMenu')?.classList.remove('open');
 
@@ -1128,6 +1172,9 @@
         const rect = button.getBoundingClientRect();
         const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
 
+        menu.__trigger = button;
+        button.classList.add('is-active');
+        button.setAttribute('aria-expanded', 'true');
         menu.style.display = 'flex';
         menu.style.position = 'fixed';
         menu.style.zIndex = '99999';
@@ -1161,7 +1208,14 @@
 
     function closeItemContextMenu() {
         const menu = $('pdItemContextMenu');
-        if (menu) menu.style.display = 'none';
+        if (menu) {
+            menu.style.display = 'none';
+            if (menu.__trigger) {
+                menu.__trigger.classList.remove('active', 'is-active');
+                menu.__trigger.setAttribute('aria-expanded', 'false');
+            }
+            menu.__trigger = null;
+        }
         contextMenuTarget = null;
     }
 
@@ -5691,69 +5745,104 @@
             return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch]));
         }
 
+        function ensureProjectSavedForTemplateAction(actionDescription, onContinue) {
+            if (!checkIsDirty()) {
+                return Promise.resolve().then(onContinue);
+            }
+            if (window.TakeoffAnnouncement) {
+                window.TakeoffAnnouncement.show({
+                    type: 'warning',
+                    force: true,
+                    title: 'Unsaved Changes in Project',
+                    badge: 'UNSAVED CHANGES',
+                    content: `<p>You have made changes to this project that have not been saved yet.</p>
+                              <div class="g-announcement-highlight-box" style="border-left-color: #f59e0b;">
+                                  Save all changes across Overview, Takeoff, and Estimating before ${escHtml(actionDescription)}?
+                              </div>`,
+                    primaryText: 'Save & Continue',
+                    cancelText: 'Go Back',
+                    showDontShow: false,
+                    onPrimary: async () => {
+                        await Promise.resolve();
+                        try {
+                            await saveProject({ silent: true, throwOnError: true });
+                            await onContinue();
+                        } catch (err) {
+                            console.error('Failed to save project before template action:', err);
+                        }
+                    },
+                    onCancel: () => {}
+                });
+                return;
+            }
+            if (confirm(`You have unsaved changes. Save project before ${actionDescription}?`)) {
+                return saveProject({ silent: true, throwOnError: true }).then(() => onContinue()).catch(() => {});
+            }
+        }
+
         async function openConvertToTemplateDialog() {
             const projectId = Number(window.ProjectState?.projectId || 0);
             if (projectId <= 0) {
                 showToast('Please save the project first before converting it to a template.');
                 return;
             }
-            const currentName = ($('poEstimateName')?.value || window.ProjectState?.projectInfo?.name || 'Project').trim();
-            const suggested = /template$/i.test(currentName) ? currentName : `${currentName} Template`;
-            const modal = ensureTemplateActionModal();
-            modal.querySelector('#pdTemplateModalTitle').innerHTML = '<i class="fas fa-layer-group" style="color:#0d9488;margin-right:6px;"></i> Convert to Template';
-            modal.querySelector('#pdTemplateModalBody').innerHTML = `
-                <p class="pd-template-modal-desc" style="margin:0;font-size:13px;line-height:1.45;">
-                    Creates a clean copy of this project in the <strong>Templates</strong> stage with all Estimating and Takeoff quantities reset to <strong>0</strong>. Your current project will remain unchanged.
-                </p>
-                <label class="pd-template-field-label" style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;font-weight:600;">
-                    <span>Template Name</span>
-                    <input type="text" id="pdConvertTemplateNameInput" class="pd-input" value="${escHtml(suggested)}" placeholder="Template name" style="padding:8px 10px;border:1px solid var(--border,#cbd5e1);border-radius:6px;font-size:13px;">
-                </label>
-            `;
-            const confirmBtn = modal.querySelector('#pdTemplateModalConfirm');
-            confirmBtn.textContent = 'Create Template';
-            confirmBtn.disabled = false;
-            modal.classList.add('open');
-            setTimeout(() => modal.querySelector('#pdConvertTemplateNameInput')?.focus(), 40);
+            return ensureProjectSavedForTemplateAction('converting it to a template', () => {
+                const currentName = ($('poEstimateName')?.value || window.ProjectState?.projectInfo?.name || 'Project').trim();
+                const suggested = /template$/i.test(currentName) ? currentName : `${currentName} Template`;
+                const modal = ensureTemplateActionModal();
+                modal.querySelector('#pdTemplateModalTitle').innerHTML = '<i class="fas fa-layer-group" style="color:#0d9488;margin-right:6px;"></i> Convert to Template';
+                modal.querySelector('#pdTemplateModalBody').innerHTML = `
+                    <p class="pd-template-modal-desc" style="margin:0;font-size:13px;line-height:1.45;">
+                        Creates a clean copy of this project in the <strong>Templates</strong> stage with all Estimating and Takeoff quantities reset to <strong>0</strong>. Your current project will remain unchanged.
+                    </p>
+                    <label class="pd-template-field-label" style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;font-weight:600;">
+                        <span>Template Name</span>
+                        <input type="text" id="pdConvertTemplateNameInput" class="pd-input" value="${escHtml(suggested)}" placeholder="Template name" style="padding:8px 10px;border:1px solid var(--border,#cbd5e1);border-radius:6px;font-size:13px;">
+                    </label>
+                `;
+                const confirmBtn = modal.querySelector('#pdTemplateModalConfirm');
+                confirmBtn.textContent = 'Create Template';
+                confirmBtn.disabled = false;
+                modal.classList.add('open');
+                setTimeout(() => modal.querySelector('#pdConvertTemplateNameInput')?.focus(), 40);
 
-            confirmBtn.onclick = async () => {
-                const nameInput = modal.querySelector('#pdConvertTemplateNameInput');
-                const tplName = (nameInput?.value || '').trim();
-                if (!tplName) {
-                    nameInput?.focus();
-                    return;
-                }
-                confirmBtn.disabled = true;
-                confirmBtn.textContent = 'Converting...';
-                try {
-                    if (typeof window.projectEstimatingSave === 'function') {
-                        await window.projectEstimatingSave().catch(() => {});
+                confirmBtn.onclick = async () => {
+                    const nameInput = modal.querySelector('#pdConvertTemplateNameInput');
+                    const tplName = (nameInput?.value || '').trim();
+                    if (!tplName) {
+                        nameInput?.focus();
+                        return;
                     }
-                    const res = await request('convert_to_template', { id: projectId, name: tplName });
-                    modal.classList.remove('open');
-                    const createdId = Number(res.project_id || res.id || 0);
-                    showToast(`Template "${res.name || tplName}" created in Templates stage.`);
-                    if (createdId > 0 && typeof window.showConfirmDialog === 'function') {
-                        const go = await window.showConfirmDialog({
-                            title: 'Template Created',
-                            message: `"${res.name || tplName}" was created in the Templates stage with quantities set to 0. Do you want to open the new template now?`,
-                            confirmText: 'Open Template',
-                            cancelText: 'Stay Here',
-                            type: 'info',
-                            badge: 'TEMPLATES',
-                            icon: 'fas fa-layer-group'
-                        });
-                        if (go) {
-                            isDirty = false;
-                            window.location.href = `project_dashboard.php?id=${encodeURIComponent(createdId)}&tab=estimating`;
+                    confirmBtn.disabled = true;
+                    confirmBtn.textContent = 'Converting...';
+                    try {
+                        await saveProject({ silent: true, throwOnError: true });
+                        const res = await request('convert_to_template', { id: projectId, name: tplName });
+                        modal.classList.remove('open');
+                        const createdId = Number(res.project_id || res.id || 0);
+                        showToast(`Template "${res.name || tplName}" created in Templates stage.`);
+                        if (createdId > 0 && typeof window.showConfirmDialog === 'function') {
+                            const go = await window.showConfirmDialog({
+                                title: 'Template Created',
+                                message: `"${res.name || tplName}" was created in the Templates stage with quantities set to 0. Do you want to open the new template now?`,
+                                confirmText: 'Open Template',
+                                cancelText: 'Stay Here',
+                                type: 'info',
+                                badge: 'TEMPLATES',
+                                icon: 'fas fa-layer-group'
+                            });
+                            if (go) {
+                                isDirty = false;
+                                window.location.href = `project_dashboard.php?id=${encodeURIComponent(createdId)}&tab=estimating`;
+                            }
                         }
+                    } catch (err) {
+                        showToast(err?.message || 'Could not convert project to template.');
+                        confirmBtn.disabled = false;
+                        confirmBtn.textContent = 'Create Template';
                     }
-                } catch (err) {
-                    showToast(err?.message || 'Could not convert project to template.');
-                    confirmBtn.disabled = false;
-                    confirmBtn.textContent = 'Create Template';
-                }
-            };
+                };
+            });
         }
 
         async function openApplyTemplateDialog() {
@@ -5762,75 +5851,75 @@
                 showToast('Please save the project first before applying a template.');
                 return;
             }
-            const modal = ensureTemplateActionModal();
-            modal.querySelector('#pdTemplateModalTitle').innerHTML = '<i class="fas fa-wand-magic-sparkles" style="color:#0d9488;margin-right:6px;"></i> Apply Template';
-            modal.querySelector('#pdTemplateModalBody').innerHTML = '<div style="padding:12px 0;font-size:13px;color:var(--muted,#64748b);">Loading available templates...</div>';
-            const confirmBtn = modal.querySelector('#pdTemplateModalConfirm');
-            confirmBtn.textContent = 'Apply Template';
-            confirmBtn.disabled = true;
-            modal.classList.add('open');
+            return ensureProjectSavedForTemplateAction('applying a template', async () => {
+                const modal = ensureTemplateActionModal();
+                modal.querySelector('#pdTemplateModalTitle').innerHTML = '<i class="fas fa-wand-magic-sparkles" style="color:#0d9488;margin-right:6px;"></i> Apply Template';
+                modal.querySelector('#pdTemplateModalBody').innerHTML = '<div style="padding:12px 0;font-size:13px;color:var(--muted,#64748b);">Loading available templates...</div>';
+                const confirmBtn = modal.querySelector('#pdTemplateModalConfirm');
+                confirmBtn.textContent = 'Apply Template';
+                confirmBtn.disabled = true;
+                modal.classList.add('open');
 
-            try {
-                const resp = await fetch(`${apiUrl}?action=templates`, { cache: 'no-store' });
-                const data = await resp.json();
-                const templates = Array.isArray(data?.templates) ? data.templates : [];
-                if (!templates.length) {
-                    modal.querySelector('#pdTemplateModalBody').innerHTML = '<p style="margin:0;font-size:13px;color:#dc2626;">No templates are currently available.</p>';
-                    return;
-                }
-                modal.querySelector('#pdTemplateModalBody').innerHTML = `
-                    <p class="pd-template-modal-desc" style="margin:0;font-size:13px;line-height:1.45;">
-                        Creates a <strong>new empty estimate</strong> in this project prefixed with <code>TMPLT_</code> and copies all groups, items, assemblies, Takeoff layers, and settings from the chosen template.
-                    </p>
-                    <label class="pd-template-field-label" style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;font-weight:600;">
-                        <span>Select Template</span>
-                        <select id="pdApplyTemplateSelect" class="pd-input" style="padding:8px 10px;border:1px solid var(--border,#cbd5e1);border-radius:6px;font-size:13px;">
-                            ${templates.map(t => `<option value="${escHtml(t.id)}">${escHtml(t.name)}${t.trade ? ` (${escHtml(t.trade)})` : ''}</option>`).join('')}
-                        </select>
-                    </label>
-                    <div id="pdApplyTemplatePreview" class="pd-template-preview-box"></div>
-                `;
-                const sel = modal.querySelector('#pdApplyTemplateSelect');
-                const preview = modal.querySelector('#pdApplyTemplatePreview');
-                const refreshPreview = () => {
-                    const chosen = templates.find(t => String(t.id) === String(sel?.value));
-                    if (!chosen || !preview) return;
-                    const prefixed = String(chosen.name || '').startsWith('TMPLT_') ? chosen.name : `TMPLT_${chosen.name}`;
-                    preview.innerHTML = `<strong>New Estimate:</strong> ${escHtml(prefixed)}${chosen.description ? `<br><span>${escHtml(chosen.description)}</span>` : ''}`;
-                };
-                sel?.addEventListener('change', refreshPreview);
-                refreshPreview();
-                confirmBtn.disabled = false;
-
-                confirmBtn.onclick = async () => {
-                    const tplId = Number(sel?.value || 0);
-                    if (tplId <= 0) return;
-                    confirmBtn.disabled = true;
-                    confirmBtn.textContent = 'Applying...';
-                    try {
-                        if (typeof window.projectEstimatingSave === 'function') {
-                            await window.projectEstimatingSave().catch(() => {});
-                        }
-                        const res = await request('apply_template', { id: projectId, template_id: tplId });
-                        const clientEstId = res?.estimate?.client_estimate_id || '';
-                        try {
-                            if (clientEstId) {
-                                sessionStorage.setItem(`takeoff.pendingActivateEstimateId.${projectId}`, clientEstId);
-                            }
-                            localStorage.removeItem(`takeoff_project_groups_${projectId}`);
-                        } catch (_) {}
-                        isDirty = false;
-                        modal.classList.remove('open');
-                        window.location.href = `project_dashboard.php?id=${encodeURIComponent(projectId)}&tab=estimating`;
-                    } catch (err) {
-                        showToast(err?.message || 'Could not apply template.');
-                        confirmBtn.disabled = false;
-                        confirmBtn.textContent = 'Apply Template';
+                try {
+                    const resp = await fetch(`${apiUrl}?action=templates`, { cache: 'no-store' });
+                    const data = await resp.json();
+                    const templates = Array.isArray(data?.templates) ? data.templates : [];
+                    if (!templates.length) {
+                        modal.querySelector('#pdTemplateModalBody').innerHTML = '<p style="margin:0;font-size:13px;color:#dc2626;">No templates are currently available.</p>';
+                        return;
                     }
-                };
-            } catch (err) {
-                modal.querySelector('#pdTemplateModalBody').innerHTML = `<p style="margin:0;font-size:13px;color:#dc2626;">${escHtml(err?.message || 'Error loading templates.')}</p>`;
-            }
+                    modal.querySelector('#pdTemplateModalBody').innerHTML = `
+                        <p class="pd-template-modal-desc" style="margin:0;font-size:13px;line-height:1.45;">
+                            Creates a <strong>new empty estimate</strong> in this project prefixed with <code>TMPLT_</code> and copies all groups, items, assemblies, Takeoff layers, and settings from the chosen template.
+                        </p>
+                        <label class="pd-template-field-label" style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;font-weight:600;">
+                            <span>Select Template</span>
+                            <select id="pdApplyTemplateSelect" class="pd-input" style="padding:8px 10px;border:1px solid var(--border,#cbd5e1);border-radius:6px;font-size:13px;">
+                                ${templates.map(t => `<option value="${escHtml(t.id)}">${escHtml(t.name)}${t.trade ? ` (${escHtml(t.trade)})` : ''}</option>`).join('')}
+                            </select>
+                        </label>
+                        <div id="pdApplyTemplatePreview" class="pd-template-preview-box"></div>
+                    `;
+                    const sel = modal.querySelector('#pdApplyTemplateSelect');
+                    const preview = modal.querySelector('#pdApplyTemplatePreview');
+                    const refreshPreview = () => {
+                        const chosen = templates.find(t => String(t.id) === String(sel?.value));
+                        if (!chosen || !preview) return;
+                        const prefixed = String(chosen.name || '').startsWith('TMPLT_') ? chosen.name : `TMPLT_${chosen.name}`;
+                        preview.innerHTML = `<strong>New Estimate:</strong> ${escHtml(prefixed)}${chosen.description ? `<br><span>${escHtml(chosen.description)}</span>` : ''}`;
+                    };
+                    sel?.addEventListener('change', refreshPreview);
+                    refreshPreview();
+                    confirmBtn.disabled = false;
+
+                    confirmBtn.onclick = async () => {
+                        const tplId = Number(sel?.value || 0);
+                        if (tplId <= 0) return;
+                        confirmBtn.disabled = true;
+                        confirmBtn.textContent = 'Applying...';
+                        try {
+                            await saveProject({ silent: true, throwOnError: true });
+                            const res = await request('apply_template', { id: projectId, template_id: tplId });
+                            const clientEstId = res?.estimate?.client_estimate_id || '';
+                            try {
+                                if (clientEstId) {
+                                    sessionStorage.setItem(`takeoff.pendingActivateEstimateId.${projectId}`, clientEstId);
+                                }
+                                localStorage.removeItem(`takeoff_project_groups_${projectId}`);
+                            } catch (_) {}
+                            isDirty = false;
+                            modal.classList.remove('open');
+                            window.location.href = `project_dashboard.php?id=${encodeURIComponent(projectId)}&tab=estimating`;
+                        } catch (err) {
+                            showToast(err?.message || 'Could not apply template.');
+                            confirmBtn.disabled = false;
+                            confirmBtn.textContent = 'Apply Template';
+                        }
+                    };
+                } catch (err) {
+                    modal.querySelector('#pdTemplateModalBody').innerHTML = `<p style="margin:0;font-size:13px;color:#dc2626;">${escHtml(err?.message || 'Error loading templates.')}</p>`;
+                }
+            });
         }
 
         $('projectActionsMenu')?.addEventListener('click', async event => {
@@ -5905,5 +5994,8 @@
                 }
             }
         });
+        if (Number(window.ProjectState?.projectId || 0) > 0 && window.ProjectState?.projectInfo?.status) {
+            syncProjectBidBoardReturnStage(false);
+        }
     });
 })();

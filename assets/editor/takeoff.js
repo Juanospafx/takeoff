@@ -42,6 +42,7 @@
     const dirtyTakeoffPageGenerations = new Map();
     const dirtyTakeoffObjects = new Map();
     const deletedTakeoffObjects = new Map();
+    const deletedTakeoffLayers = new Set();
     const takeoffObjectBaseVersions = new Map();
     const dirtyTakeoffObjectGenerations = new Map();
     let takeoffDirtyGeneration = 0;
@@ -50,6 +51,25 @@
     let selectionRectDraft = null;
     let linearPointerWorld = null;
     let linearShiftPressed = false;
+
+    function layerTrackingKeys(layer) {
+        if (!layer) return [];
+        if (typeof layer !== 'object') return [String(layer)].filter(Boolean);
+        return [
+            layer.client_uid,
+            layer.integration_key,
+            layer.metadata_json?.project_layer_id,
+            layer.id
+        ].filter(v => v !== undefined && v !== null && String(v) !== '').map(String);
+    }
+
+    function trackDeletedLayer(layer) {
+        layerTrackingKeys(layer).forEach(k => deletedTakeoffLayers.add(k));
+    }
+
+    function untrackDeletedLayer(layerOrId) {
+        layerTrackingKeys(layerOrId).forEach(k => deletedTakeoffLayers.delete(k));
+    }
 
     function trackTakeoffObjects(targets, deleted = false) {
         (targets || []).forEach(target => {
@@ -610,6 +630,7 @@
         if (!konvaLayer) return;
         const w = document.getElementById('canvas-wrapper');
         if (!w || w.clientWidth <= 0 || w.clientHeight <= 0 || document.hidden) return;
+        if (typeof konvaStage !== 'undefined' && konvaStage && (konvaStage.width() <= 0 || konvaStage.height() <= 0)) return;
         konvaLayer._waitingForDraw = false;
         if (immediate) konvaLayer.draw();
         else konvaLayer.batchDraw();
@@ -1180,11 +1201,16 @@
         konvaLayer.batchDraw();
     }
 
+    function vertexXArm(radius) {
+        return Math.max(radius * 0.95, 2);
+    }
+
     function createVertexHandleNode(point, subtype, color, radius, strokeW, options = {}) {
         const draggable = Boolean(options.draggable);
         const listening = options.listening !== undefined ? Boolean(options.listening) : true;
         const visible = options.visible !== undefined ? Boolean(options.visible) : true;
         const hitW = num(options.hitStrokeWidth || 32);
+        const blur = radius <= 3 ? 1 : 2;
         if (subtype === 'linear') {
             const side = radius * 2;
             return new Konva.Rect({
@@ -1194,12 +1220,12 @@
                 height: side,
                 offsetX: radius,
                 offsetY: radius,
-                cornerRadius: 1,
+                cornerRadius: radius <= 3 ? 0.5 : 1,
                 fill: '#ffffff',
                 stroke: color || '#2563eb',
                 strokeWidth: strokeW,
                 shadowColor: 'rgba(0,0,0,0.25)',
-                shadowBlur: 2,
+                shadowBlur: blur,
                 hitStrokeWidth: hitW,
                 draggable,
                 listening,
@@ -1223,7 +1249,7 @@
                 fill: 'rgba(0,0,0,0.001)',
                 hitStrokeWidth: hitW
             }));
-            const arm = Math.max(radius * 0.95, 4);
+            const arm = vertexXArm(radius);
             group.add(new Konva.Line({
                 name: 'vertex-x-halo1',
                 points: [-arm, -arm, arm, arm],
@@ -1266,7 +1292,7 @@
             stroke: color || '#2563eb',
             strokeWidth: strokeW,
             shadowColor: 'rgba(0,0,0,0.25)',
-            shadowBlur: 2,
+            shadowBlur: blur,
             hitStrokeWidth: hitW,
             draggable,
             listening,
@@ -1283,7 +1309,7 @@
             return;
         }
         if (typeof handle.name === 'function' && handle.name() === 'vertex-x') {
-            const arm = Math.max(handleR * 0.95, 4);
+            const arm = vertexXArm(handleR);
             const hitNode = handle.findOne?.('.vertex-x-hit');
             if (hitNode) {
                 hitNode.radius(Math.max(handleR * 1.45, 7));
@@ -1308,20 +1334,40 @@
         if (typeof handle.size === 'function') {
             handle.size({ width: handleR * 2, height: handleR * 2 });
             handle.offset({ x: handleR, y: handleR });
+            if (typeof handle.cornerRadius === 'function') {
+                handle.cornerRadius(handleR <= 3 ? 0.5 : 1);
+            }
             handle.strokeWidth(handleStroke);
             handle.hitStrokeWidth(handleHit);
         }
     }
 
-    function getLinearNodeRadius() {
+    function resolveViewportInverseScale(inverseScale) {
+        if (Number.isFinite(Number(inverseScale)) && Number(inverseScale) > 0) {
+            return Number(inverseScale);
+        }
         const viewportScale = Number(canvas?.viewportTransform?.[0] || 1);
-        const factor = viewportScale > 0 ? 1 / viewportScale : 1;
+        return viewportScale > 0 ? 1 / viewportScale : 1;
+    }
+
+    function getLinearNodeRadius(inverseScale) {
+        const factor = resolveViewportInverseScale(inverseScale);
+        // Linear & all variants (linear, linear_with_drop, linear_avg_with_drop, count_by_distance): 50% smaller
+        return Math.max(2.2, Math.min(4.0, 2.6 * factor));
+    }
+
+    function getLinearNodeStroke(inverseScale) {
+        const factor = resolveViewportInverseScale(inverseScale);
+        return Math.max(0.6, Math.min(1.2, 0.8 * factor));
+    }
+
+    function getAreaNodeRadius(inverseScale) {
+        const factor = resolveViewportInverseScale(inverseScale);
         return Math.max(4.4, Math.min(8.0, 5.2 * factor));
     }
 
-    function getLinearNodeStroke() {
-        const viewportScale = Number(canvas?.viewportTransform?.[0] || 1);
-        const factor = viewportScale > 0 ? 1 / viewportScale : 1;
+    function getAreaNodeStroke(inverseScale) {
+        const factor = resolveViewportInverseScale(inverseScale);
         return Math.max(1.2, Math.min(2.4, 1.6 * factor));
     }
 
@@ -1332,20 +1378,20 @@
     }
 
     function syncTakeoffHandleScale(inverseScale) {
-        const viewportScale = Number(canvas?.viewportTransform?.[0] || 1);
-        const factor = Number.isFinite(Number(inverseScale)) && Number(inverseScale) > 0
-            ? Number(inverseScale)
-            : (viewportScale > 0 ? 1 / viewportScale : 1);
-        // Shared node sizing: 20% smaller, clamped smoothly between zoom in and zoom out
-        const handleR = Math.max(4.4, Math.min(8.0, 5.2 * factor));
-        const handleStroke = Math.max(1.2, Math.min(2.4, 1.6 * factor));
+        const factor = resolveViewportInverseScale(inverseScale);
+        const linearR = getLinearNodeRadius(factor);
+        const linearStroke = getLinearNodeStroke(factor);
+        const areaR = getAreaNodeRadius(factor);
+        const areaStroke = getAreaNodeStroke(factor);
         const handleHit = Math.max(22, Math.min(38, 24 * factor));
 
         state.segments.forEach(segment => {
+            const isAreaSeg = String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area';
             if (segment.node) {
-                const isAreaSeg = String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area';
                 segment.node.hitStrokeWidth(segmentHitStrokeWidth(segment, isAreaSeg, factor));
             }
+            const handleR = isAreaSeg ? areaR : linearR;
+            const handleStroke = isAreaSeg ? areaStroke : linearStroke;
             (segment.handles || []).forEach(handle => {
                 if (typeof handle.radius === 'function') {
                     handle.radius(handleR);
@@ -1357,10 +1403,10 @@
             });
         });
         (state.draftLine?.vertices || []).forEach(vertex => {
-            resizeVertexHandleNode(vertex, handleR, handleStroke, handleHit);
+            resizeVertexHandleNode(vertex, linearR, linearStroke, handleHit);
         });
         (state.draftArea?.vertices || []).forEach(vertex => {
-            resizeVertexHandleNode(vertex, handleR, handleStroke, handleHit);
+            resizeVertexHandleNode(vertex, areaR, areaStroke, handleHit);
         });
         if (state.draftLine?.points?.length && linearPointerWorld) {
             const lastPt = state.draftLine.points[state.draftLine.points.length - 1];
@@ -1455,8 +1501,8 @@
             visible,
         });
         const label = new Konva.Text({ fill: segment.color || '#22c55e', fontSize: 16, padding: 4, visible: false, listening: false });
-        const handleR = getLinearNodeRadius();
-        const handleStroke = getLinearNodeStroke();
+        const handleR = isArea ? getAreaNodeRadius() : getLinearNodeRadius();
+        const handleStroke = isArea ? getAreaNodeStroke() : getLinearNodeStroke();
         const handles = (segment.points_json || []).map((point, index) => {
             const handle = (segSubtype === 'linear' || segSubtype === 'linear_with_drop')
                 ? createVertexHandleNode(point, segSubtype, segment.color || '#2563eb', handleR, handleStroke, {
@@ -1473,7 +1519,7 @@
                     stroke: segment.color || '#2563eb',
                     strokeWidth: handleStroke,
                     shadowColor: 'rgba(0,0,0,0.25)',
-                    shadowBlur: 2,
+                    shadowBlur: handleR <= 3 ? 1 : 2,
                     hitStrokeWidth: 32,
                     draggable: !isElementLocked(segment),
                     listening: !isTakeoffObjectInteractionBlocked(),
@@ -1625,29 +1671,33 @@
             selectionRectDraft.node?.destroy();
             selectionRectDraft = null;
         }
+        const layerByKey = new Map();
+        state.layers.forEach(l => {
+            if (l.client_uid != null) layerByKey.set(String(l.client_uid), l);
+            if (l.integration_key) layerByKey.set(String(l.integration_key), l);
+            if (l.metadata_json?.project_layer_id) layerByKey.set(String(l.metadata_json.project_layer_id), l);
+        });
         state.markers.forEach(m => {
             if (!m.node) createMarkerNode(m);
-            const layer = state.layers.find(l => String(l.client_uid) === String(m.layer_client_uid)
-                || String(l.integration_key || '') === String(m.layer_client_uid)
-                || String(l.metadata_json?.project_layer_id || '') === String(m.layer_client_uid));
+            const layer = layerByKey.get(String(m.layer_client_uid || ''));
             const isVisible = Number(m.page_number) === targetPage && Number(layer?.visible ?? 1) !== 0;
             if (m.node) m.node.visible(isVisible);
-            m.transformer?.visible(isVisible && !isElementLocked(m) && state.selectedObjectUids.has(String(m.client_uid)));
+            const isSelected = isVisible && !isElementLocked(m) && state.selectedObjectUids.has(String(m.client_uid));
+            m.transformer?.visible(isSelected);
             const ring = m.node?.findOne('.takeoff-selection-ring');
             if (ring) {
-                ring.visible(isVisible && !isElementLocked(m) && state.selectedObjectUids.has(String(m.client_uid)));
+                ring.visible(isSelected);
             }
         });
         state.segments.forEach(s => {
             if (!s.node) createSegmentNode(s);
-            const layer = state.layers.find(l => String(l.client_uid) === String(s.layer_client_uid)
-                || String(l.integration_key || '') === String(s.layer_client_uid)
-                || String(l.metadata_json?.project_layer_id || '') === String(s.layer_client_uid));
+            const layer = layerByKey.get(String(s.layer_client_uid || ''));
             const isVisible = Number(s.page_number) === targetPage && Number(layer?.visible ?? 1) !== 0;
             if (s.node) s.node.visible(isVisible);
             if (s.labelNode) s.labelNode.visible(false);
+            const isSelected = isVisible && !isElementLocked(s) && state.selectedObjectUids.has(String(s.client_uid));
             (s.handles || []).forEach(h => {
-                h.visible(isVisible && !isElementLocked(s) && state.selectedObjectUids.has(String(s.client_uid)));
+                h.visible(isSelected);
             });
         });
         applyObjectSelectionVisuals(true);
@@ -2073,8 +2123,8 @@
             showToast('Layer is locked', 'error');
             return;
         }
-        const handleR = getLinearNodeRadius();
-        const handleStroke = getLinearNodeStroke();
+        const handleR = getAreaNodeRadius();
+        const handleStroke = getAreaNodeStroke();
         if (!state.draftArea) {
             const vertex = createVertexHandleNode(pos, 'area', layer.color || '#2563eb', handleR, handleStroke, {
                 draggable: false,
@@ -2486,6 +2536,7 @@
             || dirtyTakeoffPages.size > 0
             || dirtyTakeoffObjects.size > 0
             || deletedTakeoffObjects.size > 0
+            || deletedTakeoffLayers.size > 0
         );
     }
     window.isEditorTakeoffDirty = isEditorTakeoffDirty;
@@ -2612,7 +2663,12 @@
                 .map(item => item.color)),
             metadata_json: { ...JSON.parse(JSON.stringify(layer.metadata_json || {})), project_layer_id: copyUid }
         };
-        state.layers.push(copy);
+        const srcIdx = state.layers.indexOf(layer);
+        if (srcIdx >= 0) {
+            state.layers.splice(srcIdx + 1, 0, copy);
+        } else {
+            state.layers.push(copy);
+        }
         state.selectedLayerUid = copy.client_uid;
         markDirty({ pageFallback: true });
         renderAll();
@@ -3487,19 +3543,58 @@
         renderAll();
     }
 
-    function deleteLayerWithoutConfirm(layer) {
+    function purgeObjectsForLayerKeys(keysInput) {
+        const keys = keysInput instanceof Set ? keysInput : new Set((keysInput || []).map(String).filter(Boolean));
+        if (!keys.size) return [];
+        const matchesLayerKey = (obj) => {
+            const lcu = String(obj?.layer_client_uid || '');
+            const lid = String(obj?.layer_id || '');
+            return (lcu && keys.has(lcu)) || (lid && keys.has(lid));
+        };
         const removedObjects = [
-            ...state.markers.filter(marker => marker.layer_client_uid === layer.client_uid).map(ref => ({ type: 'marker', ref })),
-            ...state.segments.filter(segment => segment.layer_client_uid === layer.client_uid).map(ref => ({ type: 'segment', ref }))
+            ...state.markers.filter(matchesLayerKey).map(ref => ({ type: 'marker', ref })),
+            ...state.segments.filter(matchesLayerKey).map(ref => ({ type: 'segment', ref }))
         ];
-        trackTakeoffObjects(removedObjects, true);
-        removedObjects.filter(target => target.type === 'marker').forEach(target => destroyMarkerNodes(target.ref));
-        removedObjects.filter(target => target.type === 'segment').forEach(target => destroySegmentNodes(target.ref));
-        state.markers = state.markers.filter(marker => marker.layer_client_uid !== layer.client_uid);
-        state.segments = state.segments.filter(segment => segment.layer_client_uid !== layer.client_uid);
-        state.layers = state.layers.filter(row => row !== layer);
-        state.selectedLayerUids.delete(layer.client_uid);
-        if (state.selectedLayerUid === layer.client_uid) state.selectedLayerUid = state.layers[0]?.client_uid || null;
+        if (state.draftLine && keys.has(String(state.draftLine.layerUid || ''))) {
+            cancelLinearDraft();
+        }
+        if (state.draftArea && keys.has(String(state.draftArea.layerUid || ''))) {
+            clearDrafts();
+        }
+        removedObjects.forEach(({ ref }) => {
+            const p = Number(ref?.page_number || pageNum || 1);
+            if (p > 0) dirtyTakeoffPages.add(p);
+        });
+        if (removedObjects.length) {
+            trackTakeoffObjects(removedObjects, true);
+        }
+        removedObjects.forEach(target => {
+            const objUid = String(target.ref?.client_uid || '');
+            if (objUid) state.selectedObjectUids.delete(objUid);
+            if (state.selectedElement?.ref === target.ref) state.selectedElement = null;
+            if (target.type === 'marker') destroyMarkerNodes(target.ref);
+            else destroySegmentNodes(target.ref);
+        });
+        state.markers = state.markers.filter(marker => !matchesLayerKey(marker));
+        state.segments = state.segments.filter(segment => !matchesLayerKey(segment));
+        return removedObjects;
+    }
+
+    function deleteLayerWithoutConfirm(layer, explicitKeys = []) {
+        const keys = new Set([
+            ...(layer ? layerTrackingKeys(layer) : []),
+            ...(Array.isArray(explicitKeys) ? explicitKeys : []).map(String).filter(Boolean)
+        ]);
+        if (!keys.size) return;
+        if (layer) trackDeletedLayer(layer);
+        keys.forEach(k => deletedTakeoffLayers.add(k));
+        dirtyTakeoffPages.add(Number(layer?.page_number || pageNum || 1));
+        purgeObjectsForLayerKeys(keys);
+        if (layer) {
+            state.layers = state.layers.filter(row => row !== layer);
+            state.selectedLayerUids.delete(layer.client_uid);
+            if (state.selectedLayerUid === layer.client_uid) state.selectedLayerUid = state.layers[0]?.client_uid || null;
+        }
     }
 
     function handleLayerAction(action, layer) {
@@ -3940,15 +4035,18 @@
         const sentObjectGenerations = new Map(sentObjectIds.map(id => [id, dirtyTakeoffObjectGenerations.get(id) || 0]));
         const objectBaseVersions = Object.fromEntries(sentObjectIds.map(id => [id, takeoffObjectBaseVersions.get(id) ?? null]));
         const fallbackPages = dirtyTakeoffPages.size ? [...dirtyTakeoffPages] : (sentObjectIds.length ? [] : sentPages);
+        const sentDeletedLayerIds = [...deletedTakeoffLayers];
         return {
             sentPages,
             sentGenerations,
             sentObjectIds,
             sentObjectGenerations,
+            sentDeletedLayerIds,
             body: {
                 drawing_id: fileId,
                 project_id: typeof projectId !== 'undefined' ? projectId : 0,
                 estimate_key: currentEstimateKey(),
+                replace_layers: 1,
                 layers: state.layers,
                 markers: state.markers.map(marker => ({
                     ...stripNodes(marker),
@@ -3966,6 +4064,7 @@
                 dirty_page_numbers: fallbackPages,
                 dirty_object_ids: [...dirtyTakeoffObjects.keys()],
                 deleted_object_ids: [...deletedTakeoffObjects.keys()],
+                deleted_layer_ids: sentDeletedLayerIds,
                 object_base_versions: objectBaseVersions,
             }
         };
@@ -4018,6 +4117,7 @@
                 dirty_page_numbers: dirtyObjectSet.size ? [] : (body.dirty_page_numbers || []),
                 dirty_object_ids: body.dirty_object_ids || [],
                 deleted_object_ids: body.deleted_object_ids || [],
+                deleted_layer_ids: body.deleted_layer_ids || [],
                 object_base_versions: body.object_base_versions || {},
             };
             serialized = JSON.stringify({ action: 'save_state', ...compactBody });
@@ -4033,7 +4133,7 @@
     }
 
     function saveTakeoff(silent = false, rejectOnError = false) {
-        const { sentPages, sentGenerations, sentObjectIds, sentObjectGenerations, body } = buildSaveTakeoffPayload();
+        const { sentPages, sentGenerations, sentObjectIds, sentObjectGenerations, sentDeletedLayerIds, body } = buildSaveTakeoffPayload();
         return request('save_state', body).then(res => {
             if (res.status !== 'success') throw new Error(res.msg || 'Save failed');
             sentPages.forEach(page => {
@@ -4052,7 +4152,8 @@
                     takeoffObjectBaseVersions.set(id, current._serverUpdatedAt);
                 } else takeoffObjectBaseVersions.delete(id);
             });
-            state.dirty = dirtyTakeoffPages.size > 0 || dirtyTakeoffObjects.size > 0 || deletedTakeoffObjects.size > 0;
+            (sentDeletedLayerIds || []).forEach(id => deletedTakeoffLayers.delete(id));
+            state.dirty = dirtyTakeoffPages.size > 0 || dirtyTakeoffObjects.size > 0 || deletedTakeoffObjects.size > 0 || deletedTakeoffLayers.size > 0;
             if (!silent) {
                 hasPendingManualCanvasCheckpoint = false;
                 showToast('Takeoff saved', 'success');
@@ -4318,6 +4419,8 @@
             layer = data;
             state.layers.push(layer);
         }
+        untrackDeletedLayer(layer);
+        untrackDeletedLayer(externalId);
         if (fast) {
             activateLayerForInsert(layer.client_uid, { fast: true, skipEmit: true });
             return projectLayerPayload(layer);
@@ -4448,7 +4551,33 @@
             } else {
                 state.layers.push(data);
             }
+            untrackDeletedLayer(data);
+            untrackDeletedLayer(externalId);
         });
+        // Preserve parent group layer ordering inside state.layers (copied items stay right below their source)
+        const payloadOrder = new Map();
+        layers.forEach((p, idx) => {
+            if (p?.id) payloadOrder.set(String(p.id), idx);
+        });
+        const orderedLayers = [];
+        const unmatchedLayers = [];
+        const bucketByOrder = new Map();
+        state.layers.forEach(row => {
+            const matchedKey = layerTrackingKeys(row).find(k => payloadOrder.has(k));
+            if (matchedKey !== undefined) {
+                const idx = payloadOrder.get(matchedKey);
+                if (!bucketByOrder.has(idx)) bucketByOrder.set(idx, []);
+                bucketByOrder.get(idx).push(row);
+            } else {
+                unmatchedLayers.push(row);
+            }
+        });
+        Array.from(bucketByOrder.keys()).sort((a, b) => a - b).forEach(idx => {
+            orderedLayers.push(...bucketByOrder.get(idx));
+        });
+        if (orderedLayers.length) {
+            state.layers = [...orderedLayers, ...unmatchedLayers];
+        }
         setTakeoffPage(pageNum);
         renderLayers();
         if (typeof window.syncKonvaToFabric === 'function') {
@@ -4466,57 +4595,83 @@
         return true;
     };
 
-    window.projectTakeoffSetLayerVisibility = function (layerId, visible) {
-        const layerKey = String(layerId);
-        const layer = state.layers.find(row => row.client_uid === layerKey
-            || row.metadata_json?.project_layer_id === layerKey
-            || String(row.id || '') === layerKey
-            || String(row.integration_key || '') === layerKey);
-        if (!layer) return false;
-        layer.visible = visible ? 1 : 0;
+    window.projectTakeoffSetLayersVisibility = function (entries) {
+        const list = Array.isArray(entries) ? entries : [];
+        if (!list.length) return false;
+        const layerByKey = new Map();
+        state.layers.forEach(row => {
+            if (row.client_uid != null) layerByKey.set(String(row.client_uid), row);
+            if (row.metadata_json?.project_layer_id != null) layerByKey.set(String(row.metadata_json.project_layer_id), row);
+            if (row.id != null && row.id !== '') layerByKey.set(String(row.id), row);
+            if (row.integration_key) layerByKey.set(String(row.integration_key), row);
+        });
+        let changedCount = 0;
+        list.forEach(entry => {
+            if (!entry || entry.id === undefined || entry.id === null) return;
+            const layer = layerByKey.get(String(entry.id));
+            if (!layer) return;
+            const nextVis = entry.visible ? 1 : 0;
+            if (Number(layer.visible ?? 1) !== nextVis) {
+                layer.visible = nextVis;
+            }
+            changedCount++;
+        });
+        if (!changedCount) return false;
         setTakeoffPage(pageNum);
         renderLayers();
-        emitProjectState();
+        scheduleEmitProjectState(true, 120);
         scheduleTakeoffAutosave();
         return true;
     };
 
-    window.projectTakeoffDeleteLayer = function (layerId) {
-        const layerKey = String(layerId);
-        const layer = state.layers.find(row => row.client_uid === layerKey
-            || row.metadata_json?.project_layer_id === layerKey
-            || String(row.id || '') === layerKey
-            || String(row.integration_key || '') === layerKey);
-        if (!layer) return false;
-        deleteLayerWithoutConfirm(layer);
-        markDirty();
-        renderAll();
-        return true;
+    window.projectTakeoffSetLayerVisibility = function (layerId, visible) {
+        return window.projectTakeoffSetLayersVisibility([{ id: layerId, visible }]);
     };
 
-    window.projectTakeoffDeleteLayers = function (layerIds) {
-        const wanted = new Set((Array.isArray(layerIds) ? layerIds : []).map(String));
-        const layers = state.layers.filter(row => wanted.has(String(row.client_uid))
-            || wanted.has(String(row.metadata_json?.project_layer_id || '')));
-        if (!layers.length && wanted.size) return false;
-        const blocked = layers.some(layer => Number(layer.locked || 0) === 1
-            || state.markers.some(marker => marker.layer_client_uid === layer.client_uid && isElementLocked(marker))
-            || state.segments.some(segment => segment.layer_client_uid === layer.client_uid && isElementLocked(segment)));
+    window.projectTakeoffDeleteLayer = function (layerId, options = {}) {
+        const key = String(layerId || '').trim();
+        if (!key) return false;
+        return Boolean(window.projectTakeoffDeleteLayers([key], options));
+    };
+
+    window.projectTakeoffDeleteLayers = function (layerIds, options = {}) {
+        const force = Boolean(options?.force);
+        const wanted = new Set((Array.isArray(layerIds) ? layerIds : []).map(String).filter(Boolean));
+        if (!wanted.size) return false;
+        const layers = state.layers.filter(row => layerTrackingKeys(row).some(k => wanted.has(k)));
+        const allKeys = new Set(wanted);
+        layers.forEach(layer => layerTrackingKeys(layer).forEach(k => allKeys.add(k)));
+        const matchesAnyKey = (obj) => {
+            const lcu = String(obj?.layer_client_uid || '');
+            const lid = String(obj?.layer_id || '');
+            return (lcu && allKeys.has(lcu)) || (lid && allKeys.has(lid));
+        };
+        const blocked = !force && layers.some(layer => Number(layer.locked || 0) === 1
+            || state.markers.some(marker => matchesAnyKey(marker) && isElementLocked(marker))
+            || state.segments.some(segment => matchesAnyKey(segment) && isElementLocked(segment)));
         if (blocked) return false;
         const affectedPages = new Set();
-        layers.forEach(layer => affectedPages.add(Number(layer.page_number || 1)));
+        layers.forEach(layer => affectedPages.add(Number(layer.page_number || pageNum || 1)));
         state.markers.forEach(marker => {
-            if (layers.some(layer => marker.layer_client_uid === layer.client_uid)) affectedPages.add(Number(marker.page_number || 1));
+            if (matchesAnyKey(marker)) affectedPages.add(Number(marker.page_number || pageNum || 1));
         });
         state.segments.forEach(segment => {
-            if (layers.some(layer => segment.layer_client_uid === layer.client_uid)) affectedPages.add(Number(segment.page_number || 1));
+            if (matchesAnyKey(segment)) affectedPages.add(Number(segment.page_number || pageNum || 1));
         });
         snapshot();
-        layers.forEach(deleteLayerWithoutConfirm);
+        if (layers.length) {
+            layers.forEach(layer => deleteLayerWithoutConfirm(layer, [...allKeys]));
+        } else {
+            allKeys.forEach(k => deletedTakeoffLayers.add(k));
+            purgeObjectsForLayerKeys(allKeys);
+        }
         affectedPages.forEach(page => dirtyTakeoffPages.add(page));
-        markDirty({ objectsTracked: true });
+        markDirty({ pageFallback: affectedPages.size === 0, objectsTracked: true });
         renderAll();
-        return { deletedLayerIds: layers.map(layer => String(layer.client_uid)), snapshot: projectSnapshot() };
+        flushKonvaCanvasDraw(true);
+        if (typeof window.syncKonvaToFabric === 'function') window.syncKonvaToFabric();
+        emitSelectionState();
+        return { deletedLayerIds: [...allKeys], snapshot: projectSnapshot() };
     };
 
     window.projectTakeoffSnapshot = function () {

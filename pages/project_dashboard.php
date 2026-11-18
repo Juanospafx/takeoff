@@ -294,6 +294,7 @@ if ($projectId > 0 && dash_table_exists($pdo, 'drawings')) {
 }
 
 $takeoffLayers = [];
+$catalogItemMetaMap = [];
 if ($projectId > 0 && dash_table_exists($pdo, 'takeoff_layers') && dash_table_exists($pdo, 'takeoffs')) {
     $hasLayerProjectId = dash_column_exists($pdo, 'takeoff_layers', 'project_id');
     $stmt = $pdo->prepare($hasLayerProjectId ? "
@@ -301,31 +302,46 @@ if ($projectId > 0 && dash_table_exists($pdo, 'takeoff_layers') && dash_table_ex
         FROM takeoff_layers tl
         LEFT JOIN takeoffs t ON t.id = tl.takeoff_id AND t.deleted_at IS NULL
         WHERE (tl.project_id = ? OR t.project_id = ?) AND tl.deleted_at IS NULL
-        ORDER BY tl.sort_order ASC, tl.id DESC
+        ORDER BY tl.sort_order ASC, tl.id ASC
     " : "
         SELECT tl.*, t.drawing_id AS resolved_drawing_id
         FROM takeoff_layers tl
         INNER JOIN takeoffs t ON t.id = tl.takeoff_id
         WHERE t.project_id = ? AND t.deleted_at IS NULL
-        ORDER BY tl.sort_order ASC, tl.id DESC
+        ORDER BY tl.sort_order ASC, tl.id ASC
     ");
+    $catalogItemMetaMap = [];
     $stmt->execute($hasLayerProjectId ? [$projectId, $projectId] : [$projectId]);
-    $takeoffLayers = array_map(function ($tl) {
+    $takeoffLayers = array_map(function ($tl) use (&$catalogItemMetaMap) {
         if (empty($tl['drawing_id']) && !empty($tl['resolved_drawing_id'])) {
-            $tl['drawing_id'] = (int)$tl['resolved_drawing_id'];
+            $tl['drawing_id'] = (int) $tl['resolved_drawing_id'];
         }
         unset($tl['resolved_drawing_id']);
         if (!empty($tl['metadata_json'])) {
-            $meta = is_array($tl['metadata_json']) ? $tl['metadata_json'] : json_decode($tl['metadata_json'], true);
+            $meta = is_array($tl['metadata_json']) ? $tl['metadata_json'] : json_decode((string) $tl['metadata_json'], true);
             if (is_array($meta)) {
                 if (isset($meta['difficulty']) && !isset($tl['difficulty'])) {
-                    $tl['difficulty'] = (float)$meta['difficulty'];
+                    $tl['difficulty'] = (float) $meta['difficulty'];
                 }
                 if (isset($meta['multiplier']) && !isset($tl['multiplier'])) {
-                    $tl['multiplier'] = (float)$meta['multiplier'];
+                    $tl['multiplier'] = (float) $meta['multiplier'];
                 }
                 if (empty($tl['drawing_id']) && !empty($meta['file_drawing_id'])) {
-                    $tl['drawing_id'] = (int)$meta['file_drawing_id'];
+                    $tl['drawing_id'] = (int) $meta['file_drawing_id'];
+                }
+                if (!empty($meta['catalog_item']) && is_array($meta['catalog_item'])) {
+                    $ciJson = json_encode($meta['catalog_item'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                    $ciId = trim((string) ($meta['catalog_item']['catalogItemId'] ?? $meta['catalog_item']['id'] ?? $tl['catalog_item_id'] ?? 'anon'));
+                    if ($ciId === '') {
+                        $ciId = 'anon';
+                    }
+                    $refKey = $ciId . ':' . substr(sha1((string) $ciJson), 0, 10);
+                    if (!isset($catalogItemMetaMap[$refKey])) {
+                        $catalogItemMetaMap[$refKey] = $meta['catalog_item'];
+                    }
+                    unset($meta['catalog_item']);
+                    $meta['catalog_item_ref'] = $refKey;
+                    $tl['metadata_json'] = json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
                 }
             }
         }
@@ -344,46 +360,52 @@ if ($projectId > 0 && dash_table_exists($pdo, 'takeoff_estimate_states')) {
         ");
         $stmtStates->execute([$projectId]);
         foreach ($stmtStates->fetchAll(PDO::FETCH_ASSOC) as $stRow) {
-            $estKey = trim((string)($stRow['estimate_key'] ?? ''));
-            $did = (int)($stRow['drawing_id'] ?? 0);
-            if ($estKey === '' || $did <= 0) continue;
-            $decoded = json_decode((string)($stRow['state_json'] ?? '{}'), true);
-            if (!is_array($decoded)) continue;
+            $estKey = trim((string) ($stRow['estimate_key'] ?? ''));
+            $did = (int) ($stRow['drawing_id'] ?? 0);
+            if ($estKey === '' || $did <= 0)
+                continue;
+            $decoded = json_decode((string) ($stRow['state_json'] ?? '{}'), true);
+            if (!is_array($decoded))
+                continue;
             $rawLayers = is_array($decoded['layers'] ?? null) ? $decoded['layers'] : [];
             $rawMarkers = is_array($decoded['markers'] ?? null) ? $decoded['markers'] : [];
             $rawSegments = is_array($decoded['segments'] ?? null) ? $decoded['segments'] : [];
             $shapesByLayer = [];
             foreach ($rawMarkers as $m) {
-                if (!is_array($m)) continue;
-                $lid = (string)($m['layer_client_uid'] ?? $m['layer_id'] ?? '');
-                if ($lid === '') continue;
-                $mult = isset($m['multiplier']) && $m['multiplier'] !== '' ? (float)$m['multiplier'] : 1.0;
-                $qVal = isset($m['quantity']) && $m['quantity'] !== '' ? (float)$m['quantity'] : $mult;
+                if (!is_array($m))
+                    continue;
+                $lid = (string) ($m['layer_client_uid'] ?? $m['layer_id'] ?? '');
+                if ($lid === '')
+                    continue;
+                $mult = isset($m['multiplier']) && $m['multiplier'] !== '' ? (float) $m['multiplier'] : 1.0;
+                $qVal = isset($m['quantity']) && $m['quantity'] !== '' ? (float) $m['quantity'] : $mult;
                 $shapesByLayer[$lid][] = [
-                    'id' => (string)($m['client_uid'] ?? $m['id'] ?? ''),
-                    'client_uid' => (string)($m['client_uid'] ?? $m['id'] ?? ''),
+                    'id' => (string) ($m['client_uid'] ?? $m['id'] ?? ''),
+                    'client_uid' => (string) ($m['client_uid'] ?? $m['id'] ?? ''),
                     'layerId' => $lid,
-                    'documentId' => (string)$did,
-                    'pageNumber' => max(1, (int)($m['page_number'] ?? 1)),
+                    'documentId' => (string) $did,
+                    'pageNumber' => max(1, (int) ($m['page_number'] ?? 1)),
                     'type' => 'Count',
                     'quantityValue' => $qVal,
                     'quantity' => $qVal,
                 ];
             }
             foreach ($rawSegments as $s) {
-                if (!is_array($s)) continue;
-                $lid = (string)($s['layer_client_uid'] ?? $s['layer_id'] ?? '');
-                if ($lid === '') continue;
-                $isArea = strtolower((string)($s['takeoff_type'] ?? $s['type'] ?? '')) === 'area';
-                $qVal = (float)($isArea
+                if (!is_array($s))
+                    continue;
+                $lid = (string) ($s['layer_client_uid'] ?? $s['layer_id'] ?? '');
+                if ($lid === '')
+                    continue;
+                $isArea = strtolower((string) ($s['takeoff_type'] ?? $s['type'] ?? '')) === 'area';
+                $qVal = (float) ($isArea
                     ? ($s['total_area'] ?? $s['measured_area'] ?? $s['total_length'] ?? 0)
                     : ($s['total_length'] ?? $s['measured_length'] ?? 0));
                 $shapesByLayer[$lid][] = [
-                    'id' => (string)($s['client_uid'] ?? $s['id'] ?? ''),
-                    'client_uid' => (string)($s['client_uid'] ?? $s['id'] ?? ''),
+                    'id' => (string) ($s['client_uid'] ?? $s['id'] ?? ''),
+                    'client_uid' => (string) ($s['client_uid'] ?? $s['id'] ?? ''),
                     'layerId' => $lid,
-                    'documentId' => (string)$did,
-                    'pageNumber' => max(1, (int)($s['page_number'] ?? 1)),
+                    'documentId' => (string) $did,
+                    'pageNumber' => max(1, (int) ($s['page_number'] ?? 1)),
                     'type' => $isArea ? 'Area' : 'Linear',
                     'quantityValue' => $qVal,
                     'quantity' => $qVal,
@@ -392,22 +414,24 @@ if ($projectId > 0 && dash_table_exists($pdo, 'takeoff_estimate_states')) {
             $compactLayers = [];
             $seenCompactLayerIds = [];
             foreach ($rawLayers as $rl) {
-                if (!is_array($rl)) continue;
-                $lid = (string)($rl['client_uid'] ?? $rl['id'] ?? '');
-                if ($lid === '' || isset($seenCompactLayerIds[$lid])) continue;
+                if (!is_array($rl))
+                    continue;
+                $lid = (string) ($rl['client_uid'] ?? $rl['id'] ?? '');
+                if ($lid === '' || isset($seenCompactLayerIds[$lid]))
+                    continue;
                 $seenCompactLayerIds[$lid] = true;
                 $meta = is_array($rl['metadata_json'] ?? null) ? $rl['metadata_json'] : [];
-                $baseQty = (float)($rl['baseQuantity'] ?? $rl['base_quantity'] ?? $rl['seed_quantity'] ?? $meta['base_quantity'] ?? 0);
+                $baseQty = (float) ($rl['baseQuantity'] ?? $rl['base_quantity'] ?? $rl['seed_quantity'] ?? $meta['base_quantity'] ?? 0);
                 $compactLayers[] = [
                     'id' => $lid,
                     'layerId' => $lid,
                     'client_uid' => $lid,
-                    'name' => (string)($rl['name'] ?? ''),
-                    'color' => (string)($rl['color'] ?? '#2563eb'),
-                    'symbol' => (string)($rl['symbol'] ?? 'circle'),
-                    'type' => (string)($rl['takeoff_type'] ?? $rl['type'] ?? 'count'),
-                    'unit_of_measure' => (string)($rl['unit_of_measure'] ?? 'ea'),
-                    'quantity' => (float)($rl['quantity'] ?? 0),
+                    'name' => (string) ($rl['name'] ?? ''),
+                    'color' => (string) ($rl['color'] ?? '#2563eb'),
+                    'symbol' => (string) ($rl['symbol'] ?? 'circle'),
+                    'type' => (string) ($rl['takeoff_type'] ?? $rl['type'] ?? 'count'),
+                    'unit_of_measure' => (string) ($rl['unit_of_measure'] ?? 'ea'),
+                    'quantity' => (float) ($rl['quantity'] ?? 0),
                     'baseQuantity' => $baseQty,
                     'base_quantity' => $baseQty,
                     'seed_quantity' => $baseQty,
@@ -418,8 +442,8 @@ if ($projectId > 0 && dash_table_exists($pdo, 'takeoff_estimate_states')) {
                 'estimateId' => $estKey,
                 'estimateKey' => $estKey,
                 'drawingId' => $did,
-                'documentId' => (string)$did,
-                'updatedAt' => (string)($stRow['updated_at'] ?? ''),
+                'documentId' => (string) $did,
+                'updatedAt' => (string) ($stRow['updated_at'] ?? ''),
                 'layers' => $compactLayers,
             ];
         }
@@ -523,7 +547,7 @@ if (!empty($project['metadata_json'])) {
 
 $dashEstimatesSummary = [];
 $hasPopulatedWorkspaceState = false;
-$resolvedActiveEstimateId = trim((string)($projectMeta['primary_estimate_id'] ?? ''));
+$resolvedActiveEstimateId = trim((string) ($projectMeta['primary_estimate_id'] ?? ''));
 if ($projectId > 0 && dash_table_exists($pdo, 'estimates')) {
     try {
         $hasWsState = dash_table_exists($pdo, 'estimate_workspace_states');
@@ -536,8 +560,9 @@ if ($projectId > 0 && dash_table_exists($pdo, 'estimates')) {
         $activeCandidate = '';
         $primaryCandidate = '';
         foreach ($estRows as $er) {
-            $snap = !empty($er['state_json']) ? json_decode((string)$er['state_json'], true) : [];
-            if (!is_array($snap)) $snap = [];
+            $snap = !empty($er['state_json']) ? json_decode((string) $er['state_json'], true) : [];
+            if (!is_array($snap))
+                $snap = [];
             if (!empty($snap) && isset($snap['groups']) && is_array($snap['groups'])) {
                 $hasPopulatedWorkspaceState = true;
             }
@@ -547,14 +572,14 @@ if ($projectId > 0 && dash_table_exists($pdo, 'estimates')) {
                     $estItemCount += count($wsGroup['items']);
                 }
             }
-            $cid = trim((string)($er['client_estimate_id'] ?: ($snap['id'] ?? $er['id'])));
+            $cid = trim((string) ($er['client_estimate_id'] ?: ($snap['id'] ?? $er['id'])));
             $isPrim = !empty($snap['isPrimary']) || !empty($snap['is_primary']);
             $isAct = !empty($snap['isActive']);
-            $estVal = (float)($snap['estimateTotal'] ?? $snap['totalSales'] ?? $er['total_cost'] ?? 0);
+            $estVal = (float) ($snap['estimateTotal'] ?? $snap['totalSales'] ?? $er['total_cost'] ?? 0);
             $dashEstimatesSummary[] = [
                 'id' => $cid,
-                'dbEstimateId' => (int)$er['id'],
-                'name' => (string)($snap['name'] ?? $er['name'] ?? 'Estimate'),
+                'dbEstimateId' => (int) $er['id'],
+                'name' => (string) ($snap['name'] ?? $er['name'] ?? 'Estimate'),
                 'isPrimary' => $isPrim,
                 'is_primary' => $isPrim,
                 'isActive' => $isAct,
@@ -562,18 +587,20 @@ if ($projectId > 0 && dash_table_exists($pdo, 'estimates')) {
                 'totalSales' => $estVal,
                 'itemCount' => $estItemCount,
             ];
-            if ($isAct && $activeCandidate === '') $activeCandidate = $cid;
-            if ($isPrim && $primaryCandidate === '') $primaryCandidate = $cid;
+            if ($isAct && $activeCandidate === '')
+                $activeCandidate = $cid;
+            if ($isPrim && $primaryCandidate === '')
+                $primaryCandidate = $cid;
         }
         if ($activeCandidate !== '') {
             $resolvedActiveEstimateId = $activeCandidate;
         } elseif ($primaryCandidate !== '') {
             $resolvedActiveEstimateId = $primaryCandidate;
         } elseif (!empty($dashEstimatesSummary)) {
-            $resolvedActiveEstimateId = (string)$dashEstimatesSummary[0]['id'];
+            $resolvedActiveEstimateId = (string) $dashEstimatesSummary[0]['id'];
         }
         if ($resolvedActiveEstimateId === '' && !empty($takeoffLayers[0]['estimate_key'])) {
-            $resolvedActiveEstimateId = (string)$takeoffLayers[0]['estimate_key'];
+            $resolvedActiveEstimateId = (string) $takeoffLayers[0]['estimate_key'];
         }
         if ($primaryCandidate !== '') {
             $projectMeta['primary_estimate_id'] = $primaryCandidate;
@@ -584,7 +611,7 @@ if ($projectId > 0 && dash_table_exists($pdo, 'estimates')) {
     }
 }
 if ($resolvedActiveEstimateId === '' && !empty($takeoffLayers[0]['estimate_key'])) {
-    $resolvedActiveEstimateId = (string)$takeoffLayers[0]['estimate_key'];
+    $resolvedActiveEstimateId = (string) $takeoffLayers[0]['estimate_key'];
 }
 if ($resolvedActiveEstimateId === '') {
     $resolvedActiveEstimateId = 'est_primary';
@@ -629,19 +656,19 @@ if ($projectId > 0 && dash_table_exists($pdo, 'estimate_items') && dash_table_ex
                 if (is_array($meta)) {
                     $ws = isset($meta['workspace']) && is_array($meta['workspace']) ? $meta['workspace'] : $meta;
                     if (isset($ws['difficulty']) && !isset($ei['difficulty'])) {
-                        $ei['difficulty'] = (float)$ws['difficulty'];
+                        $ei['difficulty'] = (float) $ws['difficulty'];
                     }
                     if (isset($ws['laborWaste']) && !isset($ei['laborWaste'])) {
-                        $ei['laborWaste'] = (float)$ws['laborWaste'];
+                        $ei['laborWaste'] = (float) $ws['laborWaste'];
                     }
                     if (isset($ws['laborMargin']) && !isset($ei['laborMargin'])) {
-                        $ei['laborMargin'] = (float)$ws['laborMargin'];
+                        $ei['laborMargin'] = (float) $ws['laborMargin'];
                     }
                     if (isset($ws['factorOverride']) && !isset($ei['factorOverride'])) {
-                        $ei['factorOverride'] = (float)$ws['factorOverride'];
+                        $ei['factorOverride'] = (float) $ws['factorOverride'];
                     }
                     if (isset($ws['ratio']) && !isset($ei['ratio'])) {
-                        $ei['ratio'] = (float)$ws['ratio'];
+                        $ei['ratio'] = (float) $ws['ratio'];
                     }
                     if (isset($ws['children']) && !isset($ei['children'])) {
                         $ei['children'] = $ws['children'];
@@ -799,6 +826,7 @@ $state = [
     'selectedDrawingId' => $selectedDocumentId,
     'takeoffGroups' => [],
     'takeoffLayers' => $takeoffLayers,
+    'catalogItemMetaMap' => $catalogItemMetaMap,
     'takeoffLocations' => $takeoffLocations,
     'takeoffDrawingStates' => $takeoffDrawingStates,
     'takeoffMeasurements' => [],
@@ -829,7 +857,12 @@ $state = [
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="../assets/global_tools.css?v=<?= filemtime(__DIR__ . '/../assets/global_tools.css') ?>">
+    <link rel="stylesheet"
+        href="../assets/global_tools.css?v=<?= filemtime(__DIR__ . '/../assets/global_tools.css') ?>">
+    <link rel="stylesheet"
+        href="../assets/design_system.css?v=<?= filemtime(__DIR__ . '/../assets/design_system.css') ?>">
+    <link rel="stylesheet"
+        href="../assets/project_dashboard.css?v=<?= filemtime(__DIR__ . '/../assets/project_dashboard.css') ?>">
     <script>
         (function () {
             try {
@@ -840,324 +873,24 @@ $state = [
             }
         })();
     </script>
-    <style>
-        a {
-            color: inherit;
-        }
-
-        .grid {
-            display: grid;
-            gap: 16px;
-        }
-
-        .overview-grid {
-            grid-template-columns: repeat(12, minmax(0, 1fr));
-        }
-
-        .card-panel {
-            background: var(--card);
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            padding: 18px;
-            min-width: 0;
-        }
-
-        .card-panel h2,
-        .card-panel h3 {
-            margin: 0 0 14px;
-            font-size: 1rem;
-            font-weight: 800;
-        }
-
-        .span-3 {
-            grid-column: span 3;
-        }
-
-        .span-4 {
-            grid-column: span 4;
-        }
-
-        .span-6 {
-            grid-column: span 6;
-        }
-
-        .span-8 {
-            grid-column: span 8;
-        }
-
-        .span-12 {
-            grid-column: span 12;
-        }
-
-        .metric-value {
-            font-size: 1.6rem;
-            font-weight: 800;
-            color: #60a5fa;
-        }
-
-        .label {
-            color: var(--muted);
-            font-size: .78rem;
-            text-transform: uppercase;
-            letter-spacing: .04em;
-        }
-
-        .value {
-            font-weight: 700;
-            color: var(--text);
-        }
-
-        .info-list {
-            display: grid;
-            gap: 12px;
-        }
-
-        .info-row {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            border-bottom: 1px solid rgba(255, 255, 255, .06);
-            padding-bottom: 10px;
-        }
-
-        .btn-main,
-        .btn-ghost {
-            border: 0;
-            border-radius: 6px;
-            padding: 10px 14px;
-            font-weight: 700;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            cursor: pointer;
-        }
-
-        .btn-main {
-            background: var(--primary);
-            color: #fff;
-        }
-
-        .btn-ghost {
-            background: rgba(255, 255, 255, .07);
-            color: var(--text);
-            border: 1px solid var(--line);
-        }
-
-        .btn-ghost:disabled {
-            opacity: .45;
-            cursor: not-allowed;
-        }
-
-        .quick-actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-
-        .documents-layout {
-            display: grid;
-            grid-template-columns: 260px minmax(280px, 430px) 1fr;
-            gap: 16px;
-            height: calc(100vh - 177px);
-            min-height: 580px;
-        }
-
-        .folder-list,
-        .document-list {
-            overflow: auto;
-        }
-
-        .folder-item,
-        .doc-item {
-            width: 100%;
-            border: 1px solid transparent;
-            background: transparent;
-            color: var(--text);
-            text-align: left;
-            padding: 10px 12px;
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            cursor: pointer;
-        }
-
-        .folder-item:hover,
-        .doc-item:hover {
-            background: rgba(255, 255, 255, .05);
-        }
-
-        .folder-item.active,
-        .doc-item.active {
-            background: rgba(37, 99, 235, .18);
-            border-color: rgba(96, 165, 250, .35);
-        }
-
-        .doc-title {
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            font-weight: 700;
-        }
-
-        .doc-meta {
-            color: var(--muted);
-            font-size: .78rem;
-        }
-
-        .preview-frame,
-        .takeoff-frame {
-            width: 100%;
-            height: 100%;
-            border: 0;
-            background: #0f172a;
-            border-radius: 8px;
-        }
-
-        .preview-empty,
-        .takeoff-empty {
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            color: var(--muted);
-            border: 1px dashed var(--line);
-            border-radius: 8px;
-        }
-
-        .takeoff-workspace {
-            height: 100%;
-            background: var(--bg-body, #eaedf2);
-        }
-
-        .estimating-toolbar {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin-bottom: 16px;
-        }
-
-        .estimating-toolbar input,
-        .estimating-toolbar select {
-            background: var(--card);
-            color: var(--text);
-            border: 1px solid var(--line);
-            border-radius: 6px;
-            padding: 10px 12px;
-        }
-
-        .table-wrap {
-            background: var(--card);
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            overflow: auto;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            min-width: 980px;
-        }
-
-        th,
-        td {
-            padding: 12px 14px;
-            border-bottom: 1px solid rgba(255, 255, 255, .07);
-            text-align: left;
-            vertical-align: middle;
-        }
-
-        th {
-            color: #93c5fd;
-            background: rgba(37, 99, 235, .16);
-            font-size: .78rem;
-            text-transform: uppercase;
-        }
-
-        td {
-            color: #e2e8f0;
-        }
-
-        .totals-grid {
-            grid-template-columns: repeat(6, minmax(150px, 1fr));
-            margin-top: 16px;
-        }
-
-        .proposal-sheet {
-            max-width: 920px;
-            margin: 0 auto;
-            background: #f8fafc;
-            color: #0f172a;
-            border-radius: 8px;
-            padding: 32px;
-        }
-
-        .proposal-sheet h2 {
-            margin: 0;
-            font-weight: 800;
-        }
-
-        .proposal-line {
-            border-bottom: 1px solid #cbd5e1;
-            padding: 12px 0;
-        }
-
-        @media (max-width: 1100px) {
-            .documents-layout {
-                grid-template-columns: 220px 1fr;
-                height: auto;
-            }
-
-            .documents-layout .preview-card {
-                grid-column: 1 / -1;
-                min-height: 560px;
-            }
-
-            .span-3,
-            .span-4,
-            .span-6,
-            .span-8 {
-                grid-column: span 12;
-            }
-
-            .totals-grid {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
-        }
-
-        @media (max-width: 720px) {
-            .project-header {
-                align-items: flex-start;
-                flex-direction: column;
-            }
-
-            .tab-panel {
-                padding: 16px;
-            }
-
-            .documents-layout {
-                grid-template-columns: 1fr;
-            }
-
-            .totals-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
-    <link rel="stylesheet" href="../assets/project_overview.css?v=<?= filemtime(__DIR__ . '/../assets/project_overview.css') ?>">
-    <link rel="stylesheet" href="../assets/project_takeoff.css?v=<?= filemtime(__DIR__ . '/../assets/project_takeoff.css') ?>">
-    <link rel="stylesheet" href="../assets/project_estimating.css?v=<?= filemtime(__DIR__ . '/../assets/project_estimating.css') ?>">
-    <link rel="stylesheet" href="../assets/project_proposal.css?v=<?= filemtime(__DIR__ . '/../assets/project_proposal.css') ?>">
-    <link rel="stylesheet" href="../assets/won_project_export.css?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.css') ?>">
+    <link rel="stylesheet"
+        href="../assets/project_overview.css?v=<?= filemtime(__DIR__ . '/../assets/project_overview.css') ?>">
+    <link rel="stylesheet"
+        href="../assets/project_takeoff.css?v=<?= filemtime(__DIR__ . '/../assets/project_takeoff.css') ?>">
+    <link rel="stylesheet"
+        href="../assets/project_estimating.css?v=<?= filemtime(__DIR__ . '/../assets/project_estimating.css') ?>">
+    <link rel="stylesheet"
+        href="../assets/project_proposal.css?v=<?= filemtime(__DIR__ . '/../assets/project_proposal.css') ?>">
+    <link rel="stylesheet"
+        href="../assets/won_project_export.css?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.css') ?>">
 </head>
 
-<body data-user-role="<?= htmlspecialchars($authRole, ENT_QUOTES, 'UTF-8') ?>" data-can-write="<?= $canWrite ? 'true' : 'false' ?>" data-read-only="<?= $canWrite ? 'false' : 'true' ?>">
+<body data-user-role="<?= htmlspecialchars($authRole, ENT_QUOTES, 'UTF-8') ?>"
+    data-can-write="<?= $canWrite ? 'true' : 'false' ?>" data-read-only="<?= $canWrite ? 'false' : 'true' ?>">
     <?php include __DIR__ . '/../views/global_tools_header.php'; ?>
     <div class="workspace-shell">
-        <div class="project-subhead-wrapper <?= $activeTab === 'takeoff' ? 'is-takeoff-tab' : ($activeTab === 'documents' ? 'is-documents-tab' : ($activeTab === 'estimating' ? 'is-estimating-tab' : '')) ?>">
+        <div
+            class="project-subhead-wrapper <?= $activeTab === 'takeoff' ? 'is-takeoff-tab' : ($activeTab === 'documents' ? 'is-documents-tab' : ($activeTab === 'estimating' ? 'is-estimating-tab' : '')) ?>">
             <header class="project-header">
                 <div class="pd-header-left">
                     <?php
@@ -1178,20 +911,21 @@ $state = [
                             <div class="bb-status-menu-panel project-status-menu" id="projectStatusMenu"></div>
                         </div>
                         <?php if ($projectId > 0): ?>
-                        <div class="won-export-container" id="wonProjectExportContainer">
-                            <?php if ($isAdminUser): ?>
-                            <button type="button" class="btn-retry-export" id="retryWonExportBtn" style="display:none;">
-                                <i class="fas fa-arrows-rotate"></i>
-                                <span>Retry Export</span>
-                            </button>
-                            <?php endif; ?>
-                            <span class="won-export-status-badge" id="wonExportStatusBadge" style="display:none;">
-                                <span class="won-export-dot"></span>
-                                <span class="won-export-label" id="wonExportStatusLabel"></span>
-                                <span class="won-export-meta" id="wonExportStatusMeta"></span>
-                            </span>
-                            <div class="won-export-alert" id="wonProjectAlert" role="alert" aria-live="polite" style="display:none;"></div>
-                        </div>
+                            <div class="won-export-container" id="wonProjectExportContainer">
+                                <?php if ($isAdminUser): ?>
+                                    <button type="button" class="btn-retry-export" id="retryWonExportBtn" style="display:none;">
+                                        <i class="fas fa-arrows-rotate"></i>
+                                        <span>Retry Export</span>
+                                    </button>
+                                <?php endif; ?>
+                                <span class="won-export-status-badge" id="wonExportStatusBadge" style="display:none;">
+                                    <span class="won-export-dot"></span>
+                                    <span class="won-export-label" id="wonExportStatusLabel"></span>
+                                    <span class="won-export-meta" id="wonExportStatusMeta"></span>
+                                </span>
+                                <div class="won-export-alert" id="wonProjectAlert" role="alert" aria-live="polite"
+                                    style="display:none;"></div>
+                            </div>
                         <?php endif; ?>
                         <!-- Active Takeoff Item info with quick actions -->
                         <div class="takeoff-subhead-item-info" id="takeoffSubheadItemInfo" style="display:none;"
@@ -1218,17 +952,18 @@ $state = [
                             </div>
                         </div>
                         <!-- Selected Documents info with quick actions (Independent from Takeoff) -->
-                        <div class="takeoff-subhead-item-info documents-subhead-item-info" id="documentsSubheadItemInfo" style="display:none;"
-                            title="Selected Documents">
+                        <div class="takeoff-subhead-item-info documents-subhead-item-info" id="documentsSubheadItemInfo"
+                            style="display:none;" title="Selected Documents">
                             <div class="takeoff-subhead-item-main">
-                                <span class="pro-active-layer-dot" id="documentsSubheadItemDot"><i class="fas fa-folder" style="color: #f59e0b; font-size: 11.5px;"></i></span>
+                                <span class="pro-active-layer-dot" id="documentsSubheadItemDot"><i class="fas fa-folder"
+                                        style="color: #f59e0b; font-size: 11.5px;"></i></span>
                                 <strong class="takeoff-subhead-item-name" id="documentsSubheadItemName"></strong>
                                 <span class="takeoff-subhead-item-meta" id="documentsSubheadItemMeta"></span>
                             </div>
                             <div class="takeoff-subhead-item-divider"></div>
                             <div class="takeoff-subhead-item-actions" id="documentsSubheadItemActions">
-                                <button type="button" class="subhead-item-act-btn" data-doc-subhead-action="move-takeoff"
-                                    title="Move selected documents to Takeoff">
+                                <button type="button" class="subhead-item-act-btn"
+                                    data-doc-subhead-action="move-takeoff" title="Move selected documents to Takeoff">
                                     <i class="fas fa-folder-tree"></i><span>Move to Takeoff</span>
                                 </button>
                                 <button type="button" class="subhead-item-act-btn danger"
@@ -1238,10 +973,11 @@ $state = [
                             </div>
                         </div>
                         <!-- Selected Estimating Items info with quick actions (Independent from Takeoff & Documents) -->
-                        <div class="takeoff-subhead-item-info estimating-subhead-item-info" id="estimatingSubheadItemInfo" style="display:none;"
-                            title="Selected Estimate Items">
+                        <div class="takeoff-subhead-item-info estimating-subhead-item-info"
+                            id="estimatingSubheadItemInfo" style="display:none;" title="Selected Estimate Items">
                             <div class="takeoff-subhead-item-main">
-                                <span class="pro-active-layer-dot" id="estimatingSubheadItemDot"><i class="fas fa-list-check" style="color: #fb5a3a; font-size: 11.5px;"></i></span>
+                                <span class="pro-active-layer-dot" id="estimatingSubheadItemDot"><i
+                                        class="fas fa-list-check" style="color: #fb5a3a; font-size: 11.5px;"></i></span>
                                 <strong class="takeoff-subhead-item-name" id="estimatingSubheadItemName"></strong>
                                 <span class="takeoff-subhead-item-meta" id="estimatingSubheadItemMeta"></span>
                             </div>
@@ -1295,8 +1031,10 @@ $state = [
                                         <span><?= htmlspecialchars($selfInitials) ?></span>
                                     </div>
                                     <div class="pd-presence-user-info">
-                                        <span class="pd-presence-user-name"><?= htmlspecialchars($selfName) ?> (You)</span>
-                                        <span class="pd-presence-user-role"><?= htmlspecialchars($selfRole) ?> &bull; Active now</span>
+                                        <span class="pd-presence-user-name"><?= htmlspecialchars($selfName) ?>
+                                            (You)</span>
+                                        <span class="pd-presence-user-role"><?= htmlspecialchars($selfRole) ?> &bull;
+                                            Active now</span>
                                     </div>
                                 </div>
                             </div>
@@ -1308,11 +1046,16 @@ $state = [
                         <button class="btn-ghost icon-only" type="button" data-menu-toggle="projectActionsMenu"
                             aria-label="Project actions"><i class="fas fa-ellipsis-vertical"></i></button>
                         <div class="project-menu align-right" id="projectActionsMenu">
-                            <button type="button" data-project-action="copy"><i class="fas fa-copy"></i> Copy Project</button>
-                            <button type="button" data-project-action="convert-template"><i class="fas fa-layer-group"></i> Convert to Template</button>
-                            <button type="button" data-project-action="apply-template"><i class="fas fa-wand-magic-sparkles"></i> Apply Template</button>
-                            <button type="button" data-project-action="archive"><i class="fas fa-box-archive"></i> Archive Project</button>
-                            <button type="button" class="danger" data-project-action="delete"><i class="fas fa-trash"></i> Delete Project</button>
+                            <button type="button" data-project-action="copy"><i class="fas fa-copy"></i> Copy
+                                Project</button>
+                            <button type="button" data-project-action="convert-template"><i
+                                    class="fas fa-layer-group"></i> Convert to Template</button>
+                            <button type="button" data-project-action="apply-template"><i
+                                    class="fas fa-wand-magic-sparkles"></i> Apply Template</button>
+                            <button type="button" data-project-action="archive"><i class="fas fa-box-archive"></i>
+                                Archive Project</button>
+                            <button type="button" class="danger" data-project-action="delete"><i
+                                    class="fas fa-trash"></i> Delete Project</button>
                         </div>
                     </div>
                 </div>
@@ -1329,9 +1072,9 @@ $state = [
                 <!-- Drawings & Sheets + Page Count (Point 7: right next to proposal tab) -->
                 <div class="takeoff-subhead-sheet-group" id="takeoffSubheadSheetGroup">
                     <div class="takeoff-subhead-nav-arrows">
-                        <button class="pro-icon-btn takeoff-subhead-nav-btn" type="button" data-viewer-command="previous"
-                            title="Previous drawing / sheet" aria-label="Previous drawing or sheet"><i
-                                class="fas fa-chevron-left"></i></button>
+                        <button class="pro-icon-btn takeoff-subhead-nav-btn" type="button"
+                            data-viewer-command="previous" title="Previous drawing / sheet"
+                            aria-label="Previous drawing or sheet"><i class="fas fa-chevron-left"></i></button>
                         <button class="pro-icon-btn takeoff-subhead-nav-btn" type="button" data-viewer-command="next"
                             title="Next drawing / sheet" aria-label="Next drawing or sheet"><i
                                 class="fas fa-chevron-right"></i></button>
@@ -1404,13 +1147,8 @@ $state = [
                         <i class="fas fa-code-compare"></i><span>Compare</span>
                     </button>
                 </div>
-                <!-- Right tools: Download icon first, then Drawing Scale directly underneath Save Project -->
+                <!-- Right tools: Drawing Scale aligned directly underneath Save Project -->
                 <div class="takeoff-subhead-tabs-tools" id="takeoffSubheadTabsTools">
-                    <button class="pro-actions-btn takeoff-subhead-download-btn icon-only"
-                        id="takeoffDownloadDrawingBtn" type="button" title="Download current drawing"
-                        aria-label="Download current drawing">
-                        <i class="fas fa-download"></i>
-                    </button>
                     <div class="takeoff-subhead-scale-slot" id="takeoffSubheadScaleSlot">
                         <div class="pro-scale-wrap">
                             <button class="pro-scale-status" id="takeoffScaleStatus" type="button" data-scale-toggle
@@ -1466,13 +1204,13 @@ $state = [
                 </div>
                 <!-- Overview: Move to Portfolio centered right under Save Project button in top-tabs -->
                 <?php if ($projectId > 0 && $isAdminUser): ?>
-                <div class="overview-subhead-tabs-tools <?= $activeTab === 'overview' ? 'is-overview-tab' : '' ?>" id="overviewSubheadTabsTools" <?= $activeTab !== 'overview' ? 'style="display:none !important;"' : '' ?>>
-                    <button type="button" class="btn-mark-won" id="markAsWonBtn"
-                        title="Move to Portfolio" aria-label="Move to Portfolio"
-                        <?= ($project['status'] ?? '') === 'accepted' ? 'disabled' : '' ?>>
-                        <span>Move to Portfolio</span>
-                    </button>
-                </div>
+                    <div class="overview-subhead-tabs-tools <?= $activeTab === 'overview' ? 'is-overview-tab' : '' ?>"
+                        id="overviewSubheadTabsTools" <?= $activeTab !== 'overview' ? 'style="display:none !important;"' : '' ?>>
+                        <button type="button" class="btn-mark-won" id="markAsWonBtn" title="Move to Portfolio"
+                            aria-label="Move to Portfolio" <?= ($project['status'] ?? '') === 'accepted' ? 'disabled' : '' ?>>
+                            <span>Move to Portfolio</span>
+                        </button>
+                    </div>
                 <?php endif; ?>
             </nav>
         </div>
@@ -1605,7 +1343,8 @@ $state = [
                                         <div class="pd-company-avatar" id="customerAvatarLetter">
                                             <?= htmlspecialchars($companyInitial) ?>
                                         </div>
-                                        <div class="pd-customer-details" style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+                                        <div class="pd-customer-details"
+                                            style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
                                             <div class="pd-customer-name" id="displayCustomerCompany"
                                                 style="font-weight: 700; font-size: 13.5px; color: var(--text-main); line-height: 1.25;">
                                                 <?= htmlspecialchars($displayCompany ?: 'Customer') ?>
@@ -1760,7 +1499,8 @@ $state = [
                                                         <?= htmlspecialchars($task['responsible'] ?? 'Isaac De Jesus') ?>
                                                     </div>
                                                     <?php if (!empty($task['due_date'])): ?>
-                                                        <div class="pd-task-due-badge">Due <?= htmlspecialchars($task['due_date']) ?></div>
+                                                        <div class="pd-task-due-badge">Due
+                                                            <?= htmlspecialchars($task['due_date']) ?></div>
                                                     <?php endif; ?>
                                                 </div>
                                             </div>
@@ -1824,7 +1564,8 @@ $state = [
                         </svg>
 
                         <h2 class="doc-empty-title">Upload Documents to Get Started</h2>
-                        <p class="doc-empty-desc">Drag and drop your PDF or image documents into this area to load them onto the page, or click the button below to select files from your computer.</p>
+                        <p class="doc-empty-desc">Drag and drop your PDF or image documents into this area to load them
+                            onto the page, or click the button below to select files from your computer.</p>
                         <div class="doc-empty-drop-hint">
                             <i class="fas fa-cloud-arrow-up"></i>
                             <span>Drag &amp; drop files here (PDF, PNG, JPG, WEBP)</span>
@@ -1846,9 +1587,11 @@ $state = [
                                     title="Drawing group options"><i class="fas fa-ellipsis-vertical"></i></button>
                                 <div class="documents-menu" id="documentsFolderMenu">
                                     <button type="button" data-doc-folder-action="expand-all"><i
-                                            class="fas fa-up-right-and-down-left-from-center"></i> Expand all groups</button>
+                                            class="fas fa-up-right-and-down-left-from-center"></i> Expand all
+                                        groups</button>
                                     <button type="button" data-doc-folder-action="collapse-all"><i
-                                            class="fas fa-down-left-and-up-right-to-center"></i> Collapse all groups</button>
+                                            class="fas fa-down-left-and-up-right-to-center"></i> Collapse all
+                                        groups</button>
                                     <button type="button" data-doc-folder-action="sort"><i
                                             class="fas fa-arrow-down-a-z"></i> Sort drawings A–Z</button>
                                 </div>
@@ -1949,6 +1692,9 @@ $state = [
                             <button class="pro-row-action-btn" type="button" data-takeoff-action="collapse-all"
                                 title="Collapse All Groups" aria-label="Collapse All Groups"><i
                                     class="fas fa-down-left-and-up-right-to-center"></i></button>
+                            <button class="pro-row-action-btn" id="takeoffDownloadDrawingBtn" type="button"
+                                title="Download current drawing" aria-label="Download current drawing"><i
+                                    class="fas fa-download"></i></button>
                             <button class="pro-row-action-btn excel" type="button" data-takeoff-action="export-excel"
                                 title="Takeoff Quantities to Excel" aria-label="Takeoff Quantities to Excel"><i
                                     class="fas fa-file-excel"></i></button>
@@ -1969,7 +1715,8 @@ $state = [
                     </div>
 
                     <!-- Takeoff Layer Drawer Sub-Panel (Option B) -->
-                    <aside class="pro-layer-drawer" id="takeoffLayerModal" aria-label="Takeoff Layer Details" hidden></aside>
+                    <aside class="pro-layer-drawer" id="takeoffLayerModal" aria-label="Takeoff Layer Details" hidden>
+                    </aside>
 
                     <section class="pro-takeoff-viewer">
                         <div class="pro-viewer-toolbar" style="display:none;"></div>
@@ -2023,8 +1770,9 @@ $state = [
                             <?php endif; ?>
 
                             <div class="pro-floating-controls">
-                                <button class="pro-icon-btn pro-controls-collapse-toggle" type="button" id="takeoffControlsCollapseToggle"
-                                    title="Collapse floating controls" aria-label="Collapse floating controls" aria-expanded="true"><i
+                                <button class="pro-icon-btn pro-controls-collapse-toggle" type="button"
+                                    id="takeoffControlsCollapseToggle" title="Collapse floating controls"
+                                    aria-label="Collapse floating controls" aria-expanded="true"><i
                                         class="fas fa-chevron-right"></i></button>
                                 <button class="pro-icon-btn" type="button" id="takeoffControlsDockToggle"
                                     title="Dock left / right" aria-label="Dock left or right"><i
@@ -2067,34 +1815,47 @@ $state = [
                 <div id="estimatingModule" class="est-shell est-v2" data-project-id="<?= (int) $projectId ?>">
                     <div class="est-main">
                         <!-- Table Settings Drawer (Aside sliding from left displacing table to right) -->
-                        <aside class="est-table-settings-drawer" id="estTableSettingsDrawer" aria-label="Table Settings" hidden></aside>
+                        <aside class="est-table-settings-drawer" id="estTableSettingsDrawer" aria-label="Table Settings"
+                            hidden></aside>
 
                         <section class="est-left" aria-label="Estimate cost items">
                             <div class="est-toolbar">
                                 <div class="bb-search-field-procore cc-search-procore est-search-box">
-                                    <input id="estSearch" type="search" placeholder="Search estimate items..." autocomplete="off">
+                                    <input id="estSearch" type="search" placeholder="Search estimate items..."
+                                        autocomplete="off">
                                 </div>
-                                <div class="est-toolbar-actions" style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
-                                    <button class="btn-main est-toolbar-btn est-btn-import" id="estBtnImport" type="button" data-est-option="import"
-                                        title="Import Project Estimate (.xlsx)"><i class="fas fa-file-import"></i> <span>Import</span></button>
-                                    <button class="btn-main est-toolbar-btn est-btn-export" id="estBtnExport" type="button" data-est-option="export"
-                                        title="Export Estimate"><i class="fas fa-file-export"></i> <span>Export</span></button>
-                                    <button class="est-icon-btn" id="estBtnCreateGroup" type="button" data-est-action="create-group"
-                                        title="Create Group"><i class="fas fa-folder-plus"></i></button>
-                                    <button class="est-icon-btn" id="estBtnTableSettings" type="button" data-est-action="table-settings"
-                                        title="Table Settings"><i class="fas fa-sliders"></i></button>
-                                    <button class="est-icon-btn" id="estBtnFullscreen" type="button" data-est-action="fullscreen"
-                                        title="Full screen"><i class="fas fa-expand"></i></button>
+                                <div class="est-toolbar-actions"
+                                    style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+                                    <button class="btn-main est-toolbar-btn est-btn-import" id="estBtnImport"
+                                        type="button" data-est-option="import"
+                                        title="Import Project Estimate (.xlsx)"><i class="fas fa-file-import"></i>
+                                        <span>Import</span></button>
+                                    <button class="btn-main est-toolbar-btn est-btn-export" id="estBtnExport"
+                                        type="button" data-est-option="export" title="Export Estimate"><i
+                                            class="fas fa-file-export"></i> <span>Export</span></button>
+                                    <button class="est-icon-btn" id="estBtnCreateGroup" type="button"
+                                        data-est-action="create-group" title="Create Group"><i
+                                            class="fas fa-folder-plus"></i></button>
+                                    <button class="est-icon-btn" id="estBtnTableSettings" type="button"
+                                        data-est-action="table-settings" title="Table Settings"><i
+                                            class="fas fa-sliders"></i></button>
+                                    <button class="est-icon-btn" id="estBtnFullscreen" type="button"
+                                        data-est-action="fullscreen" title="Full screen"><i
+                                            class="fas fa-expand"></i></button>
                                     <div class="est-menu-wrap">
-                                        <button class="est-icon-btn" id="estBtnMoreOptions" type="button" data-est-action="options"
-                                            title="Options"><i class="fas fa-ellipsis-vertical"></i></button>
+                                        <button class="est-icon-btn" id="estBtnMoreOptions" type="button"
+                                            data-est-action="options" title="Options"><i
+                                                class="fas fa-ellipsis-vertical"></i></button>
                                         <div class="est-menu" id="optionsMenu">
-                                            <button type="button" data-est-action="catalog-update"><i class="fas fa-arrows-rotate"></i> Update from Cost Catalog</button>
-                                            <button type="button" data-est-action="reset-quantities"><i class="fas fa-rotate-left"></i> Reset Quantities</button>
+                                            <button type="button" data-est-action="catalog-update"><i
+                                                    class="fas fa-arrows-rotate"></i> Update from Cost Catalog</button>
+                                            <button type="button" data-est-action="reset-quantities"><i
+                                                    class="fas fa-rotate-left"></i> Reset Quantities</button>
                                         </div>
                                     </div>
-                                    <button class="est-icon-btn est-toggle-right-btn" id="estToolbarToggleRight" type="button" data-est-action="toggle-right"
-                                        title="Hide summary panel"><i class="fas fa-chevron-right"></i></button>
+                                    <button class="est-icon-btn est-toggle-right-btn" id="estToolbarToggleRight"
+                                        type="button" data-est-action="toggle-right" title="Hide summary panel"><i
+                                            class="fas fa-chevron-right"></i></button>
                                 </div>
                             </div>
                             <div class="est-table-wrap bb-table-scroll">
@@ -2104,7 +1865,8 @@ $state = [
                                 </table>
                             </div>
                         </section>
-                        <div class="pro-sidebar-resizer est-sidebar-resizer" id="estSplitResizer" role="separator" aria-orientation="vertical" title="Drag to resize panels">
+                        <div class="pro-sidebar-resizer est-sidebar-resizer" id="estSplitResizer" role="separator"
+                            aria-orientation="vertical" title="Drag to resize panels">
                             <div class="pro-resizer-handle"></div>
                         </div>
                         <aside class="est-right" aria-label="Estimate notes and summary">
@@ -2133,9 +1895,15 @@ $state = [
                                         class="fas fa-chevron-down"></i>
                                 </button>
                                 <div class="proposal-export-menu" id="proposalExportMenu">
-                                    <button type="button" data-proposal-export="pdf"><i class="fas fa-file-pdf" style="color:#ef4444; width:16px; margin-right:6px;"></i> Download PDF (.pdf)</button>
-                                    <button type="button" data-proposal-export="docx"><i class="fas fa-file-word" style="color:#2563eb; width:16px; margin-right:6px;"></i> Download Word (.doc)</button>
-                                    <button type="button" data-proposal-export="print"><i class="fas fa-print" style="color:#64748b; width:16px; margin-right:6px;"></i> Print / System Dialog</button>
+                                    <button type="button" data-proposal-export="pdf"><i class="fas fa-file-pdf"
+                                            style="color:#ef4444; width:16px; margin-right:6px;"></i> Download PDF
+                                        (.pdf)</button>
+                                    <button type="button" data-proposal-export="docx"><i class="fas fa-file-word"
+                                            style="color:#2563eb; width:16px; margin-right:6px;"></i> Download Word
+                                        (.doc)</button>
+                                    <button type="button" data-proposal-export="print"><i class="fas fa-print"
+                                            style="color:#64748b; width:16px; margin-right:6px;"></i> Print / System
+                                        Dialog</button>
                                 </div>
                             </div>
                         </div>
@@ -2148,7 +1916,8 @@ $state = [
                             be connected.</div>
                         <div class="proposal-document" id="proposalDocument"></div>
                     </div>
-                    <footer class="est-version-bar project-estimate-footer" id="proposalEstimateTypesFooter" aria-label="Available estimates">
+                    <footer class="est-version-bar project-estimate-footer" id="proposalEstimateTypesFooter"
+                        aria-label="Available estimates">
                         <span class="est-pill">Loading estimates&hellip;</span>
                     </footer>
                 </div>
@@ -2156,8 +1925,10 @@ $state = [
         </main>
     </div>
 
-    <input type="file" id="projectUploadInput" class="d-none" multiple accept=".pdf,image/*,application/pdf,image/png,image/jpeg,image/jpg,image/webp,image/gif,image/bmp,image/tiff">
-    <input type="file" id="documentsBrowseInput" class="d-none" multiple accept=".pdf,image/*,application/pdf,image/png,image/jpeg,image/jpg,image/webp,image/gif,image/bmp,image/tiff">
+    <input type="file" id="projectUploadInput" class="d-none" multiple
+        accept=".pdf,image/*,application/pdf,image/png,image/jpeg,image/jpg,image/webp,image/gif,image/bmp,image/tiff">
+    <input type="file" id="documentsBrowseInput" class="d-none" multiple
+        accept=".pdf,image/*,application/pdf,image/png,image/jpeg,image/jpg,image/webp,image/gif,image/bmp,image/tiff">
 
     <!-- Customer Information Modal -->
     <div class="pd-modal-backdrop" id="pdCustomerModal" role="dialog" aria-modal="true"
@@ -2177,8 +1948,10 @@ $state = [
             </div>
             <div class="pd-modal-body" id="pdCustomerFormView">
                 <div class="pd-customer-edit-banner overview-field full" id="pdCustomerEditBanner" hidden>
-                    <span><i class="fas fa-pen-to-square"></i> Editing directory record: <strong id="pdCustomerEditBannerName"></strong></span>
-                    <button type="button" class="pd-customer-edit-cancel" id="cancelEditDirectoryCustomerBtn">Cancel Edit</button>
+                    <span><i class="fas fa-pen-to-square"></i> Editing directory record: <strong
+                            id="pdCustomerEditBannerName"></strong></span>
+                    <button type="button" class="pd-customer-edit-cancel" id="cancelEditDirectoryCustomerBtn">Cancel
+                        Edit</button>
                 </div>
                 <label class="overview-field full">
                     <span>Select Saved Customer</span>
@@ -2215,7 +1988,8 @@ $state = [
                 <div class="pd-customer-dir-toolbar">
                     <div class="pd-customer-dir-search-wrap">
                         <i class="fas fa-search"></i>
-                        <input type="text" id="poCustomerDirectorySearch" placeholder="Search company, contact, phone, email...">
+                        <input type="text" id="poCustomerDirectorySearch"
+                            placeholder="Search company, contact, phone, email...">
                     </div>
                     <span class="pd-customer-dir-count" id="poCustomerDirectoryCount">0 customers</span>
                 </div>
@@ -2229,7 +2003,8 @@ $state = [
                 </button>
                 <div style="display: flex; gap: 8px; align-items: center;">
                     <button type="button" class="btn-ghost" data-close-modal="pdCustomerModal">Cancel</button>
-                    <button type="button" class="btn-main orange" id="applyCustomerModalBtn"><i class="fas fa-check"></i>
+                    <button type="button" class="btn-main orange" id="applyCustomerModalBtn"><i
+                            class="fas fa-check"></i>
                         Apply &amp; Close</button>
                 </div>
             </div>
@@ -2365,7 +2140,8 @@ $state = [
         <div class="pd-modal doc-upload-modal" style="width: min(480px, 100%);">
             <div class="pd-modal-head">
                 <h3 id="docUploadModalTitle">
-                    <i class="fas fa-cloud-arrow-up doc-upload-modal-icon" id="docUploadModalIcon" style="color: var(--primary);"></i>
+                    <i class="fas fa-cloud-arrow-up doc-upload-modal-icon" id="docUploadModalIcon"
+                        style="color: var(--primary);"></i>
                     <span id="docUploadModalHeading">Uploading Documents...</span>
                 </h3>
                 <span class="doc-upload-modal-counter" id="docUploadModalCounter">0 / 0</span>
@@ -2379,7 +2155,8 @@ $state = [
                         </div>
                         <span class="doc-upload-file-percent" id="docUploadFilePercent">0%</span>
                     </div>
-                    <div class="doc-upload-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="docUploadProgressTrack">
+                    <div class="doc-upload-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                        aria-valuenow="0" id="docUploadProgressTrack">
                         <div class="doc-upload-progress-bar" id="docUploadProgressBar" style="width: 0%;"></div>
                     </div>
                     <div class="doc-upload-status-line">
@@ -2402,35 +2179,42 @@ $state = [
         aria-labelledby="takeoffGroupModalTitle" hidden style="display:none;">
         <div class="pd-modal" style="width: min(480px, 100%);">
             <div class="pd-modal-head">
-                <h3 id="takeoffGroupModalTitle"><i class="fas fa-folder-plus" id="takeoffGroupModalIcon" style="color: var(--primary);"></i> <span id="takeoffGroupModalHeading">Create new group</span></h3>
-                <button class="pd-modal-head-close" type="button" data-group-modal-close
-                    aria-label="Close dialog"><i class="fas fa-times"></i></button>
+                <h3 id="takeoffGroupModalTitle"><i class="fas fa-folder-plus" id="takeoffGroupModalIcon"
+                        style="color: var(--primary);"></i> <span id="takeoffGroupModalHeading">Create new group</span>
+                </h3>
+                <button class="pd-modal-head-close" type="button" data-group-modal-close aria-label="Close dialog"><i
+                        class="fas fa-times"></i></button>
             </div>
             <form id="takeoffGroupForm" novalidate>
                 <div class="pd-modal-body" style="grid-template-columns: 1fr; gap: 14px;">
                     <div class="pd-field">
-                        <label class="pro-group-field" for="takeoffGroupName" id="takeoffGroupNameLabel">Group Name</label>
-                        <input id="takeoffGroupName" name="groupName" class="pd-composer-input" type="text" maxlength="120"
-                            autocomplete="off" placeholder="For example, Lighting" required
+                        <label class="pro-group-field" for="takeoffGroupName" id="takeoffGroupNameLabel">Group
+                            Name</label>
+                        <input id="takeoffGroupName" name="groupName" class="pd-composer-input" type="text"
+                            maxlength="120" autocomplete="off" placeholder="For example, Lighting" required
                             aria-describedby="takeoffGroupNameHint takeoffGroupNameError">
                     </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: var(--text-muted, #64748b); margin-top: -6px;">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: var(--text-muted, #64748b); margin-top: -6px;">
                         <span id="takeoffGroupNameHint">Use a clear scope or system name.</span>
                         <span id="takeoffGroupNameCount">0 / 120</span>
                     </div>
-                    <div class="pro-group-error" id="takeoffGroupNameError" role="alert" hidden style="color: #ef4444; font-size: 12px; margin-top: -4px;"></div>
+                    <div class="pro-group-error" id="takeoffGroupNameError" role="alert" hidden
+                        style="color: #ef4444; font-size: 12px; margin-top: -4px;"></div>
                 </div>
                 <div class="pd-modal-foot">
                     <button type="button" class="btn-ghost" data-group-modal-close>Cancel</button>
                     <button type="submit" class="btn-main orange" id="takeoffGroupCreateSubmit">
-                        <i class="fas fa-check" id="takeoffGroupSubmitIcon"></i> <span id="takeoffGroupSubmitText">Create group</span>
+                        <i class="fas fa-check" id="takeoffGroupSubmitIcon"></i> <span
+                            id="takeoffGroupSubmitText">Create group</span>
                     </button>
                 </div>
             </form>
         </div>
     </div>
 
-    <script id="takeoff-auth-metadata" type="application/json"><?= json_encode($clientAuthMetadata, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
+    <script id="takeoff-auth-metadata"
+        type="application/json"><?= json_encode($clientAuthMetadata, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
     <script>
         (function () {
             var fallback = { displayName: 'Viewer', role: 'viewer', canWrite: false, readOnly: true };
@@ -2465,16 +2249,16 @@ $state = [
                 };
                 document.addEventListener('DOMContentLoaded', function () {
                     var mutationSelectors = [
-                        '#saveProjectBtn','#projectStatusButton','#markAsWonBtn','#retryWonExportBtn',
-                        '#saveCustomerBtn','#clearCustomerBtn','#customerDirectoryNewBtn','#editCustomerInfoBtn','#editProjectAddressBtn','#addProjectAddressBtn','#addNoteBtnHead',
-                        '#docUploadArrowBtn','[data-doc-folder-action]','[data-doc-action="delete"]','[data-doc-action="move"]',
-                        '[data-subhead-item-action]','[data-est-subhead-action]','[data-scale-apply-manual]','[data-scale-clear-line]','#takeoffScaleApplyBtn',
-                        '[data-takeoff-action="create-layer"]','[data-takeoff-action="create-group"]',
-                        '[data-tool-command="count"]','[data-tool-command="linear"]','[data-tool-command="area"]',
-                        '[data-tool-command="measure"]','[data-tool-command="text"]','[data-tool-command="cloud"]',
-                        '[data-tool-command="undo"]','[data-tool-command="redo"]',
-                        '[data-est-action="create-group"]','[data-est-action="reset-quantities"]','#optionsMenu button[data-est-action]',
-                        '#estBtnImport','[data-est-option="import"]','[data-editor-cmd]','[data-project-action]'
+                        '#saveProjectBtn', '#projectStatusButton', '#markAsWonBtn', '#retryWonExportBtn',
+                        '#saveCustomerBtn', '#clearCustomerBtn', '#customerDirectoryNewBtn', '#editCustomerInfoBtn', '#editProjectAddressBtn', '#addProjectAddressBtn', '#addNoteBtnHead',
+                        '#docUploadArrowBtn', '[data-doc-folder-action]', '[data-doc-action="delete"]', '[data-doc-action="move"]',
+                        '[data-subhead-item-action]', '[data-est-subhead-action]', '[data-scale-apply-manual]', '[data-scale-clear-line]', '#takeoffScaleApplyBtn',
+                        '[data-takeoff-action="create-layer"]', '[data-takeoff-action="create-group"]',
+                        '[data-tool-command="count"]', '[data-tool-command="linear"]', '[data-tool-command="area"]',
+                        '[data-tool-command="measure"]', '[data-tool-command="text"]', '[data-tool-command="cloud"]',
+                        '[data-tool-command="undo"]', '[data-tool-command="redo"]',
+                        '[data-est-action="create-group"]', '[data-est-action="reset-quantities"]', '#optionsMenu button[data-est-action]',
+                        '#estBtnImport', '[data-est-option="import"]', '[data-editor-cmd]', '[data-project-action]'
                     ];
                     document.querySelectorAll(mutationSelectors.join(',')).forEach(function (element) {
                         element.hidden = true;
@@ -2505,15 +2289,15 @@ $state = [
             'isAdmin' => $isAdminUser,
             'integrationEnabled' => $integrationEnabled,
         ]) ?>;
-        <?php if (!empty($_GET['stage'])): ?>
+        <?php
+        $effectiveReturnStage = !empty($project['status'])
+            ? dash_status_label($project['status'])
+            : (!empty($_GET['stage']) ? $_GET['stage'] : '');
+        ?>
+        <?php if ($effectiveReturnStage !== ''): ?>
             try {
-                localStorage.setItem('takeoff.bidBoardStage', <?= json_encode($_GET['stage']) ?>);
-                sessionStorage.setItem('takeoff.bidBoardStage', <?= json_encode($_GET['stage']) ?>);
-            } catch (e) { }
-        <?php elseif (!empty($project['status'])): ?>
-            try {
-                localStorage.setItem('takeoff.bidBoardStage', <?= json_encode(dash_status_label($project['status'])) ?>);
-                sessionStorage.setItem('takeoff.bidBoardStage', <?= json_encode(dash_status_label($project['status'])) ?>);
+                localStorage.setItem('takeoff.bidBoardStage', <?= json_encode($effectiveReturnStage) ?>);
+                sessionStorage.setItem('takeoff.bidBoardStage', <?= json_encode($effectiveReturnStage) ?>);
             } catch (e) { }
         <?php endif; ?>
 
@@ -2612,6 +2396,18 @@ $state = [
                 url.searchParams.set('tab', tab);
                 if (ProjectState.selectedDocumentId) url.searchParams.set('file_id', ProjectState.selectedDocumentId);
                 history.pushState({ ...ProjectState }, '', url.toString());
+            }
+            if (tab === 'documents') {
+                window.ensureDashboardFeature?.('pdfjs').then(function () {
+                    if (window.pdfjsLib) {
+                        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+                    }
+                    window.onDocumentsTabVisibilityChange?.(true);
+                });
+            } else if (tab === 'proposal') {
+                window.ensureDashboardFeature?.('proposal').then(function () {
+                    window.dispatchEvent(new CustomEvent('takeoff:tab-activated', { detail: { tab: 'proposal' } }));
+                });
             }
             if (tab === 'takeoff') {
                 if (window._pendingTakeoffDrawingId) {
@@ -2827,7 +2623,7 @@ $state = [
                 };
                 xhr.onload = () => {
                     let result = null;
-                    try { result = JSON.parse(xhr.responseText); } catch (_) {}
+                    try { result = JSON.parse(xhr.responseText); } catch (_) { }
                     if (xhr.status >= 200 && xhr.status < 300 && result?.status === 'success') resolve(result);
                     else reject(new Error(result?.msg || `Upload failed (HTTP ${xhr.status || 0}).`));
                 };
@@ -2926,16 +2722,18 @@ $state = [
         setActiveTab(ProjectState.activeTab || 'overview', false);
         setTimeout(alignOverviewWonBtn, 60);
     </script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
-    <script>if (window.pdfjsLib) window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';</script>
+    <?php if ($activeTab === 'documents'): ?>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+        <script>if (window.pdfjsLib) window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';</script>
+    <?php endif; ?>
     <script src="../assets/project_overview.js?v=<?= filemtime(__DIR__ . '/../assets/project_overview.js') ?>"></script>
     <script src="../assets/estimating_catalog_snapshot_service.js?v=estimating-catalog-snapshot-20260827-1"></script>
-    <script src="../assets/catalog_change_detection_service.js?v=catalog-change-detection-20260827-1"></script>
-    <script src="../assets/takeoff_estimating_sync_service.js?v=estimating-qty-override-20261028-1"></script>
-    <script src="../assets/project_estimate_footer.js?v=<?= filemtime(__DIR__ . '/../assets/project_estimate_footer.js') ?>"></script>
+    <script src="../assets/takeoff_estimating_sync_service.js?v=<?= filemtime(__DIR__ . '/../assets/takeoff_estimating_sync_service.js') ?>"></script>
+    <script
+        src="../assets/project_estimate_footer.js?v=<?= filemtime(__DIR__ . '/../assets/project_estimate_footer.js') ?>"></script>
     <script src="../assets/catalog_item_contract.js?v=catalog-item-contract-20260826-1"></script>
-    <script src="../assets/catalog_metadata.js?v=catalog-metadata-20260826-1"></script>
-    <script src="../assets/catalog_service.js?v=catalog-service-20260826-1"></script>
+    <script src="../assets/catalog_metadata.js?v=<?= filemtime(__DIR__ . '/../assets/catalog_metadata.js') ?>"></script>
+    <script src="../assets/catalog_service.js?v=<?= filemtime(__DIR__ . '/../assets/catalog_service.js') ?>"></script>
     <script src="../assets/boq_catalog_adapter.js?v=boq-catalog-boundary-20260826-1"></script>
     <script src="../assets/takeoff_catalog_adapter.js?v=takeoff-catalog-boundary-20260826-1"></script>
     <script src="../assets/takeoff_color_palette.js?v=takeoff-duplicate-color-20260831-1"></script>
@@ -2944,15 +2742,149 @@ $state = [
     <script src="../assets/estimating_assembly_expansion_adapter.js?v=estimating-assembly-adapter-20260828-1"></script>
     <script src="../assets/quantity_format_service.js?v=quantity-context-format-20260831-1"></script>
     <script src="../assets/estimate_calculation_service.js?v=estimating-normal-item-quantity-20260831-1"></script>
-    <script src="../assets/catalog_update_preview_service.js?v=catalog-update-preview-20260827-1"></script>
-    <script src="../assets/estimating_export_service.js?v=estimating-boq-export-20260820-1"></script>
-    <script src="../assets/estimating_workspace_service.js?v=<?= filemtime(__DIR__ . '/../assets/estimating_workspace_service.js') ?>"></script>
-    <script src="../assets/catalog_update_application_service.js?v=catalog-update-application-20260827-2"></script>
+    <script>
+        (function () {
+            window.DASHBOARD_LAZY_SCRIPTS = Object.assign(window.DASHBOARD_LAZY_SCRIPTS || {}, {
+                'estimating-export': [
+                    '../assets/estimating_export_service.js?v=estimating-boq-export-20260820-1'
+                ],
+                'catalog-update': [
+                    '../assets/catalog_change_detection_service.js?v=catalog-change-detection-20260827-1',
+                    '../assets/catalog_update_preview_service.js?v=catalog-update-preview-20260827-1',
+                    '../assets/catalog_update_application_service.js?v=catalog-update-application-20260827-2',
+                    '../assets/catalog_update_ui.js?v=<?= filemtime(__DIR__ . '/../assets/catalog_update_ui.js') ?>'
+                ],
+                'pdfjs': [
+                    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js'
+                ],
+                'proposal': [
+                    '../assets/project_proposal.js?v=<?= filemtime(__DIR__ . '/../assets/project_proposal.js') ?>'
+                ]
+            });
+
+            const featurePromises = new Map();
+            const scriptPromises = new Map();
+
+            function loadSequentialScript(src) {
+                if (scriptPromises.has(src)) return scriptPromises.get(src);
+                const base = src.split('?')[0].split('/').pop();
+                if (base === 'pdf.min.js' && window.pdfjsLib) {
+                    const p = Promise.resolve();
+                    scriptPromises.set(src, p);
+                    return p;
+                }
+                if (base === 'project_proposal.js' && window.__proposalModuleLoaded) {
+                    const p = Promise.resolve();
+                    scriptPromises.set(src, p);
+                    return p;
+                }
+                const promise = new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = src;
+                    script.async = false;
+                    script.onload = () => {
+                        if (base === 'project_proposal.js') window.__proposalModuleLoaded = true;
+                        if (base === 'pdf.min.js' && window.pdfjsLib) {
+                            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+                        }
+                        resolve();
+                    };
+                    script.onerror = () => reject(new Error('Failed to load dashboard module: ' + src));
+                    document.body.appendChild(script);
+                });
+                scriptPromises.set(src, promise);
+                return promise;
+            }
+
+            window.ensureDashboardFeature = function (featureName) {
+                const key = String(featureName || '');
+                if (!key) return Promise.resolve();
+                if (key === 'estimating-export' && window.EstimatingExportService) return Promise.resolve();
+                if (key === 'catalog-update' && window.CatalogUpdateUI) return Promise.resolve();
+                if (key === 'proposal' && window.__proposalModuleLoaded) return Promise.resolve();
+                if (key === 'pdfjs' && window.pdfjsLib) return Promise.resolve();
+                if (featurePromises.has(key)) return featurePromises.get(key);
+                const list = (window.DASHBOARD_LAZY_SCRIPTS && window.DASHBOARD_LAZY_SCRIPTS[key]) || [];
+                const chain = list.reduce((prev, src) => prev.then(() => loadSequentialScript(src)), Promise.resolve())
+                    .catch((err) => {
+                        featurePromises.delete(key);
+                        throw err;
+                    });
+                featurePromises.set(key, chain);
+                return chain;
+            };
+
+            // Keep ProjectState.estimateSummary updated even while Proposal script is deferred
+            window.addEventListener('takeoff:estimate-summary-updated', function (event) {
+                if (window.__proposalModuleLoaded || !window.ProjectState) return;
+                const detail = event.detail;
+                window.ProjectState.estimateSummary = detail ? {
+                    direct: detail.direct,
+                    byCategory: detail.byCategory,
+                    preTaxTotal: detail.preTaxTotal,
+                    preTaxMarkup: detail.preTaxTotal,
+                    totalTax: detail.totalTax,
+                    taxes: detail.totalTax,
+                    profit: detail.profit,
+                    estimateTotal: detail.estimateTotal,
+                    material: detail.direct?.materialSales,
+                    labor: detail.direct?.laborSales,
+                    equipment: detail.direct?.equipmentSales,
+                    total: detail.estimateTotal
+                } : {};
+            });
+
+            // Lazy-load Catalog Update stack on first click with loading blur card
+            document.addEventListener('click', async function (event) {
+                const trigger = event.target?.closest?.('[data-est-action]');
+                if (!trigger || trigger.dataset?.estAction !== 'catalog-update' || window.CatalogUpdateUI) return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                document.querySelectorAll('#optionsMenu.open, .est-menu.open').forEach((menu) => menu.classList.remove('open'));
+                const estMain = document.querySelector('#estimatingModule .est-main');
+                let overlay = estMain?.querySelector('#estLoadingOverlay');
+                let createdTemp = false;
+                if (estMain && !overlay) {
+                    overlay = document.createElement('div');
+                    overlay.id = 'estLoadingOverlay';
+                    overlay.className = 'est-loading-overlay';
+                    overlay.setAttribute('role', 'status');
+                    overlay.setAttribute('aria-live', 'polite');
+                    overlay.innerHTML = '<div class="est-loading-card"><i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i><span id="estLoadingOverlayText">Cargando actualización desde Cost Catalog...</span></div>';
+                    estMain.appendChild(overlay);
+                    createdTemp = true;
+                } else if (overlay) {
+                    const txt = overlay.querySelector('#estLoadingOverlayText');
+                    if (txt) txt.textContent = 'Cargando actualización desde Cost Catalog...';
+                    overlay.hidden = false;
+                }
+                try {
+                    await window.ensureDashboardFeature('catalog-update');
+                    if (overlay && !createdTemp) overlay.hidden = true;
+                    if (overlay && createdTemp) overlay.remove();
+                    if (window.CatalogUpdateUI && typeof window.CatalogUpdateUI.checkCatalog === 'function') {
+                        window.CatalogUpdateUI.checkCatalog();
+                    }
+                } catch (err) {
+                    if (overlay && !createdTemp) overlay.hidden = true;
+                    if (overlay && createdTemp) overlay.remove();
+                    console.error('Failed to load Catalog Update tools:', err);
+                    alert('Unable to load Cost Catalog Update tools. Please try again.');
+                }
+            }, true);
+        })();
+    </script>
+    <script
+        src="../assets/estimating_workspace_service.js?v=<?= filemtime(__DIR__ . '/../assets/estimating_workspace_service.js') ?>"></script>
     <script src="../assets/estimating_catalog_adapter.js?v=estimating-catalog-snapshot-20260827-1"></script>
-    <script src="../assets/project_estimating.js?v=<?= filemtime(__DIR__ . '/../assets/project_estimating.js') ?>"></script>
-    <script src="../assets/catalog_update_ui.js?v=<?= filemtime(__DIR__ . '/../assets/catalog_update_ui.js') ?>"></script>
-    <script src="../assets/project_proposal.js?v=<?= filemtime(__DIR__ . '/../assets/project_proposal.js') ?>"></script>
-    <script src="../assets/won_project_export.js?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.js') ?>"></script>
+    <script
+        src="../assets/project_estimating.js?v=<?= filemtime(__DIR__ . '/../assets/project_estimating.js') ?>"></script>
+    <?php if ($activeTab === 'proposal'): ?>
+        <script>window.__proposalModuleLoaded = true;</script>
+        <script src="../assets/project_proposal.js?v=<?= filemtime(__DIR__ . '/../assets/project_proposal.js') ?>"></script>
+    <?php endif; ?>
+    <script defer
+        src="../assets/won_project_export.js?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.js') ?>"></script>
     <script src="../assets/global_tools.js?v=<?= filemtime(__DIR__ . '/../assets/global_tools.js') ?>"></script>
 </body>
 

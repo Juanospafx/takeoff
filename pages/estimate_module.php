@@ -10,6 +10,7 @@ $projectId = (int)($_GET['project_id'] ?? $_GET['id'] ?? 0);
     <title>Estimate | Brightronix</title>
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <link rel="stylesheet" href="../assets/design_system.css?v=<?= filemtime(__DIR__ . '/../assets/design_system.css') ?>">
     <link rel="stylesheet" href="../assets/estimate_module.css">
 </head>
 <body>

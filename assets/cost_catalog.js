@@ -658,10 +658,106 @@
         }
     }
 
+    function normalizeCatalogSearchText(value) {
+        return String(value || '')
+            .normalize('NFD')
+            .replace(/[\u0300-\u036f]/g, '')
+            .toLowerCase()
+            .replace(/["'\u201c\u201d\u2018\u2019]/g, '')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function compactCatalogSearchText(value) {
+        return normalizeCatalogSearchText(value)
+            .replace(/[^a-z0-9]+/g, ' ')
+            .replace(/\s+/g, ' ')
+            .trim();
+    }
+
+    function scoreCatalogItemMatch(item, queryNorm, tokens, compactTokens) {
+        if (!tokens.length) return 1;
+        const nameNorm = normalizeCatalogSearchText(item.name);
+        const nameCompact = compactCatalogSearchText(item.name);
+        const codeParts = [
+            item.catalog_number,
+            item.sku,
+            item.cost_code,
+            item.masterformat,
+            item.uniformat,
+            item.sub_job_code,
+            item.sub_job_name
+        ].filter(Boolean);
+        const codeNorm = normalizeCatalogSearchText(codeParts.join(' '));
+        const codeCompact = compactCatalogSearchText(codeParts.join(' '));
+        const descNorm = normalizeCatalogSearchText([item.description, item.notes].filter(Boolean).join(' '));
+        let tagText = '';
+        if (Array.isArray(item.tags_json)) {
+            tagText = item.tags_json.map(t => typeof t === 'string' ? t : (t?.name || '')).filter(Boolean).join(' ');
+        } else if (typeof item.tags_json === 'string' && item.tags_json.trim()) {
+            try {
+                const parsed = JSON.parse(item.tags_json);
+                tagText = Array.isArray(parsed) ? parsed.map(t => typeof t === 'string' ? t : (t?.name || '')).filter(Boolean).join(' ') : item.tags_json;
+            } catch (_) {
+                tagText = item.tags_json;
+            }
+        }
+        const metaNorm = normalizeCatalogSearchText([
+            item.catalog_name,
+            item.group_name,
+            item.unit_of_measure,
+            item.item_type,
+            item.measurement_type,
+            item.supplier,
+            item.manufacturer,
+            item.material,
+            item.size,
+            item.diameter,
+            item.trade_size,
+            tagText
+        ].filter(Boolean).join(' '));
+
+        const fullNorm = `${nameNorm} ${codeNorm} ${descNorm} ${metaNorm}`.trim();
+        const fullCompact = `${nameCompact} ${codeCompact} ${compactCatalogSearchText(descNorm)} ${compactCatalogSearchText(metaNorm)}`.trim();
+
+        for (let i = 0; i < tokens.length; i++) {
+            const tok = tokens[i];
+            const cTok = compactTokens[i];
+            const matched = fullNorm.includes(tok) || (cTok && fullCompact.includes(cTok));
+            if (!matched) return 0;
+        }
+
+        let score = 10;
+        if (codeNorm && (codeNorm === queryNorm || codeCompact === compactTokens.join(' '))) score += 140;
+        else if (codeNorm && codeNorm.startsWith(queryNorm)) score += 90;
+        else if (codeNorm && codeNorm.includes(queryNorm)) score += 55;
+
+        if (nameNorm === queryNorm) score += 120;
+        else if (nameNorm.startsWith(queryNorm)) score += 85;
+        else if (nameNorm.includes(queryNorm)) score += 50;
+
+        for (let i = 0; i < tokens.length; i++) {
+            const tok = tokens[i];
+            const cTok = compactTokens[i];
+            if (nameNorm.includes(tok) || (cTok && nameCompact.includes(cTok))) {
+                score += 24;
+                if (nameNorm.startsWith(tok) || nameNorm.includes(` ${tok}`)) score += 8;
+            } else if (codeNorm.includes(tok) || (cTok && codeCompact.includes(cTok))) {
+                score += 18;
+            } else if (descNorm.includes(tok)) {
+                score += 8;
+            } else if (metaNorm.includes(tok)) {
+                score += 5;
+            }
+        }
+        return score;
+    }
+
     function renderItems() {
         const body = document.getElementById('ccItemsBody');
-        const normalizeSearch = value => String(value||'').normalize('NFD').replace(/[\u0300-\u036f]/g,'').toLowerCase().trim();
-        const normalizedQuery = normalizeSearch(itemQuery);
+        const queryNorm = normalizeCatalogSearchText(itemQuery);
+        const tokens = queryNorm ? queryNorm.split(' ').filter(Boolean) : [];
+        const compactTokens = tokens.map(compactCatalogSearchText);
         const valueForSort = item => {
             if (itemSort === 'cost') return Number(item.unit_cost || 0);
             if (itemSort === 'labor') return Number(item.labor_hours || 0);
@@ -679,21 +775,36 @@
             rawItems = (state.allItems?.length ? state.allItems : state.items).filter(item => Boolean(item.deleted_at || item.catalog_deleted_at || item.group_deleted_at));
         }
 
-        const items = rawItems.filter(item => itemTypeFilter === 'all' || normalizeType(item) === itemTypeFilter)
+        const filteredItems = rawItems
+            .filter(item => itemTypeFilter === 'all' || normalizeType(item) === itemTypeFilter)
             .filter(item => measurementFilter === 'all' || String(item.measurement_type || 'count') === measurementFilter)
             .filter(item => uomFilter === 'all' || String(item.unit_of_measure || 'ea') === uomFilter)
             .filter(item => {
                 if (selection.view === 'archived') return true;
                 return statusFilter === 'all' || (statusFilter === 'archived' ? Boolean(item.deleted_at || item.catalog_deleted_at || item.group_deleted_at) : (!item.deleted_at && !item.catalog_deleted_at && !item.group_deleted_at));
-            })
-            .filter(item => !normalizedQuery || [item.name, item.description,
-                item.catalog_name, item.group_name, item.manufacturer, item.supplier, item.catalog_number, item.cost_code, item.masterformat, item.uniformat]
-                .some(value => normalizeSearch(value).includes(normalizedQuery)))
-            .slice().sort((a, b) => {
-                const left = valueForSort(a);
-                const right = valueForSort(b);
-                return (typeof left === 'number' ? left - right : left.localeCompare(right)) * itemSortDirection;
             });
+
+        const items = tokens.length
+            ? filteredItems
+                .map(item => ({ item, score: scoreCatalogItemMatch(item, queryNorm, tokens, compactTokens) }))
+                .filter(entry => entry.score > 0)
+                .sort((a, b) => {
+                    if (itemSort === 'name' && itemSortDirection === 1 && b.score !== a.score) {
+                        return b.score - a.score;
+                    }
+                    const left = valueForSort(a.item);
+                    const right = valueForSort(b.item);
+                    const cmp = (typeof left === 'number' ? left - right : left.localeCompare(right)) * itemSortDirection;
+                    return cmp !== 0 ? cmp : (b.score - a.score);
+                })
+                .map(entry => entry.item)
+            : filteredItems
+                .slice()
+                .sort((a, b) => {
+                    const left = valueForSort(a);
+                    const right = valueForSort(b);
+                    return (typeof left === 'number' ? left - right : left.localeCompare(right)) * itemSortDirection;
+                });
 
         const archivedArea = document.getElementById('ccArchivedHeaderArea');
         if (selection.view === 'archived') {
@@ -1179,6 +1290,7 @@
             ${!isAssembly ? `<button type="button" data-floating-item-action="assembly" data-id="${itemId}"><i class="fas fa-cubes"></i>Convert to assembly</button>` : ''}
             <button type="button" class="danger" data-floating-item-action="delete" data-id="${itemId}"><i class="fas fa-box-archive"></i>Archive</button>
         `;
+        menu.style.display = '';
         menu.hidden = false;
 
         const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
@@ -1536,7 +1648,7 @@
         const item = (state.allItems?.length?state.allItems:state.items).find(row => Number(row.id) === id);
         if (!item) return;
         if (action === 'edit') return openItemModal(item);
-        if (action === 'duplicate') return mutate('duplicate_item', revisionPayload(item,{ id }));
+        if (action === 'duplicate') return mutate('duplicate_item', currentContextPayload(revisionPayload(item,{ id })));
         if (action === 'move') return openMoveItemModal(item);
         if (action === 'assembly') return mutate('convert_item_assembly', currentContextPayload(revisionPayload(item,{ id })));
         if (action === 'delete') {
@@ -1871,6 +1983,13 @@
         editingItemId = item ? Number(item.id) : null;
         document.getElementById('ccItemModalTitle').textContent = editingItemId ? 'Edit Catalog Item' : 'Create Catalog Item';
         document.getElementById('ccItemForm').reset();
+        const formError = document.getElementById('ccItemFormError');
+        if (formError) {
+            formError.textContent = '';
+            formError.hidden = true;
+        }
+        const pdfFeedback = document.getElementById('ccItemPdfFeedback');
+        if (pdfFeedback) pdfFeedback.textContent = '';
         const catalogId = item ? Number(item.catalog_id) : selectedCatalogForNewItem();
         const groupId = item ? Number(item.catalog_group_id || 0) : (selection.groupId || '');
         const catSelect = document.getElementById('ccItemCatalog');
@@ -1931,7 +2050,19 @@
             tags = typeof item?.tags_json === 'string' ? JSON.parse(item.tags_json || '[]') : (item?.tags_json || []);
         } catch (_) { tags = []; }
         setVal('ccItemTags', Array.isArray(tags) ? tags.map(tag => typeof tag === 'string' ? tag : (tag.name || '')).filter(Boolean).join(', ') : '');
-        setVal('ccItemAttributes', typeof item?.attributes_json === 'string' ? item.attributes_json : JSON.stringify(item?.attributes_json || {}, null, 2));
+        let rawAttrs = item?.attributes_json;
+        if (typeof rawAttrs === 'string') {
+            try {
+                const parsedAttrs = JSON.parse(rawAttrs || '{}');
+                rawAttrs = parsedAttrs && !Array.isArray(parsedAttrs) && typeof parsedAttrs === 'object' ? JSON.stringify(parsedAttrs, null, 2) : '{}';
+            } catch (_) {
+                rawAttrs = rawAttrs || '{}';
+            }
+        } else {
+            const safeObj = rawAttrs && !Array.isArray(rawAttrs) && typeof rawAttrs === 'object' ? rawAttrs : {};
+            rawAttrs = JSON.stringify(safeObj, null, 2);
+        }
+        setVal('ccItemAttributes', rawAttrs);
 
         renderPdfAttachment(item);
         initStagedAssemblyComponents(item);
@@ -2500,6 +2631,7 @@
             return showItemFormError('Choose a PDF, PNG, JPG, or WEBP file of 10 MB or smaller');
         }
         const saveButton = document.getElementById('ccItemSave');
+        if (saveButton.disabled) return;
         saveButton.disabled = true;
         saveButton.textContent = pdf ? 'Saving and uploading…' : 'Saving…';
         try {
@@ -2561,15 +2693,16 @@
                 notes: val('ccItemNotes'),
                 components: componentsPayload
             }));
+            const groupId = Number(document.getElementById('ccItemGroup')?.value || 0);
+            const catalogId = Number(document.getElementById('ccItemCatalog')?.value || 0);
+            selection = groupId ? { view: 'group', catalogId: null, groupId } : { view: 'catalog', catalogId, groupId: null };
+            state = data.data;
+            if (data.id) editingItemId = Number(data.id);
             if (pdf) {
                 const feedback = document.getElementById('ccItemPdfFeedback');
                 if (feedback) feedback.textContent = 'Uploading attachment…';
                 await attachmentRequest('upload', data.id, data.revision, pdf);
             }
-            const groupId = Number(document.getElementById('ccItemGroup')?.value || 0);
-            const catalogId = Number(document.getElementById('ccItemCatalog')?.value || 0);
-            selection = groupId ? { view: 'group', catalogId: null, groupId } : { view: 'catalog', catalogId, groupId: null };
-            state = data.data;
             closeItemModals();
             await load();
         } catch(err) {
@@ -2665,13 +2798,18 @@
     }
 
     function mutate(action, payload) { if (!canWrite()) { showError('Read-only mode: mutations are not permitted.'); return; }
-        request(action, payload)
+        return request(action, payload)
             .then(data => {
                 state = data.data;
                 if (data.id && action.includes('catalog')&&!action.startsWith('delete_')) selection = { view: 'catalog', catalogId: Number(data.id), groupId: null };
                 if (data.id && action.includes('group')&&!action.startsWith('delete_')) selection = { view: 'group', catalogId: null, groupId: Number(data.id) };
                 if(action.startsWith('delete_catalog'))selection={view:'all',catalogId:null,groupId:null};
                 render();
+                if (action === 'duplicate_item' && data.id) {
+                    const duplicatedItem = (state.allItems?.length ? state.allItems : state.items).find(row => Number(row.id) === Number(data.id));
+                    if (duplicatedItem) openItemModal(duplicatedItem);
+                }
+                return data;
             })
             .catch(err => showError(err.code==='revision_conflict'?'This record was updated elsewhere. Reload and review the latest version before retrying.':err.message));
     }
@@ -2765,6 +2903,7 @@
         }
 
         menu.innerHTML = html;
+        menu.style.display = '';
         menu.hidden = false;
 
         const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
@@ -2961,10 +3100,29 @@
         initColumnResizer();
         initFieldSelectors();
 
-        document.getElementById('ccSearch')?.addEventListener('input', event => {
-            itemQuery = event.target.value;
-            currentPage = 1;
-            renderItems();
+        const ccSearchInput = document.getElementById('ccSearch');
+        const syncCcItemSearch = (immediate = false) => {
+            if (!ccSearchInput) return;
+            const apply = () => {
+                itemQuery = ccSearchInput.value.trim();
+                currentPage = 1;
+                renderItems();
+            };
+            clearTimeout(ccSearchInput._timer);
+            if (immediate) apply();
+            else ccSearchInput._timer = setTimeout(apply, 120);
+        };
+        ccSearchInput?.addEventListener('input', () => syncCcItemSearch(false));
+        ccSearchInput?.addEventListener('search', () => syncCcItemSearch(true));
+        ccSearchInput?.addEventListener('keydown', event => {
+            if (event.key === 'Enter') {
+                event.preventDefault();
+                syncCcItemSearch(true);
+            }
+        });
+        ccSearchInput?.closest('.bb-search-field-procore')?.querySelector('.bb-search-submit')?.addEventListener('click', () => {
+            syncCcItemSearch(true);
+            ccSearchInput.focus();
         });
         document.getElementById('ccFiltersBtn')?.addEventListener('click', () => {
             const panel = document.getElementById('ccFiltersPanel');
@@ -2985,7 +3143,7 @@
             currentPage = 1;
             itemTypeFilter=measurementFilter=uomFilter='all';
             statusFilter='active';
-            const sInp = document.getElementById('ccSearch'); if (sInp) sInp.value='';
+            const sInp = document.getElementById('ccSearch'); if (sInp) { clearTimeout(sInp._timer); sInp.value=''; }
             const tSel = document.getElementById('ccTypeFilter'); if (tSel) { tSel.value='all'; tSel._syncCustom?.(); }
             const mSel = document.getElementById('ccMeasurementFilter'); if (mSel) { mSel.value='all'; mSel._syncCustom?.(); }
             const uSel = document.getElementById('ccUomFilter'); if (uSel) { uSel.value='all'; uSel._syncCustom?.(); }
@@ -3576,6 +3734,7 @@
 
             function toggleMoreMenu(show) {
                 const isHidden = typeof show === 'boolean' ? !show : !moreMenu.hidden;
+                moreMenu.style.display = '';
                 moreMenu.hidden = isHidden;
                 moreBtn.setAttribute('aria-expanded', isHidden ? 'false' : 'true');
             }

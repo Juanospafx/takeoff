@@ -65,9 +65,48 @@
             }
             CatalogSnapshot.refreshEffectiveLegacyFields(item);
         }
+        if (layer.copiedFromTakeoffLayerId && !item.copiedFromTakeoffLayerId) {
+            item.copiedFromTakeoffLayerId = stringId(layer.copiedFromTakeoffLayerId);
+        }
         if (Array.isArray(previous?.children) && previous.children.length > 0) {
             item.children = JSON.parse(JSON.stringify(previous.children));
             item.isAssembly = true;
+        } else if (Array.isArray(layer.children) && layer.children.length > 0) {
+            item.children = JSON.parse(JSON.stringify(layer.children));
+            item.isAssembly = true;
+            item.itemType = 'assembly';
+        } else if (Array.isArray(item.catalogSnapshot?.assemblyComponents) && item.catalogSnapshot.assemblyComponents.length > 0
+            && (!Array.isArray(item.children) || item.children.length === 0)) {
+            item.children = item.catalogSnapshot.assemblyComponents.map((comp, idx) => ({
+                id: `${item.id}_comp_${idx}`,
+                catalogItemId: comp.catalogItemId ?? comp.part_catalog_item_id ?? null,
+                assemblyComponentId: comp.id ?? null,
+                name: comp.name || 'Assembly component',
+                description: comp.description || '',
+                uom: comp.uom || 'ea',
+                itemType: comp.itemType || 'part',
+                costCode: comp.costCode || '',
+                ratio: number(comp.quantity || 1),
+                quantity: number(comp.quantity || 1),
+                ratioType: comp.ratioType || 'per_unit',
+                spacing: comp.spacing ?? null,
+                componentWaste: number(comp.waste || 0),
+                pricingSnapshot: comp.pricingSnapshot ? JSON.parse(JSON.stringify(comp.pricingSnapshot)) : undefined,
+                unitMaterialCost: number(comp.pricingSnapshot?.materialUnitCost),
+                unitEquipmentCost: number(comp.pricingSnapshot?.equipmentUnitCost),
+                unitSubcontractorCost: number(comp.pricingSnapshot?.subcontractorUnitCost),
+                unitLabor: number(comp.pricingSnapshot?.laborHoursPerUnit),
+                laborUnitType: 'hrs',
+                laborRate: number(comp.pricingSnapshot?.laborRate) > 0 ? number(comp.pricingSnapshot.laborRate) : null
+            }));
+            item.isAssembly = true;
+            item.itemType = 'assembly';
+        }
+        if (item.isAssembly
+            || layer.isAssembly === true
+            || String(layer.itemType || layer.item_type || item.catalogSnapshot?.type || layer.catalogMetadata?.type || '').toLowerCase() === 'assembly') {
+            item.isAssembly = true;
+            item.itemType = 'assembly';
         }
         if (previous?.factorOverride !== undefined && previous.factorOverride !== null) {
             item.factorOverride = previous.factorOverride;

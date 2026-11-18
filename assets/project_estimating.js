@@ -5,7 +5,7 @@
 
     const Workspace = window.EstimatingWorkspaceService;
     const Calc = window.EstimateCalculationService;
-    const Exporter = window.EstimatingExportService;
+    const getExporter = () => window.EstimatingExportService;
     const Footer = window.ProjectEstimateFooter;
     if (!Workspace || !Calc) {
         root.innerHTML = '<div class="est-fatal">Estimating could not start. Required services are unavailable.</div>';
@@ -20,18 +20,20 @@
     const resolveProjectId = () => {
         const query = new URLSearchParams(window.location.search);
         return [root.dataset.projectId, window.ProjectState?.projectId, window.EstimateProjectId,
-            query.get('project_id'), query.get('projectId'), query.get('id')]
+        query.get('project_id'), query.get('projectId'), query.get('id')]
             .map(Workspace.projectId).find(Boolean) || 0;
     };
 
     const projectId = resolveProjectId();
     const storageKey = `takeoff.estimating.module.${projectId || 'draft'}`;
     const apiUrl = '../api/project_estimating.php';
-    const ui = { search: '', selected: new Set(), saving: false, saveRequested: false, saveTimer: null, pendingDeleteId: null, lastErrorCode: null, loadState: projectId ? 'loading' : 'local',
+    const ui = {
+        search: '', selected: new Set(), saving: false, saveRequested: false, saveTimer: null, pendingDeleteId: null, lastErrorCode: null, loadState: projectId ? 'loading' : 'local',
         message: projectId ? 'Loading estimate' : 'Local draft', collapsed: { notes: true, audit: true }, expandedAssemblies: new Set(), modal: null,
-        notesLibraryModal: null, notesLibrarySearch: '', activeMarkupPopover: null, summaryColWidths: (()=>{ try { return JSON.parse(localStorage.getItem('takeoff.summaryColWidths')||'{}'); } catch(_){ return {}; } })(),
+        notesLibraryModal: null, notesLibrarySearch: '', activeMarkupPopover: null, summaryColWidths: (() => { try { return JSON.parse(localStorage.getItem('takeoff.summaryColWidths') || '{}'); } catch (_) { return {}; } })(),
         catalogTargetGroupId: null, catalogData: null, catalogLoading: false, catalogError: '',
-        importFile: null, importMode: 'keep_excel', importName: '', importError: '', importing: false };
+        importFile: null, importMode: 'keep_excel', importName: '', importError: '', importing: false
+    };
     let state = readLocal();
     const dirtyEstimateIds = new Set(state.dirtyEstimateIds || []);
     const takeoffSyncDirtyIds = new Set(state.takeoffSyncDirtyIds || []);
@@ -107,7 +109,7 @@
                         evictable.push(k);
                     }
                 }
-                evictable.forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+                evictable.forEach(k => { try { localStorage.removeItem(k); } catch (_) { } });
                 localStorage.setItem(key, value);
                 return true;
             } catch (_) {
@@ -118,7 +120,7 @@
 
     function readLocal() {
         let raw = null;
-        try { raw = JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch (_) {}
+        try { raw = JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch (_) { }
         if (!raw && projectId > 0) {
             const psActiveId = String(window.ProjectState?.activeEstimateId || '');
             const psSummary = Array.isArray(window.ProjectState?.estimatesSummary) ? window.ProjectState.estimatesSummary : [];
@@ -239,7 +241,7 @@
         return parseFloat(cleaned) || 0;
     }
 
-        function openSquareFootageModal() {
+    function openSquareFootageModal() {
         const currentSqft = resolveSquareFootage();
         document.querySelector('[data-est-sqft-portal]')?.remove();
         const portal = document.createElement('div');
@@ -333,14 +335,16 @@
     function isEquipmentItem(item) {
         if (!item) return false;
         return [item.itemType, item.item_type, item.type, item.costCategory, item.cost_category,
-            item.catalogSnapshot?.type, item.catalogMetadata?.type]
+        item.catalogSnapshot?.type, item.catalogMetadata?.type]
             .some(value => String(value || '').toLowerCase().includes('equip'));
     }
     function duplicateAssembly(item) {
         const copyTree = (source, parentItemId = null) => {
-            const copy = Workspace.item({ ...Workspace.clone(source), id: Workspace.uid('item'), parentItemId,
+            const copy = Workspace.item({
+                ...Workspace.clone(source), id: Workspace.uid('item'), parentItemId,
                 takeoffLayerId: null, copiedFromTakeoffLayerId: source.takeoffLayerId || null,
-                quantitySource: 'manual', quantitySyncStatus: 'manual' });
+                quantitySource: 'manual', quantitySyncStatus: 'manual'
+            });
             if (source.catalogSnapshot) copy.catalogSnapshot = Workspace.clone(source.catalogSnapshot);
             if (source.catalogMetadata) copy.catalogMetadata = Workspace.clone(source.catalogMetadata);
             copy.children = (source.children || []).map(child => copyTree(child, copy.id));
@@ -349,6 +353,59 @@
         const duplicate = copyTree(item);
         duplicate.name = `${item.name} Copy`;
         return duplicate;
+    }
+    function duplicateEstimatingItem(item) {
+        if (!item) return null;
+        if (isAssemblyItem(item)) return duplicateAssembly(item);
+        return Workspace.item({
+            ...Workspace.clone(item),
+            id: Workspace.uid('item'),
+            takeoffLayerId: null,
+            copiedFromTakeoffLayerId: item.takeoffLayerId || null,
+            quantitySource: 'manual',
+            quantitySyncStatus: 'manual',
+            name: `${item.name} (Copy)`
+        });
+    }
+    function collectEstimatingItemTakeoffKeys(items, estimateId = state.activeEstimateId) {
+        const estId = String(estimateId || state.activeEstimateId || '').trim();
+        const itemIds = new Set();
+        const layerKeys = new Set();
+        const addKey = (val) => {
+            const s = String(val || '').trim();
+            if (!s) return;
+            layerKeys.add(s);
+            if (s.startsWith('takeoff_') && s.length > 8) layerKeys.add(s.slice(8));
+        };
+        (Array.isArray(items) ? items : []).forEach(item => {
+            if (!item || typeof item !== 'object') return;
+            const id = String(item.id || '').trim();
+            if (id) {
+                itemIds.add(id);
+                addKey(id);
+                if (estId) layerKeys.add(`estitem_${estId}_${id}`);
+            }
+            addKey(item.takeoffLayerId);
+            addKey(item.source_layer_key);
+        });
+        return { itemIds: [...itemIds], layerKeys: [...layerKeys] };
+    }
+    function notifyTakeoffDeletedEstimatingItems(removedItems, estimateId = state.activeEstimateId) {
+        const list = Array.isArray(removedItems) ? removedItems.filter(Boolean) : [];
+        if (!list.length) return;
+        const estId = String(estimateId || state.activeEstimateId || '').trim();
+        const { itemIds, layerKeys } = collectEstimatingItemTakeoffKeys(list, estId);
+        if (!itemIds.length && !layerKeys.length) return;
+        window.dispatchEvent(new CustomEvent('takeoff:estimating-items-deleted', {
+            detail: {
+                version: 1,
+                origin: 'estimating',
+                projectId: String(projectId),
+                estimateId: estId,
+                itemIds,
+                layerKeys
+            }
+        }));
     }
     function markEstimateDirty(estimateId = state.activeEstimateId) {
         const id = String(estimateId || '');
@@ -456,22 +513,26 @@
     function publish(options = {}) {
         const total = summary();
         const syncSource = options.syncSource || 'estimating';
-        window.dispatchEvent(new CustomEvent('takeoff:estimating-state-updated', { detail: {
-            projectId: String(projectId), activeEstimateId: state.activeEstimateId,
-            syncSource,
-            estimates: state.estimates.map(row => ({
-                id: row.id,
-                name: row.name,
-                status: row.status,
-                is_primary: Boolean(row.is_primary || row.isPrimary),
-                isPrimary: Boolean(row.is_primary || row.isPrimary),
-                groups: row.groups,
-                settings: row.settings
-            })),
-            summary: { material: total.direct.materialSales, labor: total.direct.laborSales,
-                equipment: total.direct.equipmentSales, preTaxMarkup: total.preTaxTotal,
-                taxes: total.totalTax, total: total.estimateTotal, profit: total.profit }
-        } }));
+        window.dispatchEvent(new CustomEvent('takeoff:estimating-state-updated', {
+            detail: {
+                projectId: String(projectId), activeEstimateId: state.activeEstimateId,
+                syncSource,
+                estimates: state.estimates.map(row => ({
+                    id: row.id,
+                    name: row.name,
+                    status: row.status,
+                    is_primary: Boolean(row.is_primary || row.isPrimary),
+                    isPrimary: Boolean(row.is_primary || row.isPrimary),
+                    groups: row.groups,
+                    settings: row.settings
+                })),
+                summary: {
+                    material: total.direct.materialSales, labor: total.direct.laborSales,
+                    equipment: total.direct.equipmentSales, preTaxMarkup: total.preTaxTotal,
+                    taxes: total.totalTax, total: total.estimateTotal, profit: total.profit
+                }
+            }
+        }));
         const currentGroups = current().groups || [];
         const currentSummaryRow = (window.ProjectState?.estimatesSummary || []).find(
             row => String(row?.id || '') === String(state.activeEstimateId || '')
@@ -479,12 +540,14 @@
         const isUnloadedShell = ui.loadState === 'loading'
             && currentGroups.length === 0
             && Number(currentSummaryRow?.itemCount || 0) > 0;
-        if (!isUnloadedShell) {
-            window.dispatchEvent(new CustomEvent('takeoff:estimating-items-updated', { detail: {
-                version: 1, origin: 'estimating', syncSource, projectId: String(projectId),
-                activeEstimateId: String(state.activeEstimateId), revision: Number(current().revision || 0),
-                groups: Workspace.clone(currentGroups)
-            } }));
+        if (!isUnloadedShell && options.publishItems !== false) {
+            window.dispatchEvent(new CustomEvent('takeoff:estimating-items-updated', {
+                detail: {
+                    version: 1, origin: 'estimating', syncSource, projectId: String(projectId),
+                    activeEstimateId: String(state.activeEstimateId), revision: Number(current().revision || 0),
+                    groups: Workspace.clone(currentGroups)
+                }
+            }));
         }
         window.dispatchEvent(new CustomEvent('takeoff:estimate-summary-updated', { detail: total }));
     }
@@ -731,7 +794,7 @@
         return result;
     }
 
-        function showSaveProgressModal(step = 1, message = 'Saving...') {
+    function showSaveProgressModal(step = 1, message = 'Saving...') {
         let portal = document.querySelector('[data-est-save-progress-portal]');
         if (step === 0 || step === 4) {
             if (portal) {
@@ -753,14 +816,14 @@
             portal = document.createElement('div');
             portal.className = 'pd-modal-backdrop open';
             portal.dataset.estSaveProgressPortal = 'true';
-            portal.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); z-index: 9999999;';
+            portal.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 9999999;';
             portal.innerHTML = `
                 <div class="pd-modal bb-studio-modal" style="width: min(380px, 92vw); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); padding: 24px 20px; text-align: center;" role="dialog" aria-modal="true">
-                    <div class="est-save-spinner" style="margin-bottom: 12px;"><i class="fas fa-circle-notch fa-spin" style="font-size: 30px; color: #2563eb;"></i></div>
+                    <div class="est-save-spinner" style="margin-bottom: 12px;"><i class="fas fa-circle-notch fa-spin" style="font-size: 30px; color: var(--primary, #fb5a3a);"></i></div>
                     <h3 style="margin: 0 0 6px; font-size: 16px; font-weight: 600; color: var(--text-main, #0f172a);">Saving Project</h3>
                     <div id="estSaveProgressStep" style="font-size: 13px; color: var(--text-muted, #64748b); min-height: 20px;">${esc(message)}</div>
-                    <div style="margin-top: 16px; background: rgba(0,0,0,0.08); height: 5px; border-radius: 3px; overflow: hidden;">
-                        <div id="estSaveProgressBar" style="width: ${step === 1 ? '30%' : (step === 2 ? '65%' : '90%')}; height: 100%; background: #2563eb; transition: width 0.35s ease;"></div>
+                    <div style="margin-top: 16px; background: rgba(148,163,184,0.18); height: 5px; border-radius: 3px; overflow: hidden;">
+                        <div id="estSaveProgressBar" style="width: ${step === 1 ? '30%' : (step === 2 ? '65%' : '90%')}; height: 100%; background: var(--primary, #fb5a3a); transition: width 0.35s ease;"></div>
                     </div>
                 </div>`;
             document.body.appendChild(portal);
@@ -814,8 +877,10 @@
         try {
             let result;
             try {
-                result = await request('save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(sent) });
+                result = await request('save', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(sent)
+                });
             } catch (error) {
                 if (error.status !== 404 || !['estimate_not_found', 'stale_estimate_id'].includes(error.code)) throw error;
                 // Reconcile against the database before retrying. A 404 can mean
@@ -836,6 +901,8 @@
                     body: JSON.stringify({ ...sent, updates: recoverable, estimates: recoverable, state: { ...sent.state, estimates: recoverable } })
                 });
             }
+            const activeBeforeSaveId = String(state.activeEstimateId || '');
+            const activeBeforeSaveSig = groupsContentSignature(current()?.groups || []);
             const acknowledgedRows = result.updates || result.state?.estimates || result.estimates || [];
             const acknowledgements = new Map(acknowledgedRows.map(estimate => [String(estimate.id), estimate]));
             sentIds.forEach(id => {
@@ -864,7 +931,10 @@
             }
             ui.loadState = dirtyEstimateIds.size ? 'pending' : 'saved';
             ui.message = dirtyEstimateIds.size ? 'Unsaved changes' : 'Saved';
-            saveLocal({ publish: !activeEditingElement() });
+            const activeItemsUnchangedOnAck = String(state.activeEstimateId || '') === activeBeforeSaveId
+                && activeBeforeSaveSig === groupsContentSignature(current()?.groups || []);
+            sentIds.forEach(id => window.flushTakeoffDeletedLayersForEstimate?.(id));
+            saveLocal({ publish: !activeEditingElement(), publishItems: !activeItemsUnchangedOnAck });
             if (showModal) {
                 showSaveProgressModal(3, 'Updating Audit & Summaryâ€¦');
                 setTimeout(() => showSaveProgressModal(4, 'Saved!'), 200);
@@ -955,7 +1025,7 @@
                             Workspace.selectEstimate(state, pendingEstId);
                         }
                     }
-                } catch (_) {}
+                } catch (_) { }
                 restoreDirtyTracking();
                 saveLocal();
                 ui.loadState = 'saved';
@@ -1010,7 +1080,7 @@
                             Workspace.selectEstimate(state, pendingEstId);
                         }
                     }
-                } catch (_) {}
+                } catch (_) { }
                 restoreDirtyTracking();
             }
             ui.loadState = 'saved';
@@ -1045,8 +1115,10 @@
             remote.groups = window.TakeoffEstimatingSyncService.reconcile(remote.groups, takeoffGroups).map(Workspace.group);
         }
         remote.updatedAt = Workspace.now();
-        remote.auditLog.push({ id: Workspace.uid('audit'), at: remote.updatedAt,
-            action: 'Merged Takeoff changes with concurrent server changes' });
+        remote.auditLog.push({
+            id: Workspace.uid('audit'), at: remote.updatedAt,
+            action: 'Merged Takeoff changes with concurrent server changes'
+        });
         remote.auditLog = remote.auditLog.slice(-100);
         return remote;
     }
@@ -1146,6 +1218,53 @@
         }));
     }
 
+    function cloneCopiedChildrenTree(children = [], parentItemId = null) {
+        if (!Array.isArray(children) || !children.length) return [];
+        return children.map(child => {
+            const nextId = Workspace.uid('item');
+            const cloned = Workspace.clone(child || {});
+            delete cloned.dbEstimateItemId;
+            delete cloned.estimateItemId;
+            const nested = Array.isArray(cloned.children) && cloned.children.length ? cloned.children : [];
+            cloned.id = nextId;
+            cloned.parentItemId = parentItemId || null;
+            cloned.children = nested.length ? cloneCopiedChildrenTree(nested, nextId) : [];
+            return cloned;
+        });
+    }
+
+    function inheritCopiedTakeoffAssemblyChildren(existingGroups, nextGroups) {
+        const sourceByLayerId = new Map();
+        (existingGroups || []).forEach(grp => {
+            (grp.items || []).forEach(it => {
+                if (it.takeoffLayerId) sourceByLayerId.set(String(it.takeoffLayerId), it);
+                if (it.id && String(it.id).startsWith('takeoff_')) {
+                    sourceByLayerId.set(String(it.id).slice(8), it);
+                }
+            });
+        });
+        if (!sourceByLayerId.size) return nextGroups;
+        return (nextGroups || []).map(grp => ({
+            ...grp,
+            items: (grp.items || []).map(it => {
+                if (!it.copiedFromTakeoffLayerId) return it;
+                if (Array.isArray(it.children) && it.children.length > 0) return it;
+                const src = sourceByLayerId.get(String(it.copiedFromTakeoffLayerId));
+                if (!src) return it;
+                const srcChildren = getItemChildren(src);
+                if (!srcChildren.length && !isAssemblyItem(src)) return it;
+                return Workspace.item({
+                    ...it,
+                    itemType: 'assembly',
+                    isAssembly: true,
+                    ...(src.catalogItemId && !it.catalogItemId ? { catalogItemId: src.catalogItemId } : {}),
+                    ...(src.catalogSnapshot && !it.catalogSnapshot ? { catalogSnapshot: Workspace.clone(src.catalogSnapshot) } : {}),
+                    children: srcChildren.length ? cloneCopiedChildrenTree(srcChildren, it.id) : []
+                });
+            })
+        }));
+    }
+
     function drainPendingTakeoff() {
         const queued = [...pendingTakeoffByEstimate.entries()];
         pendingTakeoffByEstimate.clear();
@@ -1188,6 +1307,7 @@
             reconciled = groups.map(Workspace.group);
         }
         reconciled = preserveQuantityOverrides(currentEstimate.groups, reconciled);
+        reconciled = inheritCopiedTakeoffAssemblyChildren(currentEstimate.groups, reconciled);
         if (groupsContentSignature(currentEstimate.groups) === groupsContentSignature(reconciled)) return;
         currentEstimate.groups = reconciled;
         currentEstimate.updatedAt = Workspace.now();
@@ -1195,15 +1315,22 @@
         if (lastAudit && lastAudit.action === 'Synchronized items from Takeoff') {
             lastAudit.at = currentEstimate.updatedAt;
         } else {
-            currentEstimate.auditLog.push({ id: Workspace.uid('audit'), at: currentEstimate.updatedAt,
-                action: 'Synchronized items from Takeoff' });
+            currentEstimate.auditLog.push({
+                id: Workspace.uid('audit'), at: currentEstimate.updatedAt,
+                action: 'Synchronized items from Takeoff'
+            });
             currentEstimate.auditLog = currentEstimate.auditLog.slice(-100);
         }
         takeoffSyncDirtyIds.add(activeId);
         markEstimateDirty(activeId);
         saveLocal({ syncSource: 'takeoff-sync', targetEstimateId: activeId });
         scheduleSave('takeoff', activeId);
-        if (!options.backgroundEstimate) render();
+        if (!options.backgroundEstimate) {
+            render();
+            if (reconciled.some(g => (g.items || []).some(assemblyNeedsHydration))) {
+                hydrateBrokenAssembliesInCurrentEstimate();
+            }
+        }
     }
 
     function render(forceTable = false) {
@@ -1268,7 +1395,7 @@
                 const parsed = JSON.parse(raw);
                 if (parsed && typeof parsed === 'object') return parsed;
             }
-        } catch (_) {}
+        } catch (_) { }
         return {
             cost_item: 320,
             budget_code: 120,
@@ -1300,44 +1427,130 @@
         try {
             const saveCol = safeSetLocalStorage(COLUMNS_WIDTHS_STORAGE_KEY, JSON.stringify(widths));
             void saveCol;
-        } catch (_) {}
+        } catch (_) { }
+    }
+
+    function filterValidColumnIds(raw) {
+        if (!Array.isArray(raw) || raw.length === 0) return null;
+        const validIds = new Set(ALL_CONFIG_COLUMNS.map(c => c.id));
+        const filtered = raw.map(String).filter(id => validIds.has(id));
+        return filtered.length > 0 ? filtered : null;
     }
 
     function getVisibleColumns() {
+        const est = current();
+        const fromEst = filterValidColumnIds(est?.settings?.visibleColumns);
+        if (fromEst) return new Set(fromEst);
+        const fromProjectMeta = filterValidColumnIds(window.ProjectState?.projectMeta?.estimatingTableSettings?.visibleColumns);
+        if (fromProjectMeta) return new Set(fromProjectMeta);
+        const perEstKey = est?.id ? `${COLUMNS_STORAGE_KEY}.${est.id}` : '';
         try {
-            const stored = localStorage.getItem(COLUMNS_STORAGE_KEY);
-            if (stored) {
-                const parsed = JSON.parse(stored);
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                    const validIds = new Set(ALL_CONFIG_COLUMNS.map(c => c.id));
-                    const filtered = parsed.filter(id => validIds.has(id));
-                    if (filtered.length > 0) return new Set(filtered);
-                }
+            for (const key of [perEstKey, COLUMNS_STORAGE_KEY, 'takeoff.estimating.columns.default']) {
+                if (!key) continue;
+                const stored = localStorage.getItem(key);
+                if (!stored) continue;
+                const filtered = filterValidColumnIds(JSON.parse(stored));
+                if (filtered) return new Set(filtered);
             }
-        } catch (_) {}
+        } catch (_) { }
         return new Set(DEFAULT_VISIBLE_COLUMNS);
     }
 
     function saveVisibleColumns(colSet, applyAll = false) {
         const list = Array.from(colSet);
-        try {
+        const active = current();
+        const prevVisible = Array.from(getVisibleColumns());
+        const currentOrder = (active?.settings?.columnsOrder && Array.isArray(active.settings.columnsOrder))
+            ? [...active.settings.columnsOrder]
+            : null;
+
+        if (applyAll) {
+            (state.estimates || []).forEach(est => {
+                if (!est) return;
+                est.settings = est.settings || {};
+                est.settings.visibleColumns = list.slice();
+                est.settings.tableSettingsApplyAll = true;
+                if (currentOrder) est.settings.columnsOrder = currentOrder.slice();
+                markEstimateDirty(est.id);
+                safeSetLocalStorage(`${COLUMNS_STORAGE_KEY}.${est.id}`, JSON.stringify(list));
+            });
             safeSetLocalStorage(COLUMNS_STORAGE_KEY, JSON.stringify(list));
-            if (applyAll) {
-                safeSetLocalStorage('takeoff.estimating.columns.default', JSON.stringify(list));
+            safeSetLocalStorage('takeoff.estimating.columns.default', JSON.stringify(list));
+            if (window.ProjectState) {
+                window.ProjectState.projectMeta = window.ProjectState.projectMeta || {};
+                window.ProjectState.projectMeta.estimatingTableSettings = {
+                    visibleColumns: list.slice(),
+                    columnsOrder: currentOrder ? currentOrder.slice() : [],
+                    applyAll: true
+                };
             }
-        } catch (_) {}
+            estimatingHasUnsavedCheckpoint = true;
+            saveLocal();
+            scheduleSave('manual');
+            if (projectId > 0) {
+                setTimeout(() => { saveServer().catch(() => {}); }, 0);
+            }
+            return;
+        }
+
+        // Preserve previous column set on sibling estimates that never explicitly stored visibleColumns
+        (state.estimates || []).forEach(est => {
+            if (!est || String(est.id) === String(active?.id || '')) return;
+            est.settings = est.settings || {};
+            if (!filterValidColumnIds(est.settings.visibleColumns)) {
+                est.settings.visibleColumns = prevVisible.slice();
+                safeSetLocalStorage(`${COLUMNS_STORAGE_KEY}.${est.id}`, JSON.stringify(prevVisible));
+                markEstimateDirty(est.id);
+            }
+        });
+        if (active) {
+            active.settings = active.settings || {};
+            active.settings.visibleColumns = list.slice();
+            delete active.settings.tableSettingsApplyAll;
+            markEstimateDirty(active.id);
+            safeSetLocalStorage(`${COLUMNS_STORAGE_KEY}.${active.id}`, JSON.stringify(list));
+        } else {
+            safeSetLocalStorage(COLUMNS_STORAGE_KEY, JSON.stringify(list));
+        }
+        if (window.ProjectState?.projectMeta?.estimatingTableSettings?.applyAll) {
+            window.ProjectState.projectMeta.estimatingTableSettings = {
+                ...window.ProjectState.projectMeta.estimatingTableSettings,
+                applyAll: false
+            };
+        }
+        estimatingHasUnsavedCheckpoint = true;
+        saveLocal();
+        scheduleSave('manual');
+        if (projectId > 0) {
+            setTimeout(() => { saveServer().catch(() => {}); }, 0);
+        }
     }
 
     function getOrderedActiveColumns() {
         const visibleCols = getVisibleColumns();
+        const est = current();
         let order = [];
-        try {
-            const stored = localStorage.getItem(COLUMNS_ORDER_STORAGE_KEY);
-            if (stored) {
-                const parsed = JSON.parse(stored);
-                if (Array.isArray(parsed)) order = parsed;
-            }
-        } catch (_) {}
+        if (Array.isArray(est?.settings?.columnsOrder) && est.settings.columnsOrder.length > 0) {
+            order = est.settings.columnsOrder;
+        } else if (Array.isArray(window.ProjectState?.projectMeta?.estimatingTableSettings?.columnsOrder)
+            && window.ProjectState.projectMeta.estimatingTableSettings.columnsOrder.length > 0) {
+            order = window.ProjectState.projectMeta.estimatingTableSettings.columnsOrder;
+        } else {
+            const perEstOrderKey = est?.id ? `${COLUMNS_ORDER_STORAGE_KEY}.${est.id}` : '';
+            try {
+                for (const key of [perEstOrderKey, COLUMNS_ORDER_STORAGE_KEY]) {
+                    if (!key) continue;
+                    const stored = localStorage.getItem(key);
+                    if (stored) {
+                        const parsed = JSON.parse(stored);
+                        if (Array.isArray(parsed) && parsed.length > 0) {
+                            order = parsed;
+                            break;
+                        }
+                    }
+                }
+            } catch (_) {}
+        }
 
         const colMap = new Map(ALL_CONFIG_COLUMNS.map(c => [c.id, c]));
         const ordered = [];
@@ -1357,7 +1570,30 @@
     }
 
     function saveColumnsOrder(orderedIds) {
-        safeSetLocalStorage(COLUMNS_ORDER_STORAGE_KEY, JSON.stringify(orderedIds));
+        const cleanOrder = Array.isArray(orderedIds) ? orderedIds.map(String) : [];
+        const active = current();
+        const applyAllActive = Boolean(active?.settings?.tableSettingsApplyAll || window.ProjectState?.projectMeta?.estimatingTableSettings?.applyAll);
+        if (active) {
+            active.settings = active.settings || {};
+            active.settings.columnsOrder = cleanOrder.slice();
+            safeSetLocalStorage(`${COLUMNS_ORDER_STORAGE_KEY}.${active.id}`, JSON.stringify(cleanOrder));
+            markEstimateDirty(active.id);
+        }
+        if (applyAllActive) {
+            (state.estimates || []).forEach(est => {
+                if (!est) return;
+                est.settings = est.settings || {};
+                est.settings.columnsOrder = cleanOrder.slice();
+                safeSetLocalStorage(`${COLUMNS_ORDER_STORAGE_KEY}.${est.id}`, JSON.stringify(cleanOrder));
+                markEstimateDirty(est.id);
+            });
+            safeSetLocalStorage(COLUMNS_ORDER_STORAGE_KEY, JSON.stringify(cleanOrder));
+            if (window.ProjectState?.projectMeta?.estimatingTableSettings) {
+                window.ProjectState.projectMeta.estimatingTableSettings.columnsOrder = cleanOrder.slice();
+            }
+        }
+        saveLocal();
+        scheduleSave('manual');
     }
 
     function findTakeoffLayer(item) {
@@ -1392,7 +1628,7 @@
                     if (l) return l;
                 }
             }
-        } catch (_) {}
+        } catch (_) { }
         // 5. Check window.ProjectState.takeoffLayers
         if (Array.isArray(window.ProjectState?.takeoffLayers)) {
             const l = window.ProjectState.takeoffLayers.find(x => String(x.id) === String(layerId) || (x.name && x.name === item.name));
@@ -1851,13 +2087,13 @@
                 <div class="est-drawer-section-title">Configure Columns</div>
                 <div class="est-columns-toggle-list">
                     ${ALL_CONFIG_COLUMNS.map(col => `
-                        <div class="est-col-toggle-card">
-                            <label class="est-switch">
+                        <label class="est-col-toggle-card">
+                            <span class="proposal-switch est-switch">
                                 <input type="checkbox" data-col-switch="${col.id}" ${visibleCols.has(col.id) ? 'checked' : ''}>
-                                <span class="est-switch-slider"></span>
-                            </label>
+                                <span class="proposal-slider est-switch-slider"></span>
+                            </span>
                             <span class="est-col-toggle-label">${esc(col.label)}</span>
-                        </div>
+                        </label>
                     `).join('')}
                 </div>
                 <div class="est-apply-all-wrap">
@@ -1868,8 +2104,8 @@
                 </div>
             </div>
             <div class="est-drawer-footer">
-                <button type="button" class="est-drawer-cancel-btn" data-drawer-cancel>Cancel</button>
-                <button type="button" class="est-drawer-save-btn" data-drawer-save>Save Changes</button>
+                <button type="button" class="btn-ghost est-drawer-cancel-btn" data-drawer-cancel>Cancel</button>
+                <button type="button" class="btn-main est-drawer-save-btn" data-drawer-save>Save Changes</button>
             </div>
         `;
     }
@@ -1929,7 +2165,7 @@
         });
     }
 
-        function handleActionPopoverClick(event) {
+    function handleActionPopoverClick(event) {
         const target = event.target;
         const popGroupAction = target.closest('[data-popover-group-action]');
         if (popGroupAction) {
@@ -1960,10 +2196,9 @@
                     const copy = Workspace.clone(grp);
                     copy.id = Workspace.uid('group');
                     copy.name = `${grp.name} (Copy)`;
-                    copy.items = (grp.items || []).map(it => {
-                        const itemCopy = Workspace.clone(it);
-                        itemCopy.id = Workspace.uid('item');
-                        return itemCopy;
+                    copy.items = (grp.items || []).map(it => duplicateEstimatingItem(it)).map(it => {
+                        if (it && it.name.endsWith(' (Copy)')) it.name = it.name.slice(0, -7);
+                        return it;
                     });
                     const idx = current().groups.indexOf(grp);
                     current().groups.splice(idx + 1, 0, copy);
@@ -1973,7 +2208,10 @@
                 exportEstimate('bom-excel');
             } else if (act === 'delete-group') {
                 if (confirm('Delete this group and its items?')) {
+                    const targetGroup = current().groups.find(row => String(row.id) === String(grpId));
+                    const removedItems = targetGroup?.items || [];
                     current().groups = current().groups.filter(row => String(row.id) !== String(grpId));
+                    notifyTakeoffDeletedEstimatingItems(removedItems);
                     changed('Deleted group');
                 }
             }
@@ -1989,18 +2227,11 @@
             if (act === 'edit-item') {
                 openProjectItemEditModal(found.item, found.group);
             } else if (act === 'copy-item') {
-                if (isAssemblyItem(found.item)) {
-                    const index = found.group.items.indexOf(found.item);
-                    const duplicate = duplicateAssembly(found.item);
+                const index = found.group.items.indexOf(found.item);
+                const duplicate = duplicateEstimatingItem(found.item);
+                if (duplicate) {
                     found.group.items.splice(index + 1, 0, duplicate);
-                    changed(`Duplicated ${found.item.name}`);
-                } else {
-                    const index = found.group.items.indexOf(found.item);
-                    const duplicate = Workspace.clone(found.item);
-                    duplicate.id = Workspace.uid('item');
-                    duplicate.name = `${found.item.name} (Copy)`;
-                    found.group.items.splice(index + 1, 0, duplicate);
-                    changed(`Copied ${found.item.name}`);
+                    changed(isAssemblyItem(found.item) ? `Duplicated ${found.item.name}` : `Copied ${found.item.name}`);
                 }
             } else if (act === 'replace-item') {
                 ui.catalogTargetGroupId = found.group.id;
@@ -2023,9 +2254,11 @@
                 found.item.budgetCode = '16-1...';
                 changed(`Reset budget code for "${found.item.name}"`);
             } else if (act === 'delete-item') {
+                const removedItem = found.item;
                 found.group.items = found.group.items.filter(row => String(row.id) !== String(itId));
                 ui.expandedAssemblies.delete(String(itId));
-                changed(`Deleted ${found.item.name}`);
+                notifyTakeoffDeletedEstimatingItems([removedItem]);
+                changed(`Deleted ${removedItem.name}`);
             }
             return true;
         }
@@ -2140,7 +2373,7 @@
 
             try {
                 resizer.setPointerCapture(e.pointerId);
-            } catch (_) {}
+            } catch (_) { }
 
             table.classList.add('is-resizing-col');
 
@@ -2175,7 +2408,7 @@
                     resizer.classList.remove('est-col-resizing', 'is-dragging');
                     try {
                         if (upEvent?.pointerId) resizer.releasePointerCapture(upEvent.pointerId);
-                    } catch (_) {}
+                    } catch (_) { }
                     resizingCol = null;
                 }
                 document.body.style.cursor = '';
@@ -2383,15 +2616,15 @@
                 <div class="est-col-resizer" data-resizer-col="cost_item"></div>
             </th>
             ${activeColumns.map(col => {
-                const colWidth = widths[col.id] || parseInt(col.minWidth, 10) || 110;
-                return `<th class="est-th-draggable ${col.align === 'right' ? 'text-right' : (col.align === 'center' ? 'text-center' : '')}"
+            const colWidth = widths[col.id] || parseInt(col.minWidth, 10) || 110;
+            return `<th class="est-th-draggable ${col.align === 'right' ? 'text-right' : (col.align === 'center' ? 'text-center' : '')}"
                             data-col-id="${esc(col.id)}"
                             draggable="true"
                             style="width: ${colWidth}px; min-width: ${col.minWidth};">
                     <span class="est-th-label">${esc(col.label)}</span>
                     <div class="est-col-resizer" data-resizer-col="${esc(col.id)}"></div>
                 </th>`;
-            }).join('')}
+        }).join('')}
             <th class="col-actions-sticky"></th>
         </tr>`;
 
@@ -2431,22 +2664,22 @@
                     </div>
                 </td>
                 ${activeColumns.map(col => {
-                    if (col.id === 'budget_code') {
-                        const bCode = group.costCode || '16-1...';
-                        return `<td><span class="est-budget-code-pill">${esc(bCode)} <span class="est-budget-code-clear">âœ•</span></span></td>`;
-                    }
-                    if (col.id === 'quantity') {
-                        return `<td class="text-right"><span style="color: #2563eb; font-size: 12px; font-weight: 600;">${visible.length} x</span></td>`;
-                    }
-                    if (col.id === 'subtotal_item_cost') {
-                        return `<td class="text-right est-money" style="font-weight: 700;" data-live-group-subtotal="${esc(group.id)}">${number(groupSubtotalCost, 2)}</td>`;
-                    }
-                    if (col.id === 'labor_margin') {
-                        const gMargin = Number(current()?.settings?.globalLaborMargin ?? 34.6);
-                        return `<td class="text-right" data-live-group-labor-margin="${esc(group.id)}" style="color: #64748b; font-size: 11.5px; font-weight: 500;">${gMargin.toFixed(1)}%</td>`;
-                    }
-                    return `<td></td>`;
-                }).join('')}
+                if (col.id === 'budget_code') {
+                    const bCode = group.costCode || '16-1...';
+                    return `<td><span class="est-budget-code-pill">${esc(bCode)} <span class="est-budget-code-clear">âœ•</span></span></td>`;
+                }
+                if (col.id === 'quantity') {
+                    return `<td class="text-right"><span style="color: #2563eb; font-size: 12px; font-weight: 600;">${visible.length} x</span></td>`;
+                }
+                if (col.id === 'subtotal_item_cost') {
+                    return `<td class="text-right est-money" style="font-weight: 700;" data-live-group-subtotal="${esc(group.id)}">${number(groupSubtotalCost, 2)}</td>`;
+                }
+                if (col.id === 'labor_margin') {
+                    const gMargin = Number(current()?.settings?.globalLaborMargin ?? 34.6);
+                    return `<td class="text-right" data-live-group-labor-margin="${esc(group.id)}" style="color: #64748b; font-size: 11.5px; font-weight: 500;">${gMargin.toFixed(1)}%</td>`;
+                }
+                return `<td></td>`;
+            }).join('')}
                 <td class="col-actions-sticky">
                     <div class="est-sticky-actions-cell">
                         <button type="button" class="est-action-icon-btn est-btn-add" data-add-item="${esc(group.id)}" title="Create Item"><i class="fas fa-plus"></i></button>
@@ -2557,17 +2790,20 @@
         if (!confirmed) return;
 
         const rootIds = selectedRows.map(({ item }) => item.id);
+        const removedItems = [];
         current().groups.forEach(group => {
             const removeIds = collectDescendantIds(group.items || [], rootIds);
             group.items = (group.items || []).filter(item => {
                 if (removeIds.has(String(item.id)) || ui.selected.has(item.id) || ui.selected.has(String(item.id))) {
                     ui.expandedAssemblies.delete(String(item.id));
+                    removedItems.push(item);
                     return false;
                 }
                 return true;
             });
         });
         ui.selected.clear();
+        notifyTakeoffDeletedEstimatingItems(removedItems);
         changed('Deleted selected items');
     }
 
@@ -2605,19 +2841,12 @@
         let copied = 0;
         targetGroup.items = targetGroup.items || [];
         selectedRows.forEach(({ item }) => {
-            const copy = isAssemblyItem(item)
-                ? duplicateAssembly(item)
-                : Workspace.item({
-                    ...Workspace.clone(item),
-                    id: Workspace.uid('item'),
-                    takeoffLayerId: null,
-                    copiedFromTakeoffLayerId: item.takeoffLayerId || null,
-                    quantitySource: 'manual',
-                    quantitySyncStatus: 'manual',
-                    name: `${item.name} (Copy)`
-                });
+            const copy = duplicateEstimatingItem(item);
+            if (!copy) return;
             assignGroupMeta(copy, targetGroup);
-            targetGroup.items.push(copy);
+            const srcIdx = targetGroup.items.indexOf(item);
+            if (srcIdx >= 0) targetGroup.items.splice(srcIdx + 1, 0, copy);
+            else targetGroup.items.push(copy);
             copied += 1;
         });
         if (copied > 0) {
@@ -3160,14 +3389,14 @@
                 const parsed = JSON.parse(raw);
                 if (Array.isArray(parsed) && parsed.length) return parsed;
             }
-        } catch (_) {}
+        } catch (_) { }
         return [...DEFAULT_EXCLUSIONS];
     }
 
     function saveExclusionPresets(list) {
         try {
             safeSetLocalStorage(EXCLUSION_PRESETS_KEY, JSON.stringify(list));
-        } catch (_) {}
+        } catch (_) { }
     }
 
     function addExclusionPreset(text) {
@@ -3195,14 +3424,14 @@
                 const parsed = JSON.parse(raw);
                 if (Array.isArray(parsed) && parsed.length) return parsed;
             }
-        } catch (_) {}
+        } catch (_) { }
         return [...DEFAULT_INCLUSIONS];
     }
 
     function saveInclusionPresets(list) {
         try {
             safeSetLocalStorage(INCLUSION_PRESETS_KEY, JSON.stringify(list));
-        } catch (_) {}
+        } catch (_) { }
     }
 
     function addInclusionPreset(text) {
@@ -3542,7 +3771,7 @@
             try {
                 const d = new Date(iso);
                 return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ' • ' +
-                       d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                    d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
             } catch (_) {
                 return String(iso || '');
             }
@@ -3564,13 +3793,13 @@
                 </div>
                 <div class="est-audit-timeline">
                     ${logs.map(row => {
-                        const badge = getBadgeInfo(row.action);
-                        const rawAction = String(row.action || '');
-                        const diffMatch = rawAction.match(/^(.*?)\s*\(([^()]+?)\s*(?:->|→)\s*([^()]+?)\)\s*$/);
-                        const actionHtml = diffMatch
-                            ? `<span>${esc(diffMatch[1])}</span> <span class="est-audit-diff-pill"><span class="est-audit-old-val">${esc(diffMatch[2].trim())}</span><i class="fas fa-arrow-right"></i><span class="est-audit-new-val">${esc(diffMatch[3].trim())}</span></span>`
-                            : esc(rawAction);
-                        return `
+            const badge = getBadgeInfo(row.action);
+            const rawAction = String(row.action || '');
+            const diffMatch = rawAction.match(/^(.*?)\s*\(([^()]+?)\s*(?:->|→)\s*([^()]+?)\)\s*$/);
+            const actionHtml = diffMatch
+                ? `<span>${esc(diffMatch[1])}</span> <span class="est-audit-diff-pill"><span class="est-audit-old-val">${esc(diffMatch[2].trim())}</span><i class="fas fa-arrow-right"></i><span class="est-audit-new-val">${esc(diffMatch[3].trim())}</span></span>`
+                : esc(rawAction);
+            return `
                         <div class="est-audit-item">
                             <div class="est-audit-dot ${badge.cls}">
                                 <i class="fas ${badge.icon}"></i>
@@ -3580,7 +3809,7 @@
                                 <time class="est-audit-time"><i class="far fa-clock"></i> ${esc(formatAuditDate(row.at))}</time>
                             </div>
                         </div>`;
-                    }).join('') || `
+        }).join('') || `
                         <div class="est-audit-empty">
                             <i class="fas fa-clipboard-check"></i>
                             <span>No activity recorded yet for this estimate.</span>
@@ -3819,14 +4048,16 @@
         }
         pop.style.visibility = 'visible';
     }
-function renderFooter() {
+    function renderFooter() {
         const bar = $('versionBar');
         if (!bar) return;
         if (Footer?.render) {
-            bar.innerHTML = Footer.render({ estimates: state.estimates, activeEstimateId: state.activeEstimateId,
+            bar.innerHTML = Footer.render({
+                estimates: state.estimates, activeEstimateId: state.activeEstimateId,
                 selectAttribute: 'data-version', actionAttribute: 'data-estimating-action',
                 menuAttribute: 'data-estimate-menu', itemActionAttribute: 'data-estimate-action',
-                showCompare: false });
+                showCompare: false
+            });
             Footer.bindMenus?.(bar, {
                 menuAttribute: 'data-estimate-menu',
                 itemActionAttribute: 'data-estimate-action',
@@ -4092,8 +4323,8 @@ function renderFooter() {
                     <div class="est-studio-section-label">Import Behavior</div>
                     <div class="est-studio-card-grid" role="radiogroup" aria-label="Import behavior">
                         ${importOptions.map(opt => {
-                            const active = activeMode === opt.value;
-                            return `
+                const active = activeMode === opt.value;
+                return `
                         <label class="bb-mode-card bb-studio-card est-studio-card ${active ? 'active' : ''}" data-est-radio-card>
                             <input type="radio" name="estimateImportMode" value="${opt.value}" ${active ? 'checked' : ''} class="est-sr-radio">
                             <div class="est-studio-card-top">
@@ -4105,7 +4336,7 @@ function renderFooter() {
                                 <span>${esc(opt.desc)}</span>
                             </div>
                         </label>`;
-                        }).join('')}
+            }).join('')}
                     </div>
                 </div>
                 <div class="pd-modal-foot est-studio-modal-foot">
@@ -4312,7 +4543,7 @@ function renderFooter() {
         const rows = ui.catalogData?.items || [];
         const normalized = String(query).trim().toLowerCase();
         const visible = rows.filter(item => !normalized || [item.name, item.description, item.supplier.catalogNumber,
-            item.classification.costCode, item.catalog.name, item.category.name].join(' ').toLowerCase().includes(normalized));
+        item.classification.costCode, item.catalog.name, item.category.name].join(' ').toLowerCase().includes(normalized));
         return visible.map(item => `<button type="button" class="est-copy-option" data-est-catalog-item="${esc(item.id)}"><span><strong>${esc(item.name)}</strong><small>${esc(item.catalog.name || '')} Â· ${esc(item.category.name || '')} Â· ${esc(item.uom || 'ea')} Â· ${money(item.pricing.materialUnitCost || item.pricing.equipmentUnitCost || item.pricing.legacyUnitCost || 0)}</small></span></button>`).join('')
             || '<div class="est-empty">No catalog items found.</div>';
     }
@@ -4378,6 +4609,11 @@ function renderFooter() {
     }
 
     async function exportEstimate(mode = 'estimate-xlsx') {
+        let Exporter = getExporter();
+        if (!Exporter && typeof window.ensureDashboardFeature === 'function') {
+            await window.ensureDashboardFeature('estimating-export');
+            Exporter = getExporter();
+        }
         if (!Exporter && mode !== 'estimate-xlsx') return false;
         let estimate = Workspace.clone(current());
         if ((mode === 'estimate-xlsx' || mode === 'flat' || mode === 'bom-excel' || mode === 'bom-csv' || mode === 'summary-csv') && Exporter?.needsCatalog?.(estimate)) {
@@ -4704,7 +4940,7 @@ function renderFooter() {
             if (target.matches?.('input.is-editable, input.est-cell-input, input.est-rate-inline-input, input[data-item-field], input[data-summary-rate], input[data-field], input[data-markup-quick-val], input[data-group-name]')) {
                 setTimeout(() => {
                     if (document.activeElement === target) {
-                        try { target.select(); } catch (_) {}
+                        try { target.select(); } catch (_) { }
                     }
                 }, 10);
             }
@@ -5169,10 +5405,14 @@ function renderFooter() {
 
             let ack = { success: true, state };
             if (projectId) {
-                ack = await request('delete', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'delete', project_id: projectId,
+                ack = await request('delete', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'delete', project_id: projectId,
                         estimate_id: requestedDbId, client_estimate_id: requestedId,
-                        delete_original: original }) });
+                        delete_original: original
+                    })
+                });
             }
             const acknowledgedId = String(ack?.deleted?.clientEstimateId || ack?.clientEstimateId || requestedId);
             const localDrafts = state.estimates.filter(row => !Number(row.dbEstimateId || 0)
@@ -5491,11 +5731,11 @@ function renderFooter() {
                         </thead>
                         <tbody>
                             ${children.map((comp, idx) => {
-                                const compRatio = (comp.factorOverride !== undefined && comp.factorOverride !== null && comp.factorOverride !== '')
-                                    ? comp.factorOverride : (comp.quantity || 1);
-                                const compCost = Number(comp.unitMaterialCost ?? comp.unitCost ?? 0);
-                                const compLabor = Number(comp.unitLabor ?? comp.laborHours ?? 0);
-                                return `<tr data-proj-comp-row="${idx}" style="border-bottom: 1px solid var(--border-soft, #e2e8f0);">
+            const compRatio = (comp.factorOverride !== undefined && comp.factorOverride !== null && comp.factorOverride !== '')
+                ? comp.factorOverride : (comp.quantity || 1);
+            const compCost = Number(comp.unitMaterialCost ?? comp.unitCost ?? 0);
+            const compLabor = Number(comp.unitLabor ?? comp.laborHours ?? 0);
+            return `<tr data-proj-comp-row="${idx}" style="border-bottom: 1px solid var(--border-soft, #e2e8f0);">
                                     <td style="text-align: center; color: var(--text-muted, #94a3b8); padding: 8px 10px;"><i class="fas fa-grip-vertical"></i></td>
                                     <td style="text-align: right; padding: 8px 10px;">
                                         <input type="number" step="0.001" min="0" class="cc-qty-input proj-comp-ratio-input" data-comp-idx="${idx}" data-comp-id="${esc(comp.id || '')}" data-unit-cost="${compCost}" data-labor-hours="${compLabor}" value="${Number(compRatio)}" style="width: 78px; height: 28px; padding: 0 6px; text-align: right; font-weight: 600; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; font-size: 12px; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a);">
@@ -5515,7 +5755,7 @@ function renderFooter() {
                                         </button>
                                     </td>
                                 </tr>`;
-                            }).join('')}
+        }).join('')}
                         </tbody>
                     </table>
                 </div>
@@ -5733,7 +5973,7 @@ function renderFooter() {
 
     root.addEventListener('click', event => {
         const target = event.target;
-        
+
         const editSqft = target.closest('[data-edit-sqft]');
         if (editSqft) {
             openSquareFootageModal();
@@ -5769,7 +6009,7 @@ function renderFooter() {
             openMarkupPopover(markupMenuBtn.dataset.markupMenuBtn, markupMenuBtn);
             return;
         }
-const estimateMenu = target.closest('[data-estimate-menu]');
+        const estimateMenu = target.closest('[data-estimate-menu]');
         if (estimateMenu) {
             const id = estimateMenu.dataset.estimateMenu;
             const menu = root.querySelector(`[data-estimate-actions-menu="${selectorValue(id)}"]`);
@@ -5907,10 +6147,9 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                     const copy = Workspace.clone(grp);
                     copy.id = Workspace.uid('group');
                     copy.name = `${grp.name} (Copy)`;
-                    copy.items = (grp.items || []).map(it => {
-                        const itemCopy = Workspace.clone(it);
-                        itemCopy.id = Workspace.uid('item');
-                        return itemCopy;
+                    copy.items = (grp.items || []).map(it => duplicateEstimatingItem(it)).map(it => {
+                        if (it && it.name.endsWith(' (Copy)')) it.name = it.name.slice(0, -7);
+                        return it;
                     });
                     const idx = current().groups.indexOf(grp);
                     current().groups.splice(idx + 1, 0, copy);
@@ -5920,7 +6159,10 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                 exportEstimate('bom-excel');
             } else if (act === 'delete-group') {
                 if (confirm('Delete this group and its items?')) {
+                    const targetGroup = current().groups.find(row => row.id === grpId);
+                    const removedItems = targetGroup?.items || [];
                     current().groups = current().groups.filter(row => row.id !== grpId);
+                    notifyTakeoffDeletedEstimatingItems(removedItems);
                     changed('Deleted group');
                 }
             }
@@ -5941,18 +6183,11 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                 return;
             } else if (act === 'copy-item') {
                 if (found) {
-                    if (isAssemblyItem(found.item)) {
-                        const index = found.group.items.indexOf(found.item);
-                        const duplicate = duplicateAssembly(found.item);
+                    const index = found.group.items.indexOf(found.item);
+                    const duplicate = duplicateEstimatingItem(found.item);
+                    if (duplicate) {
                         found.group.items.splice(index + 1, 0, duplicate);
-                        changed(`Duplicated ${found.item.name}`);
-                    } else {
-                        const index = found.group.items.indexOf(found.item);
-                        const duplicate = Workspace.clone(found.item);
-                        duplicate.id = Workspace.uid('item');
-                        duplicate.name = `${found.item.name} (Copy)`;
-                        found.group.items.splice(index + 1, 0, duplicate);
-                        changed(`Copied ${found.item.name}`);
+                        changed(isAssemblyItem(found.item) ? `Duplicated ${found.item.name}` : `Copied ${found.item.name}`);
                     }
                 }
             } else if (act === 'reset-quantity') {
@@ -5969,9 +6204,11 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                 }
             } else if (act === 'delete-item') {
                 if (found) {
+                    const removedItem = found.item;
                     found.group.items = found.group.items.filter(row => row.id !== itId);
                     ui.expandedAssemblies.delete(String(itId));
-                    changed(`Deleted ${found.item.name}`);
+                    notifyTakeoffDeletedEstimatingItems([removedItem]);
+                    changed(`Deleted ${removedItem.name}`);
                 }
             }
             // Advanced actions: replace-item, move-item, reset-budget-code
@@ -5997,7 +6234,10 @@ const estimateMenu = target.closest('[data-estimate-menu]');
             });
             changed('Reset quantities');
         }
-        if (action === 'fullscreen') document.fullscreenElement ? document.exitFullscreen() : root.requestFullscreen?.();
+        if (action === 'fullscreen') {
+            toggleEstimatingFullscreen();
+            return;
+        }
         if (action === 'options') {
             event.stopPropagation();
             const menu = $('optionsMenu');
@@ -6056,18 +6296,24 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         const deleteItem = target.closest('[data-delete-item]')?.dataset.deleteItem;
         if (deleteItem) {
             const found = findItem(deleteItem);
-            found.group.items = found.group.items.filter(row => row.id !== deleteItem);
-            ui.expandedAssemblies.delete(String(deleteItem));
-            changed(`Deleted ${found.item.name}`);
+            if (found) {
+                const removedItem = found.item;
+                found.group.items = found.group.items.filter(row => row.id !== deleteItem);
+                ui.expandedAssemblies.delete(String(deleteItem));
+                notifyTakeoffDeletedEstimatingItems([removedItem]);
+                changed(`Deleted ${removedItem.name}`);
+            }
         }
         const duplicateItem = target.closest('[data-duplicate-item]')?.dataset.duplicateItem;
         if (duplicateItem) {
             const found = findItem(duplicateItem);
-            if (isAssemblyItem(found?.item)) {
+            if (found) {
                 const index = found.group.items.indexOf(found.item);
-                const duplicate = duplicateAssembly(found.item);
-                found.group.items.splice(index + 1, 0, duplicate);
-                changed(`Duplicated ${found.item.name}`);
+                const duplicate = duplicateEstimatingItem(found.item);
+                if (duplicate) {
+                    found.group.items.splice(index + 1, 0, duplicate);
+                    changed(isAssemblyItem(found.item) ? `Duplicated ${found.item.name}` : `Copied ${found.item.name}`);
+                }
             }
         }
         const removeComponent = target.closest('[data-remove-assembly-component]');
@@ -6097,7 +6343,13 @@ const estimateMenu = target.closest('[data-estimate-menu]');
             }
         }
         const deleteGroup = target.closest('[data-delete-group]')?.dataset.deleteGroup;
-        if (deleteGroup && confirm('Delete this group and its items?')) { current().groups = current().groups.filter(row => row.id !== deleteGroup); changed('Deleted group'); }
+        if (deleteGroup && confirm('Delete this group and its items?')) {
+            const targetGroup = current().groups.find(row => row.id === deleteGroup);
+            const removedItems = targetGroup?.items || [];
+            current().groups = current().groups.filter(row => row.id !== deleteGroup);
+            notifyTakeoffDeletedEstimatingItems(removedItems);
+            changed('Deleted group');
+        }
         const toggleExclusions = target.closest('[data-toggle-exclusion-presets]');
         if (toggleExclusions) {
             ui.showingExclusionPresets = !ui.showingExclusionPresets;
@@ -6233,7 +6485,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         }
         const copyPreset = target.closest('[data-copy-preset]');
         if (copyPreset) {
-            try { navigator.clipboard.writeText(copyPreset.dataset.copyPreset); } catch (_) {}
+            try { navigator.clipboard.writeText(copyPreset.dataset.copyPreset); } catch (_) { }
             const orig = copyPreset.innerHTML;
             copyPreset.innerHTML = '<i class="fas fa-check" style="color: #10b981;"></i>';
             setTimeout(() => { copyPreset.innerHTML = orig; }, 1200);
@@ -6369,6 +6621,15 @@ const estimateMenu = target.closest('[data-estimate-menu]');
             renderModal();
             saveLocal();
             const createdEstimate = current();
+            const projTbl = window.ProjectState?.projectMeta?.estimatingTableSettings;
+            if (createdEstimate && projTbl?.applyAll && Array.isArray(projTbl.visibleColumns) && projTbl.visibleColumns.length > 0) {
+                createdEstimate.settings = createdEstimate.settings || {};
+                createdEstimate.settings.visibleColumns = projTbl.visibleColumns.slice();
+                createdEstimate.settings.tableSettingsApplyAll = true;
+                if (Array.isArray(projTbl.columnsOrder) && projTbl.columnsOrder.length > 0) {
+                    createdEstimate.settings.columnsOrder = projTbl.columnsOrder.slice();
+                }
+            }
             if (mode === 'all' && createdEstimate && typeof window.cloneTakeoffWorkspaceForEstimate === 'function') {
                 const cloneResult = window.cloneTakeoffWorkspaceForEstimate(sourceEstimateId, createdEstimate.id, createdEstimate);
                 if (cloneResult) {
@@ -6476,16 +6737,22 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                 state = Workspace.workspace(stored, projectId);
                 restoreDirtyTracking();
             }
-        } catch (_) {}
+        } catch (_) { }
     }
 
     function selectEstimate(estimateId) {
+        const prevActiveId = String(state.activeEstimateId || '');
         const selected = Workspace.selectEstimate(state, estimateId);
         if (!selected) return;
         // Selecting a tab is local UI state, not an estimate content edit. It
         // must not increment the estimate revision or conflict with another
         // estimator editing that same estimate.
         ui.selected.clear(); syncEstimatingSubheadInfo(); saveLocal(); render(); publish();
+        if (prevActiveId !== String(selected.id)) {
+            window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', {
+                detail: { projectId, estimateId: selected.id, source: 'estimating' }
+            }));
+        }
     }
 
     function refreshTableIfActive() {
@@ -6499,7 +6766,12 @@ const estimateMenu = target.closest('[data-estimate-menu]');
 
     function flushEstimatingTabView() {
         const hasPendingSync = typeof window.hasPendingTakeoffEstimatingSync === 'function' && window.hasPendingTakeoffEstimatingSync();
-        if (!estimatingTableDirty && !hasPendingSync) return;
+        if (!estimatingTableDirty && !hasPendingSync) {
+            if (allItems().some(r => assemblyNeedsHydration(r.item))) {
+                hydrateBrokenAssembliesInCurrentEstimate();
+            }
+            return;
+        }
         setEstimatingLoading(true, 'Synchronizing estimate items...');
         const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : cb => setTimeout(cb, 0);
         raf(() => setTimeout(() => {
@@ -6508,6 +6780,9 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                     window.flushTakeoffEstimatingSync();
                 }
                 render(true);
+                if (allItems().some(r => assemblyNeedsHydration(r.item))) {
+                    hydrateBrokenAssembliesInCurrentEstimate();
+                }
             } finally {
                 if (ui.loadState !== 'loading') setEstimatingLoading(false);
             }
@@ -6524,9 +6799,9 @@ const estimateMenu = target.closest('[data-estimate-menu]');
             && Number(event.detail?.version || 0) >= 2;
         reconcileGroups(incomingEstId || state.activeEstimateId,
             event.detail?.groups || [], {
-                importNewLayers: scopedSnapshot,
-                backgroundEstimate: isBackgroundEstimate && incomingEstId !== String(state.activeEstimateId)
-            });
+            importNewLayers: scopedSnapshot,
+            backgroundEstimate: isBackgroundEstimate && incomingEstId !== String(state.activeEstimateId)
+        });
     });
     window.addEventListener('takeoff:layer-updated', refreshTableIfActive);
     window.addEventListener('takeoff:layers-updated', refreshTableIfActive);
@@ -6571,6 +6846,8 @@ const estimateMenu = target.closest('[data-estimate-menu]');
     });
     window.addEventListener('takeoff:active-estimate-changed', event => {
         if (event.detail?.projectId && String(event.detail.projectId) !== String(projectId)) return;
+        if (event.detail?.source === 'estimating') return;
+        if (String(state.activeEstimateId || '') === String(event.detail?.estimateId || '')) return;
         selectEstimate(event.detail?.estimateId);
     });
     window.addEventListener('takeoff:layer-properties-updated', event => {
@@ -6641,7 +6918,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         (group.items || []).forEach(it => { it.groupName = nextName; });
         changed(`Renamed group "${nextName}"`);
     });
-        window.addEventListener('takeoff:estimating-items-reorder-requested', event => {
+    window.addEventListener('takeoff:estimating-items-reorder-requested', event => {
         const detail = event.detail || {};
         if (detail.projectId && String(detail.projectId) !== String(projectId)) return;
         if (String(detail.estimateId || '') !== String(state.activeEstimateId)) return;
@@ -6847,6 +7124,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
             project_id: projectId,
             updates: estimates,
             estimates,
+            project_estimating_table_settings: window.ProjectState?.projectMeta?.estimatingTableSettings || null,
             state: {
                 schemaVersion: state.schemaVersion,
                 projectId: state.projectId,
@@ -6871,7 +7149,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                 body: JSON.stringify(payload),
                 keepalive: true
             });
-        } catch (_) {}
+        } catch (_) { }
     }
 
     window.addEventListener('pagehide', flushDirtyEstimatesKeepalive);
@@ -6918,7 +7196,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         safeSetLocalStorage('takeoff.estimatingRightCollapsed', willCollapse ? '1' : '0');
     }
 
-    
+
     let draggedNoteInfo = null;
     let draggedMarkupInfo = null;
 
@@ -7102,7 +7380,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
             resizer.classList.add('is-dragging');
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
-            try { resizer.setPointerCapture(e.pointerId); } catch (_) {}
+            try { resizer.setPointerCapture(e.pointerId); } catch (_) { }
         });
 
         const onPointerMove = e => {
@@ -7130,7 +7408,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         window.addEventListener('pointerup', onPointerUp);
         window.addEventListener('pointercancel', onPointerUp);
     }
-function initEstimatingResizer() {
+    function initEstimatingResizer() {
         const resizer = $('estSplitResizer');
         const estRight = root.querySelector('.est-right');
         const estMain = root.querySelector('.est-main');
@@ -7151,7 +7429,7 @@ function initEstimatingResizer() {
             if (savedCollapsed === '1') {
                 toggleEstimatingRight(true);
             }
-        } catch (_) {}
+        } catch (_) { }
 
         toolbarToggle?.addEventListener('click', e => {
             e.stopPropagation();
@@ -7173,7 +7451,7 @@ function initEstimatingResizer() {
             estMain?.classList.add('is-resizing');
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
-            try { resizer.setPointerCapture(e.pointerId); } catch (_) {}
+            try { resizer.setPointerCapture(e.pointerId); } catch (_) { }
             e.preventDefault();
         };
 
@@ -7196,7 +7474,7 @@ function initEstimatingResizer() {
             document.body.style.userSelect = '';
             try {
                 if (e?.pointerId) resizer.releasePointerCapture(e.pointerId);
-            } catch (_) {}
+            } catch (_) { }
 
             const finalWidth = parseInt(getComputedStyle(estRight).width, 10) || 420;
             safeSetLocalStorage('takeoff.estimatingRightWidth', String(finalWidth));
@@ -7207,6 +7485,74 @@ function initEstimatingResizer() {
         window.addEventListener('pointerup', stopDragging);
         window.addEventListener('pointercancel', stopDragging);
     }
+
+    function showEstCanvasToast(text, type = 'info') {
+        const container = document.fullscreenElement || document.body;
+        document.querySelectorAll('.toast-lite').forEach(el => el.remove());
+        const toast = document.createElement('div');
+        toast.className = 'toast-lite';
+        toast.setAttribute('role', 'status');
+        toast.setAttribute('aria-live', 'polite');
+        toast.style.cssText = 'position:fixed !important; top:16px !important; bottom:auto !important; left:50% !important; right:auto !important; transform:translateX(-50%) !important; z-index:999999 !important; border-radius:9999px !important; padding:4px 14px !important; height:28px !important; font-size:12px !important; display:inline-flex !important; align-items:center !important; gap:7px !important; pointer-events:none !important; white-space:nowrap !important;';
+        const iconClass = type === 'error' ? 'fa-circle-exclamation' : (type === 'success' ? 'fa-circle-check' : 'fa-info-circle');
+        const iconColor = type === 'error' ? '#ef4444' : (type === 'success' ? '#22c55e' : '#38bdf8');
+        toast.innerHTML = `<i class="fas ${iconClass}" style="color:${iconColor}; font-size:12px; margin-right:4px;"></i><span>${esc(text)}</span>`;
+        container.appendChild(toast);
+        setTimeout(() => { try { toast.remove(); } catch (_) {} }, 3400);
+    }
+
+    function syncEstimatingFullscreenUi() {
+        const isNativeFs = Boolean(document.fullscreenElement === root || (document.fullscreenElement && root && document.fullscreenElement.contains(root)));
+        const isFallbackFs = root.classList.contains('est-fullscreen') && !document.fullscreenElement;
+        const isFs = Boolean(isNativeFs || isFallbackFs);
+        root.classList.toggle('is-fullscreen', isFs);
+        document.body.classList.toggle('est-is-fullscreen', isFs);
+        const fsBtn = $('estBtnFullscreen');
+        if (fsBtn) {
+            fsBtn.classList.toggle('is-active', isFs);
+            fsBtn.setAttribute('aria-pressed', isFs ? 'true' : 'false');
+            fsBtn.setAttribute('title', isFs ? 'Exit full screen' : 'Full screen');
+            const icon = fsBtn.querySelector('i');
+            if (icon) icon.className = isFs ? 'fas fa-compress' : 'fas fa-expand';
+        }
+        return isFs;
+    }
+
+    async function toggleEstimatingFullscreen() {
+        const currentlyNative = document.fullscreenElement === root;
+        const currentlyFallback = root.classList.contains('est-fullscreen');
+        if (currentlyNative) {
+            try { await document.exitFullscreen?.(); } catch (_) {}
+            root.classList.remove('est-fullscreen', 'is-fullscreen');
+            document.body.classList.remove('est-is-fullscreen');
+            syncEstimatingFullscreenUi();
+            return;
+        }
+        if (currentlyFallback) {
+            root.classList.remove('est-fullscreen', 'is-fullscreen');
+            document.body.classList.remove('est-is-fullscreen');
+            syncEstimatingFullscreenUi();
+            return;
+        }
+        if (typeof root.requestFullscreen === 'function') {
+            try {
+                await root.requestFullscreen();
+                syncEstimatingFullscreenUi();
+                showEstCanvasToast('Fullscreen active — press the Full screen button again (or Esc) to exit', 'info');
+                return;
+            } catch (_) { }
+        }
+        root.classList.add('est-fullscreen', 'is-fullscreen');
+        document.body.classList.add('est-is-fullscreen');
+        syncEstimatingFullscreenUi();
+        showEstCanvasToast('Fullscreen active — press the Full screen button again to exit', 'info');
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+        const isFs = Boolean(document.fullscreenElement === root);
+        if (!isFs) root.classList.remove('est-fullscreen');
+        syncEstimatingFullscreenUi();
+    });
 
     const hasInitialGroups = (current()?.groups || []).length > 0;
     if (!projectId || hasInitialGroups || dirtyEstimateIds.size > 0) {

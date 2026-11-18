@@ -96,15 +96,17 @@ final class CatalogAdminService
         }
         return $number;
     }
-    private function jsonValue(array $p, string $key, $fallback = null): ?string
+    private function jsonValue(array $p, string $key, $fallback = null, bool $forceObjectWhenEmpty = false): ?string
     {
         $value = array_key_exists($key, $p) ? $p[$key] : $fallback;
         if ($value === null || $value === '') return null;
         if (is_string($value)) {
-            json_decode($value, true);
+            $decoded = json_decode($value, true);
             if (json_last_error() !== JSON_ERROR_NONE) throw new CatalogAdminException('VALIDATION_ERROR', ucfirst(str_replace('_json','',$key)).' must be valid JSON.',422,['field'=>$key]);
+            if ($forceObjectWhenEmpty && $decoded === []) return '{}';
             return $value;
         }
+        if ($forceObjectWhenEmpty && is_array($value) && $value === []) return '{}';
         return json_encode($value, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
     }
     private function tableRow(string $table, int $id, bool $active = true): array
@@ -182,7 +184,7 @@ final class CatalogAdminService
             'gauge'=>$this->text($p['gauge'] ?? null),'material'=>$this->text($p['material'] ?? null),
             'color'=>$this->text($p['color'] ?? null),'symbol'=>$this->text($p['symbol'] ?? null),
             'marker_size'=>array_key_exists('marker_size',$p) && $p['marker_size']!=='' ? $this->number($p,'marker_size') : null,
-            'tags_json'=>$this->jsonValue($p,'tags_json',null),'attributes_json'=>$this->jsonValue($p,'attributes_json',null),
+            'tags_json'=>$this->jsonValue($p,'tags_json',null),'attributes_json'=>$this->jsonValue($p,'attributes_json',null,true),
             'notes'=>$this->text($p['notes'] ?? null),
             'active'=>array_key_exists('active', $p) ? (!empty($p['active']) ? 1 : 0) : 1
         ];
@@ -546,7 +548,7 @@ final class CatalogAdminService
     { if($assemblyId===$childId)throw new CatalogAdminException('ASSEMBLY_SELF_REFERENCE','Assembly cannot contain itself.',422);$seen=[];$queue=[$childId];$stmt=$this->pdo->prepare('SELECT part_catalog_item_id FROM assembly_parts WHERE assembly_catalog_item_id=? AND deleted_at IS NULL');while($queue){$current=array_shift($queue);if($current===$assemblyId)throw new CatalogAdminException('ASSEMBLY_CYCLE','Nested assembly components cannot create a cycle.',422);if(isset($seen[$current]))continue;$seen[$current]=true;$stmt->execute([$current]);foreach($stmt->fetchAll(PDO::FETCH_COLUMN)as$next)$queue[]=(int)$next;}}
     private function componentValues(array $p,array $old=[]):array
     {$columns=catalog_ra_columns($this->pdo,'assembly_parts');$ratio=strtolower((string)($p['ratio_type']??$p['ratioType']??$old['ratio_type']??'per_unit'));$allowed=['fixed','per_unit','per_linear_length','per_area','per_endpoint','spacing_based'];if(!in_array($ratio,$allowed,true))throw new CatalogAdminException('VALIDATION_ERROR','Invalid component ratio type.',422,['field'=>'ratio_type']);$merged=array_merge($old,$p);$q=$this->number($merged,'quantity');if($q<=0)throw new CatalogAdminException('VALIDATION_ERROR','Quantity must be greater than zero.',422,['field'=>'quantity']);$spacing=$merged['spacing']??$merged['spacing_value']??null;if($ratio==='spacing_based'&&(!is_numeric($spacing)||(float)$spacing<=0))throw new CatalogAdminException('VALIDATION_ERROR','Spacing must be greater than zero.',422,['field'=>'spacing_value']);$values=['quantity'=>$q,'ratio_type'=>$ratio,'spacing_value'=>$ratio==='spacing_based'?(float)$spacing:null,'waste_factor_percent'=>$this->number($merged,array_key_exists('waste',$merged)?'waste':'waste_factor_percent',0,100000),'sort_order'=>(int)($merged['sort_order']??0),'notes'=>$this->text($merged['notes']??null)];return array_intersect_key($values,$columns);}
-    private function recalculateAssembly(int $id,array $p,string $action):array{$stmt=$this->pdo->prepare('SELECT COALESCE(SUM(quantity*unit_cost_snapshot),0) unit_cost,COALESCE(SUM(quantity*unit_labor_time_snapshot),0) labor_hours FROM assembly_parts WHERE assembly_catalog_item_id=? AND deleted_at IS NULL');$stmt->execute([$id]);$t=$stmt->fetch(PDO::FETCH_ASSOC);return catalog_ra_update($this->pdo,'catalog_items','item',$id,['item_type'=>'assembly','unit_cost'=>(float)$t['unit_cost'],'labor_hours'=>(float)$t['labor_hours']],$action,$p,null,true);}
+    private function recalculateAssembly(int $id,array $p,string $action):array{$stmt=$this->pdo->prepare('SELECT COALESCE(SUM(quantity*unit_cost_snapshot),0) unit_cost,COALESCE(SUM(quantity*unit_labor_time_snapshot),0) labor_hours FROM assembly_parts WHERE assembly_catalog_item_id=? AND deleted_at IS NULL');$stmt->execute([$id]);$t=$stmt->fetch(PDO::FETCH_ASSOC);$inner=$p;unset($inner['expected_revision'],$inner['expectedRevision']);return catalog_ra_update($this->pdo,'catalog_items','item',$id,['item_type'=>'assembly','unit_cost'=>(float)$t['unit_cost'],'labor_hours'=>(float)$t['labor_hours']],$action,$inner,null,true);}
     public function addAssemblyComponent(array $p): array {return $this->transaction(function()use($p){$aid=$this->requiredId($p,'assembly_catalog_item_id');$cid=$this->requiredId($p,'part_catalog_item_id');$a=catalog_ra_assert_expected($this->pdo,'catalog_items',$aid,$p);$c=$this->tableRow('catalog_items',$cid);$this->assertUnlocked((int)$a['catalog_id']);if((int)$a['catalog_id']!==(int)$c['catalog_id'])throw new CatalogAdminException('ITEM_CATALOG_MISMATCH','Assembly component must belong to the same catalog.');$this->assertNoAssemblyCycle($aid,$cid);$values=$this->componentValues($p);$find=$this->pdo->prepare('SELECT * FROM assembly_parts WHERE assembly_catalog_item_id=? AND part_catalog_item_id=? AND deleted_at IS NULL FOR UPDATE');$find->execute([$aid,$cid]);$matching=null;foreach($find->fetchAll(PDO::FETCH_ASSOC)as$row){if((string)($row['ratio_type']??'per_unit')===(string)$values['ratio_type']&&abs((float)($row['spacing_value']??0)-(float)($values['spacing_value']??0))<0.000001&&abs((float)($row['waste_factor_percent']??0)-(float)($values['waste_factor_percent']??0))<0.000001){$matching=$row;break;}}
         if($matching){$id=(int)$matching['id'];$componentInput=$p;unset($componentInput['expected_revision']);$entity=catalog_ra_update($this->pdo,'assembly_parts','assembly_component',$id,['quantity'=>(float)$matching['quantity']+(float)$values['quantity'],'notes'=>$values['notes']??$matching['notes']??null],'assembly_component.quantity_merged',$componentInput,(int)$a['catalog_id']);$parent=$this->recalculateAssembly($aid,$p,'assembly.component_merged');return['id'=>$id,'entity'=>$entity,'assembly'=>$parent,'merged'=>true];}
         $values+=['assembly_catalog_item_id'=>$aid,'part_catalog_item_id'=>$cid,'unit_cost_snapshot'=>(float)$c['unit_cost'],'unit_labor_time_snapshot'=>(float)$c['labor_hours']];$id=$this->insert('assembly_parts',$values);catalog_ra_created($this->pdo,'assembly_parts','assembly_component',$id,'assembly_component.created',$p,(int)$a['catalog_id']);$parent=$this->recalculateAssembly($aid,$p,'assembly.component_added');return ['id'=>$id,'entity'=>catalog_ra_row($this->pdo,'assembly_parts',$id),'assembly'=>$parent,'merged'=>false];});}

@@ -985,6 +985,20 @@ try {
                 SET e.deleted_at=CURRENT_TIMESTAMP WHERE e.project_id=? AND e.deleted_at IS NULL AND e.id NOT IN ($marks)");
             $stmt->execute(array_merge(array($projectId), $keptIds));
         }
+        if (isset($body['project_estimating_table_settings']) && is_array($body['project_estimating_table_settings'])) {
+            pew_best_effort('save project estimating table settings metadata', $pdo, function () use ($pdo, $projectId, $body) {
+                $stmtMeta = $pdo->prepare('SELECT metadata_json FROM projects WHERE id=? AND deleted_at IS NULL LIMIT 1');
+                $stmtMeta->execute(array($projectId));
+                $rawMeta = $stmtMeta->fetchColumn();
+                $meta = is_string($rawMeta) ? pew_decode($rawMeta) : array();
+                if (!is_array($meta)) $meta = array();
+                $meta['estimatingTableSettings'] = $body['project_estimating_table_settings'];
+                $encodedMeta = json_encode($meta, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                if ($encodedMeta !== false) {
+                    $pdo->prepare('UPDATE projects SET metadata_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute(array($encodedMeta, $projectId));
+                }
+            });
+        }
         pew_best_effort('sync project primary estimate metadata', $pdo, function () use ($pdo, $projectId) {
             pew_sync_project_primary_estimate_metadata($pdo, $projectId);
         });
@@ -1058,6 +1072,20 @@ try {
             $pdo->prepare('DELETE FROM takeoff_estimate_states WHERE estimate_key=? AND project_id=?')->execute(array($clientEstimateId, $projectId));
             $pdo->prepare('DELETE FROM takeoff_estimate_scales WHERE estimate_key=? AND project_id=?')->execute(array($clientEstimateId, $projectId));
         });
+        if (isset($body['project_estimating_table_settings']) && is_array($body['project_estimating_table_settings'])) {
+            pew_best_effort('save project estimating table settings metadata', $pdo, function () use ($pdo, $projectId, $body) {
+                $stmtMeta = $pdo->prepare('SELECT metadata_json FROM projects WHERE id=? AND deleted_at IS NULL LIMIT 1');
+                $stmtMeta->execute(array($projectId));
+                $rawMeta = $stmtMeta->fetchColumn();
+                $meta = is_string($rawMeta) ? pew_decode($rawMeta) : array();
+                if (!is_array($meta)) $meta = array();
+                $meta['estimatingTableSettings'] = $body['project_estimating_table_settings'];
+                $encodedMeta = json_encode($meta, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                if ($encodedMeta !== false) {
+                    $pdo->prepare('UPDATE projects SET metadata_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute(array($encodedMeta, $projectId));
+                }
+            });
+        }
         pew_best_effort('sync project primary estimate metadata', $pdo, function () use ($pdo, $projectId) {
             pew_sync_project_primary_estimate_metadata($pdo, $projectId);
         });

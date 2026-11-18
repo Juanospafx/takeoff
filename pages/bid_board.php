@@ -25,6 +25,7 @@ $readOnly = !$canWrite;
         rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="../assets/global_tools.css?v=<?= time() ?>">
+    <link rel="stylesheet" href="../assets/design_system.css?v=<?= filemtime(__DIR__ . '/../assets/design_system.css') ?>">
     <script>
         (function () {
             try {

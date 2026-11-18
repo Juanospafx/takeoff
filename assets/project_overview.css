@@ -138,7 +138,7 @@ body {
     align-items: center;
     justify-content: center;
     cursor: pointer;
-    transition: all 0.2s ease;
+    transition: background-color 0.2s var(--ds-ease, ease), border-color 0.2s var(--ds-ease, ease), color 0.2s var(--ds-ease, ease), opacity 0.2s var(--ds-ease, ease), box-shadow 0.2s var(--ds-ease, ease), transform 0.2s var(--ds-ease, ease);
 }
 
 .bt-header-slide-toggle:hover {
@@ -159,7 +159,7 @@ body {
     cursor: pointer;
     margin-left: 4px;
     font-size: 11px;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .bt-header-collapse-btn:hover {
@@ -276,7 +276,7 @@ body.header-is-collapsed .project-subhead-wrapper,
     max-width: 100%;
     white-space: nowrap;
     box-shadow: none !important;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
     font-family: inherit;
     outline: none;
     border: 1px solid transparent;
@@ -758,7 +758,7 @@ body.header-is-collapsed .project-subhead-wrapper,
     cursor: pointer !important;
     padding: 0 !important;
     font-size: 14px !important;
-    transition: all 0.15s ease !important;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease) !important;
 }
 
 .btn-ghost.icon-only:hover,
@@ -1424,7 +1424,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     place-items: center !important;
     border-radius: 4px !important;
     padding: 0 !important;
-    transition: all 0.15s ease !important;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease) !important;
 }
 
 .pd-row-dots-btn:hover,
@@ -1797,7 +1797,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     justify-content: center;
     padding: 20px;
     background: rgba(15, 23, 42, 0.55);
-    backdrop-filter: blur(2px);
+    backdrop-filter: blur(5px);
     z-index: 999999;
 }
 
@@ -1878,12 +1878,12 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 
 .pd-modal-foot .btn-ghost,
 .pd-modal-foot .btn-main {
-    height: 30px !important;
-    min-height: 30px !important;
-    max-height: 30px !important;
+    height: var(--ds-btn-md, 34px) !important;
+    min-height: var(--ds-btn-md, 34px) !important;
+    max-height: var(--ds-btn-md, 34px) !important;
     padding: 0 14px !important;
-    font-size: 12px !important;
-    border-radius: 4px !important;
+    font-size: 13px !important;
+    border-radius: 6px !important;
     font-weight: 600 !important;
     box-sizing: border-box !important;
     display: inline-flex !important;
@@ -2107,12 +2107,12 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 }
 
 [data-theme="dark"] .doc-svg-box {
-    fill: #1e2430;
+    fill: var(--bg-panel, #242a38);
     stroke: #94a3b8;
 }
 
 [data-theme="dark"] .doc-svg-label {
-    fill: #1e2430;
+    fill: var(--bg-panel, #242a38);
     stroke: #fb5a3a;
 }
 
@@ -2153,7 +2153,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     color: var(--text-secondary);
     font-size: 0.78rem;
     font-weight: 500;
-    transition: all 0.18s ease;
+    transition: background-color 0.18s var(--ds-ease, ease), border-color 0.18s var(--ds-ease, ease), color 0.18s var(--ds-ease, ease), opacity 0.18s var(--ds-ease, ease), box-shadow 0.18s var(--ds-ease, ease), transform 0.18s var(--ds-ease, ease);
 }
 
 .doc-empty-drop-hint i {
@@ -2485,7 +2485,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     border-radius: 2px;
     background: var(--border, #cbd5e1);
     pointer-events: none;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .documents-sidebar-resizer:hover .doc-resizer-handle,
@@ -2934,7 +2934,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     gap: 8px;
     cursor: pointer;
     user-select: none;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
     flex-shrink: 0;
 }
 
@@ -3188,7 +3188,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     background: var(--bg-card);
     color: var(--text-primary);
     cursor: pointer;
-    transition: all 0.12s ease;
+    transition: background-color 0.12s var(--ds-ease, ease), border-color 0.12s var(--ds-ease, ease), color 0.12s var(--ds-ease, ease), opacity 0.12s var(--ds-ease, ease), box-shadow 0.12s var(--ds-ease, ease), transform 0.12s var(--ds-ease, ease);
 }
 
 .doc-custom-btn i.fa-bars {
@@ -3219,7 +3219,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     border-radius: 4px;
     gap: 7px;
     cursor: pointer;
-    transition: all 0.12s ease;
+    transition: background-color 0.12s var(--ds-ease, ease), border-color 0.12s var(--ds-ease, ease), color 0.12s var(--ds-ease, ease), opacity 0.12s var(--ds-ease, ease), box-shadow 0.12s var(--ds-ease, ease), transform 0.12s var(--ds-ease, ease);
     white-space: nowrap;
 }
 
@@ -3528,7 +3528,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     z-index: 999999;
     padding: 20px;
     background: rgba(15, 23, 42, 0.62);
-    backdrop-filter: blur(3px);
+    backdrop-filter: blur(5px);
 }
 
 .doc-attachment-preview-modal.pd-modal {
@@ -3547,7 +3547,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 }
 
 [data-theme="dark"] .doc-attachment-preview-modal.pd-modal {
-    background: #1e2430 !important;
+    background: var(--bg-panel, #242a38) !important;
     border-color: #2f384a !important;
 }
 
@@ -3664,7 +3664,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     background: var(--bg-card);
     color: var(--text-secondary);
     font-size: 14px;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .doc-attachment-preview-actions .pd-modal-head-close:hover {
@@ -3674,7 +3674,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
 }
 
 [data-theme="dark"] .doc-attachment-preview-actions .pd-modal-head-close {
-    background: #1e2430;
+    background: var(--bg-panel, #242a38);
     border-color: #334155;
     color: #94a3b8;
 }
@@ -3759,7 +3759,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     font-size: 15px;
     cursor: pointer;
     box-shadow: 0 4px 14px rgba(15, 23, 42, 0.14);
-    transition: all 0.16s ease;
+    transition: background-color 0.16s var(--ds-ease, ease), border-color 0.16s var(--ds-ease, ease), color 0.16s var(--ds-ease, ease), opacity 0.16s var(--ds-ease, ease), box-shadow 0.16s var(--ds-ease, ease), transform 0.16s var(--ds-ease, ease);
     z-index: 5;
 }
 
@@ -3865,7 +3865,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     font-weight: 600;
     color: var(--text-secondary, #64748b);
     background: rgba(241, 245, 249, 0.72);
-    backdrop-filter: blur(2px);
+    backdrop-filter: blur(5px);
     z-index: 2;
     pointer-events: none;
 }
@@ -3888,7 +3888,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     justify-content: center;
     gap: 10px;
     background: rgba(248, 250, 252, 0.78);
-    backdrop-filter: blur(2px);
+    backdrop-filter: blur(5px);
     z-index: 40;
     font-family: 'Outfit', sans-serif;
     font-size: 13px;
@@ -4227,9 +4227,7 @@ input[type="datetime-local"]::-webkit-calendar-picker-indicator {
     display: inline-flex;
     align-items: center;
     gap: 7px;
-    background: rgba(255, 255, 255, 0.96);
-    backdrop-filter: blur(8px);
-    -webkit-backdrop-filter: blur(8px);
+    background: var(--bg-panel, #ffffff);
     color: #0f172a;
     border: 1px solid rgba(0, 0, 0, 0.12);
     box-shadow: 0 4px 16px rgba(0, 0, 0, 0.12), 0 1px 3px rgba(0, 0, 0, 0.06);
@@ -4861,13 +4859,13 @@ body.theme-dark .pd-input-icon-wrap input {
 }
 [data-theme="dark"] .pd-modal,
 body.theme-dark .pd-modal {
-    background: #18202f !important;
+    background: var(--bg-panel, #242a38) !important;
     border-color: #2f384a !important;
     color: #f8fafc !important;
 }
 [data-theme="dark"] .pd-modal-head,
 body.theme-dark .pd-modal-head {
-    background: #18202f !important;
+    background: var(--bg-panel, #242a38) !important;
     border-bottom-color: #2f384a !important;
     color: #f8fafc !important;
 }
@@ -4879,12 +4877,12 @@ body.theme-dark .pd-template-field-label {
 }
 [data-theme="dark"] .pd-modal-body,
 body.theme-dark .pd-modal-body {
-    background: #1e2432 !important;
+    background: var(--bg-panel, #242a38) !important;
     color: #e2e8f0 !important;
 }
 [data-theme="dark"] .pd-modal-foot,
 body.theme-dark .pd-modal-foot {
-    background: #18202f !important;
+    background: var(--bg-panel, #242a38) !important;
     border-top-color: #2f384a !important;
 }
 [data-theme="dark"] .pd-template-modal-desc,
@@ -4934,7 +4932,7 @@ body.theme-dark .pd-danger-callout {
     display: inline-flex;
     align-items: center;
     gap: 6px;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 .pd-customer-head-dir-btn:hover {
     border-color: var(--primary, #f97316);
@@ -5102,7 +5100,7 @@ body.theme-dark .pd-danger-callout {
     display: inline-flex;
     align-items: center;
     gap: 4px;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 .pd-customer-dir-btn:hover {
     border-color: var(--primary, #f97316);
@@ -5124,7 +5122,7 @@ body.theme-dark .pd-danger-callout {
 }
 [data-theme="dark"] .pd-modal.pd-customer-modal,
 body.theme-dark .pd-modal.pd-customer-modal {
-    background: #18202f !important;
+    background: var(--bg-panel, #242a38) !important;
     border-color: #2f384a !important;
     color: #f8fafc !important;
 }
@@ -5148,7 +5146,7 @@ body.theme-dark .pd-customer-edit-banner {
 }
 [data-theme="dark"] .pd-customer-dir-card,
 body.theme-dark .pd-customer-dir-card {
-    background: #18202f;
+    background: var(--bg-panel, #242a38);
     border-color: #2f384a;
 }
 [data-theme="dark"] .pd-customer-dir-company,

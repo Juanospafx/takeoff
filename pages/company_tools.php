@@ -11,11 +11,12 @@ $categories = company_tools_existing_categories();
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link rel="stylesheet" href="../assets/global_tools.css">
+    <link rel="stylesheet" href="../assets/design_system.css?v=<?= filemtime(__DIR__ . '/../assets/design_system.css') ?>">
     <style>
         body {
             margin: 0;
             min-height: 100vh;
-            background: #151f2b;
+            background: #1b212d;
             color: #f8fafc;
             font-family: 'Outfit', system-ui, sans-serif;
         }

@@ -50,6 +50,21 @@
         if (input._markupsSeeded !== undefined) result._markupsSeeded = Boolean(input._markupsSeeded);
         if (input._defaultsActivated !== undefined) result._defaultsActivated = Boolean(input._defaultsActivated);
         if (input._laborDefaultsActivated !== undefined) result._laborDefaultsActivated = Boolean(input._laborDefaultsActivated);
+        if (Array.isArray(input.visibleColumns) && input.visibleColumns.length > 0) {
+            result.visibleColumns = input.visibleColumns.map(col => text(col)).filter(Boolean);
+        }
+        if (Array.isArray(input.columnsOrder) && input.columnsOrder.length > 0) {
+            result.columnsOrder = input.columnsOrder.map(col => text(col)).filter(Boolean);
+        }
+        if (input.columnWidths && typeof input.columnWidths === 'object' && !Array.isArray(input.columnWidths)) {
+            const cleanedWidths = {};
+            Object.entries(input.columnWidths).forEach(([k, v]) => {
+                const key = text(k);
+                const val = Number(v);
+                if (key && Number.isFinite(val) && val > 0) cleanedWidths[key] = val;
+            });
+            if (Object.keys(cleanedWidths).length > 0) result.columnWidths = cleanedWidths;
+        }
         return result;
     }
 

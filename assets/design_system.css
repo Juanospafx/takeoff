@@ -1,0 +1,472 @@
+/* ==========================================================
+   BRIGHTRONIX DESIGN SYSTEM — CANONICAL TOKENS, BUTTONS, MODALS & MOTION
+   Scoped initially to Bid Board & Project Dashboard
+   Matches Header (global_tools.css) + Bid Board (bid_board.css)
+   ========================================================== */
+
+:root,
+[data-theme="light"],
+body.theme-light {
+    /* Core Surface & Text Tokens */
+    --bg-body: #f5f6f8;
+    --bg-workspace: #eaedf2;
+    --bg-panel: #ffffff;
+    --bg-input: #f7f8fa;
+    --bg-surface-2: #f8fafc;
+    --bg-subtle: #f8fafc;
+    --bg-hover: #f1f5f9;
+    --bg-header: rgba(255, 255, 255, 0.96);
+
+    --border: #d5d8dc;
+    --border-soft: #e5e7eb;
+
+    --text-main: #0f172a;
+    --text-muted: #64748b;
+
+    /* Brand & Semantic Accents */
+    --primary: #fb5a3a;
+    --primary-hover: #e14e32;
+    --primary-soft: rgba(251, 90, 58, 0.1);
+    --primary-border: rgba(251, 90, 58, 0.35);
+
+    --accent: #0ea5e9;
+    --accent-blue: #0055b8;
+    --accent-blue-hover: #004494;
+    --accent-blue-soft: rgba(0, 85, 184, 0.1);
+    --accent-blue-border: rgba(0, 85, 184, 0.28);
+
+    --success: #10b981;
+    --danger: #ef4444;
+    --warning: #f59e0b;
+
+    /* Shadows */
+    --shadow-sm: 0 1px 3px rgba(0, 0, 0, 0.05);
+    --shadow-md: 0 10px 28px rgba(15, 23, 42, 0.12), 0 2px 6px rgba(15, 23, 42, 0.04);
+    --shadow-lg: 0 24px 64px rgba(15, 23, 42, 0.22), 0 4px 12px rgba(15, 23, 42, 0.08);
+
+    /* Module Compatibility Aliases */
+    --procore-blue: var(--accent-blue);
+    --procore-blue-hover: var(--accent-blue-hover);
+    --bg-primary: var(--bg-panel);
+    --bg-secondary: var(--bg-body);
+    --bg-card: var(--bg-panel);
+    --text-primary: var(--text-main);
+    --text-secondary: var(--text-muted);
+    --border-color: var(--border);
+    --accent-orange: var(--primary);
+    --bg: var(--bg-body);
+    --panel: var(--bg-panel);
+    --card: var(--bg-panel);
+    --card-2: var(--bg-input);
+    --line: var(--border);
+    --text: var(--text-main);
+    --muted: var(--text-muted);
+
+    --bb-bg: var(--bg-body);
+    --bb-surface: var(--bg-panel);
+    --bb-surface-2: var(--bg-input);
+    --bb-line: var(--border);
+    --bb-line-soft: var(--border-soft);
+    --bb-text: var(--text-main);
+    --bb-muted: var(--text-muted);
+    --bb-primary: var(--primary);
+    --bb-primary-dark: var(--primary-hover);
+    --bb-orange: var(--primary);
+    --bb-orange-hover: var(--primary-hover);
+    --bb-focus: rgba(251, 90, 58, 0.22);
+    --bb-danger: var(--danger);
+    --bb-warning: var(--warning);
+    --bb-success: var(--success);
+    --bb-shadow-soft: var(--shadow-sm);
+
+    --tk-primary: var(--primary);
+    --tk-primary-hover: var(--primary-hover);
+    --tk-accent-blue: var(--accent-blue);
+    --tk-accent-blue-hover: var(--accent-blue-hover);
+    --tk-bg-workspace: var(--bg-workspace);
+    --tk-bg-panel: var(--bg-panel);
+    --tk-bg-surface: var(--bg-panel);
+    --tk-bg-input: var(--bg-input);
+    --tk-bg-hover: var(--bg-hover);
+    --tk-border: var(--border);
+    --tk-border-soft: var(--border-soft);
+    --tk-text-main: var(--text-main);
+    --tk-text-muted: var(--text-muted);
+
+    --est-bg: var(--bg-body);
+    --est-surface: var(--bg-panel);
+    --est-surface-2: var(--bg-input);
+    --est-surface-3: var(--bg-hover);
+    --est-line: var(--border);
+    --est-line-soft: var(--border-soft);
+    --est-text: var(--text-main);
+    --est-text-soft: var(--text-main);
+    --est-muted: var(--text-muted);
+    --est-primary: var(--primary);
+    --est-primary-strong: var(--primary-hover);
+    --est-primary-soft: var(--primary-soft);
+    --est-primary-border: var(--primary-border);
+
+    /* Unified Size & Timing Scale */
+    --ds-btn-3dots: 28px;
+    --ds-btn-icon: 32px;
+    --ds-btn-sm: 28px;
+    --ds-btn-md: 34px;
+    --ds-radius: 6px;
+    --ds-radius-lg: 12px;
+
+    --ds-ease: cubic-bezier(0.22, 1, 0.36, 1);
+    --ds-dur-fast: 105ms;
+    --ds-dur-menu: 170ms;
+}
+
+[data-theme="dark"],
+body.theme-dark {
+    --bg-body: #1b212d;
+    --bg-workspace: #141822;
+    --bg-panel: #242a38;
+    --bg-input: #1f2633;
+    --bg-surface-2: #1f2633;
+    --bg-subtle: #1f2633;
+    --bg-hover: rgba(255, 255, 255, 0.07);
+    --bg-header: rgba(36, 42, 56, 0.95);
+
+    --border: #2f384a;
+    --border-soft: #283040;
+
+    --text-main: #f8fafc;
+    --text-muted: #94a3b8;
+
+    --primary: #fb5a3a;
+    --primary-hover: #e14e32;
+    --primary-soft: rgba(251, 90, 58, 0.16);
+    --primary-border: rgba(251, 90, 58, 0.4);
+
+    --accent: #0ea5e9;
+    --accent-blue: #60a5fa;
+    --accent-blue-hover: #93c5fd;
+    --accent-blue-soft: rgba(96, 165, 250, 0.16);
+    --accent-blue-border: rgba(96, 165, 250, 0.38);
+
+    --success: #10b981;
+    --danger: #ef4444;
+    --warning: #fbbf24;
+
+    --shadow-sm: 0 2px 8px rgba(0, 0, 0, 0.28);
+    --shadow-md: 0 14px 38px rgba(0, 0, 0, 0.45), 0 2px 6px rgba(0, 0, 0, 0.25);
+    --shadow-lg: 0 24px 64px rgba(0, 0, 0, 0.6), 0 4px 14px rgba(0, 0, 0, 0.35);
+
+    --bb-focus: rgba(251, 90, 58, 0.32);
+    --est-bg: var(--bg-body);
+    --est-surface: var(--bg-panel);
+    --est-surface-2: var(--bg-input);
+    --est-surface-3: #283040;
+    --est-line: var(--border);
+    --est-line-soft: var(--border-soft);
+    --est-text: var(--text-main);
+    --est-text-soft: #e2e8f0;
+    --est-muted: var(--text-muted);
+    --est-primary: var(--primary);
+    --est-primary-strong: var(--primary-hover);
+    --est-primary-soft: var(--primary-soft);
+    --est-primary-border: var(--primary-border);
+}
+
+/* ==========================================================
+   SHARED KEYFRAMES
+   ========================================================== */
+@keyframes dsFadeIn {
+    from {
+        opacity: 0;
+    }
+
+    to {
+        opacity: 1;
+    }
+}
+
+@keyframes dsModalIn {
+    from {
+        opacity: 0;
+        transform: translateY(6px) scale(0.985);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes dsProModalIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px) scale(0.99);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes dsMenuIn {
+    from {
+        opacity: 0;
+        transform: translateY(-4px) scale(0.98);
+    }
+
+    to {
+        opacity: 1;
+        transform: translateY(0) scale(1);
+    }
+}
+
+@keyframes dsSpin {
+    to {
+        transform: rotate(360deg);
+    }
+}
+
+/* ==========================================================
+   UNIFIED BUTTON SIZE & INTERACTION HIERARCHY
+   1. 3-Dot Row/Item Menus: 28x28
+   2. Toolbar Icon Buttons: 32x32
+   3. Compact Inline / Chip Buttons: 28px height
+   4. Standard Action & Modal Buttons: 34px height
+   ========================================================== */
+
+/* 1. All 3-Dot Row Buttons (28x28 desktop) */
+.bb-row-menu-toggle,
+.bb-three-dots-btn,
+.cc-row-menu-toggle,
+.pd-btn-dots,
+.btn-ghost.icon-only,
+.pro-row-menu-btn,
+.pro-takeoff-tree .pro-row-menu-btn {
+    width: var(--ds-btn-3dots) !important;
+    min-width: var(--ds-btn-3dots) !important;
+    height: var(--ds-btn-3dots) !important;
+    min-height: var(--ds-btn-3dots) !important;
+    padding: 0 !important;
+    border-radius: var(--ds-radius) !important;
+    font-size: 14px !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    border: none !important;
+    background: transparent !important;
+    color: var(--text-muted) !important;
+    box-shadow: none !important;
+    transition: background-color var(--ds-dur-fast) ease, color var(--ds-dur-fast) ease !important;
+}
+
+.bb-row-menu-toggle:hover,
+.bb-row-menu-toggle.active,
+.bb-three-dots-btn:hover,
+.bb-three-dots-btn.active,
+.cc-row-menu-toggle:hover,
+.cc-row-menu-toggle.active,
+.pd-btn-dots:hover,
+.pd-btn-dots.active,
+.btn-ghost.icon-only:hover,
+.btn-ghost.icon-only.active,
+.pro-row-menu-btn:hover,
+.pro-row-menu-btn.is-active,
+.pro-row-menu-btn[aria-expanded="true"] {
+    background: var(--bg-hover) !important;
+    color: var(--text-main) !important;
+}
+
+.pro-row-menu-btn:hover,
+.pro-row-menu-btn.is-active,
+.pro-row-menu-btn[aria-expanded="true"] {
+    color: var(--primary) !important;
+    background: var(--primary-soft) !important;
+}
+
+/* Preserve accessible touch targets on mobile */
+@media (max-width: 760px) {
+
+    .pro-row-menu-btn,
+    .pro-takeoff-tree .pro-row-menu-btn {
+        width: 42px !important;
+        min-width: 42px !important;
+        height: 42px !important;
+        min-height: 42px !important;
+    }
+}
+
+/* 2. Toolbar Icon Buttons (32x32) */
+.bb-icon-btn,
+.bb-control-btn.icon-only,
+#bbSortDir,
+#bbFiltersBtn,
+#ccSortDir,
+#ccFiltersBtn,
+#ccMoreActionsBtn,
+.est-toolbar-actions .est-icon-btn,
+.pd-modal-head-close,
+.est-cu-dialog .est-cu-close,
+.tk-action-modal-close {
+    width: var(--ds-btn-icon) !important;
+    min-width: var(--ds-btn-icon) !important;
+    height: var(--ds-btn-icon) !important;
+    min-height: var(--ds-btn-icon) !important;
+    border-radius: var(--ds-radius) !important;
+    padding: 0 !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    transition: background-color var(--ds-dur-fast) ease,
+        border-color var(--ds-dur-fast) ease,
+        color var(--ds-dur-fast) ease !important;
+}
+
+/* Keep small dots inside pipeline tab bar and header at 28x28 if using dots */
+#bbHeadMoreBtn,
+#bbConfigPhasesBtn {
+    width: var(--ds-btn-3dots) !important;
+    min-width: var(--ds-btn-3dots) !important;
+    height: var(--ds-btn-3dots) !important;
+    min-height: var(--ds-btn-3dots) !important;
+    border-radius: var(--ds-radius) !important;
+}
+
+/* 3. Standard Action & Modal Buttons (34px height) */
+.bb-btn-procore-primary:not(.small),
+.bb-btn-procore-secondary:not(.small),
+.bb-btn-danger:not(.small),
+.bb-btn-ghost:not(.icon-only):not(.small),
+.bb-control-btn:not(.icon-only):not(#bbSortDir):not(#bbFiltersBtn):not(#ccSortDir):not(#ccFiltersBtn):not(#ccMoreActionsBtn),
+.tk-btn-primary,
+.tk-btn-cancel,
+.btn-main,
+.btn-ghost:not(.icon-only),
+.pd-modal-foot .btn-main,
+.pd-modal-foot .btn-ghost,
+.est-cu-dialog .est-btn {
+    width: auto !important;
+    min-width: 0 !important;
+    height: var(--ds-btn-md) !important;
+    min-height: var(--ds-btn-md) !important;
+    padding: 0 14px !important;
+    border-radius: var(--ds-radius) !important;
+    font-size: 13px !important;
+    font-weight: 600 !important;
+    line-height: 1 !important;
+    white-space: nowrap !important;
+    display: inline-flex !important;
+    align-items: center !important;
+    justify-content: center !important;
+    gap: 7px !important;
+    transition: background-color var(--ds-dur-fast) ease,
+        border-color var(--ds-dur-fast) ease,
+        color var(--ds-dur-fast) ease,
+        transform var(--ds-dur-fast) ease !important;
+}
+
+/* ==========================================================
+   MODALS, BACKDROPS & LOADING OVERLAYS (CANONICAL PALETTE)
+   Backdrop blur restricted strictly to modals & loading overlays
+   ========================================================== */
+.pd-modal-backdrop,
+.tk-modal-portal,
+.pro-modal-backdrop,
+.est-cu-backdrop,
+.est-loading-overlay,
+.proposal-contact-modal-backdrop {
+    backdrop-filter: blur(5px) !important;
+    -webkit-backdrop-filter: blur(5px) !important;
+}
+
+.pd-modal-backdrop.open,
+.pd-modal-backdrop.is-open,
+.tk-modal-portal {
+    animation: dsFadeIn var(--ds-dur-menu) var(--ds-ease);
+}
+
+.pd-modal,
+.tk-action-modal,
+.bb-studio-modal,
+.est-cu-dialog.pd-modal,
+.proposal-contact-modal-card {
+    background: var(--bg-panel) !important;
+    border-color: var(--border) !important;
+    color: var(--text-main) !important;
+}
+
+.pd-modal-head,
+.tk-action-modal-head,
+.est-cu-dialog.pd-modal>header.est-cu-header,
+.bb-create-project-modal .bb-modal-head {
+    background: var(--bg-panel) !important;
+    border-bottom-color: var(--border) !important;
+    color: var(--text-main) !important;
+}
+
+.pd-modal-body,
+.tk-action-modal-body,
+.est-cu-dialog.pd-modal>main {
+    background: var(--bg-panel) !important;
+    color: var(--text-main) !important;
+}
+
+.pd-modal-foot,
+.tk-action-modal-foot,
+.est-cu-dialog.pd-modal>footer,
+.bb-create-project-modal .bb-modal-foot {
+    background: var(--bg-surface-2) !important;
+    border-top-color: var(--border) !important;
+    color: var(--text-main) !important;
+}
+
+/* Fast vs Eased modal entrances */
+.pd-modal,
+.tk-action-modal,
+.bb-studio-modal {
+    animation: dsModalIn var(--ds-dur-menu) var(--ds-ease);
+}
+
+/* Pro Layer Modal uses a crisp, lightweight ease (150ms, minimal 4px slide) */
+.pro-modal-backdrop {
+    animation: dsFadeIn 130ms ease !important;
+}
+
+.pro-layer-modal,
+.pro-create-layer-modal,
+.pro-catalog-modal,
+.pro-browse-catalog-modal,
+.pro-group-modal {
+    animation: dsProModalIn 150ms var(--ds-ease) !important;
+}
+
+.est-loading-card {
+    background: var(--bg-panel) !important;
+    border-color: var(--border) !important;
+    color: var(--text-main) !important;
+}
+
+.est-loading-card i {
+    color: var(--primary) !important;
+}
+
+/* Non-modal floating elements stay free of GPU blur overhead */
+.pro-takeoff-toolbar,
+.pro-floating-controls,
+.pro-floating-tools,
+.toast-lite {
+    backdrop-filter: none !important;
+    -webkit-backdrop-filter: none !important;
+}
+
+@media (prefers-reduced-motion: reduce) {
+
+    *,
+    *::before,
+    *::after {
+        animation-duration: 0.01ms !important;
+        animation-iteration-count: 1 !important;
+        transition-duration: 0.01ms !important;
+        scroll-behavior: auto !important;
+    }
+}

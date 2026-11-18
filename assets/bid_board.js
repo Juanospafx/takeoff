@@ -194,11 +194,26 @@
             .catch(err => showError(err.message));
     }
 
-    function saveActiveStage(status) {
+    function saveActiveStage(status, options = {}) {
         if (!status) return;
+        const code = statusCodes[status] || status;
         try {
             localStorage.setItem('takeoff.bidBoardStage', status);
             sessionStorage.setItem('takeoff.bidBoardStage', status);
+        } catch (e) {}
+        try {
+            const brandLink = document.getElementById('btHeaderBrandLink');
+            if (brandLink) {
+                brandLink.setAttribute('href', `bid_board.php?status=${encodeURIComponent(code)}`);
+            }
+            if (options.syncUrl !== false && window.history && typeof window.history.replaceState === 'function') {
+                const url = new URL(window.location.href);
+                url.searchParams.set('status', code);
+                if (options.clearProjectId) {
+                    url.searchParams.delete('project_id');
+                }
+                window.history.replaceState(null, '', url.toString());
+            }
         } catch (e) {}
     }
 
@@ -225,6 +240,21 @@
         const targetProjectId = params.get('project_id');
         const urlStatus = params.get('status') || params.get('stage');
 
+        // Honor stage changes made inside Project Dashboard when returning to Bid Board
+        try {
+            const rawOverride = sessionStorage.getItem('takeoff.bidBoardStageOverride');
+            if (rawOverride) {
+                sessionStorage.removeItem('takeoff.bidBoardStageOverride');
+                const parsed = JSON.parse(rawOverride);
+                const overrideStatus = resolveStatusFromInput(parsed?.stage || parsed?.code);
+                if (overrideStatus) {
+                    activeStatus = overrideStatus;
+                    saveActiveStage(activeStatus, { clearProjectId: true });
+                    return;
+                }
+            }
+        } catch (e) {}
+
         if (targetProjectId) {
             const found = (state.projects || []).find(p => String(p.id) === String(targetProjectId));
             if (found) {
@@ -246,6 +276,7 @@
         const fromSaved = resolveStatusFromInput(savedStage);
         if (fromSaved) {
             activeStatus = fromSaved;
+            saveActiveStage(activeStatus);
             return;
         }
 
@@ -778,7 +809,7 @@
         root.querySelectorAll('[data-status]').forEach(tab => {
             tab.addEventListener('click', () => {
                 activeStatus = tab.dataset.status;
-                saveActiveStage(activeStatus);
+                saveActiveStage(activeStatus, { clearProjectId: true });
                 render();
             });
         });
@@ -996,6 +1027,7 @@
                     openLink.href = `project_dashboard.php?id=${encodeURIComponent(projectId)}&tab=overview&stage=${encodeURIComponent(activeStatus)}`;
                 }
 
+                menu.style.display = '';
                 menu.hidden = false;
                 const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
                 const rect = button.getBoundingClientRect();
@@ -1508,6 +1540,7 @@
             return window.__bbCreateProjectFromExcel({
                 projectName: excelProjectName,
                 statusCode: excelStatusCode,
+                stage: excelStage,
                 submitBtn: excelSubmitBtn,
                 originalButtonHtml: excelSubmitBtn ? excelSubmitBtn.innerHTML : '<i class="fas fa-plus"></i> Create Project'
             });
@@ -1545,8 +1578,9 @@
                 try {
                     localStorage.removeItem('takeoff.projectDraft');
                 } catch (ignore) {}
+                saveActiveStage(selectedStage);
                 const newId = res.id || res.project_id;
-                window.location.href = `project_dashboard.php?id=${encodeURIComponent(newId)}&tab=overview`;
+                window.location.href = `project_dashboard.php?id=${encodeURIComponent(newId)}&tab=overview&stage=${encodeURIComponent(selectedStage)}`;
                 return;
             }
             throw new Error('Server returned an invalid project response.');
@@ -1594,7 +1628,7 @@
         document.querySelectorAll('.bb-modal-backdrop').forEach(el => el.classList.remove('open'));
     }
 
-    window.__bbCreateProjectFromExcel = async function ({ projectName, statusCode, submitBtn, originalButtonHtml }) {
+    window.__bbCreateProjectFromExcel = async function ({ projectName, statusCode, stage, submitBtn, originalButtonHtml }) {
         const fileInput = document.getElementById('bbProjectExcelFile');
         const excelErr = document.getElementById('bbProjectExcelError');
         const setInlineErr = (msg) => {
@@ -1628,7 +1662,9 @@
             if (!resp.ok || data?.status !== 'success' || !data?.project_id) {
                 throw new Error(data?.msg || 'Failed to import project from Excel.');
             }
-            window.location.href = `project_dashboard.php?id=${encodeURIComponent(data.project_id)}&tab=estimating`;
+            const targetStage = stage || activeStatus || 'To Do';
+            saveActiveStage(targetStage);
+            window.location.href = `project_dashboard.php?id=${encodeURIComponent(data.project_id)}&tab=estimating&stage=${encodeURIComponent(targetStage)}`;
         } catch (err) {
             if (submitBtn) {
                 submitBtn.disabled = false;
@@ -1748,6 +1784,7 @@
             moreBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const willOpen = moreDropdown.hidden;
+                moreDropdown.style.display = '';
                 moreDropdown.hidden = !willOpen;
                 moreBtn.setAttribute('aria-expanded', String(!willOpen));
             });

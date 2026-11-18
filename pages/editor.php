@@ -110,8 +110,10 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         })();
     </script>
 
-    <link rel="stylesheet" href="../assets/editor/editor.css?v=takeoff-editor-20261005-6">
-    <link rel="stylesheet" href="../assets/editor/takeoff.css?v=takeoff-locking-20260804-1">
+    <link rel="stylesheet"
+        href="../assets/design_system.css?v=<?= filemtime(__DIR__ . '/../assets/design_system.css') ?>">
+    <link rel="stylesheet" href="../assets/editor/editor.css?v=<?= filemtime(__DIR__ . '/../assets/editor/editor.css') ?>">
+    <link rel="stylesheet" href="../assets/editor/takeoff.css?v=<?= filemtime(__DIR__ . '/../assets/editor/takeoff.css') ?>">
 
     <style>
         #toast-container {
@@ -132,10 +134,8 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
 
         .toast-msg {
-            background: rgba(255, 255, 255, 0.96) !important;
-            backdrop-filter: blur(8px) !important;
-            -webkit-backdrop-filter: blur(8px) !important;
-            border: 1px solid rgba(0, 0, 0, 0.12) !important;
+            background: rgba(255, 255, 255, 0.98) !important;
+            border: 1px solid var(--border, #d5d8dc) !important;
             border-radius: 9999px !important;
             padding: 2px 12px !important;
             height: 24px !important;
@@ -156,10 +156,10 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         [data-theme="dark"] .toast-msg,
         body.theme-dark .toast-msg,
         .toast-msg.theme-dark {
-            background: rgba(15, 23, 42, 0.94) !important;
-            border: 1px solid rgba(255, 255, 255, 0.14) !important;
+            background: #242a38 !important;
+            border: 1px solid #2f384a !important;
             box-shadow: 0 4px 16px rgba(0, 0, 0, 0.36) !important;
-            color: #f8fafc !important;
+            color: #f1f5f9 !important;
         }
 
         .toast-msg i {
@@ -172,13 +172,18 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
                 transform: translateY(-8px) scale(0.96);
                 opacity: 0;
             }
+
             to {
                 transform: translateY(0) scale(1);
                 opacity: 1;
             }
         }
 
-        :root {
+        :root,
+        [data-theme="light"],
+        body.theme-light,
+        [data-theme="dark"],
+        body.theme-dark {
             --project-nav-height:
                 <?= $embedded ? '0px' : '48px' ?>
             ;
@@ -187,13 +192,13 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             /* Ancho Desktop */
             --sb-mobile-h: 65px;
             /* Alto Mobile */
-            --bg-dark: #0f172a;
-            --border-color: #334155;
+            --bg-dark: #242a38;
+            --border-color: #2f384a;
         }
 
         body {
             overflow: hidden;
-            background: var(--bg-dark);
+            background: #1b212d;
         }
 
         body.embedded-editor .app-container {
@@ -241,7 +246,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             align-items: center;
             gap: 4px;
             padding: 0 16px;
-            background: #0b1120;
+            background: #1b212d;
             border-bottom: 1px solid var(--border-color);
             overflow-x: auto;
             white-space: nowrap;
@@ -266,9 +271,9 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         }
 
         .project-flow-nav a.active {
-            color: #60a5fa;
-            border-bottom-color: #3b82f6;
-            background: rgba(59, 130, 246, 0.12);
+            color: #fb5a3a;
+            border-bottom-color: #fb5a3a;
+            background: rgba(251, 90, 58, 0.12);
         }
 
         .app-header {
@@ -339,7 +344,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
 
         [data-theme="dark"] .drawing-loading-pill,
         body.theme-dark .drawing-loading-pill {
-            background: #1e293b;
+            background: #242a38;
             border-color: rgba(251, 90, 58, 0.5);
             color: #fb5a3a;
             box-shadow: 0 8px 24px rgba(0, 0, 0, 0.4), 0 0 16px rgba(251, 90, 58, 0.25);
@@ -402,7 +407,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             position: absolute;
             bottom: 20px;
             right: 20px;
-            background: rgba(15, 23, 42, 0.9);
+            background: rgba(36, 42, 56, 0.94);
             border: 1px solid var(--border-color);
             border-radius: 50px;
             padding: 5px 15px;
@@ -411,8 +416,8 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             gap: 10px;
             z-index: 30;
             box-shadow: 0 4px 6px -1px rgba(0, 0, 0, 0.3);
-            transition: all 0.3s ease;
-            /* TransiciÃ³n suave para ocultar/mostrar */
+            transition: opacity 0.25s ease, transform 0.25s ease;
+            /* Transición suave para ocultar/mostrar */
             color: white;
         }
 
@@ -458,13 +463,12 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             /* Fix para Mobile overflow */
             z-index: 2000;
             display: none;
-            background: rgba(15, 23, 42, 0.95);
+            background: #242a38;
             border: 1px solid var(--border-color);
             border-radius: 12px;
             padding: 10px;
             gap: 8px;
             box-shadow: 0 10px 25px rgba(0, 0, 0, 0.5);
-            backdrop-filter: blur(5px);
         }
 
         .stamp-item {
@@ -495,31 +499,26 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             }
         }
 
-        /* --- BOTÃ“N SAVE (MORADO Y RESPONSIVE) --- */
+        /* --- BOTÓN SAVE (BRIGHTRONIX PRIMARY) --- */
         #btn-save {
-            display: flex;
+            display: inline-flex;
             align-items: center;
             justify-content: center;
             gap: 8px;
-            height: 40px !important;
-            padding: 0 20px !important;
-            /* Estilo pÃ­ldora en Desktop */
-            border-radius: 50px !important;
-
-            /* COLOR MORADO FUERTE */
-            background: #8b5cf6 !important;
+            height: 34px !important;
+            padding: 0 16px !important;
+            border-radius: 6px !important;
+            background: #fb5a3a !important;
             color: white !important;
-            border: none;
-
+            border: 1px solid #e14e32;
             min-width: unset;
-            transition: transform 0.2s, background 0.2s;
-            box-shadow: 0 4px 6px rgba(139, 92, 246, 0.25);
+            transition: background-color 0.15s ease, transform 0.15s ease;
+            box-shadow: 0 1px 3px rgba(251, 90, 58, 0.25);
         }
 
         #btn-save:hover {
-            transform: scale(1.05);
-            background: #7c3aed !important;
-            /* Morado un poco mÃ¡s oscuro al pasar mouse */
+            transform: translateY(-0.5px);
+            background: #e14e32 !important;
         }
 
         #btn-save span {
@@ -631,8 +630,11 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
     </style>
 </head>
 
-<body class="<?= $embedded ? 'embedded-editor' : '' ?>" data-user-role="<?= htmlspecialchars($authRole, ENT_QUOTES, 'UTF-8') ?>" data-can-write="<?= $canWrite ? 'true' : 'false' ?>" data-read-only="<?= $canWrite ? 'false' : 'true' ?>">
-    <script id="takeoff-auth-metadata" type="application/json"><?= json_encode($clientAuthMetadata, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
+<body class="<?= $embedded ? 'embedded-editor' : '' ?>"
+    data-user-role="<?= htmlspecialchars($authRole, ENT_QUOTES, 'UTF-8') ?>"
+    data-can-write="<?= $canWrite ? 'true' : 'false' ?>" data-read-only="<?= $canWrite ? 'false' : 'true' ?>">
+    <script id="takeoff-auth-metadata"
+        type="application/json"><?= json_encode($clientAuthMetadata, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
     <script>
         (function () {
             var fallback = { displayName: 'Viewer', role: 'viewer', canWrite: false, readOnly: true };
@@ -1769,6 +1771,9 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
                 schedulePdfRerender();
             }
             syncKonvaToFabric();
+            if (konvaLayer && (!konvaStage || (konvaStage.width() > 0 && konvaStage.height() > 0))) {
+                konvaLayer.batchDraw();
+            }
         });
         document.addEventListener('visibilitychange', () => {
             if (!document.hidden) {
@@ -4712,8 +4717,8 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             reportAttachments.forEach((entry, idx) => {
                 const row = document.createElement('div');
                 row.className = 'd-flex align-items-center justify-content-between p-2 rounded';
-                row.style.background = '#111827';
-                row.style.border = '1px solid #334155';
+                row.style.background = '#1f2633';
+                row.style.border = '1px solid #2f384a';
 
                 const left = document.createElement('div');
                 left.className = 'd-flex align-items-center gap-2';
@@ -5002,7 +5007,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             el.className = `toast-msg`;
             const isDark = document.documentElement.getAttribute('data-theme') === 'dark'
                 || document.body?.classList.contains('theme-dark')
-                || (function() {
+                || (function () {
                     try {
                         return window.parent?.document?.documentElement?.getAttribute('data-theme') === 'dark'
                             || window.parent?.document?.body?.classList.contains('theme-dark');
@@ -5198,9 +5203,9 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
         });
 
     </script>
-    <script src="../assets/catalog_metadata.js?v=catalog-metadata-20260826-1"></script>
+    <script src="../assets/catalog_metadata.js?v=<?= filemtime(__DIR__ . '/../assets/catalog_metadata.js') ?>"></script>
     <script src="../assets/takeoff_color_palette.js?v=takeoff-duplicate-color-20260831-1"></script>
-    <script src="../assets/editor/takeoff.js?v=takeoff-all-types-20261117"></script>
+    <script src="../assets/editor/takeoff.js?v=<?= filemtime(__DIR__ . '/../assets/editor/takeoff.js') ?>"></script>
 </body>
 
 </html>

@@ -48,6 +48,24 @@
             if (statusButtonLabel) {
                 statusButtonLabel.textContent = normalized.toUpperCase();
             }
+            if (normalized) {
+                if (window.ProjectState?.projectInfo) {
+                    window.ProjectState.projectInfo.status = normalized;
+                }
+                const label = normalized.replace(/_/g, ' ').replace(/\b\w/g, c => c.toUpperCase());
+                try {
+                    localStorage.setItem('takeoff.bidBoardStage', label);
+                    sessionStorage.setItem('takeoff.bidBoardStage', label);
+                    sessionStorage.setItem('takeoff.bidBoardStageOverride', JSON.stringify({
+                        stage: label,
+                        code: normalized,
+                        projectId: Number(window.ProjectState?.projectId || 0),
+                        at: Date.now()
+                    }));
+                    const brandLink = document.getElementById('btHeaderBrandLink');
+                    if (brandLink) brandLink.setAttribute('href', 'bid_board.php?status=' + encodeURIComponent(normalized));
+                } catch (e) {}
+            }
         }
 
         function renderOutboxState(outbox, isIntegrationEnabled, projectStatus) {
