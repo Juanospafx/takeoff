@@ -4,7 +4,7 @@
     const pipelineStatuses = [
         'Invitations',
         'To Do',
-        'Estimating',
+        'Templates',
         'Bid Submitted',
         'Accepted',
         'In Progress',
@@ -16,7 +16,7 @@
     const statusCodes = {
         Invitations: 'invitations',
         'To Do': 'to_do',
-        Estimating: 'estimating',
+        Templates: 'templates',
         'Bid Submitted': 'bid_submitted',
         Accepted: 'accepted',
         'In Progress': 'in_progress',
@@ -29,12 +29,14 @@
         draft: 'To Do',
         to_do: 'To Do',
         todo: 'To Do',
-        active: 'Estimating',
+        active: 'To Do',
         invitations: 'Invitations',
         invitation: 'Invitations',
         invited: 'Invitations',
-        bidding: 'Estimating',
-        estimating: 'Estimating',
+        templates: 'Templates',
+        template: 'Templates',
+        bidding: 'To Do',
+        estimating: 'To Do',
         submitted: 'Bid Submitted',
         bid_submitted: 'Bid Submitted',
         awarded: 'Accepted',
@@ -58,7 +60,7 @@
     const defaultPhaseConfig = {
         'Invitations': { label: 'Invitations', color: '#b45309' },
         'To Do': { label: 'To Do', color: '#1d5cc9' },
-        'Estimating': { label: 'Estimating', color: '#d97706' },
+        'Templates': { label: 'Templates', color: '#0d9488' },
         'Bid Submitted': { label: 'Bid Submitted', color: '#ea580c' },
         'Accepted': { label: 'Accepted', color: '#059669' },
         'In Progress': { label: 'In Progress', color: '#2563eb' },
@@ -362,7 +364,7 @@
             }
             const fallbackValue = Number(metadata.estimate_total ?? metadata.total_sales ?? metadata.totalValue ?? 0);
             let totalValue;
-            if (hasStoragePrimary && (!hasServerPrimary || storageUpdatedMs > serverUpdatedMs)) {
+            if (hasStoragePrimary && (!hasServerPrimary || (storageUpdatedMs > serverUpdatedMs && (storagePrimary > 0 || Number(metadataPrimary) <= 0)))) {
                 totalValue = storagePrimary;
             } else if (hasServerPrimary) {
                 totalValue = metadataPrimary;
@@ -1233,11 +1235,34 @@
         const previousState = JSON.parse(JSON.stringify(state));
         rawProject.status = statusCodes[statusLabel] || 'to_do';
         render();
-        postProjectAction('save', savePayload(rawProject, statusLabel)).catch(err => {
+        postProjectAction('save', savePayload(rawProject, statusLabel)).then(res => {
+            if (res && res.data) {
+                state = res.data;
+                renderTemplateOptions();
+            }
+        }).catch(err => {
             state = previousState;
             render();
             showError(err.message);
         });
+    }
+
+    function confirmDeleteProjectModal(project) {
+        const rawName = String(project?.name || `Project #${project?.id || ''}`).trim();
+        const projName = esc(rawName);
+        if (window.TakeoffAnnouncement && typeof window.TakeoffAnnouncement.confirm === 'function') {
+            return window.TakeoffAnnouncement.confirm({
+                type: 'error',
+                badge: 'DELETE',
+                icon: 'fas fa-trash',
+                title: 'Delete Project',
+                message: `Are you sure you want to delete <strong>"${projName}"</strong>? This project will be moved to the deleted archive and hidden from the Bid Board.`,
+                confirmText: 'Delete Project',
+                cancelText: 'Cancel',
+                primaryDanger: true
+            });
+        }
+        return Promise.resolve(window.confirm(`Are you sure you want to delete "${rawName}" from the Bid Board?`));
     }
 
     async function runProjectAction(action, projectId) {
@@ -1247,18 +1272,8 @@
         }
         openMenuId = null;
         if (action === 'delete') {
-            const ok = typeof window.showConfirmDialog === 'function'
-                ? await window.showConfirmDialog({
-                    title: 'Delete Project',
-                    message: 'Delete this project from the Bid Board? This will move it to the deleted archive.',
-                    confirmText: 'Delete Project',
-                    cancelText: 'Cancel',
-                    type: 'error',
-                    badge: 'DELETE',
-                    icon: 'fas fa-trash',
-                    primaryDanger: true
-                })
-                : window.confirm('Delete this project from the Bid Board?');
+            const targetProject = (state.projects || []).find(p => Number(p.id) === Number(projectId));
+            const ok = await confirmDeleteProjectModal(targetProject);
             if (!ok) {
                 renderTable();
                 return;
@@ -1281,7 +1296,9 @@
                                         delete est.estimateItemId;
                                     });
                                 }
-                                localStorage.setItem(`takeoff.estimating.module.${res.id}`, JSON.stringify(parsed));
+                                try {
+                        localStorage.setItem(`takeoff.estimating.module.${res.id}`, JSON.stringify(parsed));
+                    } catch (_) { }
                             }
                         }
                     } catch (_) {}
@@ -1443,6 +1460,14 @@
                 });
             }
         }
+        const excelInput = document.getElementById('bbProjectExcelFile');
+        const excelName = document.getElementById('bbProjectExcelFileName');
+        const excelMeta = document.getElementById('bbProjectExcelFileMeta');
+        const excelErr = document.getElementById('bbProjectExcelError');
+        if (excelInput) excelInput.value = '';
+        if (excelName) excelName.textContent = 'Click or drag & drop exported .xlsx file here';
+        if (excelMeta) excelMeta.textContent = 'Generated by Estimating -> Export Estimate (.xlsx)';
+        if (excelErr) { excelErr.textContent = ''; excelErr.style.display = 'none'; }
         document.querySelector('input[name="bbProjectMode"][value="template"]').checked = true;
         toggleProjectTemplate();
         updateModalLivePreview();
@@ -1463,6 +1488,8 @@
         });
         const wrap = document.getElementById('bbProjectTemplateWrap');
         if (wrap) wrap.style.display = mode === 'template' ? 'block' : 'none';
+        const excelWrap = document.getElementById('bbProjectExcelWrap');
+        if (excelWrap) excelWrap.style.display = mode === 'excel' ? 'block' : 'none';
         updateModalLivePreview();
     }
 
@@ -1473,6 +1500,18 @@
             return;
         }
         const mode = document.querySelector('input[name="bbProjectMode"]:checked')?.value || 'empty';
+        if (mode === 'excel' && typeof window.__bbCreateProjectFromExcel === 'function') {
+            const excelProjectName = document.getElementById('bbProjectName')?.value.trim() || 'New Project';
+            const excelStage = document.getElementById('bbProjectStage')?.value || activeStatus || 'To Do';
+            const excelStatusCode = statusCodes[excelStage] || 'to_do';
+            const excelSubmitBtn = event.target.querySelector('button[type="submit"]');
+            return window.__bbCreateProjectFromExcel({
+                projectName: excelProjectName,
+                statusCode: excelStatusCode,
+                submitBtn: excelSubmitBtn,
+                originalButtonHtml: excelSubmitBtn ? excelSubmitBtn.innerHTML : '<i class="fas fa-plus"></i> Create Project'
+            });
+        }
         const templateId = mode === 'template' ? document.getElementById('bbProjectTemplate').value : '';
         const template = (state.templates || []).find(row => String(row.id) === String(templateId));
         const projectName = document.getElementById('bbProjectName')?.value.trim() || 'New Project';
@@ -1554,6 +1593,50 @@
     function closeModals() {
         document.querySelectorAll('.bb-modal-backdrop').forEach(el => el.classList.remove('open'));
     }
+
+    window.__bbCreateProjectFromExcel = async function ({ projectName, statusCode, submitBtn, originalButtonHtml }) {
+        const fileInput = document.getElementById('bbProjectExcelFile');
+        const excelErr = document.getElementById('bbProjectExcelError');
+        const setInlineErr = (msg) => {
+            if (excelErr) {
+                excelErr.textContent = msg || '';
+                excelErr.style.display = msg ? 'block' : 'none';
+            }
+            if (msg) showError(msg);
+        };
+        setInlineErr('');
+        const file = fileInput?.files?.[0];
+        if (!file) {
+            setInlineErr('Please choose an exported Project Estimate (.xlsx) file to import.');
+            document.getElementById('bbProjectExcelDropzone')?.focus();
+            return;
+        }
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Importing Excel...';
+        }
+        try {
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('name', projectName);
+            fd.append('status', statusCode || 'to_do');
+            const resp = await fetch('../api/project_estimate_excel.php?action=import_project', {
+                method: 'POST',
+                body: fd
+            });
+            const data = await resp.json().catch(() => null);
+            if (!resp.ok || data?.status !== 'success' || !data?.project_id) {
+                throw new Error(data?.msg || 'Failed to import project from Excel.');
+            }
+            window.location.href = `project_dashboard.php?id=${encodeURIComponent(data.project_id)}&tab=estimating`;
+        } catch (err) {
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalButtonHtml || '<i class="fas fa-plus"></i> Create Project';
+            }
+            setInlineErr(err?.message || 'Could not import project from Excel.');
+        }
+    };
 
     function showError(message) {
         const el = document.getElementById('bbError');
@@ -1677,6 +1760,46 @@
         document.querySelectorAll('[data-close-modal]').forEach(btn => btn.addEventListener('click', closeModals));
         document.querySelectorAll('input[name="bbProjectMode"]').forEach(input => input.addEventListener('change', toggleProjectTemplate));
         document.getElementById('bbProjectForm')?.addEventListener('submit', createProjectDraft);
+
+        const excelDropzone = document.getElementById('bbProjectExcelDropzone');
+        const excelInput = document.getElementById('bbProjectExcelFile');
+        const updateSelectedExcelUi = (file) => {
+            const nameEl = document.getElementById('bbProjectExcelFileName');
+            const metaEl = document.getElementById('bbProjectExcelFileMeta');
+            if (!file) return;
+            if (nameEl) nameEl.textContent = file.name;
+            if (metaEl) metaEl.textContent = `${(file.size / 1024).toFixed(1)} KB • Ready to import`;
+            const projNameInput = document.getElementById('bbProjectName');
+            if (projNameInput && (!projNameInput.value.trim() || projNameInput.value.trim() === 'New Project')) {
+                projNameInput.value = file.name.replace(/\.(xlsx|xlsm)$/i, '').replace(/[_-]+/g, ' ').trim() || 'Imported Project';
+                updateModalLivePreview();
+            }
+        };
+        if (excelDropzone && excelInput) {
+            excelDropzone.addEventListener('click', () => excelInput.click());
+            excelDropzone.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); excelInput.click(); }
+            });
+            excelInput.addEventListener('change', () => {
+                if (excelInput.files?.[0]) updateSelectedExcelUi(excelInput.files[0]);
+            });
+            excelDropzone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                excelDropzone.classList.add('is-dragover');
+            });
+            excelDropzone.addEventListener('dragleave', () => excelDropzone.classList.remove('is-dragover'));
+            excelDropzone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                excelDropzone.classList.remove('is-dragover');
+                const dropped = e.dataTransfer?.files?.[0];
+                if (dropped && excelInput) {
+                    const dt = new DataTransfer();
+                    dt.items.add(dropped);
+                    excelInput.files = dt.files;
+                    updateSelectedExcelUi(dropped);
+                }
+            });
+        }
 
         document.getElementById('bbActionDuplicate')?.addEventListener('click', (e) => {
             e.stopPropagation();

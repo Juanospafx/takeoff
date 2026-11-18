@@ -134,6 +134,8 @@ function dash_status_label(?string $status): string
         'invitations' => 'Invitations',
         'to_do' => 'To Do',
         'draft' => 'To Do',
+        'templates' => 'Templates',
+        'template' => 'Templates',
         'estimating' => 'Estimating',
         'bid_submitted' => 'Bid Submitted',
         'accepted' => 'Accepted',
@@ -671,10 +673,70 @@ if ($activeTab === 'takeoff' && (!$selectedDoc || $selectedDoc['source'] !== 'le
     }
 }
 
+$dashEstimatesSummary = [];
+$resolvedActiveEstimateId = trim((string)($projectMeta['primary_estimate_id'] ?? ''));
+if ($projectId > 0 && dash_table_exists($pdo, 'estimates')) {
+    try {
+        $hasWsState = dash_table_exists($pdo, 'estimate_workspace_states');
+        $estSql = $hasWsState
+            ? "SELECT e.id, e.name, e.total_cost, ws.client_estimate_id, ws.state_json FROM estimates e LEFT JOIN estimate_workspace_states ws ON ws.estimate_id = e.id WHERE e.project_id = ? AND e.deleted_at IS NULL ORDER BY e.id ASC"
+            : "SELECT e.id, e.name, e.total_cost, NULL AS client_estimate_id, NULL AS state_json FROM estimates e WHERE e.project_id = ? AND e.deleted_at IS NULL ORDER BY e.id ASC";
+        $estRowsStmt = $pdo->prepare($estSql);
+        $estRowsStmt->execute([$projectId]);
+        $estRows = $estRowsStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $activeCandidate = '';
+        $primaryCandidate = '';
+        foreach ($estRows as $er) {
+            $snap = !empty($er['state_json']) ? json_decode((string)$er['state_json'], true) : [];
+            if (!is_array($snap)) $snap = [];
+            $cid = trim((string)($er['client_estimate_id'] ?: ($snap['id'] ?? $er['id'])));
+            $isPrim = !empty($snap['isPrimary']) || !empty($snap['is_primary']);
+            $isAct = !empty($snap['isActive']);
+            $estVal = (float)($snap['estimateTotal'] ?? $snap['totalSales'] ?? $er['total_cost'] ?? 0);
+            $dashEstimatesSummary[] = [
+                'id' => $cid,
+                'dbEstimateId' => (int)$er['id'],
+                'name' => (string)($snap['name'] ?? $er['name'] ?? 'Estimate'),
+                'isPrimary' => $isPrim,
+                'is_primary' => $isPrim,
+                'isActive' => $isAct,
+                'estimateTotal' => $estVal,
+                'totalSales' => $estVal,
+            ];
+            if ($isAct && $activeCandidate === '') $activeCandidate = $cid;
+            if ($isPrim && $primaryCandidate === '') $primaryCandidate = $cid;
+        }
+        if ($activeCandidate !== '') {
+            $resolvedActiveEstimateId = $activeCandidate;
+        } elseif ($primaryCandidate !== '') {
+            $resolvedActiveEstimateId = $primaryCandidate;
+        } elseif (!empty($dashEstimatesSummary)) {
+            $resolvedActiveEstimateId = (string)$dashEstimatesSummary[0]['id'];
+        }
+        if ($resolvedActiveEstimateId === '' && !empty($takeoffLayers[0]['estimate_key'])) {
+            $resolvedActiveEstimateId = (string)$takeoffLayers[0]['estimate_key'];
+        }
+        if ($primaryCandidate !== '') {
+            $projectMeta['primary_estimate_id'] = $primaryCandidate;
+        } elseif ($resolvedActiveEstimateId !== '' && empty($projectMeta['primary_estimate_id'])) {
+            $projectMeta['primary_estimate_id'] = $resolvedActiveEstimateId;
+        }
+    } catch (Throwable $e) {
+    }
+}
+if ($resolvedActiveEstimateId === '' && !empty($takeoffLayers[0]['estimate_key'])) {
+    $resolvedActiveEstimateId = (string)$takeoffLayers[0]['estimate_key'];
+}
+if ($resolvedActiveEstimateId === '') {
+    $resolvedActiveEstimateId = 'est_primary';
+}
+
 $state = [
     'projectId' => $projectId,
     'isDraftProject' => $isDraftProject,
     'activeTab' => $activeTab,
+    'activeEstimateId' => $resolvedActiveEstimateId,
+    'estimatesSummary' => $dashEstimatesSummary,
     'projectInfo' => $project,
     'projectMeta' => $projectMeta,
     'documents' => $documents,
@@ -1192,11 +1254,11 @@ $state = [
                         <button class="btn-ghost icon-only" type="button" data-menu-toggle="projectActionsMenu"
                             aria-label="Project actions"><i class="fas fa-ellipsis-vertical"></i></button>
                         <div class="project-menu align-right" id="projectActionsMenu">
-                            <button type="button"><i class="fas fa-copy"></i> Copy Project</button>
-                            <button type="button"><i class="fas fa-layer-group"></i> Convert to Template</button>
-                            <button type="button"><i class="fas fa-wand-magic-sparkles"></i> Apply Template</button>
-                            <button type="button"><i class="fas fa-box-archive"></i> Archive Project</button>
-                            <button type="button" class="danger"><i class="fas fa-trash"></i> Delete Project</button>
+                            <button type="button" data-project-action="copy"><i class="fas fa-copy"></i> Copy Project</button>
+                            <button type="button" data-project-action="convert-template"><i class="fas fa-layer-group"></i> Convert to Template</button>
+                            <button type="button" data-project-action="apply-template"><i class="fas fa-wand-magic-sparkles"></i> Apply Template</button>
+                            <button type="button" data-project-action="archive"><i class="fas fa-box-archive"></i> Archive Project</button>
+                            <button type="button" class="danger" data-project-action="delete"><i class="fas fa-trash"></i> Delete Project</button>
                         </div>
                     </div>
                 </div>
@@ -1893,7 +1955,7 @@ $state = [
 
                             <?php if ($selectedDoc && $selectedDoc['source'] === 'legacy_file' && $activeTab === 'takeoff'): ?>
                                 <iframe id="takeoffFrame" class="takeoff-frame pro-takeoff-frame"
-                                    src="editor.php?id=<?= (int) $selectedDoc['id'] ?>&embedded=1&estimate_key=est_primary&inherit_legacy=1&_v=<?= time() ?>"></iframe>
+                                    src="editor.php?id=<?= (int) $selectedDoc['id'] ?>&embedded=1&estimate_key=<?= htmlspecialchars(urlencode($resolvedActiveEstimateId)) ?>&inherit_legacy=1&_v=<?= time() ?>"></iframe>
                             <?php else: ?>
                                 <div id="takeoffEmpty" class="takeoff-empty pro-takeoff-empty" <?= ($selectedDoc && $selectedDoc['source'] === 'legacy_file') ? 'style="display:none;"' : '' ?>>
                                     <div>
@@ -1959,6 +2021,10 @@ $state = [
                                     <input id="estSearch" type="search" placeholder="Search estimate items..." autocomplete="off">
                                 </div>
                                 <div class="est-toolbar-actions" style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+                                    <button class="btn-main est-toolbar-btn est-btn-import" id="estBtnImport" type="button" data-est-option="import"
+                                        title="Import Project Estimate (.xlsx)"><i class="fas fa-file-import"></i> <span>Import</span></button>
+                                    <button class="btn-main est-toolbar-btn est-btn-export" id="estBtnExport" type="button" data-est-option="export"
+                                        title="Export Estimate"><i class="fas fa-file-export"></i> <span>Export</span></button>
                                     <button class="est-icon-btn" id="estBtnCreateGroup" type="button" data-est-action="create-group"
                                         title="Create Group"><i class="fas fa-folder-plus"></i></button>
                                     <button class="est-icon-btn" id="estBtnTableSettings" type="button" data-est-action="table-settings"
@@ -1971,22 +2037,6 @@ $state = [
                                         <div class="est-menu" id="optionsMenu">
                                             <button type="button" data-est-action="catalog-update"><i class="fas fa-arrows-rotate"></i> Update from Cost Catalog</button>
                                             <button type="button" data-est-action="reset-quantities"><i class="fas fa-rotate-left"></i> Reset Quantities</button>
-                                            <button type="button" data-est-action="delete-selected" id="estBtnDeleteSelected" disabled><i class="fas fa-trash"></i> Delete Selected</button>
-                                            <div class="est-menu-divider" style="height: 1px; background: var(--border, #e2e8f0); margin: 4px 0;"></div>
-                                            <button type="button" data-est-option="save"><i class="fas fa-floppy-disk"></i>
-                                                Save estimate</button>
-                                            <button type="button" data-est-option="copy"><i class="fas fa-copy"></i> Copy
-                                                estimate</button>
-                                            <button type="button" data-est-option="status"><i
-                                                    class="fas fa-circle-check"></i> Change project status</button>
-                                            <button type="button" data-est-option="import"><i
-                                                    class="fas fa-file-import"></i> Import</button>
-                                            <button type="button" data-est-option="export"><i
-                                                    class="fas fa-file-export"></i> Export</button>
-                                            <button type="button" data-est-option="export-bom"><i
-                                                    class="fas fa-file-excel"></i> Export BOM (Excel)</button>
-                                            <button type="button" data-est-option="delete-estimate" class="danger"><i
-                                                    class="fas fa-trash"></i> Delete estimate</button>
                                         </div>
                                     </div>
                                     <button class="est-icon-btn est-toggle-right-btn" id="estToolbarToggleRight" type="button" data-est-action="toggle-right"
@@ -2058,14 +2108,24 @@ $state = [
     <!-- Customer Information Modal -->
     <div class="pd-modal-backdrop" id="pdCustomerModal" role="dialog" aria-modal="true"
         aria-labelledby="customerModalTitle">
-        <div class="pd-modal">
+        <div class="pd-modal pd-customer-modal">
             <div class="pd-modal-head">
                 <h3 id="customerModalTitle"><i class="far fa-id-badge" style="color: var(--primary);"></i> Customer
                     Information</h3>
-                <button class="pd-modal-head-close" type="button" data-close-modal="pdCustomerModal"
-                    aria-label="Close">&times;</button>
+                <div class="pd-modal-head-actions">
+                    <button type="button" class="pd-customer-head-dir-btn" id="openCustomerDirectoryBtn"
+                        title="Open Customer Directory (View, Edit &amp; Delete)">
+                        <i class="fas fa-address-book"></i> <span>Directory</span>
+                    </button>
+                    <button class="pd-modal-head-close" type="button" data-close-modal="pdCustomerModal"
+                        aria-label="Close">&times;</button>
+                </div>
             </div>
-            <div class="pd-modal-body">
+            <div class="pd-modal-body" id="pdCustomerFormView">
+                <div class="pd-customer-edit-banner overview-field full" id="pdCustomerEditBanner" hidden>
+                    <span><i class="fas fa-pen-to-square"></i> Editing directory record: <strong id="pdCustomerEditBannerName"></strong></span>
+                    <button type="button" class="pd-customer-edit-cancel" id="cancelEditDirectoryCustomerBtn">Cancel Edit</button>
+                </div>
                 <label class="overview-field full">
                     <span>Select Saved Customer</span>
                     <div style="display: flex; gap: 8px; align-items: center; margin-top: 2px;">
@@ -2097,7 +2157,17 @@ $state = [
                     <input id="poCustomerAddress" value="<?= htmlspecialchars($customerAddress) ?>">
                 </label>
             </div>
-            <div class="pd-modal-foot" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+            <div class="pd-modal-body pd-customer-directory-body" id="pdCustomerDirectoryView" hidden>
+                <div class="pd-customer-dir-toolbar">
+                    <div class="pd-customer-dir-search-wrap">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="poCustomerDirectorySearch" placeholder="Search company, contact, phone, email...">
+                    </div>
+                    <span class="pd-customer-dir-count" id="poCustomerDirectoryCount">0 customers</span>
+                </div>
+                <div class="pd-customer-dir-list" id="poCustomerDirectoryList"></div>
+            </div>
+            <div class="pd-modal-foot pd-customer-foot-between" id="pdCustomerFormFoot">
                 <button type="button" class="btn-ghost" id="saveCustomerBtn"
                     title="Save this customer to database directory for use in other projects"
                     style="color: var(--primary, #ea580c); font-weight: 600;">
@@ -2107,6 +2177,17 @@ $state = [
                     <button type="button" class="btn-ghost" data-close-modal="pdCustomerModal">Cancel</button>
                     <button type="button" class="btn-main orange" id="applyCustomerModalBtn"><i class="fas fa-check"></i>
                         Apply &amp; Close</button>
+                </div>
+            </div>
+            <div class="pd-modal-foot pd-customer-foot-between" id="pdCustomerDirectoryFoot" hidden>
+                <button type="button" class="btn-ghost" id="customerDirectoryBackBtn">
+                    <i class="fas fa-arrow-left"></i> Back to Form
+                </button>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button type="button" class="btn-ghost" id="customerDirectoryNewBtn">
+                        <i class="fas fa-plus"></i> New Customer
+                    </button>
+                    <button type="button" class="btn-main orange" data-close-modal="pdCustomerModal">Done</button>
                 </div>
             </div>
         </div>
@@ -2331,16 +2412,15 @@ $state = [
                 document.addEventListener('DOMContentLoaded', function () {
                     var mutationSelectors = [
                         '#saveProjectBtn','#projectStatusButton','#markAsWonBtn','#retryWonExportBtn',
-                        '#saveCustomerBtn','#editCustomerInfoBtn','#editProjectAddressBtn','#addProjectAddressBtn','#addNoteBtnHead',
+                        '#saveCustomerBtn','#clearCustomerBtn','#customerDirectoryNewBtn','#editCustomerInfoBtn','#editProjectAddressBtn','#addProjectAddressBtn','#addNoteBtnHead',
                         '#docUploadArrowBtn','[data-doc-folder-action]','[data-doc-action="delete"]','[data-doc-action="move"]',
                         '[data-subhead-item-action]','[data-est-subhead-action]','[data-scale-apply-manual]','[data-scale-clear-line]','#takeoffScaleApplyBtn',
                         '[data-takeoff-action="create-layer"]','[data-takeoff-action="create-group"]',
                         '[data-tool-command="count"]','[data-tool-command="linear"]','[data-tool-command="area"]',
                         '[data-tool-command="measure"]','[data-tool-command="text"]','[data-tool-command="cloud"]',
                         '[data-tool-command="undo"]','[data-tool-command="redo"]',
-                        '[data-est-action="create-group"]','[data-est-action="reset-quantities"]','[data-est-action="delete-selected"]',
-                        '[data-est-option="save"]','[data-est-option="copy"]','[data-est-option="status"]',
-                        '[data-est-option="import"]','[data-est-option="delete-estimate"]','[data-editor-cmd]'
+                        '[data-est-action="create-group"]','[data-est-action="reset-quantities"]','#optionsMenu button[data-est-action]',
+                        '#estBtnImport','[data-est-option="import"]','[data-editor-cmd]','[data-project-action]'
                     ];
                     document.querySelectorAll(mutationSelectors.join(',')).forEach(function (element) {
                         element.hidden = true;
@@ -2349,7 +2429,7 @@ $state = [
                     });
                 });
                 document.addEventListener('click', function (event) {
-                    var target = event.target?.closest?.('[data-subhead-item-action],[data-est-subhead-action],[data-doc-folder-action],[data-takeoff-action],[data-scale-apply-manual],[data-scale-clear-line],[data-est-action],[data-est-option],[data-editor-cmd],#saveProjectBtn,#projectStatusButton,#markAsWonBtn,#retryWonExportBtn,#docUploadArrowBtn');
+                    var target = event.target?.closest?.('[data-project-action],[data-subhead-item-action],[data-est-subhead-action],[data-doc-folder-action],[data-takeoff-action],[data-scale-apply-manual],[data-scale-clear-line],[data-est-action],[data-est-option],[data-editor-cmd],#saveProjectBtn,#projectStatusButton,#markAsWonBtn,#retryWonExportBtn,#docUploadArrowBtn');
                     if (!target) return;
                     event.preventDefault(); event.stopImmediatePropagation();
                 }, true);

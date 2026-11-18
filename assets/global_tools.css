@@ -1686,7 +1686,7 @@ body.header-is-collapsed .bb-pipeline-tabs-wrapper {
 .g-announcement-backdrop {
     position: fixed;
     inset: 0;
-    z-index: 1000100 !important;
+    z-index: 2147483647 !important;
     background: rgba(15, 23, 42, 0.65);
     backdrop-filter: blur(6px);
     -webkit-backdrop-filter: blur(6px);
@@ -1700,6 +1700,7 @@ body.header-is-collapsed .bb-pipeline-tabs-wrapper {
 }
 
 .g-announcement-backdrop.open {
+    z-index: 2147483647 !important;
     opacity: 1;
     visibility: visible;
 }

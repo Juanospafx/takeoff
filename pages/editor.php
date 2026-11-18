@@ -1720,6 +1720,8 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
 
         window.addEventListener('contextmenu', e => e.preventDefault());
 
+        let hasInitialPdfFit = false;
+
         function resize() {
             const w = document.getElementById('canvas-wrapper');
             if (!w || w.clientWidth <= 0 || w.clientHeight <= 0) return;
@@ -1732,7 +1734,12 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
                 syncKonvaToFabric();
             }
             if (pdfDoc && pdfWorldWidth && pdfWorldHeight) {
-                fitPdfToView(true);
+                if (!hasInitialPdfFit) {
+                    fitPdfToView(true);
+                } else {
+                    // Keep the user's zoom level and pan position intact when panels/aside resize the viewport.
+                    fitPdfToView(false, { preserveViewport: true });
+                }
                 schedulePdfRerender();
             }
         }
@@ -1754,7 +1761,11 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             if (pdfDoc && !canvas.backgroundImage && !isRenderingPage) {
                 renderPage(pageNum, true);
             } else if (pdfDoc) {
-                fitPdfToView(true);
+                if (!hasInitialPdfFit) {
+                    fitPdfToView(true);
+                } else {
+                    fitPdfToView(false, { preserveViewport: true });
+                }
                 schedulePdfRerender();
             }
             syncKonvaToFabric();
@@ -3496,7 +3507,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             return wrapperSizePromise;
         }
 
-        function fitPdfToView(force = false) {
+        function fitPdfToView(force = false, options = {}) {
             if (!pdfWorldWidth || !pdfWorldHeight || !wrapperHasSize()) return;
             const w = getCanvasWrapper();
             const availableW = Math.max(120, w.clientWidth - PDF_PADDING * 2);
@@ -3504,8 +3515,12 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             const nextFit = Math.min(availableW / pdfWorldWidth, availableH / pdfWorldHeight);
             if (!isFinite(nextFit) || nextFit <= 0) return;
             pdfFitZoom = nextFit;
+            if (options && options.preserveViewport) {
+                return;
+            }
             if (force || Math.abs(canvas.getZoom() - nextFit) < 0.02 || canvas.getZoom() === 1) {
                 centerPdfAtZoom(nextFit);
+                hasInitialPdfFit = true;
             }
         }
 

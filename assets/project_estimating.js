@@ -30,7 +30,8 @@
     const ui = { search: '', selected: new Set(), saving: false, saveRequested: false, saveTimer: null, pendingDeleteId: null, lastErrorCode: null, loadState: projectId ? 'loading' : 'local',
         message: projectId ? 'Loading estimate' : 'Local draft', collapsed: { notes: true, audit: true }, expandedAssemblies: new Set(), modal: null,
         notesLibraryModal: null, notesLibrarySearch: '', activeMarkupPopover: null, summaryColWidths: (()=>{ try { return JSON.parse(localStorage.getItem('takeoff.summaryColWidths')||'{}'); } catch(_){ return {}; } })(),
-        catalogTargetGroupId: null, catalogData: null, catalogLoading: false, catalogError: '' };
+        catalogTargetGroupId: null, catalogData: null, catalogLoading: false, catalogError: '',
+        importFile: null, importMode: 'keep_excel', importName: '', importError: '', importing: false };
     let state = readLocal();
     const dirtyEstimateIds = new Set(state.dirtyEstimateIds || []);
     const takeoffSyncDirtyIds = new Set(state.takeoffSyncDirtyIds || []);
@@ -56,12 +57,63 @@
 
     root.classList.add('est-v2');
     if (!$('estTableHead')) {
-        root.innerHTML = `<div class="est-main"><aside class="est-table-settings-drawer" id="estTableSettingsDrawer" aria-label="Table Settings" hidden></aside><section class="est-left"><div class="est-toolbar"><div class="bb-search-field-procore cc-search-procore est-search-box"><input id="estSearch" type="search" placeholder="Search estimate items..." autocomplete="off"></div><div class="est-toolbar-actions" style="display: flex; align-items: center; gap: 8px; margin-left: auto;"><button class="est-icon-btn" id="estBtnCreateGroup" type="button" data-est-action="create-group" title="Create Group"><i class="fas fa-folder-plus"></i></button><button class="est-icon-btn" id="estBtnTableSettings" type="button" data-est-action="table-settings" title="Table Settings"><i class="fas fa-sliders"></i></button><button class="est-icon-btn" id="estBtnFullscreen" type="button" data-est-action="fullscreen" title="Full screen"><i class="fas fa-expand"></i></button><div class="est-menu-wrap"><button class="est-icon-btn" id="estBtnMoreOptions" type="button" data-est-action="options" title="Options"><i class="fas fa-ellipsis-vertical"></i></button><div class="est-menu" id="optionsMenu"><button type="button" data-est-action="catalog-update"><i class="fas fa-arrows-rotate"></i> Update from Cost Catalog</button><button type="button" data-est-action="reset-quantities"><i class="fas fa-rotate-left"></i> Reset Quantities</button><button type="button" data-est-action="delete-selected" id="estBtnDeleteSelected" disabled><i class="fas fa-trash"></i> Delete Selected</button><div class="est-menu-divider" style="height: 1px; background: var(--border, #e2e8f0); margin: 4px 0;"></div><button type="button" data-est-option="save"><i class="fas fa-floppy-disk"></i> Save estimate</button><button type="button" data-est-option="copy"><i class="fas fa-copy"></i> Copy estimate</button><button type="button" data-est-option="status"><i class="fas fa-circle-check"></i> Change project status</button><button type="button" data-est-option="import"><i class="fas fa-file-import"></i> Import</button><button type="button" data-est-option="export"><i class="fas fa-file-export"></i> Export</button><button type="button" data-est-option="export-bom"><i class="fas fa-file-excel"></i> Export BOM (Excel)</button><button type="button" data-est-option="delete-estimate" class="danger"><i class="fas fa-trash"></i> Delete estimate</button></div></div><button class="est-icon-btn est-toggle-right-btn" id="estToolbarToggleRight" type="button" data-est-action="toggle-right" title="Hide summary panel"><i class="fas fa-chevron-right"></i></button></div></div><div class="est-table-wrap bb-table-scroll"><table class="est-table bb-table" id="estMainTable"><thead id="estTableHead"></thead><tbody id="estTableBody"></tbody></table></div></section><div class="pro-sidebar-resizer est-sidebar-resizer" id="estSplitResizer" role="separator" aria-orientation="vertical" title="Drag to resize panels"><div class="pro-resizer-handle"></div></div><aside class="est-right"><div class="est-right-scroll"></div><div class="est-total-box"><div id="estimateTotal" class="est-total-value"></div><div class="est-total-label">Estimate Total</div><div id="estimateSqft" class="est-total-sub"></div></div></aside></div><footer class="est-version-bar" id="versionBar"></footer>`;
+        root.innerHTML = `<div class="est-main"><aside class="est-table-settings-drawer" id="estTableSettingsDrawer" aria-label="Table Settings" hidden></aside><section class="est-left"><div class="est-toolbar"><div class="bb-search-field-procore cc-search-procore est-search-box"><input id="estSearch" type="search" placeholder="Search estimate items..." autocomplete="off"></div><div class="est-toolbar-actions" style="display: flex; align-items: center; gap: 8px; margin-left: auto;"><button class="btn-main est-toolbar-btn est-btn-import" id="estBtnImport" type="button" data-est-option="import" title="Import Project Estimate (.xlsx)"><i class="fas fa-file-import"></i> <span>Import</span></button><button class="btn-main est-toolbar-btn est-btn-export" id="estBtnExport" type="button" data-est-option="export" title="Export Estimate"><i class="fas fa-file-export"></i> <span>Export</span></button><button class="est-icon-btn" id="estBtnCreateGroup" type="button" data-est-action="create-group" title="Create Group"><i class="fas fa-folder-plus"></i></button><button class="est-icon-btn" id="estBtnTableSettings" type="button" data-est-action="table-settings" title="Table Settings"><i class="fas fa-sliders"></i></button><button class="est-icon-btn" id="estBtnFullscreen" type="button" data-est-action="fullscreen" title="Full screen"><i class="fas fa-expand"></i></button><div class="est-menu-wrap"><button class="est-icon-btn" id="estBtnMoreOptions" type="button" data-est-action="options" title="Options"><i class="fas fa-ellipsis-vertical"></i></button><div class="est-menu" id="optionsMenu"><button type="button" data-est-action="catalog-update"><i class="fas fa-arrows-rotate"></i> Update from Cost Catalog</button><button type="button" data-est-action="reset-quantities"><i class="fas fa-rotate-left"></i> Reset Quantities</button></div></div><button class="est-icon-btn est-toggle-right-btn" id="estToolbarToggleRight" type="button" data-est-action="toggle-right" title="Hide summary panel"><i class="fas fa-chevron-right"></i></button></div></div><div class="est-table-wrap bb-table-scroll"><table class="est-table bb-table" id="estMainTable"><thead id="estTableHead"></thead><tbody id="estTableBody"></tbody></table></div></section><div class="pro-sidebar-resizer est-sidebar-resizer" id="estSplitResizer" role="separator" aria-orientation="vertical" title="Drag to resize panels"><div class="pro-resizer-handle"></div></div><aside class="est-right"><div class="est-right-scroll"></div><div class="est-total-box"><div id="estimateTotal" class="est-total-value"></div><div class="est-total-label">Estimate Total</div><div id="estimateSqft" class="est-total-sub"></div></div></aside></div><footer class="est-version-bar" id="versionBar"></footer>`;
+    }
+
+    function safeSetLocalStorage(key, value) {
+        try {
+            localStorage.setItem(key, value);
+            return true;
+        } catch (err) {
+            try {
+                const currentProjectStr = String(projectId || 'draft');
+                const evictable = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i);
+                    if (!k || k === key) continue;
+                    if ((k.startsWith('takeoff.estimating.module.') && k !== `takeoff.estimating.module.${currentProjectStr}`)
+                        || (k.startsWith('takeoff_project_groups_') && k !== `takeoff_project_groups_${currentProjectStr}`)) {
+                        evictable.push(k);
+                    }
+                }
+                evictable.forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+                localStorage.setItem(key, value);
+                return true;
+            } catch (_) {
+                return false;
+            }
+        }
     }
 
     function readLocal() {
         let raw = null;
         try { raw = JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch (_) {}
+        if (!raw && projectId > 0) {
+            const psActiveId = String(window.ProjectState?.activeEstimateId || '');
+            const psSummary = Array.isArray(window.ProjectState?.estimatesSummary) ? window.ProjectState.estimatesSummary : [];
+            const seedItems = window.ProjectState?.estimateItems || [];
+            if (psSummary.length > 0) {
+                raw = {
+                    activeEstimateId: (psActiveId && psActiveId !== 'est_primary') ? psActiveId : psSummary[0].id,
+                    estimates: psSummary.map((row, idx) => ({
+                        id: String(row.id),
+                        dbEstimateId: row.dbEstimateId || null,
+                        name: row.name || (idx === 0 ? 'Primary Estimate' : `Estimate ${idx + 1}`),
+                        isPrimary: Boolean(row.isPrimary || row.is_primary),
+                        is_primary: Boolean(row.isPrimary || row.is_primary),
+                        isActive: Boolean(row.isActive || String(row.id) === psActiveId),
+                        estimateTotal: Number(row.estimateTotal || row.totalSales || 0),
+                        totalSales: Number(row.totalSales || row.estimateTotal || 0),
+                        groups: idx === 0 && seedItems.length ? undefined : []
+                    }))
+                };
+            } else if (psActiveId && psActiveId !== 'est_primary') {
+                raw = {
+                    activeEstimateId: psActiveId,
+                    estimates: [{ id: psActiveId, name: 'Primary Estimate', isPrimary: true, is_primary: true, isActive: true }]
+                };
+            }
+        }
         return Workspace.workspace(raw || {}, projectId, window.ProjectState?.estimateItems || []);
     }
 
@@ -164,32 +216,32 @@
         portal.dataset.estSqftPortal = 'true';
         portal.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(4px); z-index: 999999;';
         portal.innerHTML = `
-            <div class="pd-modal bb-create-project-modal bb-studio-modal notes-lib-modal" style="width: min(440px, 100%); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true">
-                <div class="bb-studio-modal-header" style="padding: 16px 20px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
+            <div class="pd-modal bb-create-project-modal bb-studio-modal notes-lib-modal" style="width: min(440px, 100%); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true">
+                <div class="pd-modal-head bb-studio-modal-header" style="padding: 16px 20px; display: flex; align-items: center; justify-content: space-between;">
                     <div style="display: flex; align-items: center; gap: 12px;">
-                        <div class="notes-lib-badge" style="width: 36px; height: 36px; border-radius: 8px; background: rgba(37,99,235,0.1); color: #2563eb; display: flex; align-items: center; justify-content: center; font-size: 16px;">
+                        <div class="notes-lib-badge" style="width: 36px; height: 36px; border-radius: 8px; background: rgba(37,99,235,0.12); color: #3b82f6; display: flex; align-items: center; justify-content: center; font-size: 16px;">
                             <i class="fas fa-ruler-combined"></i>
                         </div>
                         <div>
-                            <h3 style="margin: 0; font-size: 15px; font-weight: 600; color: var(--text-main, #0f172a);">Project Square Footage</h3>
-                            <p style="margin: 2px 0 0; font-size: 12px; color: var(--text-muted, #64748b);">Gross area for $/sq ft cost and sales metrics</p>
+                            <h3 style="margin: 0; font-size: 15px; font-weight: 600;">Project Square Footage</h3>
+                            <p class="est-modal-sub" style="margin: 2px 0 0; font-size: 12px;">Gross area for $/sq ft cost and sales metrics</p>
                         </div>
                     </div>
-                    <button type="button" data-close-sqft-modal style="border: none; background: transparent; font-size: 20px; line-height: 1; cursor: pointer; color: var(--text-muted, #94a3b8);">&times;</button>
+                    <button type="button" class="pd-modal-head-close" data-close-sqft-modal style="border: none; background: transparent; font-size: 20px; line-height: 1; cursor: pointer;">&times;</button>
                 </div>
-                <div style="padding: 20px;">
-                    <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-muted, #475569); margin-bottom: 6px;">Total Gross Area (sq ft)</label>
+                <div class="pd-modal-body" style="padding: 20px;">
+                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px;">Total Gross Area (sq ft)</label>
                     <div style="position: relative; display: flex; align-items: center;">
-                        <input id="estSqftModalInput" type="number" step="any" min="0" value="${currentSqft > 0 ? currentSqft : ''}" placeholder="e.g. 5000" style="width: 100%; height: 42px; border: 1.5px solid var(--border, #cbd5e1); border-radius: 8px; padding: 0 54px 0 12px; font-size: 15px; font-weight: 600; background: var(--bg-surface, #f8fafc); color: var(--text-main, #0f172a); outline: none;">
-                        <span style="position: absolute; right: 12px; font-size: 12px; font-weight: 600; color: #2563eb; background: rgba(37,99,235,0.1); padding: 2px 6px; border-radius: 4px;">sq ft</span>
+                        <input id="estSqftModalInput" class="est-modal-input" type="number" step="any" min="0" value="${currentSqft > 0 ? currentSqft : ''}" placeholder="e.g. 5000" style="width: 100%; height: 42px; border-radius: 8px; padding: 0 54px 0 12px; font-size: 15px; font-weight: 600; outline: none;">
+                        <span style="position: absolute; right: 12px; font-size: 12px; font-weight: 600; color: #3b82f6; background: rgba(37,99,235,0.12); padding: 2px 6px; border-radius: 4px;">sq ft</span>
                     </div>
-                    <div style="margin-top: 10px; font-size: 11.5px; color: var(--text-muted, #64748b);">
+                    <div class="est-modal-sub" style="margin-top: 10px; font-size: 11.5px;">
                         Updating this value recalculates the price per square foot across the entire estimate summary without altering item costs.
                     </div>
                 </div>
-                <div style="padding: 12px 20px; border-top: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: flex-end; gap: 8px; background: var(--bg-surface, #f8fafc);">
-                    <button type="button" class="pd-btn pd-btn-secondary" data-close-sqft-modal style="padding: 7px 14px; font-size: 13px; border-radius: 6px;">Cancel</button>
-                    <button type="button" class="pd-btn pd-btn-primary orange" id="estSaveSqftBtn" style="padding: 7px 16px; font-size: 13px; border-radius: 6px; background: #ea580c; color: #fff; border: none; font-weight: 600; cursor: pointer;">Save Area</button>
+                <div class="pd-modal-foot" style="padding: 12px 20px; display: flex; align-items: center; justify-content: flex-end; gap: 8px;">
+                    <button type="button" class="btn-ghost pd-btn pd-btn-secondary" data-close-sqft-modal style="padding: 7px 14px; font-size: 13px; border-radius: 6px; cursor: pointer;">Cancel</button>
+                    <button type="button" class="btn-main orange pd-btn pd-btn-primary" id="estSaveSqftBtn" style="padding: 7px 16px; font-size: 13px; border-radius: 6px; background: #ea580c; color: #fff; border: none; font-weight: 600; cursor: pointer;">Save Area</button>
                 </div>
             </div>`;
         document.body.appendChild(portal);
@@ -338,7 +390,7 @@
         state.clientUiUpdatedAt = Workspace.now();
         const stored = Workspace.clone(state);
         if (!stored.pendingProjectCreationSync) delete stored.pendingProjectCreationSync;
-        localStorage.setItem(storageKey, JSON.stringify(stored));
+        safeSetLocalStorage(storageKey, JSON.stringify(stored));
         if (options.publish !== false) publish();
     }
 
@@ -841,6 +893,15 @@
             if (!localHasContent && remoteHasContent) {
                 dirtyEstimateIds.clear();
                 state = remote;
+                try {
+                    const pendingEstId = sessionStorage.getItem(`takeoff.pendingActivateEstimateId.${projectId}`);
+                    if (pendingEstId) {
+                        sessionStorage.removeItem(`takeoff.pendingActivateEstimateId.${projectId}`);
+                        if (state.estimates.some(row => String(row.id) === String(pendingEstId))) {
+                            Workspace.selectEstimate(state, pendingEstId);
+                        }
+                    }
+                } catch (_) {}
                 restoreDirtyTracking();
                 saveLocal();
                 ui.loadState = 'saved';
@@ -887,6 +948,15 @@
                 saveLocal();
             } else if (Array.isArray(remoteSource.estimates) && remoteSource.estimates.length) {
                 state = remote;
+                try {
+                    const pendingEstId = sessionStorage.getItem(`takeoff.pendingActivateEstimateId.${projectId}`);
+                    if (pendingEstId) {
+                        sessionStorage.removeItem(`takeoff.pendingActivateEstimateId.${projectId}`);
+                        if (state.estimates.some(row => String(row.id) === String(pendingEstId))) {
+                            Workspace.selectEstimate(state, pendingEstId);
+                        }
+                    }
+                } catch (_) {}
                 restoreDirtyTracking();
             }
             ui.loadState = 'saved';
@@ -1012,6 +1082,8 @@
                     updated.pendingTakeoffQuantity = measured;
                     updated.quantityOverride = true;
                     updated.quantitySyncStatus = 'overridden';
+                    if (match.quantityOverrideSource) updated.quantityOverrideSource = match.quantityOverrideSource;
+                    if (match.origin) updated.origin = match.origin;
                 }
                 return updated;
             })
@@ -1157,7 +1229,8 @@
         const widths = getColumnWidths();
         widths[colId] = Math.max(60, Math.round(widthPx));
         try {
-            localStorage.setItem(COLUMNS_WIDTHS_STORAGE_KEY, JSON.stringify(widths));
+            const saveCol = safeSetLocalStorage(COLUMNS_WIDTHS_STORAGE_KEY, JSON.stringify(widths));
+            void saveCol;
         } catch (_) {}
     }
 
@@ -1179,9 +1252,9 @@
     function saveVisibleColumns(colSet, applyAll = false) {
         const list = Array.from(colSet);
         try {
-            localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(list));
+            safeSetLocalStorage(COLUMNS_STORAGE_KEY, JSON.stringify(list));
             if (applyAll) {
-                localStorage.setItem('takeoff.estimating.columns.default', JSON.stringify(list));
+                safeSetLocalStorage('takeoff.estimating.columns.default', JSON.stringify(list));
             }
         } catch (_) {}
     }
@@ -1215,9 +1288,7 @@
     }
 
     function saveColumnsOrder(orderedIds) {
-        try {
-            localStorage.setItem(COLUMNS_ORDER_STORAGE_KEY, JSON.stringify(orderedIds));
-        } catch (_) {}
+        safeSetLocalStorage(COLUMNS_ORDER_STORAGE_KEY, JSON.stringify(orderedIds));
     }
 
     function findTakeoffLayer(item) {
@@ -1806,6 +1877,7 @@
                         item.quantityOverride = false;
                         item.pendingTakeoffQuantity = null;
                         item.quantitySyncStatus = item.takeoffLayerId ? 'synced' : 'manual';
+                        delete item.quantityOverrideSource;
                     });
                     changed(`Reset quantities for group "${grp.name}"`);
                 }
@@ -1875,6 +1947,7 @@
                 found.item.quantityOverride = false;
                 found.item.pendingTakeoffQuantity = null;
                 found.item.quantitySyncStatus = found.item.takeoffLayerId ? 'synced' : 'manual';
+                delete found.item.quantityOverrideSource;
                 changed(`Reset quantity for "${found.item.name}" (${formatAuditVal(prevQty, 'qty', found.item.uom)} -> ${formatAuditVal(nextQty, 'qty', found.item.uom)})`);
             } else if (act === 'reset-budget-code') {
                 found.item.costCode = '16-1...';
@@ -3024,7 +3097,7 @@
 
     function saveExclusionPresets(list) {
         try {
-            localStorage.setItem(EXCLUSION_PRESETS_KEY, JSON.stringify(list));
+            safeSetLocalStorage(EXCLUSION_PRESETS_KEY, JSON.stringify(list));
         } catch (_) {}
     }
 
@@ -3059,7 +3132,7 @@
 
     function saveInclusionPresets(list) {
         try {
-            localStorage.setItem(INCLUSION_PRESETS_KEY, JSON.stringify(list));
+            safeSetLocalStorage(INCLUSION_PRESETS_KEY, JSON.stringify(list));
         } catch (_) {}
     }
 
@@ -3469,22 +3542,22 @@
         backdrop.id = 'notesLibraryModalBackdrop';
         backdrop.className = 'pd-modal-backdrop open';
         backdrop.innerHTML = `
-            <div class="bb-create-project-modal bb-studio-modal pd-modal notes-lib-modal" style="width: min(720px, 95vw); max-height: min(84vh, 740px); border-radius: 12px; overflow: hidden; background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); box-shadow: 0 24px 80px rgba(15, 23, 42, 0.35); display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="notesLibModalTitle">
-                <div class="pd-modal-head bb-modal-head" style="padding: 14px 22px; border-bottom: 1px solid var(--border-soft, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff); flex-shrink: 0;">
+            <div class="bb-create-project-modal bb-studio-modal pd-modal notes-lib-modal" style="width: min(720px, 95vw); max-height: min(84vh, 740px); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="notesLibModalTitle">
+                <div class="pd-modal-head bb-modal-head" style="padding: 14px 22px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;">
                     <div style="display: flex; align-items: center; gap: 12px;">
-                        <div class="bb-modal-icon-badge" style="width: 36px; height: 36px; border-radius: 8px; background: rgba(37, 99, 235, 0.1); border: 1px solid rgba(37, 99, 235, 0.25); color: #2563eb; display: grid; place-items: center; font-size: 16px; flex: 0 0 36px;">
+                        <div class="bb-modal-icon-badge" style="width: 36px; height: 36px; border-radius: 8px; background: rgba(37, 99, 235, 0.12); border: 1px solid rgba(37, 99, 235, 0.28); color: #3b82f6; display: grid; place-items: center; font-size: 16px; flex: 0 0 36px;">
                             <i class="fas fa-clipboard-list"></i>
                         </div>
                         <div>
-                            <h3 id="notesLibModalTitle" style="margin: 0; font-size: 15px; font-weight: 700; color: var(--text-main, #0f172a); line-height: 1.3;">Notes Library & Presets</h3>
-                            <span style="font-size: 12px; color: var(--text-muted, #64748b);">Manage and insert reusable note templates for inclusions and exclusions</span>
+                            <h3 id="notesLibModalTitle" style="margin: 0; font-size: 15px; font-weight: 700; line-height: 1.3;">Notes Library & Presets</h3>
+                            <span class="est-modal-sub" style="font-size: 12px;">Manage and insert reusable note templates for inclusions and exclusions</span>
                         </div>
                     </div>
-                    <button class="pd-modal-head-close" type="button" data-close-notes-lib aria-label="Close" style="border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--text-muted, #64748b);">&times;</button>
+                    <button class="pd-modal-head-close" type="button" data-close-notes-lib aria-label="Close" style="border: none; background: transparent; font-size: 18px; cursor: pointer;">&times;</button>
                 </div>
                 
                 <!-- Category switch & Search bar (Matching Procore / Bid Board) -->
-                <div class="notes-lib-subhead" style="padding: 12px 22px; background: var(--bg-subtle, #f8fafc); border-bottom: 1px solid var(--border-soft, #e2e8f0); display: flex; flex-direction: column; gap: 10px; flex-shrink: 0;">
+                <div class="notes-lib-subhead" style="padding: 12px 22px; border-bottom: 1px solid var(--est-line-soft, #e2e8f0); display: flex; flex-direction: column; gap: 10px; flex-shrink: 0;">
                     <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
                         <div class="bb-filter-pills" style="display: inline-flex; gap: 6px; padding: 3px; background: var(--bg-input, #f1f5f9); border: 1px solid var(--border, #cbd5e1); border-radius: 8px;">
                             <button type="button" class="notes-lib-pill ${!isExcluded ? 'is-active' : ''}" data-notes-lib-tab="included">
@@ -3533,8 +3606,8 @@
                     </div>
                 </div>
 
-                <div class="pd-modal-foot bb-modal-foot" style="padding: 12px 22px; border-top: 1px solid var(--border-soft, #e2e8f0); display: flex; align-items: center; justify-content: flex-end; background: var(--bg-panel, #ffffff); flex-shrink: 0;">
-                    <button type="button" class="btn-ghost" data-close-notes-lib style="height: 32px; padding: 0 16px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--text-main, #0f172a);">Close</button>
+                <div class="pd-modal-foot bb-modal-foot" style="padding: 12px 22px; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0;">
+                    <button type="button" class="btn-ghost" data-close-notes-lib style="height: 32px; padding: 0 16px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600;">Close</button>
                 </div>
             </div>
         `;
@@ -3712,75 +3785,75 @@ function renderFooter() {
         portal.className = 'pd-modal-backdrop open';
         portal.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(4px); z-index: 999999;';
         if (ui.modal === 'new') {
-            portal.innerHTML = `<div class="bb-create-project-modal bb-studio-modal pd-modal est-dialog est-copy-modal" style="width: min(480px, 92vw); border-radius: 12px; overflow: hidden; background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); box-shadow: 0 20px 60px rgba(15, 23, 42, 0.28); display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="copyEstimateTitle">
-                <div class="bb-modal-head" style="padding: 12px 18px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
+            portal.innerHTML = `<div class="bb-create-project-modal bb-studio-modal pd-modal est-dialog est-copy-modal" style="width: min(480px, 92vw); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="copyEstimateTitle">
+                <div class="pd-modal-head bb-modal-head" style="padding: 12px 18px; display: flex; align-items: center; justify-content: space-between;">
                     <div style="display: flex; align-items: center; gap: 12px;">
-                        <div class="bb-modal-icon-badge" style="width: 34px; height: 34px; border-radius: 8px; background: #fff7ed; border: 1px solid #fed7aa; color: #fb5a3a; display: grid; place-items: center; font-size: 15px; flex: 0 0 34px;">
+                        <div class="bb-modal-icon-badge est-modal-icon-badge" style="width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; font-size: 15px; flex: 0 0 34px;">
                             <i class="fas fa-calculator"></i>
                         </div>
                         <div>
-                            <strong id="copyEstimateTitle" class="bb-modal-heading" style="display: block; font-size: 14.5px; font-weight: 700; color: var(--text-main, #0f172a); line-height: 1.25;">New Estimate Version</strong>
-                            <span class="bb-modal-subheading" style="display: block; font-size: 11.5px; color: var(--text-muted, #64748b); margin-top: 1px;">Create an independent bid estimate version for this project</span>
+                            <strong id="copyEstimateTitle" class="bb-modal-heading" style="display: block; font-size: 14.5px; font-weight: 700; line-height: 1.25;">New Estimate Version</strong>
+                            <span class="bb-modal-subheading est-modal-sub" style="display: block; font-size: 11.5px; margin-top: 1px;">Create an independent bid estimate version for this project</span>
                         </div>
                     </div>
-                    <button class="bb-icon-btn bordered" type="button" data-close-modal aria-label="Close" style="width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border, #e2e8f0); background: transparent; cursor: pointer; color: var(--text-muted, #64748b); display: grid; place-items: center; font-size: 13px; transition: all .15s ease;">
+                    <button class="pd-modal-head-close bb-icon-btn bordered" type="button" data-close-modal aria-label="Close" style="width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; font-size: 13px; cursor: pointer; transition: all .15s ease;">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
-                <div class="bb-modal-body" /* class="est-copy-body" */ style="padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; background: var(--bg-panel, #ffffff);">
-                    <div class="bb-form-group" /* class="est-copy-name" */ style="display: flex; flex-direction: column; gap: 4px;">
-                        <label class="bb-form-label" for="copyEstimateName" style="font-size: 11.5px; font-weight: 600; color: var(--text-main, #0f172a); display: flex; align-items: center; gap: 4px;">
+                <div class="pd-modal-body bb-modal-body" style="padding: 14px 18px; display: flex; flex-direction: column; gap: 12px;">
+                    <div class="bb-form-group" style="display: flex; flex-direction: column; gap: 4px;">
+                        <label class="bb-form-label" for="copyEstimateName" style="font-size: 11.5px; font-weight: 600; display: flex; align-items: center; gap: 4px;">
                             <span>Estimate Name</span>
                             <span style="color: #fb5a3a; font-weight: 700;">*</span>
                         </label>
                         <div class="bb-input-icon-wrap" style="position: relative; display: flex; align-items: center;">
-                            <i class="fas fa-file-invoice-dollar" style="position: absolute; left: 11px; color: var(--text-muted, #94a3b8); font-size: 13px; pointer-events: none;"></i>
-                            <input id="copyEstimateName" class="bb-input-control" type="text" value="${esc(current().name)} Copy" autocomplete="off" placeholder="e.g. Base Bid Copy" style="width: 100%; box-sizing: border-box; height: 35px; padding: 6px 10px 6px 33px; border: 1px solid var(--border, #cbd5e1); border-radius: 7px; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a); font-size: 12.5px; outline: none; transition: border-color .15s ease, box-shadow .15s ease;">
+                            <i class="fas fa-file-invoice-dollar" style="position: absolute; left: 11px; opacity: 0.65; font-size: 13px; pointer-events: none;"></i>
+                            <input id="copyEstimateName" class="bb-input-control est-modal-input" type="text" value="${esc(current().name)} Copy" autocomplete="off" placeholder="e.g. Base Bid Copy" style="width: 100%; box-sizing: border-box; height: 35px; padding: 6px 10px 6px 33px; border-radius: 7px; font-size: 12.5px; outline: none; transition: border-color .15s ease, box-shadow .15s ease;">
                         </div>
-                        <div class="bb-input-hint" style="font-size: 10.5px; color: var(--text-muted, #64748b);">Unique name displayed across tabs, client summaries, and proposals.</div>
+                        <div class="bb-input-hint est-modal-sub" style="font-size: 10.5px;">Unique name displayed across tabs, client summaries, and proposals.</div>
                     </div>
 
                     <div class="est-copy-name" style="display:contents"></div><div class="bb-form-group" style="display: flex; flex-direction: column; gap: 6px;">
-                        <label class="bb-form-label" style="font-size: 11.5px; font-weight: 600; color: var(--text-main, #0f172a); display: flex; align-items: center; gap: 5px;">
+                        <label class="bb-form-label" style="font-size: 11.5px; font-weight: 600; display: flex; align-items: center; gap: 5px;">
                             <i class="fas fa-shapes" style="color: #fb5a3a; font-size: 12px;"></i>
                             <span>Starting Configuration</span>
                         </label>
                         <div class="bb-studio-mode-stack" style="display: flex; flex-direction: column; gap: 7px;">
-                            <label class="bb-studio-card" /* class="est-copy-option" */ style="position: relative; border: 1.5px solid var(--border, #cbd5e1); border-radius: 8px; padding: 8px 12px; background: var(--bg-panel, #ffffff); cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all .15s ease;">
+                            <label class="bb-studio-card est-copy-option est-modal-card" style="position: relative; border-radius: 8px; padding: 8px 12px; cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all .15s ease;">
                                 <input type="radio" name="copyEstimateMode" value="all" checked style="margin-top: 2px; accent-color: #fb5a3a; width: 14px; height: 14px;">
                                 <div style="flex: 1;">
                                     <div style="display: flex; align-items: center; gap: 7px;">
-                                        <strong style="font-size: 12.5px; color: var(--text-main, #0f172a);">Copy everything</strong>
-                                        <span style="display: inline-block; font-size: 9.5px; font-weight: 700; color: #fb5a3a; background: #fff7ed; border: 1px solid #fed7aa; padding: 1px 6px; border-radius: 999px;">Recommended</span>
+                                        <strong style="font-size: 12.5px;">Copy everything</strong>
+                                        <span class="est-recommended-pill" style="display: inline-block; font-size: 9.5px; font-weight: 700; padding: 1px 6px; border-radius: 999px;">Recommended</span>
                                     </div>
-                                    <small style="display: block; font-size: 11px; color: var(--text-muted, #64748b); margin-top: 1px; line-height: 1.3;">Start with a complete clone of groups, items, quantities, notes, materials and markups.</small>
+                                    <small class="est-modal-sub" style="display: block; font-size: 11px; margin-top: 1px; line-height: 1.3;">Start with a complete clone of groups, items, quantities, notes, materials and markups.</small>
                                 </div>
                             </label>
-                            <label class="est-copy-option bb-studio-card" style="position: relative; border: 1.5px solid var(--border, #cbd5e1); border-radius: 8px; padding: 8px 12px; background: var(--bg-panel, #ffffff); cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all .15s ease;">
+                            <label class="est-copy-option bb-studio-card est-modal-card" style="position: relative; border-radius: 8px; padding: 8px 12px; cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all .15s ease;">
                                 <input type="radio" name="copyEstimateMode" value="structure" style="margin-top: 2px; accent-color: #fb5a3a; width: 14px; height: 14px;">
                                 <div style="flex: 1;">
-                                    <strong style="display: block; font-size: 12.5px; color: var(--text-main, #0f172a);">Groups only</strong>
-                                    <small style="display: block; font-size: 11px; color: var(--text-muted, #64748b); margin-top: 1px; line-height: 1.3;">Keep the exact group hierarchy; items from Takeoff are not automatically pre-populated.</small>
+                                    <strong style="display: block; font-size: 12.5px;">Groups only</strong>
+                                    <small class="est-modal-sub" style="display: block; font-size: 11px; margin-top: 1px; line-height: 1.3;">Keep the exact group hierarchy; items from Takeoff are not automatically pre-populated.</small>
                                 </div>
                             </label>
-                            <label class="est-copy-option bb-studio-card" style="position: relative; border: 1.5px solid var(--border, #cbd5e1); border-radius: 8px; padding: 8px 12px; background: var(--bg-panel, #ffffff); cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all .15s ease;">
+                            <label class="est-copy-option bb-studio-card est-modal-card" style="position: relative; border-radius: 8px; padding: 8px 12px; cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all .15s ease;">
                                 <input type="radio" name="copyEstimateMode" value="blank" style="margin-top: 2px; accent-color: #fb5a3a; width: 14px; height: 14px;">
                                 <div style="flex: 1;">
-                                    <strong style="display: block; font-size: 12.5px; color: var(--text-main, #0f172a);">Blank estimate</strong>
-                                    <small style="display: block; font-size: 11px; color: var(--text-muted, #64748b); margin-top: 1px; line-height: 1.3;">Start with a fresh empty estimate. Ideal for value engineering alternates or custom bids.</small>
+                                    <strong style="display: block; font-size: 12.5px;">Blank estimate</strong>
+                                    <small class="est-modal-sub" style="display: block; font-size: 11px; margin-top: 1px; line-height: 1.3;">Start with a fresh empty estimate. Ideal for value engineering alternates or custom bids.</small>
                                 </div>
                             </label>
                         </div>
                     </div>
                 </div>
-                <div class="bb-modal-foot" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 18px; border-top: 1px solid var(--border, #e2e8f0); background: var(--bg-subtle, #f8fafc);">
-                    <div class="bb-modal-foot-info" style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted, #64748b);">
+                <div class="pd-modal-foot bb-modal-foot" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 18px;">
+                    <div class="bb-modal-foot-info est-modal-sub" style="display: flex; align-items: center; gap: 6px; font-size: 11px;">
                         <i class="fas fa-circle-check" style="color: #16a34a; font-size: 13px;"></i>
                         <span>Independent version with separate totals</span>
                     </div>
                     <div class="bb-modal-foot-actions" style="display: flex; align-items: center; gap: 8px;">
-                        <button class="bb-btn-procore-secondary" type="button" data-close-modal style="height: 32px; padding: 0 14px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: var(--bg-panel, #ffffff); color: var(--text-main, #334155); font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s ease;">Cancel</button>
-                        <button class="bb-btn-procore-primary" type="button" data-create-estimate data-est-action="create-estimate-copy" style="height: 32px; padding: 0 16px; border: none; border-radius: 6px; background: var(--tk-primary, #fb5a3a); color: #ffffff; font-size: 12px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(251, 90, 58, 0.3); transition: all .15s ease;">
+                        <button class="btn-ghost bb-btn-procore-secondary" type="button" data-close-modal style="height: 32px; padding: 0 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s ease;">Cancel</button>
+                        <button class="btn-main orange bb-btn-procore-primary" type="button" data-create-estimate data-est-action="create-estimate-copy" style="height: 32px; padding: 0 16px; border: none; border-radius: 6px; background: var(--tk-primary, #fb5a3a); color: #ffffff; font-size: 12px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(251, 90, 58, 0.3); transition: all .15s ease;">
                             <i class="fas fa-plus"></i> Create Estimate
                         </button>
                     </div>
@@ -3788,66 +3861,282 @@ function renderFooter() {
             </div>`;
         }
         if (ui.modal === 'export') {
-            portal.innerHTML = `<div class="pd-modal" style="width: min(520px, 100%); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="exportEstimateTitle">
-                <div class="pd-modal-head" style="padding: 14px 18px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
-                    <div>
-                        <h3 id="exportEstimateTitle" style="margin: 0; font-size: 1.05rem; display: flex; align-items: center; gap: 8px;">
-                            <i class="fas fa-file-export" style="color: var(--primary, #fb5a3a);"></i> Export Estimate
-                        </h3>
-                        <span style="font-size: .78rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Download a supplier-ready bill of materials or bill of quantities</span>
+            const exportOptions = [
+                {
+                    value: 'estimate-xlsx',
+                    title: 'Project Estimate (.xlsx)',
+                    desc: 'Full multi-tab workbook (Estimate, BoM Flat & Summary)',
+                    icon: 'fa-file-excel',
+                    badge: 'Template'
+                },
+                {
+                    value: 'bom-excel',
+                    title: 'Bill of Materials (BOM - Excel)',
+                    desc: 'Grouped hierarchical assemblies & components (.xls)',
+                    icon: 'fa-table-list',
+                    badge: 'Excel'
+                },
+                {
+                    value: 'bom-csv',
+                    title: 'Bill of Materials (BOM - CSV)',
+                    desc: 'Hierarchical BOM with group headers & children (.csv)',
+                    icon: 'fa-file-csv',
+                    badge: 'CSV'
+                },
+                {
+                    value: 'normal',
+                    title: 'BOQ Normal (CSV)',
+                    desc: 'Organized by group keeping assemblies as single rows',
+                    icon: 'fa-list-ul',
+                    badge: 'CSV'
+                },
+                {
+                    value: 'flat',
+                    title: 'BOQ Flat (CSV)',
+                    desc: 'Break assemblies into parts consolidated by catalog item',
+                    icon: 'fa-layer-group',
+                    badge: 'CSV'
+                },
+                {
+                    value: 'summary-csv',
+                    title: 'Estimate Summary (CSV)',
+                    desc: 'Group totals for Material, Labor Hours, Equipment & Cost',
+                    icon: 'fa-chart-pie',
+                    badge: 'Summary'
+                }
+            ];
+            portal.innerHTML = `<div class="pd-modal bb-studio-modal est-grid-modal est-export-modal" role="dialog" aria-modal="true" aria-labelledby="exportEstimateTitle">
+                <div class="pd-modal-head est-studio-modal-head">
+                    <div class="est-studio-head-left">
+                        <div class="est-modal-icon-badge is-export">
+                            <i class="fas fa-file-export"></i>
+                        </div>
+                        <div>
+                            <h3 id="exportEstimateTitle">Export Estimate</h3>
+                            <span class="est-modal-sub">Choose a spreadsheet or bill of materials format for this active estimate</span>
+                        </div>
                     </div>
-                    <button class="pd-modal-head-close" type="button" aria-label="Close" data-close-modal style="border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--text-muted, #64748b);">&times;</button>
+                    <button class="pd-modal-head-close" type="button" aria-label="Close" data-close-modal>&times;</button>
                 </div>
-                <div class="pd-modal-body" style="padding: 18px 20px; background: var(--bg-panel, #ffffff);">
-                    <fieldset style="border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px; padding: 12px 14px; margin: 0; display: flex; flex-direction: column; gap: 8px; background: var(--bg-card, #f8fafc);">
-                        <legend style="font-size: .75rem; font-weight: 700; color: var(--text-muted, #64748b); padding: 0 4px; text-transform: uppercase; letter-spacing: 0.05em;">Export format</legend>
-                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
-                            <input type="radio" name="estimateExportMode" value="bom-excel" checked style="margin-top: 3px;">
-                            <span><strong style="display: block; font-size: .83rem;">Bill of Materials (BOM - Excel)</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Summary of all items separated by groups, with hierarchical assemblies and components formatted for Excel (.xls).</small></span>
-                        </label>
-                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
-                            <input type="radio" name="estimateExportMode" value="bom-csv" style="margin-top: 3px;">
-                            <span><strong style="display: block; font-size: .83rem;">Bill of Materials (BOM - CSV)</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Hierarchical BOM with group headers and assembly components as CSV.</small></span>
-                        </label>
-                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
-                            <input type="radio" name="estimateExportMode" value="normal" style="margin-top: 3px;">
-                            <span><strong style="display: block; font-size: .83rem;">BOQ normal (CSV)</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Export the estimate as organized, keeping assemblies as assembly rows.</small></span>
-                        </label>
-                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
-                            <input type="radio" name="estimateExportMode" value="flat" style="margin-top: 3px;">
-                            <span><strong style="display: block; font-size: .83rem;">BOQ Flat (CSV)</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Break assemblies into parts and consolidate the total quantity of each catalog item.</small></span>
-                        </label>
-                    </fieldset>
+                <div class="pd-modal-body est-studio-modal-body">
+                    <div class="est-studio-section-label">Select Export Format</div>
+                    <div class="est-studio-card-grid" role="radiogroup" aria-label="Export format">
+                        ${exportOptions.map((opt, idx) => `
+                        <label class="bb-mode-card bb-studio-card est-studio-card ${idx === 0 ? 'active' : ''}" data-est-radio-card>
+                            <input type="radio" name="estimateExportMode" value="${opt.value}" ${idx === 0 ? 'checked' : ''} class="est-sr-radio">
+                            <div class="est-studio-card-top">
+                                <span class="bb-mode-icon"><i class="fas ${opt.icon}"></i></span>
+                                <span class="est-studio-card-pill">${esc(opt.badge)}</span>
+                            </div>
+                            <div class="est-studio-card-body">
+                                <strong>${esc(opt.title)}</strong>
+                                <span>${esc(opt.desc)}</span>
+                            </div>
+                        </label>`).join('')}
+                    </div>
                 </div>
-                <div class="pd-modal-foot" style="display: flex; justify-content: flex-end; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--border, #e2e8f0); background: var(--bg-card, #f8fafc);">
-                    <button type="button" class="btn-ghost" data-close-modal style="padding: 7px 14px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; cursor: pointer;">Cancel</button>
-                    <button type="button" class="btn-main orange" data-download-estimate style="padding: 7px 16px; border: none; border-radius: 6px; background: var(--primary, #fb5a3a); color: #fff; font-weight: 600; cursor: pointer;"><i class="fas fa-download"></i> Export</button>
+                <div class="pd-modal-foot est-studio-modal-foot">
+                    <button type="button" class="btn-ghost" data-close-modal>Cancel</button>
+                    <button type="button" class="btn-main est-btn-export" data-download-estimate><i class="fas fa-download"></i> Export</button>
+                </div>
+            </div>`;
+        }
+        if (ui.modal === 'import') {
+            const importOptions = [
+                {
+                    value: 'keep_excel',
+                    title: 'Workbook Qty & Rates',
+                    desc: 'Keep workbook quantities & rates and link items to Cost Catalog',
+                    icon: 'fa-file-circle-check',
+                    badge: 'Default'
+                },
+                {
+                    value: 'keep_qty_refresh_prices',
+                    title: 'Refresh Catalog Prices',
+                    desc: 'Keep workbook quantities and load latest Cost Catalog pricing',
+                    icon: 'fa-arrows-rotate',
+                    badge: 'Catalog'
+                },
+                {
+                    value: 'zero_qty_keep_prices',
+                    title: 'Zero Qty (Keep Rates)',
+                    desc: 'Import structure & workbook prices with all quantities at 0',
+                    icon: 'fa-eraser',
+                    badge: 'Template'
+                },
+                {
+                    value: 'zero_qty_refresh_prices',
+                    title: 'Zero Qty + Catalog Rates',
+                    desc: 'Start at 0 quantity with live Cost Catalog prices linked',
+                    icon: 'fa-wand-magic-sparkles',
+                    badge: 'Fresh'
+                },
+                {
+                    value: 'standalone_exact',
+                    title: 'Exact Workbook Only',
+                    desc: 'Keep workbook rows and rates verbatim without catalog relink',
+                    icon: 'fa-lock',
+                    badge: 'Standalone'
+                },
+                {
+                    value: 'keep_excel_open_takeoff',
+                    title: 'Import & Open Takeoff',
+                    desc: 'Create new estimate tab and jump to Takeoff canvas to count',
+                    icon: 'fa-compass-drafting',
+                    badge: 'Takeoff'
+                }
+            ];
+            const activeMode = ui.importMode || 'keep_excel';
+            const selectedFile = ui.importFile;
+            portal.innerHTML = `<div class="pd-modal bb-studio-modal est-grid-modal est-import-modal" role="dialog" aria-modal="true" aria-labelledby="importEstimateTitle">
+                <div class="pd-modal-head est-studio-modal-head">
+                    <div class="est-studio-head-left">
+                        <div class="est-modal-icon-badge is-import">
+                            <i class="fas fa-file-import"></i>
+                        </div>
+                        <div>
+                            <h3 id="importEstimateTitle">Import Estimate (.xlsx)</h3>
+                            <span class="est-modal-sub">Create a new Estimate tab inside this project from an exported template workbook</span>
+                        </div>
+                    </div>
+                    <button class="pd-modal-head-close" type="button" aria-label="Close" data-close-modal>&times;</button>
+                </div>
+                <div class="pd-modal-body est-studio-modal-body">
+                    <div class="est-import-top-row">
+                        <div class="est-import-field">
+                            <label for="estImportName">New Estimate Tab Name</label>
+                            <input type="text" id="estImportName" class="est-modal-input" value="${esc(ui.importName || '')}" placeholder="Optional — defaults to workbook estimate name">
+                        </div>
+                        <div class="est-import-field">
+                            <label>Excel Workbook (.xlsx)</label>
+                            <div class="est-import-dropzone ${selectedFile ? 'has-file' : ''}" id="estImportDropzone" tabindex="0" role="button" aria-label="Choose .xlsx file">
+                                <input type="file" id="estImportFileInput" accept=".xlsx,.xlsm" hidden>
+                                <i class="fas ${selectedFile ? 'fa-file-excel' : 'fa-cloud-arrow-up'}"></i>
+                                <div class="est-import-dropzone-text">
+                                    <strong>${selectedFile ? esc(selectedFile.name) : 'Click or drop .xlsx workbook here'}</strong>
+                                    <span>${selectedFile ? `${Math.max(1, Math.round(selectedFile.size / 1024))} KB ready to import` : 'Uses Project Estimate Export_Template.xlsx structure'}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    ${ui.importError ? `<div class="est-import-error" id="estImportError"><i class="fas fa-circle-exclamation"></i> <span>${esc(ui.importError)}</span></div>` : ''}
+                    <div class="est-studio-section-label">Import Behavior</div>
+                    <div class="est-studio-card-grid" role="radiogroup" aria-label="Import behavior">
+                        ${importOptions.map(opt => {
+                            const active = activeMode === opt.value;
+                            return `
+                        <label class="bb-mode-card bb-studio-card est-studio-card ${active ? 'active' : ''}" data-est-radio-card>
+                            <input type="radio" name="estimateImportMode" value="${opt.value}" ${active ? 'checked' : ''} class="est-sr-radio">
+                            <div class="est-studio-card-top">
+                                <span class="bb-mode-icon"><i class="fas ${opt.icon}"></i></span>
+                                <span class="est-studio-card-pill">${esc(opt.badge)}</span>
+                            </div>
+                            <div class="est-studio-card-body">
+                                <strong>${esc(opt.title)}</strong>
+                                <span>${esc(opt.desc)}</span>
+                            </div>
+                        </label>`;
+                        }).join('')}
+                    </div>
+                </div>
+                <div class="pd-modal-foot est-studio-modal-foot">
+                    <button type="button" class="btn-ghost" data-close-modal ${ui.importing ? 'disabled' : ''}>Cancel</button>
+                    <button type="button" class="btn-main est-btn-import" data-import-estimate ${ui.importing ? 'disabled' : ''}>
+                        <i class="fas ${ui.importing ? 'fa-spinner fa-spin' : 'fa-file-import'}"></i> ${ui.importing ? 'Importing…' : 'Import as New Estimate'}
+                    </button>
                 </div>
             </div>`;
         }
         if (ui.modal === 'catalog') {
-            portal.innerHTML = `<div class="pd-modal" style="width: min(580px, 100%); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="estimateCatalogTitle">
-                <div class="pd-modal-head" style="padding: 14px 18px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
+            portal.innerHTML = `<div class="pd-modal" style="width: min(580px, 100%); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="estimateCatalogTitle">
+                <div class="pd-modal-head" style="padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;">
                     <div>
                         <h3 id="estimateCatalogTitle" style="margin: 0; font-size: 1.05rem; display: flex; align-items: center; gap: 8px;">
                             <i class="fas fa-book-open" style="color: var(--primary, #fb5a3a);"></i> Add Cost Catalog Item
                         </h3>
-                        <span style="font-size: .78rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Select an existing catalog item for this estimate group</span>
+                        <span class="est-modal-sub" style="font-size: .78rem; display: block; margin-top: 2px;">Select an existing catalog item for this estimate group</span>
                     </div>
-                    <button class="pd-modal-head-close" type="button" aria-label="Close" data-close-modal style="border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--text-muted, #64748b);">&times;</button>
+                    <button class="pd-modal-head-close" type="button" aria-label="Close" data-close-modal style="border: none; background: transparent; font-size: 18px; cursor: pointer;">&times;</button>
                 </div>
-                <div class="pd-modal-body" style="padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; background: var(--bg-panel, #ffffff);">
-                    <input type="search" data-est-catalog-search placeholder="Search Cost Catalog..." autocomplete="off" style="width: 100%; box-sizing: border-box; height: 36px; padding: 6px 12px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: var(--bg-card, #f8fafc); color: inherit;">
+                <div class="pd-modal-body" style="padding: 16px 20px; display: flex; flex-direction: column; gap: 12px;">
+                    <input type="search" data-est-catalog-search class="est-modal-input" placeholder="Search Cost Catalog..." autocomplete="off" style="width: 100%; box-sizing: border-box; height: 36px; padding: 6px 12px; border-radius: 6px;">
                     <div data-est-catalog-results style="max-height: 320px; overflow-y: auto;">
-                        ${ui.catalogLoading ? '<div class="est-empty" style="padding: 24px; text-align: center; color: var(--text-muted, #64748b);">Loading Cost Catalogâ€¦</div>' : (ui.catalogError ? `<div class="est-empty" style="padding: 24px; text-align: center; color: #ef4444;">${esc(ui.catalogError)}</div>` : renderCatalogChoices(''))}
+                        ${ui.catalogLoading ? '<div class="est-empty est-modal-sub" style="padding: 24px; text-align: center;">Loading Cost Catalog...</div>' : (ui.catalogError ? `<div class="est-empty" style="padding: 24px; text-align: center; color: #ef4444;">${esc(ui.catalogError)}</div>` : renderCatalogChoices(''))}
                     </div>
                 </div>
-                <div class="pd-modal-foot" style="display: flex; justify-content: flex-end; padding: 12px 20px; border-top: 1px solid var(--border, #e2e8f0); background: var(--bg-card, #f8fafc);">
-                    <button type="button" class="btn-ghost" data-close-modal style="padding: 7px 16px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; cursor: pointer;">Cancel</button>
+                <div class="pd-modal-foot" style="display: flex; justify-content: flex-end; padding: 12px 20px;">
+                    <button type="button" class="btn-ghost" data-close-modal style="padding: 7px 16px; border-radius: 6px; cursor: pointer;">Cancel</button>
                 </div>
             </div>`;
         }
         document.body.appendChild(portal);
+        portal.addEventListener('change', event => {
+            const card = event.target.closest('[data-est-radio-card]');
+            if (card && event.target.type === 'radio') {
+                const groupName = event.target.name;
+                portal.querySelectorAll(`input[name="${groupName}"]`).forEach(input => {
+                    input.closest('[data-est-radio-card]')?.classList.toggle('active', input.checked);
+                });
+                if (groupName === 'estimateImportMode') {
+                    ui.importMode = event.target.value;
+                }
+            }
+            if (event.target.id === 'estImportFileInput') {
+                const file = event.target.files?.[0] || null;
+                if (file) {
+                    ui.importFile = file;
+                    ui.importError = '';
+                    const nameInput = portal.querySelector('#estImportName');
+                    if (nameInput && !nameInput.value.trim()) {
+                        ui.importName = file.name.replace(/\.(xlsx|xlsm)$/i, '').replace(/[_-]+/g, ' ').trim();
+                    } else if (nameInput) {
+                        ui.importName = nameInput.value;
+                    }
+                    renderModal();
+                }
+            }
+        });
+        portal.addEventListener('input', event => {
+            if (event.target.id === 'estImportName') {
+                ui.importName = event.target.value;
+            }
+        });
+        const dropzone = portal.querySelector('#estImportDropzone');
+        const fileInput = portal.querySelector('#estImportFileInput');
+        if (dropzone && fileInput) {
+            dropzone.addEventListener('click', () => {
+                if (!ui.importing) fileInput.click();
+            });
+            dropzone.addEventListener('keydown', event => {
+                if ((event.key === 'Enter' || event.key === ' ') && !ui.importing) {
+                    event.preventDefault();
+                    fileInput.click();
+                }
+            });
+            dropzone.addEventListener('dragover', event => {
+                event.preventDefault();
+                dropzone.classList.add('is-dragover');
+            });
+            dropzone.addEventListener('dragleave', () => {
+                dropzone.classList.remove('is-dragover');
+            });
+            dropzone.addEventListener('drop', event => {
+                event.preventDefault();
+                dropzone.classList.remove('is-dragover');
+                const file = event.dataTransfer?.files?.[0] || null;
+                if (file) {
+                    ui.importFile = file;
+                    ui.importError = '';
+                    const nameInput = portal.querySelector('#estImportName');
+                    if (nameInput && !nameInput.value.trim()) {
+                        ui.importName = file.name.replace(/\.(xlsx|xlsm)$/i, '').replace(/[_-]+/g, ' ').trim();
+                    } else if (nameInput) {
+                        ui.importName = nameInput.value;
+                    }
+                    renderModal();
+                }
+            });
+        }
         portal.addEventListener('keydown', event => {
             if (event.key !== 'Enter' || event.isComposing || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
             if (event.target?.tagName === 'TEXTAREA' || event.target?.tagName === 'BUTTON') return;
@@ -3857,9 +4146,12 @@ function renderFooter() {
             } else if (ui.modal === 'export') {
                 event.preventDefault();
                 portal.querySelector('[data-download-estimate]')?.click();
+            } else if (ui.modal === 'import') {
+                event.preventDefault();
+                portal.querySelector('[data-import-estimate]')?.click();
             }
         });
-        portal.querySelector('input, button')?.focus();
+        portal.querySelector('input:not([type="file"]):not(.est-sr-radio), button:not([disabled])')?.focus();
     }
 
     function moveEstimatingItem(draggedItemId, targetItemId, targetGroupId, isBefore = true) {
@@ -4000,10 +4292,26 @@ function renderFooter() {
         return item;
     }
 
-    async function exportEstimate(mode = 'bom-excel') {
-        if (!Exporter) return;
+    function triggerFileDownload(blobOrUrl, filename, revokeBlob = true) {
+        const anchor = document.createElement('a');
+        const url = revokeBlob ? URL.createObjectURL(blobOrUrl) : String(blobOrUrl);
+        anchor.href = url;
+        anchor.download = filename;
+        anchor.dataset.noNavGuard = '1';
+        anchor.style.display = 'none';
+        document.body.appendChild(anchor);
+        anchor.click();
+        setTimeout(() => {
+            anchor.remove();
+            if (revokeBlob) URL.revokeObjectURL(url);
+        }, 1500);
+        return true;
+    }
+
+    async function exportEstimate(mode = 'estimate-xlsx') {
+        if (!Exporter && mode !== 'estimate-xlsx') return false;
         let estimate = Workspace.clone(current());
-        if ((mode === 'flat' || mode === 'bom-excel' || mode === 'bom-csv') && Exporter.needsCatalog(estimate)) {
+        if ((mode === 'estimate-xlsx' || mode === 'flat' || mode === 'bom-excel' || mode === 'bom-csv' || mode === 'summary-csv') && Exporter?.needsCatalog?.(estimate)) {
             try {
                 const catalogSnapshot = await window.CatalogService.getSnapshot({ enabledForProjectsOnly: true });
                 estimate = window.BoqCatalogAdapter.hydrateEstimate(estimate, catalogSnapshot);
@@ -4011,7 +4319,7 @@ function renderFooter() {
                 console.warn('Could not hydrate estimate from catalog snapshot:', error);
                 if (mode === 'flat') {
                     alert(`BOQ Flat could not load the Cost Catalog: ${error.message}`);
-                    return;
+                    return false;
                 }
             }
         }
@@ -4019,41 +4327,71 @@ function renderFooter() {
             const unresolved = Exporter.unresolvedAssemblies(estimate);
             if (unresolved.length) {
                 alert(`BOQ Flat cannot expand these assemblies because they have no Cost Catalog components: ${unresolved.map(item => item.name).join(', ')}`);
-                return;
+                return false;
             }
         }
 
-        const safeName = current().name.replace(/[^a-z0-9_-]+/gi, '_');
+        const cleanFilePart = value => String(value ?? '').trim()
+            .replace(/[^a-z0-9.-]+/gi, '_')
+            .replace(/_+/g, '_')
+            .replace(/^_+|_+$/g, '');
+        const projectNameRaw = window.ProjectState?.projectInfo?.name
+            || document.getElementById('projectHeaderName')?.childNodes?.[0]?.textContent
+            || '';
+        const projectPart = cleanFilePart(projectNameRaw);
+        const estimatePart = cleanFilePart(current().name || '');
+        const safeName = (projectPart && estimatePart)
+            ? `${projectPart}_${estimatePart}`
+            : (projectPart || estimatePart || 'Project_Estimate');
+
+        if (mode === 'estimate-xlsx') {
+            try {
+                const readOnly = document.body?.dataset?.readOnly === 'true';
+                if (readOnly) {
+                    return triggerFileDownload(
+                        `../api/project_estimate_excel.php?action=export_estimate&project_id=${encodeURIComponent(projectId)}&estimate_id=${encodeURIComponent(estimate.id || '')}`,
+                        `${safeName}.xlsx`,
+                        false
+                    );
+                }
+                const resp = await fetch(`../api/project_estimate_excel.php?action=export_estimate&project_id=${encodeURIComponent(projectId)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        project_id: projectId,
+                        estimate_id: estimate.id || '',
+                        estimate
+                    })
+                });
+                if (!resp.ok) {
+                    const errJson = await resp.json().catch(() => null);
+                    throw new Error(errJson?.msg || `Export failed (${resp.status})`);
+                }
+                const blob = await resp.blob();
+                return triggerFileDownload(blob, `${safeName}.xlsx`);
+            } catch (err) {
+                alert(err?.message || 'Could not export Estimate Excel.');
+                return false;
+            }
+        }
 
         if (mode === 'bom-excel') {
             const xml = Exporter.excelXml(estimate, current().settings);
-            const blob = new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8' });
-            const anchor = document.createElement('a');
-            anchor.href = URL.createObjectURL(blob);
-            anchor.download = `${safeName}_BOM.xls`;
-            anchor.click();
-            URL.revokeObjectURL(anchor.href);
-            return;
+            return triggerFileDownload(new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8' }), `${safeName}_BOM.xls`);
         }
 
         if (mode === 'bom-csv') {
             const rows = Exporter.bomRows(estimate, current().settings);
-            const blob = new Blob([Exporter.bomCsv(rows)], { type: 'text/csv;charset=utf-8' });
-            const anchor = document.createElement('a');
-            anchor.href = URL.createObjectURL(blob);
-            anchor.download = `${safeName}_BOM.csv`;
-            anchor.click();
-            URL.revokeObjectURL(anchor.href);
-            return;
+            return triggerFileDownload(new Blob([Exporter.bomCsv(rows)], { type: 'text/csv;charset=utf-8' }), `${safeName}_BOM.csv`);
+        }
+
+        if (mode === 'summary-csv') {
+            const csvText = Exporter.summaryCsv(estimate, current().settings);
+            return triggerFileDownload(new Blob([csvText], { type: 'text/csv;charset=utf-8' }), `${safeName}_Summary.csv`);
         }
 
         const rows = mode === 'flat' ? Exporter.flatRows(estimate) : Exporter.normalRows(estimate);
-        const blob = new Blob([Exporter.csv(rows)], { type: 'text/csv;charset=utf-8' });
-        const anchor = document.createElement('a');
-        anchor.href = URL.createObjectURL(blob);
-        anchor.download = `${safeName}_${mode === 'flat' ? 'BOQ_Flat' : 'BOQ'}.csv`;
-        anchor.click();
-        URL.revokeObjectURL(anchor.href);
+        return triggerFileDownload(new Blob([Exporter.csv(rows)], { type: 'text/csv;charset=utf-8' }), `${safeName}_${mode === 'flat' ? 'BOQ_Flat' : 'BOQ'}.csv`);
     }
 
     root.addEventListener('input', event => {
@@ -4291,6 +4629,9 @@ function renderFooter() {
             if (target.dataset.auditPrevValue === undefined) {
                 target.dataset.auditPrevValue = target.value;
             }
+            if (target.dataset.itemField === 'quantity') {
+                target.dataset.estFocusQty = target.value;
+            }
             if (target.matches?.('input.is-editable, input.est-cell-input, input.est-rate-inline-input, input[data-item-field], input[data-summary-rate], input[data-field], input[data-markup-quick-val], input[data-group-name]')) {
                 setTimeout(() => {
                     if (document.activeElement === target) {
@@ -4386,11 +4727,15 @@ function renderFooter() {
                 const parsedVal = event.target.type === 'number' ? Number(event.target.value) : event.target.value;
                 if (field === 'quantity') {
                     const origQty = Workspace.numeric(found.item.lastSyncedTakeoffQuantity ?? found.item.originalQuantity ?? found.item.takeoffQuantity ?? 0);
+                    const liveLayer = findTakeoffLayer(found.item);
+                    const liveCanvasQty = liveLayer ? Workspace.numeric(liveLayer.quantity || 0) : 0;
+                    const effectiveCanvasQty = Math.max(origQty, liveCanvasQty);
                     const numParsed = Workspace.numeric(parsedVal);
                     if (Math.abs(numParsed - origQty) < 0.0001) {
                         found.item.quantityOverride = false;
                         found.item.quantitySyncStatus = found.item.takeoffLayerId ? 'synced' : 'manual';
                         delete found.item.pendingTakeoffQuantity;
+                        delete found.item.quantityOverrideSource;
                         delete found.item._manualFields.quantity;
                         event.target.classList.remove('is-qty-overridden', 'is-val-overridden');
                         const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
@@ -4406,9 +4751,33 @@ function renderFooter() {
                         found.item.quantitySyncStatus = 'overridden';
                         found.item.pendingTakeoffQuantity = origQty;
                         found.item._manualFields.quantity = true;
+                        found.item.quantityOverrideSource = effectiveCanvasQty > 0 ? 'canvas_overridden' : 'estimating_first';
                         event.target.classList.add('is-qty-overridden', 'is-val-overridden');
                         const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
                         if (unitEl) unitEl.style.color = '#ea580c';
+                        if (!isLiveTypingCommit && effectiveCanvasQty > 0) {
+                            const focusQtyRaw = event.target.dataset.estFocusQty;
+                            const focusQtyNum = focusQtyRaw !== undefined ? Workspace.numeric(focusQtyRaw) : origQty;
+                            if (Math.abs(numParsed - focusQtyNum) >= 0.0001) {
+                                event.target.dataset.estFocusQty = String(numParsed);
+                                if (window.TakeoffAnnouncement && typeof window.TakeoffAnnouncement.show === 'function') {
+                                    const uomLabel = found.item.uom || 'ea';
+                                    window.TakeoffAnnouncement.show({
+                                        id: 'user_alert_canvas_overridden_in_estimating',
+                                        perUser: true,
+                                        force: false,
+                                        type: 'warning',
+                                        badge: 'QUANTITY OVERRIDE',
+                                        icon: 'fas fa-triangle-exclamation',
+                                        title: 'Canvas Value Will Not Be Used',
+                                        message: `You overrode the quantity for "${found.item.name || 'this item'}" manually in Estimating. The quantity counted on the Takeoff canvas (${effectiveCanvasQty} ${uomLabel}) will not be taken into account while this override is active.`,
+                                        primaryText: 'Got It',
+                                        showDontShow: true,
+                                        dontShowLabel: "Don't show this warning again"
+                                    });
+                                }
+                            }
+                        }
                     }
                 } else {
                     found.item._manualFields[effectiveField] = true;
@@ -4472,9 +4841,9 @@ function renderFooter() {
             const newFmt = formatAuditVal(nextRaw, fieldMeta.kind, found.item.uom);
             commitAuditPrevValue(event.target);
             Workspace.touch(state, `Updated ${fieldMeta.label} for "${found.item.name}" (${oldFmt} -> ${newFmt})`);
-            saveLocal({ publish: false });
             scheduleSave();
             renderLiveSummary();
+            saveLocal({ publish: !isLiveTypingCommit && field === 'quantity' });
             if (!isLiveTypingCommit && isAssemblyItem(found.item) && (field === 'quantity' || ['materialMargin', 'equipmentMargin', 'laborMargin', 'waste', 'laborWaste', 'difficulty', 'laborRate'].includes(effectiveField))) renderTable();
             return;
         }
@@ -4626,22 +4995,22 @@ function renderFooter() {
             portal.className = 'pd-modal-backdrop open';
             portal.dataset.estimateDeleteConfirm = 'true';
             portal.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(4px); z-index: 999999;';
-            portal.innerHTML = `<div class="pd-modal" style="width: min(460px, 100%); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="deleteEstimateTitle">
-                <div class="pd-modal-head" style="padding: 14px 18px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
+            portal.innerHTML = `<div class="pd-modal" style="width: min(460px, 100%); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="deleteEstimateTitle">
+                <div class="pd-modal-head" style="padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;">
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <i class="fas fa-trash-can" style="color: #ef4444; font-size: 1.1rem;"></i>
                         <h3 id="deleteEstimateTitle" style="margin: 0; font-size: 1.05rem; font-weight: 600;">Delete Estimate</h3>
                     </div>
-                    <button class="pd-modal-head-close" type="button" data-delete-cancel aria-label="Close" style="border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--text-muted, #64748b);">&times;</button>
+                    <button class="pd-modal-head-close" type="button" data-delete-cancel aria-label="Close" style="border: none; background: transparent; font-size: 18px; cursor: pointer;">&times;</button>
                 </div>
-                <div class="pd-modal-body" style="padding: 18px 20px; font-size: .88rem; color: var(--text-main, #334155); line-height: 1.5; background: var(--bg-panel, #ffffff);">
+                <div class="pd-modal-body" style="padding: 18px 20px; font-size: .88rem; line-height: 1.5;">
                     <p style="margin: 0 0 10px;">${esc(message)}</p>
-                    <div style="background: rgba(239, 68, 68, 0.08); border-left: 3px solid #ef4444; padding: 8px 12px; border-radius: 4px; font-size: .8rem; color: #b91c1c;">
+                    <div class="est-danger-callout" style="border-left: 3px solid #ef4444; padding: 8px 12px; border-radius: 4px; font-size: .8rem;">
                         <strong>Warning:</strong> This action is permanent and cannot be undone.
                     </div>
                 </div>
-                <div class="pd-modal-foot" style="display: flex; justify-content: flex-end; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--border, #e2e8f0); background: var(--bg-card, #f8fafc);">
-                    <button type="button" class="btn-ghost" data-delete-cancel style="padding: 7px 14px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; cursor: pointer;">Cancel</button>
+                <div class="pd-modal-foot" style="display: flex; justify-content: flex-end; gap: 10px; padding: 12px 20px;">
+                    <button type="button" class="btn-ghost" data-delete-cancel style="padding: 7px 14px; border-radius: 6px; cursor: pointer;">Cancel</button>
                     <button type="button" class="btn-main" data-delete-confirm style="padding: 7px 16px; border: none; border-radius: 6px; background: #ef4444; color: #fff; font-weight: 600; cursor: pointer;"><i class="fas fa-trash"></i> Delete Estimate</button>
                 </div>
             </div>`;
@@ -5455,6 +5824,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                         item.quantityOverride = false;
                         item.pendingTakeoffQuantity = null;
                         item.quantitySyncStatus = item.takeoffLayerId ? 'synced' : 'manual';
+                        delete item.quantityOverrideSource;
                     });
                     changed(`Reset quantities for group "${grp.name}"`);
                 }
@@ -5553,6 +5923,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                 item.quantityOverride = false;
                 item.pendingTakeoffQuantity = null;
                 item.quantitySyncStatus = item.takeoffLayerId ? 'synced' : 'manual';
+                delete item.quantityOverrideSource;
                 if (item._manualFields) delete item._manualFields.quantity;
             });
             changed('Reset quantities');
@@ -5574,14 +5945,15 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         }
         const option = target.closest('[data-est-option]')?.dataset.estOption;
         if (option) closeOptionsMenu();
-        if (option === 'save') { ui.explicitSaveRequested = true; saveServer({ showModal: true }); }
-        if (option === 'copy') { ui.modal = 'new'; renderModal(); }
         if (option === 'export') { ui.modal = 'export'; renderModal(); }
-        if (option === 'export-bom') exportEstimate('bom-excel');
-        if (option === 'delete-estimate') deleteEstimateAuthoritative();
-        if (target.closest('[data-download-estimate]')) {
-            const mode = document.querySelector('[name="estimateExportMode"]:checked')?.value || 'bom-excel';
-            exportEstimate(mode); ui.modal = null; renderModal();
+        if (option === 'import') {
+            ui.importFile = null;
+            ui.importMode = 'keep_excel';
+            ui.importName = '';
+            ui.importError = '';
+            ui.importing = false;
+            ui.modal = 'import';
+            renderModal();
         }
         const collapse = target.closest('[data-collapse-card]')?.dataset.collapseCard;
         if (collapse) { ui.collapsed[collapse] = !ui.collapsed[collapse]; renderDetails(); }
@@ -5829,13 +6201,104 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         }
         const portal = event.target.closest('[data-estimating-modal-portal]');
         if (!portal) return;
-        if (event.target.closest('[data-close-modal]') || event.target === portal) { ui.modal = null; renderModal(); return; }
+        if (event.target.closest('[data-close-modal]') || event.target === portal) {
+            if (!ui.importing) {
+                ui.modal = null;
+                renderModal();
+            }
+            return;
+        }
+        if (event.target.closest('[data-download-estimate]')) {
+            const downloadButton = event.target.closest('[data-download-estimate]');
+            if (downloadButton.disabled) return;
+            const mode = portal.querySelector('input[name="estimateExportMode"]:checked')?.value || 'estimate-xlsx';
+            downloadButton.disabled = true;
+            try {
+                const exported = await exportEstimate(mode);
+                if (exported !== false) {
+                    ui.modal = null;
+                    renderModal();
+                }
+            } finally {
+                downloadButton.disabled = false;
+            }
+            return;
+        }
+        if (event.target.closest('[data-import-estimate]')) {
+            const importBtn = event.target.closest('[data-import-estimate]');
+            if (importBtn.disabled || ui.importing) return;
+            const mode = portal.querySelector('input[name="estimateImportMode"]:checked')?.value || ui.importMode || 'keep_excel';
+            const customName = (portal.querySelector('#estImportName')?.value || ui.importName || '').trim();
+            if (!ui.importFile) {
+                ui.importError = 'Please select a valid .xlsx workbook exported from a project estimate.';
+                renderModal();
+                return;
+            }
+            if (!projectId) {
+                ui.importError = 'Save or open a persisted project before importing an estimate workbook.';
+                renderModal();
+                return;
+            }
+            ui.importing = true;
+            ui.importError = '';
+            ui.importMode = mode;
+            ui.importName = customName;
+            renderModal();
+            try {
+                const formData = new FormData();
+                formData.append('action', 'import_estimate');
+                formData.append('project_id', String(projectId));
+                formData.append('estimate_name', customName);
+                formData.append('import_mode', mode);
+                formData.append('file', ui.importFile);
+                const resp = await fetch('../api/project_estimate_excel.php?action=import_estimate', {
+                    method: 'POST',
+                    body: formData
+                });
+                const payload = await resp.json().catch(() => null);
+                if (!resp.ok || !payload || payload.status !== 'success' || !payload.estimate) {
+                    throw new Error(payload?.msg || payload?.message || `Import failed (${resp.status})`);
+                }
+                const imported = Workspace.estimate(payload.estimate, projectId, state.estimates.length);
+                state.estimates.forEach(row => { row.isActive = false; });
+                imported.isActive = true;
+                state.estimates.push(imported);
+                state.activeEstimateId = imported.id;
+                Workspace.selectEstimate(state, imported.id);
+                ui.modal = null;
+                ui.importFile = null;
+                ui.importError = '';
+                ui.importing = false;
+                ui.loadState = 'saved';
+                ui.message = `Imported ${imported.name} (${payload.items_count || 0} items)`;
+                saveLocal();
+                render();
+                if (window.ProjectState) {
+                    window.ProjectState.activeEstimateId = String(imported.id);
+                }
+                window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', {
+                    detail: { projectId: String(projectId || ''), estimateId: imported.id, cloned: false, importedFromExcel: true }
+                }));
+                if (mode === 'keep_excel_open_takeoff') {
+                    document.querySelector('[data-pd-tab="takeoff"], [data-tab="takeoff"], .pd-tab-btn[data-tab="takeoff"]')?.click();
+                }
+            } catch (err) {
+                ui.importing = false;
+                ui.importError = err?.message || 'Could not import Excel estimate.';
+                renderModal();
+            }
+            return;
+        }
         if (event.target.closest('[data-create-estimate]')) {
             const createButton = event.target.closest('[data-create-estimate]');
+            if (createButton.disabled) return;
             const sourceEstimateId = String(current()?.id || '');
             const name = portal.querySelector('#copyEstimateName')?.value;
             const mode = portal.querySelector('input[name="copyEstimateMode"]:checked')?.value || 'blank';
-            Workspace.createEstimate(state, name, mode); ui.modal = null; saveLocal();
+            Workspace.createEstimate(state, name, mode);
+            ui.modal = null;
+            renderModal();
+            saveLocal();
             const createdEstimate = current();
             if (mode === 'all' && createdEstimate && typeof window.cloneTakeoffWorkspaceForEstimate === 'function') {
                 const cloneResult = window.cloneTakeoffWorkspaceForEstimate(sourceEstimateId, createdEstimate.id, createdEstimate);
@@ -5849,10 +6312,18 @@ const estimateMenu = target.closest('[data-estimate-menu]');
             markEstimateDirty();
             saveLocal();
             render();
+            if (createdEstimate) {
+                if (window.ProjectState) {
+                    window.ProjectState.activeEstimateId = String(createdEstimate.id);
+                }
+                window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', {
+                    detail: { projectId: String(projectId || ''), estimateId: createdEstimate.id, cloned: false }
+                }));
+            }
             if (projectId) {
                 createButton.disabled = true;
                 ui.loadState = 'saving';
-                ui.message = 'Creating estimate in databaseâ€¦';
+                ui.message = 'Creating estimate in database...';
                 renderStatus();
                 try {
                     await window.projectEstimatingSave();
@@ -5873,11 +6344,9 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                     ui.loadState = 'error';
                     ui.message = `Estimate was not confirmed by the database: ${error.message}`;
                     renderStatus();
+                } finally {
+                    createButton.disabled = false;
                 }
-            } else if (mode === 'all' && createdEstimate) {
-                window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', {
-                    detail: { projectId: String(projectId || ''), estimateId: createdEstimate.id, cloned: true }
-                }));
             }
         }
         const catalogId = event.target.closest('[data-est-catalog-item]')?.dataset.estCatalogItem;
@@ -6185,7 +6654,11 @@ const estimateMenu = target.closest('[data-estimate-menu]');
     };
 
     function catalogDomainOptions(options = {}) {
-        const result = { ...options };
+        const result = {
+            matchUnlinkedByCodeOrName: true,
+            forceInPlace: true,
+            ...options
+        };
         delete result.estimateId;
         return result;
     }
@@ -6202,9 +6675,10 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         const catalog = await Catalog.getSnapshot();
         const domainOptions = catalogDomainOptions(options);
         const prepared = Application.prepareCatalogUpdate(Workspace.clone(estimate), catalog, domainOptions);
-        const strategy = Application.resolveCatalogUpdateStrategy(estimate);
+        const strategy = Application.resolveCatalogUpdateStrategy(estimate, domainOptions);
         return {
             ...prepared,
+            estimateName: estimate.name || 'Active Estimate',
             strategy,
             currentEstimateRevision: Number(estimate.estimateRevision || 1),
             projectedEstimateRevision: Number(estimate.estimateRevision || 1)
@@ -6350,9 +6824,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
             toolbarBtn.title = willCollapse ? 'Show summary panel' : 'Hide summary panel';
         }
 
-        try {
-            localStorage.setItem('takeoff.estimatingRightCollapsed', willCollapse ? '1' : '0');
-        } catch (_) {}
+        safeSetLocalStorage('takeoff.estimatingRightCollapsed', willCollapse ? '1' : '0');
     }
 
     
@@ -6558,9 +7030,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
             root.querySelectorAll('[data-summary-col-resizer].is-dragging').forEach(r => r.classList.remove('is-dragging'));
-            try {
-                localStorage.setItem('takeoff.summaryColWidths', JSON.stringify(ui.summaryColWidths || {}));
-            } catch (_) {}
+            safeSetLocalStorage('takeoff.summaryColWidths', JSON.stringify(ui.summaryColWidths || {}));
             activeCol = null;
             activeTh = null;
         };
@@ -6638,9 +7108,7 @@ function initEstimatingResizer() {
             } catch (_) {}
 
             const finalWidth = parseInt(getComputedStyle(estRight).width, 10) || 420;
-            try {
-                localStorage.setItem('takeoff.estimatingRightWidth', finalWidth);
-            } catch (_) {}
+            safeSetLocalStorage('takeoff.estimatingRightWidth', String(finalWidth));
         };
 
         resizer.addEventListener('pointerdown', onPointerDown);

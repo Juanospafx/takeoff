@@ -24,6 +24,7 @@ $mutationActions = [
 $user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'list');
 
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/services/ProjectTemplateService.php';
 
 function bid_board_json(array $payload, int $status = 200): void
 {
@@ -179,10 +180,22 @@ function bid_board_ensure_schema(PDO $pdo): void
         if (!in_array($column, $projectColumns, true)) $pdo->exec($sql);
     }
 
+    $legacyEstStatusId = (int)$pdo->query("SELECT id FROM bid_statuses WHERE code = 'estimating' LIMIT 1")->fetchColumn();
+    $tmplStatusId = (int)$pdo->query("SELECT id FROM bid_statuses WHERE code = 'templates' LIMIT 1")->fetchColumn();
+    if ($legacyEstStatusId > 0 && $tmplStatusId <= 0) {
+        $pdo->prepare("UPDATE bid_statuses SET code = 'templates', name = 'TEMPLATES' WHERE id = ?")->execute([$legacyEstStatusId]);
+    } elseif ($legacyEstStatusId > 0 && $tmplStatusId > 0) {
+        $todoId = (int)$pdo->query("SELECT id FROM bid_statuses WHERE code = 'to_do' LIMIT 1")->fetchColumn();
+        if ($todoId > 0) {
+            $pdo->prepare("UPDATE bids SET bid_status_id = ? WHERE bid_status_id = ?")->execute([$todoId, $legacyEstStatusId]);
+        }
+        $pdo->prepare("DELETE FROM bid_statuses WHERE id = ?")->execute([$legacyEstStatusId]);
+    }
+
     $stmt = $pdo->prepare("INSERT INTO bid_statuses (code, name, sort_order, is_terminal) VALUES (?, ?, ?, ?) ON DUPLICATE KEY UPDATE name = VALUES(name), sort_order = VALUES(sort_order), is_terminal = VALUES(is_terminal)");
     $statuses = [
         ['to_do', 'TO DO', 10, 0],
-        ['estimating', 'ESTIMATING', 20, 0],
+        ['templates', 'TEMPLATES', 20, 0],
         ['bid_submitted', 'BID SUBMITTED', 30, 0],
         ['accepted', 'ACCEPTED', 40, 0],
         ['in_progress', 'IN PROGRESS', 50, 0],
@@ -205,7 +218,7 @@ function bid_board_payload(PDO $pdo): array
 {
     $statuses = $pdo->query("SELECT * FROM bid_statuses ORDER BY sort_order, id")->fetchAll(PDO::FETCH_ASSOC);
     $estimators = $pdo->query("SELECT id, display_name, email FROM estimators WHERE deleted_at IS NULL AND active = 1 ORDER BY display_name")->fetchAll(PDO::FETCH_ASSOC);
-    $templates = $pdo->query("SELECT id, name, description FROM project_templates WHERE deleted_at IS NULL AND active = 1 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
+    $templates = ProjectTemplateService::listTemplates($pdo);
 
     $dashboard = $pdo->query(
         "SELECT bs.id AS status_id, bs.code, bs.name, COUNT(b.id) AS bid_count, COALESCE(SUM(b.total_amount), 0) AS total_sales

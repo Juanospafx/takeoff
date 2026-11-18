@@ -1,10 +1,10 @@
 (function () {
     const apiUrl = '../api/project_module.php';
-    const PROJECT_STATUSES = ['Invitations', 'To Do', 'Estimating', 'Bid Submitted', 'Accepted', 'In Progress', 'Complete', 'Estimadores', 'Lost', 'Archived'];
+    const PROJECT_STATUSES = ['Invitations', 'To Do', 'Templates', 'Bid Submitted', 'Accepted', 'In Progress', 'Complete', 'Estimadores', 'Lost', 'Archived'];
     const STATUS_VALUES = {
         'Invitations': 'invitations',
         'To Do': 'to_do',
-        'Estimating': 'estimating',
+        'Templates': 'templates',
         'Bid Submitted': 'bid_submitted',
         'Accepted': 'accepted',
         'In Progress': 'in_progress',
@@ -15,6 +15,8 @@
     };
     const STATUS_LABELS = Object.fromEntries(Object.entries(STATUS_VALUES).map(([label, value]) => [value, label]));
     STATUS_LABELS.draft = 'To Do';
+    STATUS_LABELS.template = 'Templates';
+    STATUS_LABELS.estimating = 'To Do';
     STATUS_LABELS.estimators = 'Estimadores';
 
     let isDirty = false;
@@ -129,8 +131,20 @@
         }
 
         const saveButton = $('saveProjectBtn');
+        const previousHtml = saveButton?.innerHTML;
         const previousLabel = saveButton?.textContent;
         if (saveButton) {
+            saveButton.style.boxSizing = 'border-box';
+            if (!saveButton.dataset.intrinsicWidth) {
+                const restingWidth = Math.ceil(saveButton.getBoundingClientRect().width || 0);
+                if (restingWidth > 0) {
+                    saveButton.dataset.intrinsicWidth = String(restingWidth);
+                }
+            }
+            if (saveButton.dataset.intrinsicWidth) {
+                saveButton.style.minWidth = `${saveButton.dataset.intrinsicWidth}px`;
+                saveButton.style.justifyContent = 'center';
+            }
             saveButton.disabled = true;
             saveButton.textContent = 'Saving...';
         }
@@ -210,7 +224,8 @@
         } finally {
             if (saveButton) {
                 saveButton.disabled = false;
-                saveButton.textContent = previousLabel || 'Save Project';
+                if (previousHtml) saveButton.innerHTML = previousHtml;
+                else saveButton.textContent = previousLabel || 'Save Project';
             }
         }
     }
@@ -293,7 +308,7 @@
     const defaultPhaseConfig = {
         'Invitations': { label: 'Invitations', color: '#b45309' },
         'To Do': { label: 'To Do', color: '#1d5cc9' },
-        'Estimating': { label: 'Estimating', color: '#d97706' },
+        'Templates': { label: 'Templates', color: '#0d9488' },
         'Bid Submitted': { label: 'Bid Submitted', color: '#ea580c' },
         'Accepted': { label: 'Accepted', color: '#059669' },
         'In Progress': { label: 'In Progress', color: '#2563eb' },
@@ -453,6 +468,181 @@
     }
 
     let savedCustomers = [];
+    let editingDirectoryCustomerId = null;
+    let customerModalView = 'form';
+
+    function setEditingDirectoryCustomer(customer = null) {
+        const banner = $('pdCustomerEditBanner');
+        const bannerName = $('pdCustomerEditBannerName');
+        const saveBtn = $('saveCustomerBtn');
+        if (customer && Number(customer.id) > 0) {
+            editingDirectoryCustomerId = Number(customer.id);
+            if (banner) banner.hidden = false;
+            if (bannerName) bannerName.textContent = customer.company || 'Customer';
+            if (saveBtn) saveBtn.innerHTML = '<i class="fas fa-floppy-disk"></i> Update Directory';
+        } else {
+            editingDirectoryCustomerId = null;
+            if (banner) banner.hidden = true;
+            if (bannerName) bannerName.textContent = '';
+            if (saveBtn) saveBtn.innerHTML = '<i class="fas fa-bookmark"></i> Save to Directory';
+        }
+    }
+
+    function setCustomerModalView(view = 'form') {
+        customerModalView = view === 'directory' ? 'directory' : 'form';
+        const isDir = customerModalView === 'directory';
+        const formView = $('pdCustomerFormView');
+        const dirView = $('pdCustomerDirectoryView');
+        const formFoot = $('pdCustomerFormFoot');
+        const dirFoot = $('pdCustomerDirectoryFoot');
+        const titleEl = $('customerModalTitle');
+        const toggleBtn = $('openCustomerDirectoryBtn');
+
+        if (formView) formView.hidden = isDir;
+        if (formFoot) formFoot.hidden = isDir;
+        if (dirView) dirView.hidden = !isDir;
+        if (dirFoot) dirFoot.hidden = !isDir;
+        if (titleEl) {
+            titleEl.innerHTML = isDir
+                ? '<i class="fas fa-address-book" style="color: var(--primary);"></i> Customer Directory'
+                : '<i class="far fa-id-badge" style="color: var(--primary);"></i> Customer Information';
+        }
+        if (toggleBtn) {
+            toggleBtn.classList.toggle('is-active', isDir);
+            toggleBtn.innerHTML = isDir
+                ? '<i class="fas fa-arrow-left"></i> <span>Form</span>'
+                : '<i class="fas fa-address-book"></i> <span>Directory</span>';
+        }
+        if (isDir) {
+            renderCustomerDirectory();
+            setTimeout(() => $('poCustomerDirectorySearch')?.focus(), 40);
+        }
+    }
+
+    function renderCustomerDirectory() {
+        const listEl = $('poCustomerDirectoryList');
+        const countEl = $('poCustomerDirectoryCount');
+        if (!listEl) return;
+        const query = ($('poCustomerDirectorySearch')?.value || '').trim().toLowerCase();
+        const canMutateDir = window.TakeoffAuth
+            ? window.TakeoffAuth.canWrite === true
+            : !document.body?.dataset?.readOnly;
+
+        const filtered = savedCustomers
+            .map((customer, index) => ({ customer, index }))
+            .filter(({ customer }) => {
+                if (!query) return true;
+                const haystack = [
+                    customer.company,
+                    customer.contact_name,
+                    customer.phone,
+                    customer.email,
+                    customer.address
+                ].filter(Boolean).join(' ').toLowerCase();
+                return haystack.includes(query);
+            });
+
+        if (countEl) {
+            countEl.textContent = `${filtered.length} customer${filtered.length === 1 ? '' : 's'}`;
+        }
+
+        if (!filtered.length) {
+            listEl.innerHTML = savedCustomers.length
+                ? '<div class="pd-customer-dir-empty">No customers match your search.</div>'
+                : '<div class="pd-customer-dir-empty">No saved customers in directory yet.</div>';
+            return;
+        }
+
+        listEl.innerHTML = filtered.map(({ customer, index }) => {
+            const dbId = Number(customer.id || 0);
+            const hasDbId = dbId > 0;
+            const company = escapeHtml(customer.company || 'Unnamed Customer');
+            const badge = hasDbId
+                ? '<span class="pd-customer-dir-badge">Saved</span>'
+                : '<span class="pd-customer-dir-badge is-project">Project</span>';
+            const metaParts = [];
+            if (customer.contact_name) metaParts.push(`<span><i class="far fa-user"></i> ${escapeHtml(customer.contact_name)}</span>`);
+            if (customer.phone) metaParts.push(`<span><i class="fas fa-phone"></i> ${escapeHtml(customer.phone)}</span>`);
+            if (customer.email) metaParts.push(`<span><i class="far fa-envelope"></i> ${escapeHtml(customer.email)}</span>`);
+            if (customer.address) metaParts.push(`<span><i class="fas fa-location-dot"></i> ${escapeHtml(customer.address)}</span>`);
+            const metaHtml = metaParts.length
+                ? metaParts.join('')
+                : '<span>No contact details stored</span>';
+
+            return `
+                <div class="pd-customer-dir-card" data-dir-row="${index}">
+                    <div class="pd-customer-dir-info">
+                        <div class="pd-customer-dir-title-row">
+                            <span class="pd-customer-dir-company">${company}</span>
+                            ${badge}
+                        </div>
+                        <div class="pd-customer-dir-meta">${metaHtml}</div>
+                    </div>
+                    <div class="pd-customer-dir-actions">
+                        <button type="button" class="pd-customer-dir-btn" data-dir-use="${index}" title="Use this customer for the project">
+                            <i class="fas fa-check"></i> Select
+                        </button>
+                        ${canMutateDir ? `
+                            <button type="button" class="pd-customer-dir-btn" data-dir-edit="${index}" title="${hasDbId ? 'Edit directory customer' : 'Edit & save to directory'}">
+                                <i class="fas fa-pen"></i>
+                            </button>
+                            ${hasDbId ? `
+                                <button type="button" class="pd-customer-dir-btn is-danger" data-dir-delete="${dbId}" title="Delete from customer directory">
+                                    <i class="fas fa-trash-can"></i>
+                                </button>
+                            ` : ''}
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    async function deleteDirectoryCustomer(customerId) {
+        const targetId = Number(customerId || 0);
+        if (targetId <= 0) return;
+        const target = savedCustomers.find(c => Number(c.id || 0) === targetId);
+        const safeCompany = escapeHtml(target?.company || `Customer #${targetId}`);
+        const confirmed = typeof window.showConfirmDialog === 'function'
+            ? await window.showConfirmDialog({
+                title: 'Delete Customer',
+                message: `Are you sure you want to remove <strong>"${safeCompany}"</strong> from the Customer Directory? Existing projects will keep their copied customer fields.`,
+                confirmText: 'Delete Customer',
+                cancelText: 'Cancel',
+                type: 'error',
+                badge: 'DELETE',
+                icon: 'fas fa-trash',
+                primaryDanger: true
+            })
+            : window.confirm(`Delete "${target?.company || targetId}" from directory?`);
+        if (!confirmed) return;
+
+        try {
+            const res = await fetch('../api/customers.php?action=delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: targetId })
+            });
+            const data = await res.json();
+            if (data?.status === 'success') {
+                if (Array.isArray(data.customers)) {
+                    savedCustomers = data.customers;
+                } else {
+                    savedCustomers = savedCustomers.filter(c => Number(c.id || 0) !== targetId);
+                }
+                if (editingDirectoryCustomerId === targetId) {
+                    setEditingDirectoryCustomer(null);
+                }
+                populateCustomerSelector();
+                renderCustomerDirectory();
+                showToast(`Customer "${target?.company || targetId}" removed from directory.`);
+            } else {
+                showToast(data?.msg || 'Failed to delete customer.');
+            }
+        } catch (e) {
+            showToast('Error deleting customer from directory.');
+        }
+    }
 
     async function loadCustomersDirectory() {
         const selector = $('poCustomerSelector');
@@ -463,6 +653,7 @@
             if (data?.status === 'success' && Array.isArray(data.data)) {
                 savedCustomers = data.data;
                 populateCustomerSelector();
+                if (customerModalView === 'directory') renderCustomerDirectory();
             }
         } catch (e) {
             console.warn('Could not load customers directory:', e);
@@ -481,7 +672,7 @@
             }).join('');
     }
 
-    function selectCustomerByIndex(index) {
+    function selectCustomerByIndex(index, { editDirectory = false } = {}) {
         const c = savedCustomers[index];
         if (!c) return;
         if ($('poCustomerCompany')) $('poCustomerCompany').value = c.company || '';
@@ -489,13 +680,22 @@
         if ($('poCustomerPhone')) $('poCustomerPhone').value = c.phone || '';
         if ($('poCustomerEmail')) $('poCustomerEmail').value = c.email || '';
         if ($('poCustomerAddress')) $('poCustomerAddress').value = c.address || '';
+        if (editDirectory) {
+            setEditingDirectoryCustomer(Number(c.id || 0) > 0 ? c : null);
+        } else {
+            setEditingDirectoryCustomer(null);
+        }
         syncCustomerDisplayCard();
         markDirty();
         renderProjectHeaderMeta();
-        showToast(`Customer "${c.company}" selected.`);
+        populateCustomerSelector(c.company || '');
+        if (!editDirectory) {
+            showToast(`Customer "${c.company}" selected.`);
+        }
     }
 
     function clearCustomerFields() {
+        setEditingDirectoryCustomer(null);
         if ($('poCustomerCompany')) $('poCustomerCompany').value = '';
         if ($('poPrimaryContact')) $('poPrimaryContact').value = '';
         if ($('poCustomerPhone')) $('poCustomerPhone').value = '';
@@ -514,7 +714,9 @@
             $('poCustomerCompany')?.focus();
             return;
         }
+        const wasEditing = editingDirectoryCustomerId > 0;
         const payload = {
+            id: wasEditing ? editingDirectoryCustomerId : null,
             company,
             contact_name: $('poPrimaryContact')?.value?.trim() || '',
             phone: $('poCustomerPhone')?.value?.trim() || '',
@@ -534,12 +736,14 @@
                 if (Array.isArray(data.customers)) {
                     savedCustomers = data.customers;
                 } else if (data.data) {
-                    const existingIdx = savedCustomers.findIndex(c => c.company.toLowerCase() === company.toLowerCase());
+                    const existingIdx = savedCustomers.findIndex(c => Number(c.id || 0) === Number(data.data.id || -1) || c.company.toLowerCase() === company.toLowerCase());
                     if (existingIdx >= 0) savedCustomers[existingIdx] = data.data;
                     else savedCustomers.push(data.data);
                 }
-                populateCustomerSelector(company);
-                showToast(`Customer "${company}" saved to directory!`);
+                setEditingDirectoryCustomer(null);
+                populateCustomerSelector(data.data?.company || company);
+                if (customerModalView === 'directory') renderCustomerDirectory();
+                showToast(wasEditing ? `Customer "${company}" updated in directory!` : `Customer "${company}" saved to directory!`);
             } else {
                 showToast(data?.msg || 'Failed to save customer.');
             }
@@ -4926,9 +5130,14 @@
         });
 
         function openCustomerModal() {
+            setEditingDirectoryCustomer(null);
+            setCustomerModalView('form');
+            populateCustomerSelector();
             $('pdCustomerModal')?.classList.add('open');
         }
         function closeCustomerModal() {
+            setEditingDirectoryCustomer(null);
+            setCustomerModalView('form');
             $('pdCustomerModal')?.classList.remove('open');
             syncCustomerDisplayCard();
         }
@@ -5033,6 +5242,36 @@
         });
         $('saveCustomerBtn')?.addEventListener('click', saveCurrentCustomerToDirectory);
         $('clearCustomerBtn')?.addEventListener('click', clearCustomerFields);
+        $('openCustomerDirectoryBtn')?.addEventListener('click', () => {
+            setCustomerModalView(customerModalView === 'directory' ? 'form' : 'directory');
+        });
+        $('customerDirectoryBackBtn')?.addEventListener('click', () => setCustomerModalView('form'));
+        $('customerDirectoryNewBtn')?.addEventListener('click', () => {
+            clearCustomerFields();
+            setCustomerModalView('form');
+            setTimeout(() => $('poCustomerCompany')?.focus(), 40);
+        });
+        $('cancelEditDirectoryCustomerBtn')?.addEventListener('click', () => setEditingDirectoryCustomer(null));
+        $('poCustomerDirectorySearch')?.addEventListener('input', renderCustomerDirectory);
+        $('poCustomerDirectoryList')?.addEventListener('click', async event => {
+            const useBtn = event.target.closest('[data-dir-use]');
+            if (useBtn) {
+                selectCustomerByIndex(Number(useBtn.dataset.dirUse), { editDirectory: false });
+                setCustomerModalView('form');
+                return;
+            }
+            const editBtn = event.target.closest('[data-dir-edit]');
+            if (editBtn) {
+                selectCustomerByIndex(Number(editBtn.dataset.dirEdit), { editDirectory: true });
+                setCustomerModalView('form');
+                setTimeout(() => $('poCustomerCompany')?.focus(), 40);
+                return;
+            }
+            const deleteBtn = event.target.closest('[data-dir-delete]');
+            if (deleteBtn) {
+                await deleteDirectoryCustomer(Number(deleteBtn.dataset.dirDelete));
+            }
+        });
         loadCustomersDirectory();
         $('addNoteBtn')?.addEventListener('click', () => openNoteModal(-1));
         $('addNoteBtnHead')?.addEventListener('click', () => openNoteModal(-1));
@@ -5318,8 +5557,11 @@
             if (!link) return;
 
             const href = link.getAttribute('href');
-            if (!href || href === '#' || href.startsWith('javascript:') || link.target === '_blank') return;
-            if (href.startsWith('#')) return;
+            if (!href || href === '#' || href.startsWith('#') || href.startsWith('javascript:')
+                || href.startsWith('blob:') || href.startsWith('data:')
+                || href.startsWith('mailto:') || href.startsWith('tel:')
+                || link.hasAttribute('download') || link.dataset.noNavGuard === '1'
+                || link.target === '_blank') return;
 
             event.preventDefault();
             event.stopPropagation();
@@ -5416,6 +5658,252 @@
             if (!checkIsDirty()) return;
             event.preventDefault();
             event.returnValue = '';
+        });
+
+        function ensureTemplateActionModal() {
+            let backdrop = $('pdTemplateActionModal');
+            if (backdrop) return backdrop;
+            backdrop = document.createElement('div');
+            backdrop.id = 'pdTemplateActionModal';
+            backdrop.className = 'pd-modal-backdrop';
+            backdrop.innerHTML = `
+                <div class="pd-modal" style="max-width: 520px; width: 92vw;" role="dialog" aria-modal="true" aria-labelledby="pdTemplateModalTitle">
+                    <div class="pd-modal-head">
+                        <h3 id="pdTemplateModalTitle" style="margin:0;font-size:15px;font-weight:700;">Project Template</h3>
+                        <button type="button" class="pd-modal-head-close" id="pdTemplateModalClose" aria-label="Close"><i class="fas fa-times"></i></button>
+                    </div>
+                    <div class="pd-modal-body" id="pdTemplateModalBody" style="display:flex;flex-direction:column;gap:12px;"></div>
+                    <div class="pd-modal-foot">
+                        <button type="button" class="btn-ghost" id="pdTemplateModalCancel">Cancel</button>
+                        <button type="button" class="btn-main orange" id="pdTemplateModalConfirm">Confirm</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(backdrop);
+            const close = () => backdrop.classList.remove('open');
+            backdrop.querySelector('#pdTemplateModalClose')?.addEventListener('click', close);
+            backdrop.querySelector('#pdTemplateModalCancel')?.addEventListener('click', close);
+            backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+            return backdrop;
+        }
+
+        function escHtml(v) {
+            return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch]));
+        }
+
+        async function openConvertToTemplateDialog() {
+            const projectId = Number(window.ProjectState?.projectId || 0);
+            if (projectId <= 0) {
+                showToast('Please save the project first before converting it to a template.');
+                return;
+            }
+            const currentName = ($('poEstimateName')?.value || window.ProjectState?.projectInfo?.name || 'Project').trim();
+            const suggested = /template$/i.test(currentName) ? currentName : `${currentName} Template`;
+            const modal = ensureTemplateActionModal();
+            modal.querySelector('#pdTemplateModalTitle').innerHTML = '<i class="fas fa-layer-group" style="color:#0d9488;margin-right:6px;"></i> Convert to Template';
+            modal.querySelector('#pdTemplateModalBody').innerHTML = `
+                <p class="pd-template-modal-desc" style="margin:0;font-size:13px;line-height:1.45;">
+                    Creates a clean copy of this project in the <strong>Templates</strong> stage with all Estimating and Takeoff quantities reset to <strong>0</strong>. Your current project will remain unchanged.
+                </p>
+                <label class="pd-template-field-label" style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;font-weight:600;">
+                    <span>Template Name</span>
+                    <input type="text" id="pdConvertTemplateNameInput" class="pd-input" value="${escHtml(suggested)}" placeholder="Template name" style="padding:8px 10px;border:1px solid var(--border,#cbd5e1);border-radius:6px;font-size:13px;">
+                </label>
+            `;
+            const confirmBtn = modal.querySelector('#pdTemplateModalConfirm');
+            confirmBtn.textContent = 'Create Template';
+            confirmBtn.disabled = false;
+            modal.classList.add('open');
+            setTimeout(() => modal.querySelector('#pdConvertTemplateNameInput')?.focus(), 40);
+
+            confirmBtn.onclick = async () => {
+                const nameInput = modal.querySelector('#pdConvertTemplateNameInput');
+                const tplName = (nameInput?.value || '').trim();
+                if (!tplName) {
+                    nameInput?.focus();
+                    return;
+                }
+                confirmBtn.disabled = true;
+                confirmBtn.textContent = 'Converting...';
+                try {
+                    if (typeof window.projectEstimatingSave === 'function') {
+                        await window.projectEstimatingSave().catch(() => {});
+                    }
+                    const res = await request('convert_to_template', { id: projectId, name: tplName });
+                    modal.classList.remove('open');
+                    const createdId = Number(res.project_id || res.id || 0);
+                    showToast(`Template "${res.name || tplName}" created in Templates stage.`);
+                    if (createdId > 0 && typeof window.showConfirmDialog === 'function') {
+                        const go = await window.showConfirmDialog({
+                            title: 'Template Created',
+                            message: `"${res.name || tplName}" was created in the Templates stage with quantities set to 0. Do you want to open the new template now?`,
+                            confirmText: 'Open Template',
+                            cancelText: 'Stay Here',
+                            type: 'info',
+                            badge: 'TEMPLATES',
+                            icon: 'fas fa-layer-group'
+                        });
+                        if (go) {
+                            isDirty = false;
+                            window.location.href = `project_dashboard.php?id=${encodeURIComponent(createdId)}&tab=estimating`;
+                        }
+                    }
+                } catch (err) {
+                    showToast(err?.message || 'Could not convert project to template.');
+                    confirmBtn.disabled = false;
+                    confirmBtn.textContent = 'Create Template';
+                }
+            };
+        }
+
+        async function openApplyTemplateDialog() {
+            const projectId = Number(window.ProjectState?.projectId || 0);
+            if (projectId <= 0) {
+                showToast('Please save the project first before applying a template.');
+                return;
+            }
+            const modal = ensureTemplateActionModal();
+            modal.querySelector('#pdTemplateModalTitle').innerHTML = '<i class="fas fa-wand-magic-sparkles" style="color:#0d9488;margin-right:6px;"></i> Apply Template';
+            modal.querySelector('#pdTemplateModalBody').innerHTML = '<div style="padding:12px 0;font-size:13px;color:var(--muted,#64748b);">Loading available templates...</div>';
+            const confirmBtn = modal.querySelector('#pdTemplateModalConfirm');
+            confirmBtn.textContent = 'Apply Template';
+            confirmBtn.disabled = true;
+            modal.classList.add('open');
+
+            try {
+                const resp = await fetch(`${apiUrl}?action=templates`, { cache: 'no-store' });
+                const data = await resp.json();
+                const templates = Array.isArray(data?.templates) ? data.templates : [];
+                if (!templates.length) {
+                    modal.querySelector('#pdTemplateModalBody').innerHTML = '<p style="margin:0;font-size:13px;color:#dc2626;">No templates are currently available.</p>';
+                    return;
+                }
+                modal.querySelector('#pdTemplateModalBody').innerHTML = `
+                    <p class="pd-template-modal-desc" style="margin:0;font-size:13px;line-height:1.45;">
+                        Creates a <strong>new empty estimate</strong> in this project prefixed with <code>TMPLT_</code> and copies all groups, items, assemblies, Takeoff layers, and settings from the chosen template.
+                    </p>
+                    <label class="pd-template-field-label" style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;font-weight:600;">
+                        <span>Select Template</span>
+                        <select id="pdApplyTemplateSelect" class="pd-input" style="padding:8px 10px;border:1px solid var(--border,#cbd5e1);border-radius:6px;font-size:13px;">
+                            ${templates.map(t => `<option value="${escHtml(t.id)}">${escHtml(t.name)}${t.trade ? ` (${escHtml(t.trade)})` : ''}</option>`).join('')}
+                        </select>
+                    </label>
+                    <div id="pdApplyTemplatePreview" class="pd-template-preview-box"></div>
+                `;
+                const sel = modal.querySelector('#pdApplyTemplateSelect');
+                const preview = modal.querySelector('#pdApplyTemplatePreview');
+                const refreshPreview = () => {
+                    const chosen = templates.find(t => String(t.id) === String(sel?.value));
+                    if (!chosen || !preview) return;
+                    const prefixed = String(chosen.name || '').startsWith('TMPLT_') ? chosen.name : `TMPLT_${chosen.name}`;
+                    preview.innerHTML = `<strong>New Estimate:</strong> ${escHtml(prefixed)}${chosen.description ? `<br><span>${escHtml(chosen.description)}</span>` : ''}`;
+                };
+                sel?.addEventListener('change', refreshPreview);
+                refreshPreview();
+                confirmBtn.disabled = false;
+
+                confirmBtn.onclick = async () => {
+                    const tplId = Number(sel?.value || 0);
+                    if (tplId <= 0) return;
+                    confirmBtn.disabled = true;
+                    confirmBtn.textContent = 'Applying...';
+                    try {
+                        if (typeof window.projectEstimatingSave === 'function') {
+                            await window.projectEstimatingSave().catch(() => {});
+                        }
+                        const res = await request('apply_template', { id: projectId, template_id: tplId });
+                        const clientEstId = res?.estimate?.client_estimate_id || '';
+                        try {
+                            if (clientEstId) {
+                                sessionStorage.setItem(`takeoff.pendingActivateEstimateId.${projectId}`, clientEstId);
+                            }
+                            localStorage.removeItem(`takeoff_project_groups_${projectId}`);
+                        } catch (_) {}
+                        isDirty = false;
+                        modal.classList.remove('open');
+                        window.location.href = `project_dashboard.php?id=${encodeURIComponent(projectId)}&tab=estimating`;
+                    } catch (err) {
+                        showToast(err?.message || 'Could not apply template.');
+                        confirmBtn.disabled = false;
+                        confirmBtn.textContent = 'Apply Template';
+                    }
+                };
+            } catch (err) {
+                modal.querySelector('#pdTemplateModalBody').innerHTML = `<p style="margin:0;font-size:13px;color:#dc2626;">${escHtml(err?.message || 'Error loading templates.')}</p>`;
+            }
+        }
+
+        $('projectActionsMenu')?.addEventListener('click', async event => {
+            const btn = event.target?.closest?.('[data-project-action]');
+            if (!btn) return;
+            event.stopPropagation();
+            $('projectActionsMenu')?.classList.remove('open');
+            const action = btn.dataset.projectAction;
+            const projectId = Number(window.ProjectState?.projectId || 0);
+            if (action === 'convert-template') return openConvertToTemplateDialog();
+            if (action === 'apply-template') return openApplyTemplateDialog();
+            if (projectId <= 0) {
+                showToast('Please save the project first.');
+                return;
+            }
+            if (action === 'copy') {
+                const ok = typeof window.showConfirmDialog === 'function'
+                    ? await window.showConfirmDialog({
+                        title: 'Copy Project',
+                        message: 'Create a full duplicate of this project including documents, takeoffs, and estimates?',
+                        confirmText: 'Copy Project',
+                        cancelText: 'Cancel',
+                        type: 'info',
+                        icon: 'fas fa-copy'
+                    })
+                    : window.confirm('Create a copy of this project?');
+                if (!ok) return;
+                try {
+                    const res = await request('copy', { id: projectId });
+                    if (res?.id) {
+                        isDirty = false;
+                        window.location.href = `project_dashboard.php?id=${encodeURIComponent(res.id)}&tab=overview`;
+                    }
+                } catch (err) {
+                    showToast(err?.message || 'Could not copy project.');
+                }
+            } else if (action === 'archive') {
+                const ok = typeof window.showConfirmDialog === 'function'
+                    ? await window.showConfirmDialog({
+                        title: 'Archive Project',
+                        message: 'Move this project to Archived stage?',
+                        confirmText: 'Archive',
+                        cancelText: 'Cancel',
+                        type: 'warning',
+                        icon: 'fas fa-box-archive'
+                    })
+                    : window.confirm('Archive this project?');
+                if (!ok) return;
+                await changeProjectStatus('archived');
+            } else if (action === 'delete') {
+                const projLabel = ($('poEstimateName')?.value || window.ProjectState?.projectInfo?.name || `Project #${projectId}`).trim();
+                const safeProjLabel = escHtml(projLabel || 'this project');
+                const ok = typeof window.showConfirmDialog === 'function'
+                    ? await window.showConfirmDialog({
+                        title: 'Delete Project',
+                        message: `Are you sure you want to delete <strong>"${safeProjLabel}"</strong>? It will be moved to the deleted archive and hidden from the Bid Board.`,
+                        confirmText: 'Delete Project',
+                        cancelText: 'Cancel',
+                        type: 'error',
+                        badge: 'DELETE',
+                        icon: 'fas fa-trash',
+                        primaryDanger: true
+                    })
+                    : window.confirm(`Are you sure you want to delete "${projLabel}"?`);
+                if (!ok) return;
+                try {
+                    await request('delete', { id: projectId });
+                    isDirty = false;
+                    window.location.href = 'bid_board.php';
+                } catch (err) {
+                    showToast(err?.message || 'Could not delete project.');
+                }
+            }
         });
     });
 })();

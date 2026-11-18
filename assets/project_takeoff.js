@@ -169,10 +169,8 @@
     window.projectTakeoffFitToScreen = fitTakeoffToScreen;
     window.projectTakeoffSaveState = async function () {
         takeoffIsDirty = false;
-        try {
-            const pId = String(window.ProjectState?.projectId || 0);
-            localStorage.setItem('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
-        } catch (_) { }
+        const pId = String(window.ProjectState?.projectId || 0);
+        safeSetTakeoffLocalStorage('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
         syncTakeoffToEstimating();
         syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
         try {
@@ -1326,7 +1324,7 @@
                 if (prefix === 'createLayer') {
                     setCreateLayerColor(color);
                 } else {
-                    setLayerColor(color);
+                    setLayerColor(color, { notify: true });
                 }
                 closeAllProCustomDropdowns();
             });
@@ -1628,10 +1626,11 @@
         if (!options.suppressDirty) {
             takeoffIsDirty = true;
         }
-        try {
-            const pId = String(window.ProjectState?.projectId || 0);
-            localStorage.setItem('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
-        } catch (_) { }
+        const pId = String(window.ProjectState?.projectId || 0);
+        safeSetTakeoffLocalStorage('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
+        if (options && options.skipEstimatingSync) {
+            return true;
+        }
         if (options && options.debounceEstimatingSync) {
             scheduleEstimatingSyncFromCanvas();
         } else {
@@ -1759,11 +1758,156 @@
         return `takeoff.estimating.module.${window.ProjectState?.projectId || 'draft'}`;
     }
 
-    function loadEstimatingStateForSync() {
+    let latestEstimatingState = null;
+    let takeoffDomInitialized = false;
+    let pendingInitialEstimatingItemsDetail = null;
+
+    function adoptAuthoritativeEstimateFromEstimating(detail = {}) {
+        const incomingEstId = String(detail.activeEstimateId || '');
+        if (!incomingEstId || incomingEstId === 'est_primary') return;
+        const estimatesList = Array.isArray(detail.estimates) ? detail.estimates : (latestEstimatingState?.estimates || []);
+        const estListIds = new Set(estimatesList.map(row => String(row?.id || '')));
+        const currentEstId = String(takeoffState.activeEstimateId || '');
+        const currentLayersCount = takeoffState.groups
+            .filter(g => groupBelongsToEstimate(g, currentEstId))
+            .reduce((sum, g) => sum + ((g.items || g.layers || []).length), 0);
+        if (!currentEstId || currentEstId === 'est_primary' || (estListIds.size && !estListIds.has(currentEstId))
+            || (currentEstId !== incomingEstId && currentLayersCount === 0 && !takeoffIsDirty)) {
+            takeoffState.activeEstimateId = incomingEstId;
+            if (takeoffDomInitialized && typeof ensureEstimateTakeoffWorkspace === 'function') {
+                ensureEstimateTakeoffWorkspace(incomingEstId, false);
+            }
+        }
+    }
+
+    window.addEventListener('takeoff:estimating-state-updated', event => {
+        const detail = event.detail || {};
+        updateLatestEstimatingState(detail, false);
+        if (!takeoffDomInitialized) return;
+        adoptAuthoritativeEstimateFromEstimating(detail);
+        if (typeof renderTakeoffEstimateFooter === 'function') renderTakeoffEstimateFooter();
+        if (typeof renderTakeoffPanel === 'function') renderTakeoffPanel();
+    });
+
+    window.addEventListener('takeoff:estimating-items-updated', event => {
+        const detail = event.detail || {};
+        updateLatestEstimatingState(detail, true);
+        if (!takeoffDomInitialized) {
+            pendingInitialEstimatingItemsDetail = detail;
+            return;
+        }
+        adoptAuthoritativeEstimateFromEstimating(detail);
+        syncEstimatingItemsToTakeoff(detail);
+        if (typeof renderTakeoffPanel === 'function') renderTakeoffPanel();
+        if (typeof renderTakeoffEstimateFooter === 'function') renderTakeoffEstimateFooter();
+    });
+
+    function safeSetTakeoffLocalStorage(key, value) {
         try {
-            const parsed = JSON.parse(localStorage.getItem(estimatingStoreKey()) || 'null');
-            if (parsed && (Array.isArray(parsed.groups) || Array.isArray(parsed.estimates))) return parsed;
+            localStorage.setItem(key, value);
+            return true;
+        } catch (_) {
+            try {
+                const pidStr = String(window.ProjectState?.projectId || 'draft');
+                const evictable = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i);
+                    if (!k || k === key) continue;
+                    if ((k.startsWith('takeoff.estimating.module.') && k !== `takeoff.estimating.module.${pidStr}`)
+                        || (k.startsWith('takeoff_project_groups_') && k !== `takeoff_project_groups_${pidStr}`)) {
+                        evictable.push(k);
+                    }
+                }
+                evictable.forEach(k => { try { localStorage.removeItem(k); } catch (_) {} });
+                localStorage.setItem(key, value);
+                return true;
+            } catch (_) {
+                return false;
+            }
+        }
+    }
+
+    function updateLatestEstimatingState(detail = {}, isItemsEvent = false) {
+        if (!detail || typeof detail !== 'object') return;
+        if (!isItemsEvent && Array.isArray(detail.estimates)) {
+            latestEstimatingState = {
+                ...(latestEstimatingState || {}),
+                activeEstimateId: String(detail.activeEstimateId || latestEstimatingState?.activeEstimateId || detail.estimates[0]?.id || 'est_primary'),
+                estimates: detail.estimates,
+                summary: detail.summary || latestEstimatingState?.summary || null
+            };
+            return;
+        }
+        const detailActiveId = String(detail.activeEstimateId || '');
+        if (!detailActiveId || !Array.isArray(detail.groups)) return;
+        const base = latestEstimatingState && Array.isArray(latestEstimatingState.estimates)
+            ? latestEstimatingState
+            : loadEstimatingStateForSync();
+        const estimates = Array.isArray(base?.estimates) ? base.estimates.map(est => {
+            if (String(est?.id) === detailActiveId) {
+                return { ...est, groups: detail.groups };
+            }
+            return est;
+        }) : [];
+        if (!estimates.some(est => String(est?.id) === detailActiveId)) {
+            estimates.push({
+                id: detailActiveId,
+                name: 'Estimate',
+                groups: detail.groups,
+                isPrimary: estimates.length === 0,
+                is_primary: estimates.length === 0
+            });
+        }
+        latestEstimatingState = {
+            ...(base || {}),
+            activeEstimateId: detailActiveId,
+            estimates
+        };
+    }
+
+    function loadEstimatingStateForSync() {
+        let parsed = null;
+        try {
+            const candidate = JSON.parse(localStorage.getItem(estimatingStoreKey()) || 'null');
+            if (candidate && (Array.isArray(candidate.groups) || Array.isArray(candidate.estimates))) {
+                parsed = candidate;
+            }
         } catch (e) { }
+        if (latestEstimatingState && Array.isArray(latestEstimatingState.estimates) && latestEstimatingState.estimates.length) {
+            return {
+                ...(parsed || {}),
+                activeEstimateId: String(latestEstimatingState.activeEstimateId || parsed?.activeEstimateId || latestEstimatingState.estimates[0]?.id || 'est_primary'),
+                estimates: latestEstimatingState.estimates,
+                summary: latestEstimatingState.summary || parsed?.summary || null
+            };
+        }
+        if (parsed) return parsed;
+        const psSummary = Array.isArray(window.ProjectState?.estimatesSummary) ? window.ProjectState.estimatesSummary : [];
+        const psActiveId = String(window.ProjectState?.activeEstimateId || '');
+        if (psSummary.length > 0) {
+            const resolvedActive = (psActiveId && psActiveId !== 'est_primary') ? psActiveId : String(psSummary[0].id || 'est_primary');
+            const activeRow = psSummary.find(row => String(row.id) === resolvedActive) || psSummary[0];
+            return {
+                search: '',
+                selected: [],
+                fullscreen: false,
+                hiddenColumns: [],
+                laborUnit: 'hrs',
+                groups: Array.isArray(activeRow?.groups) ? activeRow.groups : [],
+                estimates: psSummary.map((row, idx) => ({
+                    id: String(row.id),
+                    name: row.name || (idx === 0 ? 'Primary Estimate' : `Estimate ${idx + 1}`),
+                    is_primary: Boolean(row.is_primary || row.isPrimary || idx === 0),
+                    isPrimary: Boolean(row.is_primary || row.isPrimary || idx === 0),
+                    primary: Boolean(row.is_primary || row.isPrimary || idx === 0),
+                    groups: Array.isArray(row.groups) ? row.groups : [],
+                    settings: row.settings || {}
+                })),
+                activeEstimateId: resolvedActive,
+                summary: activeRow?.estimateSummary || null
+            };
+        }
+        const fallbackActiveId = (psActiveId && psActiveId !== 'est_primary') ? psActiveId : 'est_primary';
         return {
             search: '',
             selected: [],
@@ -1771,8 +1915,8 @@
             hiddenColumns: [],
             laborUnit: 'hrs',
             groups: [],
-            estimates: [{ id: 'est_primary', name: 'Primary Estimate', primary: true }],
-            activeEstimateId: 'est_primary',
+            estimates: [{ id: fallbackActiveId, name: 'Primary Estimate', primary: true }],
+            activeEstimateId: fallbackActiveId,
             globalLaborCost: 36,
             globalLaborSales: 55.05,
             globalLaborMargin: 34.6,
@@ -1831,14 +1975,34 @@
     }
 
     function activeEstimateId() {
-        if (takeoffState.activeEstimateId) return String(takeoffState.activeEstimateId);
         const estimating = loadEstimatingStateForSync();
-        return String(estimating.activeEstimateId || estimating.estimates?.[0]?.id || 'est_primary');
+        const psActiveId = String(window.ProjectState?.activeEstimateId || '');
+        if (takeoffState.activeEstimateId && String(takeoffState.activeEstimateId) !== 'est_primary') {
+            return String(takeoffState.activeEstimateId);
+        }
+        const estActiveId = String(estimating?.activeEstimateId || '');
+        if (estActiveId && estActiveId !== 'est_primary') {
+            return estActiveId;
+        }
+        if (psActiveId && psActiveId !== 'est_primary') {
+            return psActiveId;
+        }
+        const firstEstId = String(estimating?.estimates?.[0]?.id || '');
+        if (firstEstId && firstEstId !== 'est_primary') {
+            return firstEstId;
+        }
+        return String(takeoffState.activeEstimateId || estActiveId || firstEstId || 'est_primary');
     }
 
     function primaryEstimateId() {
         const estimating = loadEstimatingStateForSync();
-        return String(estimating.estimates?.[0]?.id || estimating.activeEstimateId || 'est_primary');
+        const primary = Array.isArray(estimating?.estimates)
+            ? estimating.estimates.find(row => Boolean(row?.isPrimary || row?.is_primary || row?.primary))
+            : null;
+        if (primary?.id) return String(primary.id);
+        const metaPrimaryId = String(window.ProjectState?.metadata?.primary_estimate_id || '');
+        if (metaPrimaryId && metaPrimaryId !== 'est_primary') return metaPrimaryId;
+        return String(estimating.estimates?.[0]?.id || estimating.activeEstimateId || activeEstimateId() || 'est_primary');
     }
 
     function groupBelongsToEstimate(group, estimateId = activeEstimateId()) {
@@ -1921,7 +2085,7 @@
             orderedGroupIds.push(String(group.id));
             (estimateGroup.items || []).forEach(item => {
                 const itemId = String(item.id || '');
-                if (!itemId) return;
+                if (!itemId || item.parentItemId || item.parent_item_id || item.assemblyParentId) return;
                 const layerId = String(item.takeoffLayerId || `estitem_${estimateId}_${itemId}`);
                 const layerMatchesEstimatingItem = (row) => {
                     if (String(row.estimatingItemId || '') === itemId) return true;
@@ -1945,23 +2109,26 @@
                 };
                 let layer = allLayers().find(row => (String(row.estimateId || '') === estimateId || !row.estimateId)
                     && layerMatchesEstimatingItem(row));
-                const isItemOverridden = Boolean(item.quantityOverride || String(item.quantitySyncStatus || '') === 'overridden');
-                const isItemAddedFromEst = Boolean(item.addedFromEstimating || item.origin === 'estimating');
+                const estQty = Number(item.quantity || 0);
+                const isItemAddedFromEst = Boolean(item.addedFromEstimating || item.origin === 'estimating' || item.origin === 'excel_import');
                 const hasTakeoffOrigin = Boolean(item.copiedFromTakeoffLayerId || item.takeoffLayerId || item.source_layer_key || String(item.quantitySource || '') === 'takeoff');
+                const initialTakeoffQty = (item.lastSyncedTakeoffQuantity !== undefined && item.lastSyncedTakeoffQuantity !== null)
+                    ? Number(item.lastSyncedTakeoffQuantity || 0)
+                    : (hasTakeoffOrigin ? Number(item.takeoffQuantity ?? 0) : 0);
+                const isItemOverridden = Boolean(
+                    item.quantityOverride
+                    || String(item.quantitySyncStatus || '') === 'overridden'
+                    || (!layer && Math.abs(estQty - initialTakeoffQty) >= 0.0001)
+                );
                 if (!layer) {
-                    const initialTakeoffQty = (isItemAddedFromEst && !hasTakeoffOrigin)
-                        ? (isItemOverridden
-                            ? Number(item.lastSyncedTakeoffQuantity ?? item.originalQuantity ?? 0)
-                            : Number(item.quantity || 0))
-                        : 0;
                     layer = {
                         id: layerId, groupId: group.id, estimateId, estimatingItemId: itemId,
                         name: item.name || 'Cost item', type: inferTakeoffTypeFromUom(item.uom) || 'Count',
                         uom: item.uom || 'ea', symbol: 'Solid Circle', size: 'Medium', color: '#2563eb',
-                        visible: true, locked: false, quantity: Number(item.quantity || initialTakeoffQty || 0),
+                        visible: true, locked: false, quantity: initialTakeoffQty,
                         baseQuantity: initialTakeoffQty,
                         quantityOverride: isItemOverridden,
-                        estimatingQuantity: Number(item.quantity || 0),
+                        estimatingQuantity: estQty,
                         addedFromEstimating: isItemAddedFromEst,
                         catalogItemId: item.catalogItemId || null,
                         catalog_item_id: item.catalogItemId || null, unitCost: Number(item.unitMaterialCost || 0),
@@ -2009,7 +2176,7 @@
                 takeoffIsDirty = true;
                 try {
                     const pId = String(window.ProjectState?.projectId || 0);
-                    localStorage.setItem('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
+                    safeSetTakeoffLocalStorage('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
                 } catch (_) { }
             }
         }
@@ -2121,6 +2288,22 @@
         const projectedLayerIds = new Set();
         const targetEstimateId = String(state.activeEstimateId || '');
         const scopedTakeoffGroups = takeoffState.groups.filter(group => groupBelongsToEstimate(group, targetEstimateId));
+        const totalScopedLayerCount = scopedTakeoffGroups.reduce((sum, group) => {
+            const groupItems = Array.isArray(group?.items) ? group.items : (Array.isArray(group?.layers) ? group.layers : []);
+            return sum + groupItems.length;
+        }, 0);
+        if (totalScopedLayerCount === 0 && !takeoffIsDirty) {
+            const targetEstimate = Array.isArray(state?.estimates)
+                ? state.estimates.find(est => String(est?.id) === targetEstimateId)
+                : null;
+            const targetEstGroups = Array.isArray(targetEstimate?.groups) ? targetEstimate.groups : (Array.isArray(state?.groups) ? state.groups : []);
+            const estimatingHasItems = targetEstGroups.some(grp => Array.isArray(grp?.items) && grp.items.length > 0)
+                || (Array.isArray(window.ProjectState?.estimateItems) && window.ProjectState.estimateItems.length > 0)
+                || (Array.isArray(window.ProjectState?.estimatesSummary) && window.ProjectState.estimatesSummary.some(e => String(e.id) === targetEstimateId && Number(e.itemCount || 0) > 0));
+            if (estimatingHasItems) {
+                return;
+            }
+        }
         const projectedGroups = scopedTakeoffGroups.map((takeoffGroup, groupIndex) => {
             const groupName = takeoffGroup.name || 'Default Group';
             const groupId = String(takeoffGroup.estimatingGroupId || `takeoff_group_${String(takeoffGroup.id || groupIndex)}`);
@@ -2222,6 +2405,7 @@
     }
 
     function layerCanvasPayload(layer) {
+        const overrideBlock = getLayerEstimatingOverrideBlock(layer, layer.estimateId || activeEstimateId());
         return {
             id: layer.id,
             name: layer.name,
@@ -2254,6 +2438,9 @@
             estimate_id: layer.estimateId || activeEstimateId(),
             estimating_item_id: layer.estimatingItemId || null,
             estimating_group_id: groupForLayer(layer)?.estimatingGroupId || null,
+            estimating_override_block: Boolean(overrideBlock.blocked),
+            estimating_override_qty: Number(overrideBlock.estimatingQuantity || 0),
+            estimating_override_uom: String(overrideBlock.uom || layer.uom || 'ea'),
             visible: layer.visible !== false && layerBelongsToEstimate(layer),
             locked: Boolean(layer.locked)
         };
@@ -2385,22 +2572,38 @@
                 : null;
             const groups = est?.groups || estState?.groups || [];
             const lid = String(layer.id || '');
-            const estItemId = String(layer.estimatingItemId || '');
+            const estItemId = String(layer.estimatingItemId || layer.metadata_json?.estimating_item_id || '');
+            const layerKeys = new Set([
+                lid,
+                String(layer.client_uid || ''),
+                String(layer.integration_key || ''),
+                String(layer.metadata_json?.project_layer_id || '')
+            ].filter(Boolean));
             const tkQty = Number(layer.quantity || 0);
             for (const grp of groups) {
                 for (const it of (grp.items || [])) {
                     const itId = String(it.id || '');
-                    const itLayerId = String(it.takeoffLayerId || '');
+                    const itLayerId = String(it.takeoffLayerId || it.takeoff_layer_id || it.layerId || '');
+                    const cleanLayerId = itLayerId.replace(/^takeoff_/, '');
+                    const cleanItemId = itId.replace(/^takeoff_/, '');
                     if ((estItemId && itId === estItemId)
-                        || (lid && (itLayerId === lid || itId === `takeoff_${lid}` || itLayerId === `takeoff_${lid}`))) {
+                        || (itLayerId && (layerKeys.has(itLayerId) || layerKeys.has(cleanLayerId)))
+                        || (itId && layerKeys.has(cleanItemId))) {
                         const estQty = Number(it.quantity ?? 0);
                         const isSame = Math.abs(tkQty - estQty) < 0.0001;
-                        const overridden = Boolean(it.quantityOverride === true || String(it.quantitySyncStatus || '') === 'overridden') && !isSame;
-                        const addedFromEstimating = Boolean(it.addedFromEstimating === true || it.origin === 'estimating' || layer.addedFromEstimating === true);
+                        const overridden = !isSame && (
+                            it.quantityOverride === true
+                            || String(it.quantitySyncStatus || '') === 'overridden'
+                            || String(it.origin || '') === 'excel_import'
+                            || (Boolean(layer.quantityOverride) && String(it.quantitySyncStatus || '') !== 'synced')
+                        );
+                        const addedFromEstimating = Boolean(it.addedFromEstimating === true || it.origin === 'estimating' || it.origin === 'excel_import' || layer.addedFromEstimating === true);
                         return {
                             overridden,
                             estimatingQuantity: estQty,
-                            addedFromEstimating
+                            addedFromEstimating,
+                            quantityOverrideSource: String(it.quantityOverrideSource || ''),
+                            lastSyncedTakeoffQuantity: Number(it.lastSyncedTakeoffQuantity ?? it.originalQuantity ?? 0)
                         };
                     }
                 }
@@ -2409,8 +2612,30 @@
         return {
             overridden: false,
             estimatingQuantity: 0,
-            addedFromEstimating: Boolean(layer.addedFromEstimating === true)
+            addedFromEstimating: Boolean(layer.addedFromEstimating === true),
+            quantityOverrideSource: '',
+            lastSyncedTakeoffQuantity: 0
         };
+    }
+
+    function getLayerEstimatingOverrideBlock(layer, estimateId = activeEstimateId()) {
+        if (!layer) return { blocked: false, estimatingQuantity: 0, uom: 'ea' };
+        const ov = getLayerEstimatingOverride(layer, estimateId);
+        const uom = String(layer.uom || 'ea');
+        const estQty = Number(ov.estimatingQuantity || 0);
+        if (!ov.overridden || estQty <= 0) {
+            return { blocked: false, estimatingQuantity: estQty, uom };
+        }
+        const source = String(ov.quantityOverrideSource || '');
+        if (source === 'canvas_overridden') {
+            return { blocked: false, estimatingQuantity: estQty, uom };
+        }
+        const hasCanvasShapes = Array.isArray(layer.shapes) && layer.shapes.length > 0;
+        const canvasQty = Number(layer.quantity || 0);
+        const estSyncedCanvasQty = Number(ov.lastSyncedTakeoffQuantity || 0);
+        const blocked = source === 'estimating_first'
+            || (!hasCanvasShapes && canvasQty <= 0 && estSyncedCanvasQty <= 0);
+        return { blocked, estimatingQuantity: estQty, uom };
     }
 
     function toggleGroupLock(groupId) {
@@ -2626,10 +2851,8 @@
             }
         });
         takeoffIsDirty = true;
-        try {
-            const pId = String(window.ProjectState?.projectId || 0);
-            localStorage.setItem('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
-        } catch (_) { }
+        const pId = String(window.ProjectState?.projectId || 0);
+        safeSetTakeoffLocalStorage('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
         window.dispatchEvent(new CustomEvent('takeoff:estimating-group-rename-requested', {
             detail: {
                 projectId: String(window.ProjectState?.projectId || ''),
@@ -2890,6 +3113,12 @@
                 }
                 // Single item selection: deselect others, select only this one
                 selectSingleLayer(layerId);
+                const drawerModal = $('takeoffLayerModal');
+                const drawerWorkspace = $('takeoffWorkspace');
+                if (drawerModal && !drawerModal.hidden && drawerWorkspace?.classList.contains('has-layer-drawer') && String(takeoffState.editingLayerId || '') !== String(layerId)) {
+                    const menuBtn = document.querySelector(`[data-layer-menu="${CSS.escape ? CSS.escape(layerId) : layerId}"]`);
+                    openLayerModal(layer?.groupId, layerId, menuBtn);
+                }
             });
 
             row.addEventListener('dragover', event => {
@@ -3075,6 +3304,9 @@
         ensureTakeoffModal();
         ensureTakeoffOverlays();
         ensureEditorEstimate();
+        if (!takeoffState.activeEstimateId || takeoffState.activeEstimateId === 'est_primary') {
+            takeoffState.activeEstimateId = activeEstimateId();
+        }
         renderTakeoffPanel();
         renderActiveLayerToolbar();
         syncTakeoffToEstimating();
@@ -3267,7 +3499,15 @@
                 </div>
             </div>
         </div>`;
-        $('layerDrawerSaveBtn')?.addEventListener('click', submitLayerModal);
+        $('layerDrawerSaveBtn')?.addEventListener('click', () => {
+            if (takeoffState.editingLayerId) {
+                flushActiveLayerModalSave();
+                if (!isLayerModalNonAutoDirty()) {
+                    return closeLayerModal();
+                }
+            }
+            return submitLayerModal();
+        });
 
         modal.querySelectorAll('[data-layer-modal-close]').forEach(btn => btn.addEventListener('click', () => {
             closeLayerModal();
@@ -3706,7 +3946,10 @@
     function setCreateLayerColor(hex) {
         const swatch = $('createLayerColorSwatch');
         const select = $('createLayerColor');
-        if (swatch) swatch.style.background = hex;
+        if (swatch) {
+            swatch.dataset.hexColor = hex;
+            swatch.style.background = hex;
+        }
         if (select) {
             let match = Array.from(select.options).find(o => o.value.toLowerCase() === hex.toLowerCase());
             if (match) select.value = match.value;
@@ -4052,6 +4295,122 @@
     let layerModalPopulating = false;
     let layerModalHistorySnapshotId = null;
     let layerModalActiveFormType = 'Count';
+    let layerModalNonAutoBaseline = null;
+    let layerModalLiveBackendTimer = null;
+    let layerModalNeedsBackendSave = false;
+
+    function getLayerModalNonAutoSnapshot() {
+        const rawMult = $('layerMultiplierInput')?.value;
+        const parsedMult = (rawMult !== undefined && rawMult !== '' && Number.isFinite(Number(rawMult)) && Number(rawMult) >= 0)
+            ? Number(rawMult)
+            : 1;
+        return {
+            type: $('layerTypeInput')?.value || 'Count',
+            name: ($('layerNameInput')?.value || '').replace(/\r?\n+/g, ' ').trim(),
+            tag: ($('layerTagInput')?.value || '').replace(/\r?\n+/g, ' ').trim(),
+            strokeWidth: Math.max(1, Math.min(3, parseFloat($('layerStrokeInput')?.value || '2.5') || 2.5)),
+            difficulty: parseFloat($('layerDifficultyInput')?.value || '1.0') || 1.0,
+            multiplier: parsedMult,
+            dropLength: Number($('layerDropInput')?.value || 0),
+            spacing: Number($('layerSpacingInput')?.value || 0),
+            height: Number($('layerHeightInput')?.value || 0),
+            depth: Number($('layerDepthInput')?.value || 0),
+            hasNewCatalogPickerItem: Boolean(takeoffState.pendingCatalogItem && takeoffState.pendingCatalogItem._fromCatalogPicker === true)
+        };
+    }
+
+    function isLayerModalNonAutoDirty() {
+        if (!takeoffState.editingLayerId) return Boolean(($('layerNameInput')?.value || '').trim());
+        if (!layerModalNonAutoBaseline) return false;
+        const curr = getLayerModalNonAutoSnapshot();
+        return (
+            curr.type !== layerModalNonAutoBaseline.type ||
+            curr.name !== layerModalNonAutoBaseline.name ||
+            curr.tag !== layerModalNonAutoBaseline.tag ||
+            curr.strokeWidth !== layerModalNonAutoBaseline.strokeWidth ||
+            curr.difficulty !== layerModalNonAutoBaseline.difficulty ||
+            curr.multiplier !== layerModalNonAutoBaseline.multiplier ||
+            curr.dropLength !== layerModalNonAutoBaseline.dropLength ||
+            curr.spacing !== layerModalNonAutoBaseline.spacing ||
+            curr.height !== layerModalNonAutoBaseline.height ||
+            curr.depth !== layerModalNonAutoBaseline.depth ||
+            Boolean(curr.hasNewCatalogPickerItem)
+        );
+    }
+
+    function refreshTakeoffLayerRowDom(layer) {
+        if (!layer || !layer.id) return false;
+        const escId = CSS.escape ? CSS.escape(String(layer.id)) : String(layer.id);
+        const row = document.querySelector(`[data-layer-row="${escId}"]`);
+        if (!row) {
+            renderTakeoffPanel();
+            return false;
+        }
+        const existingTagEl = row.querySelector('.pro-tree-item-tag');
+        const hasTagDom = Boolean(existingTagEl);
+        const hasTagModel = Boolean(layer.tag);
+        if (hasTagDom !== hasTagModel) {
+            renderTakeoffPanel();
+            return false;
+        }
+        const titleEl = row.querySelector('.pro-tree-item-title');
+        if (titleEl) {
+            titleEl.textContent = layer.name || '';
+            titleEl.title = layer.name || '';
+        }
+        if (existingTagEl && hasTagModel) {
+            existingTagEl.innerHTML = `<i class="fas fa-tag"></i> ${esc(layer.tag)}`;
+        }
+        const badgeWrap = row.querySelector('.pro-layer-symbol-badge');
+        if (badgeWrap) {
+            const symbolLabel = layer.symbol || layer.type || 'Item';
+            badgeWrap.title = `${symbolLabel} (${layer.color || '#3b82f6'})`;
+            badgeWrap.innerHTML = getLayerBadgeSvg(layer, 13);
+        } else {
+            const subEl = row.querySelector('.pro-tree-item-sub');
+            if (subEl) {
+                subEl.insertAdjacentHTML('afterbegin', renderLayerBadgeHtml(layer, 13));
+            }
+        }
+        const qtyEl = row.querySelector('.pro-tree-qty');
+        if (qtyEl) {
+            qtyEl.textContent = itemQuantitySubtitle(layer);
+        }
+        return true;
+    }
+
+    function scheduleLiveLayerBackendSave(delayMs = 380) {
+        layerModalNeedsBackendSave = true;
+        if (layerModalLiveBackendTimer) {
+            clearTimeout(layerModalLiveBackendTimer);
+            layerModalLiveBackendTimer = null;
+        }
+        if (delayMs <= 0) {
+            flushLiveLayerBackendSave();
+            return;
+        }
+        layerModalLiveBackendTimer = setTimeout(() => {
+            layerModalLiveBackendTimer = null;
+            flushLiveLayerBackendSave();
+        }, delayMs);
+    }
+
+    function flushLiveLayerBackendSave() {
+        if (layerModalLiveBackendTimer) {
+            clearTimeout(layerModalLiveBackendTimer);
+            layerModalLiveBackendTimer = null;
+        }
+        if (!layerModalNeedsBackendSave || !canWrite()) return;
+        layerModalNeedsBackendSave = false;
+        try {
+            const saved = callEditor('projectTakeoffSave');
+            if (saved && typeof saved.then === 'function') {
+                saved.catch(err => console.warn('Takeoff live layer save warning:', err));
+            }
+        } catch (editorErr) {
+            console.warn('Takeoff live layer save warning:', editorErr);
+        }
+    }
 
     function applyLiveLayerModalEdits({ syncBackend = true } = {}) {
         if (layerModalPopulating || !canWrite()) return false;
@@ -4073,6 +4432,7 @@
         if ($('layerDiameterInput')) $('layerDiameterInput').value = markerDiameter;
         const chosenUom = $('layerUomInput')?.value || layer.uom || typeToUom(layer.type || 'Count');
         const chosenSymbol = $('layerSymbolInput')?.value || layer.symbol || 'Solid Circle';
+        const uomChanged = String(layer.uom || '') !== String(chosenUom || '');
 
         layer.uom = chosenUom;
         layer.symbol = chosenSymbol;
@@ -4081,18 +4441,14 @@
         layer.color = chosenColor;
 
         callEditor('projectTakeoffUpdateLayerObjects', editingLayerId, {
+            uom: chosenUom,
             symbol: chosenSymbol,
             color: chosenColor,
             symbolSize: calcRadius,
             diameter: markerDiameter
         });
-        syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
-        const liveSnap = callEditor('projectTakeoffSnapshot');
-        if (liveSnap && Array.isArray(liveSnap.layers)) {
-            syncTakeoffFromCanvasSnapshot(liveSnap, { suppressEstimatingSync: true });
-        }
-        saveTakeoffState();
-        renderTakeoffPanel();
+        saveTakeoffState(uomChanged ? { debounceEstimatingSync: true } : { skipEstimatingSync: true });
+        refreshTakeoffLayerRowDom(layer);
         renderActiveLayerToolbar();
         updateSubheadSelectedItem();
         if (takeoffState.editingLayerId === editingLayerId) {
@@ -4104,14 +4460,7 @@
         }
         window.dispatchEvent(new CustomEvent('takeoff:layer-visuals-updated', { detail: { projectId: String(window.ProjectState?.projectId || '') } }));
         if (syncBackend) {
-            try {
-                const saved = callEditor('projectTakeoffSave');
-                if (saved && typeof saved.then === 'function') {
-                    saved.catch(err => console.warn('Takeoff live layer save warning:', err));
-                }
-            } catch (editorErr) {
-                console.warn('Takeoff live layer save warning:', editorErr);
-            }
+            scheduleLiveLayerBackendSave(360);
             layerModalPendingSave = false;
         }
         return true;
@@ -4244,12 +4593,16 @@
         const modal = $('takeoffLayerModal');
         const workspace = $('takeoffWorkspace');
         if (modal) {
+            const wasDrawerOpen = Boolean(!modal.hidden && workspace?.classList.contains('has-layer-drawer'));
             modal.hidden = false;
             void modal.offsetWidth;
             workspace?.classList.add('has-layer-drawer');
-            notifyEditorVisible();
-            setTimeout(() => notifyEditorVisible(), 260);
+            if (!wasDrawerOpen) {
+                notifyEditorVisible();
+                setTimeout(() => notifyEditorVisible(), 260);
+            }
         }
+        layerModalNonAutoBaseline = getLayerModalNonAutoSnapshot();
         layerModalPopulating = false;
         layerModalPendingSave = false;
         setTimeout(() => $('layerNameInput')?.focus(), 50);
@@ -4261,7 +4614,9 @@
 
     function closeLayerModal() {
         flushActiveLayerModalSave();
+        flushLiveLayerBackendSave();
         layerModalHistorySnapshotId = null;
+        layerModalNonAutoBaseline = null;
         const modal = $('takeoffLayerModal');
         const workspace = $('takeoffWorkspace');
         if (modal) {
@@ -4282,7 +4637,7 @@
         takeoffState.pendingCatalogItem = null;
     }
 
-    function setLayerColor(color) {
+    function setLayerColor(color, { notify = false } = {}) {
         const input = $('layerColorInput');
         const picker = $('layerCustomColorPicker');
         if (!input) return;
@@ -4303,6 +4658,9 @@
         }
         updateLayerColorSwatch();
         updateColorDropdownTrigger('editLayer', hex);
+        if (notify && !layerModalPopulating && hex !== '__custom__') {
+            input.dispatchEvent(new Event('change', { bubbles: true }));
+        }
     }
 
     function updateLayerColorSwatch() {
@@ -4351,7 +4709,9 @@
         activeItem.uom = $('createLayerUom')?.value || activeItem.uom || 'ea';
         activeItem.symbol = $('createLayerSymbol')?.value || activeItem.symbol || 'Solid Circle';
         activeItem.size = $('createLayerSize')?.value || activeItem.size || 'Medium';
-        activeItem.color = $('createLayerColorSwatch')?.style.background || activeItem.color || '#00d2ff';
+        const swatchColor = $('createLayerColorSwatch')?.dataset?.hexColor;
+        const selectColor = ($('createLayerColor')?.value && $('createLayerColor').value !== '__custom__') ? $('createLayerColor').value : '';
+        activeItem.color = swatchColor || selectColor || activeItem.color || '#00d2ff';
 
         updateActiveItemRowPreview(activeItem);
     }
@@ -4403,7 +4763,10 @@
         const color = activeItem.color || '#00d2ff';
         const swatch = $('createLayerColorSwatch');
         const select = $('createLayerColor');
-        if (swatch) swatch.style.background = color;
+        if (swatch) {
+            swatch.dataset.hexColor = color;
+            swatch.style.background = color;
+        }
         if (select) {
             let match = Array.from(select.options).find(o => o.value.toLowerCase() === color.toLowerCase());
             if (match) select.value = match.value;
@@ -4567,10 +4930,54 @@
         });
     }
 
+    function assignDistinctCatalogColors(items, groupId = null) {
+        if (!Array.isArray(items) || !items.length) return;
+        const palette = TAKEOFF_RICH_COLORS;
+        const normHex = (val) => {
+            if (window.TakeoffColorPalette?.normalizeHex) {
+                return window.TakeoffColorPalette.normalizeHex(val);
+            }
+            const raw = String(val || '').trim().toLowerCase();
+            return /^#[0-9a-f]{6}$/.test(raw) ? raw : '';
+        };
+        const targetGroup = findGroupExact(groupId) || findGroup(groupId)
+            || takeoffState.groups.find(g => groupBelongsToEstimate(g, activeEstimateId()));
+        const existingGroupColors = new Set(
+            (targetGroup?.layers || []).map(l => normHex(l?.color)).filter(Boolean)
+        );
+        const batchColors = new Set();
+        const pickNextColor = (startIndex = 0) => {
+            for (let pass = 0; pass < 2; pass++) {
+                for (let offset = 0; offset < palette.length; offset++) {
+                    const candidate = palette[(startIndex + offset) % palette.length];
+                    const norm = normHex(candidate) || candidate.toLowerCase();
+                    if (batchColors.has(norm)) continue;
+                    if (pass === 0 && existingGroupColors.has(norm)) continue;
+                    batchColors.add(norm);
+                    return candidate;
+                }
+            }
+            const fallback = palette[startIndex % palette.length];
+            batchColors.add(normHex(fallback) || fallback.toLowerCase());
+            return fallback;
+        };
+
+        if (items.length > 1) {
+            // Assign distinct sequential colors from our palette across ALL takeoff types
+            // whenever more than one catalog item is added at once.
+            items.forEach((it, idx) => {
+                it.color = pickNextColor(idx);
+            });
+            return;
+        }
+        const single = items[0];
+        const explicit = normHex(single.color || single.takeoffDefaults?.color);
+        single.color = explicit || pickNextColor(0);
+    }
+
     async function applyCatalogItemsToLayerForm(items) {
         if (!Array.isArray(items)) items = items ? [items] : [];
-        const palette = TAKEOFF_RICH_COLORS;
-        items.forEach((it, idx) => {
+        items.forEach((it) => {
             if (!it.customName) it.customName = it.name || '';
             const mType = String(it.measurement_type || it.measurementType || '').toLowerCase();
             const uomRaw = String(it.unit_of_measure || it.uom || '').toLowerCase();
@@ -4592,13 +4999,14 @@
             it.uom = it.unit_of_measure || it.uom || defaultUomForType(takeoffType);
             if (!it.symbol) it.symbol = it.takeoffDefaults?.symbol || it.symbol || 'Solid Circle';
             if (!it.size) it.size = it.takeoffDefaults?.size || 'Medium';
-            if (!it.color) {
-                it.color = it.takeoffDefaults?.color || it.color || palette[idx % palette.length];
-            }
         });
 
         const createModal = $('takeoffCreateLayerModal');
         const inCreateFlow = Boolean(createModal && !createModal.hidden);
+        const targetGroupId = inCreateFlow
+            ? ($('createLayerGroup')?.value || takeoffState.pendingCreateGroupId || takeoffState.activeGroupId)
+            : (takeoffState.pendingLayerGroupId || takeoffState.activeGroupId);
+        assignDistinctCatalogColors(items, targetGroupId);
 
         if (!inCreateFlow && items.length && takeoffState.editingLayerId) {
             const editingLayer = findLayer(takeoffState.editingLayerId);
@@ -4669,10 +5077,14 @@
         return applyCatalogItemsToLayerForm(item ? [item] : []);
     }
 
+    function dismissEmptyLayerModal() {
+        return closeLayerModal();
+    }
+
     async function submitLayerModal() {
         if (!requireWrite()) return false;
         const name = $('layerNameInput')?.value.replace(/\r?\n+/g, ' ').trim();
-        if (!name) return closeLayerModal();
+        if (!name) return dismissEmptyLayerModal();
         const submit = $('layerCreateSubmit');
         if (submit?.dataset.saving === '1') return;
         const editingLayerId = takeoffState.editingLayerId;
@@ -4737,6 +5149,26 @@
                 }
             }
             let savedLayerId = editingLayerId;
+            const prevLayer = editingLayer;
+            const nameChanged = prevLayer ? (String(prevLayer.name || '') !== String(payload.name || '')) : true;
+            const tagChanged = prevLayer ? (String(prevLayer.tag || '') !== String(payload.tag || '')) : Boolean(payload.tag);
+            const diffChanged = prevLayer ? (Number(prevLayer.difficulty ?? prevLayer.metadata_json?.difficulty ?? 1) !== Number(payload.difficulty)) : false;
+            const multChanged = prevLayer ? (Number(prevLayer.multiplier ?? prevLayer.metadata_json?.multiplier ?? 1) !== Number(payload.multiplier)) : false;
+            const dropChanged = prevLayer ? (Number(prevLayer.dropLength || 0) !== Number(payload.dropLength)) : false;
+            const spacingChanged = prevLayer ? (Number(prevLayer.spacing || 0) !== Number(payload.spacing)) : false;
+            const strokeChanged = prevLayer ? (Number(prevLayer.strokeWidth || 2.5) !== Number(payload.strokeWidth)) : false;
+            const uomChanged = prevLayer ? (String(prevLayer.uom || '') !== String(payload.uom || '')) : true;
+            const subtypeChanged = prevLayer ? (previousLayerType !== nextFormType && !typeFamilyChanged) : false;
+            const visualChanged = prevLayer ? (
+                String(prevLayer.color || '').toLowerCase() !== String(payload.color || '').toLowerCase() ||
+                takeoffDisplaySymbol(prevLayer.symbol) !== takeoffDisplaySymbol(payload.symbol) ||
+                takeoffDisplaySize(prevLayer.size) !== takeoffDisplaySize(payload.size) ||
+                strokeChanged
+            ) : true;
+            const catalogChanged = Boolean(takeoffState.pendingCatalogItem && takeoffState.pendingCatalogItem._fromCatalogPicker === true);
+            const formulaChanged = typeFamilyChanged || subtypeChanged || multChanged || dropChanged || spacingChanged || uomChanged;
+            const metadataOnly = Boolean(editingLayerId && !typeFamilyChanged && !subtypeChanged && !visualChanged && !formulaChanged);
+
             if (editingLayerId) {
                 const layer = findLayer(editingLayerId);
                 if (layer) {
@@ -4761,6 +5193,9 @@
                     }
                 }
                 callEditor('projectTakeoffUpdateLayerObjects', editingLayerId, {
+                    name: payload.name,
+                    tag: payload.tag,
+                    difficulty: payload.difficulty,
                     type: payload.type,
                     uom: payload.uom,
                     purgeIncompatibleGeometry: typeFamilyChanged,
@@ -4771,10 +5206,13 @@
                     strokeWidth: payload.strokeWidth,
                     multiplier: payload.multiplier,
                     dropLength: payload.dropLength,
-                    spacing: payload.spacing
+                    spacing: payload.spacing,
+                    metadataOnly
                 });
                 const shouldReactivateTool = typeFamilyChanged && takeoffState.activeLayerId === editingLayerId;
-                setActiveTakeoffLayer(editingLayerId, shouldReactivateTool);
+                if (typeFamilyChanged || takeoffState.activeLayerId === editingLayerId) {
+                    setActiveTakeoffLayer(editingLayerId, shouldReactivateTool);
+                }
             } else {
                 const group = findGroup(takeoffState.pendingLayerGroupId);
                 const layer = {
@@ -4794,11 +5232,21 @@
                 takeoffState.activeGroupId = group.id;
                 setActiveTakeoffLayer(layer.id, false);
             }
-            syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: !typeFamilyChanged });
-            const liveSnap = callEditor('projectTakeoffSnapshot');
-            if (liveSnap && Array.isArray(liveSnap.layers)) {
-                syncTakeoffFromCanvasSnapshot(liveSnap, { suppressEstimatingSync: !typeFamilyChanged, immediateEstimatingSync: typeFamilyChanged });
+            if (!editingLayerId || typeFamilyChanged || catalogChanged) {
+                syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true }); // Modal Save is a durable operation
             }
+            if (!editingLayerId || typeFamilyChanged || formulaChanged || catalogChanged) {
+                const liveSnap = callEditor('projectTakeoffSnapshot');
+                if (liveSnap && Array.isArray(liveSnap.layers)) {
+                    syncTakeoffFromCanvasSnapshot(liveSnap, { suppressEstimatingSync: !typeFamilyChanged, immediateEstimatingSync: typeFamilyChanged });
+                }
+            }
+            // Cancel any pending live debounce since Save commits durably now.
+            if (layerModalLiveBackendTimer) {
+                clearTimeout(layerModalLiveBackendTimer);
+                layerModalLiveBackendTimer = null;
+            }
+            layerModalNeedsBackendSave = false;
             // Modal Save is a durable operation, not merely a request for the
             // editor's delayed autosave. Waiting for this ACK prevents a quick
             // close/reload from restoring the duplicate's previous appearance.
@@ -4809,8 +5257,16 @@
                 console.warn('Takeoff editor background save notification warning:', editorErr);
             }
             closeLayerModal();
-            saveTakeoffState({ debounceEstimatingSync: !typeFamilyChanged });
-            renderTakeoffPanel();
+            const needsEstimatingSync = Boolean(!editingLayerId || typeFamilyChanged || formulaChanged || catalogChanged || nameChanged || diffChanged);
+            saveTakeoffState(needsEstimatingSync
+                ? { debounceEstimatingSync: !typeFamilyChanged && !catalogChanged }
+                : { skipEstimatingSync: true });
+            const savedLayer = findLayer(savedLayerId);
+            if (editingLayerId && savedLayer && !catalogChanged && !typeFamilyChanged && !tagChanged) {
+                refreshTakeoffLayerRowDom(savedLayer);
+            } else {
+                renderTakeoffPanel();
+            }
             window.dispatchEvent(new CustomEvent('takeoff:layer-visuals-updated', { detail: { projectId: String(window.ProjectState?.projectId || '') } }));
             window.dispatchEvent(new CustomEvent('takeoff:layer-properties-updated', { detail: { layerId: savedLayerId, difficulty: payload.difficulty, multiplier: payload.multiplier } }));
         } catch (error) {
@@ -6729,7 +7185,9 @@
         });
     }
 
-    function syncTakeoffSubheadAlignment() {
+    let cachedSaveBtnMetrics = null;
+
+    function syncTakeoffSubheadAlignment(forceResetCache = false) {
         // 5: takeoffSubheadItemInfo is centered horizontally via CSS
         const itemInfo = document.getElementById('takeoffSubheadItemInfo');
         if (itemInfo) {
@@ -6741,8 +7199,30 @@
         const scaleBtn = document.getElementById('takeoffScaleStatus');
         const scaleSlot = document.getElementById('takeoffSubheadScaleSlot');
         if (saveBtn && scaleBtn && scaleSlot) {
-            const saveRect = saveBtn.getBoundingClientRect();
-            if (saveRect.width > 0) {
+            const btnLabel = (saveBtn.textContent || '').trim();
+            const isTransientSaveState = Boolean(saveBtn.disabled || /^(saving\b|saved\b)/i.test(btnLabel));
+            if (!isTransientSaveState) {
+                if (forceResetCache || !saveBtn.dataset.intrinsicWidth) {
+                    saveBtn.style.minWidth = '';
+                    saveBtn.style.boxSizing = 'border-box';
+                    const intrinsicRect = saveBtn.getBoundingClientRect();
+                    if (intrinsicRect.width > 0) {
+                        const intrinsicPx = Math.ceil(intrinsicRect.width);
+                        saveBtn.dataset.intrinsicWidth = String(intrinsicPx);
+                        saveBtn.style.minWidth = `${intrinsicPx}px`;
+                        saveBtn.style.justifyContent = 'center';
+                    }
+                }
+                const liveRect = saveBtn.getBoundingClientRect();
+                if (liveRect.width > 0) {
+                    cachedSaveBtnMetrics = {
+                        width: liveRect.width,
+                        left: liveRect.left
+                    };
+                }
+            }
+            const saveRect = (!isTransientSaveState && cachedSaveBtnMetrics) ? cachedSaveBtnMetrics : cachedSaveBtnMetrics;
+            if (saveRect && saveRect.width > 0) {
                 // 1. Give scale button the width of save project minus 2px (1px each side)
                 const targetW = Math.max(20, Math.round(saveRect.width) - 2);
                 const widthPx = `${targetW}px`;
@@ -9212,6 +9692,31 @@
                 syncScaleStatus();
                 return;
             }
+            if (event.data?.type === 'takeoff-canvas-blocked-by-estimating-override') {
+                if (event.source !== takeoffWindow()) return;
+                const payload = event.data?.payload || {};
+                const qtyNum = Number(payload.estimatingQty || 0);
+                const qtyStr = Number.isFinite(qtyNum) ? String(qtyNum) : '0';
+                const uomStr = String(payload.uom || 'ea');
+                if (window.TakeoffAnnouncement && typeof window.TakeoffAnnouncement.show === 'function') {
+                    window.TakeoffAnnouncement.show({
+                        id: 'user_alert_estimating_first_override',
+                        perUser: true,
+                        force: false,
+                        type: 'warning',
+                        badge: 'ESTIMATING QUANTITY ACTIVE',
+                        icon: 'fas fa-triangle-exclamation',
+                        title: 'Remove Manual Quantity in Estimating',
+                        message: `"${payload.name || 'This item'}" already has a manual quantity placed in Estimating (${qtyStr} ${uomStr}). To count or measure it on the canvas, first remove or reset that quantity in Estimating.`,
+                        primaryText: 'Got It',
+                        showDontShow: true,
+                        dontShowLabel: "Don't show this warning again"
+                    });
+                } else {
+                    showToast(`Remove the manual quantity (${qtyStr} ${uomStr}) in Estimating before counting "${payload.name || 'this item'}" on the canvas.`, 'warning');
+                }
+                return;
+            }
             if (event.data?.type === 'takeoff-editor-state-loaded') {
                 if (event.source !== takeoffWindow()) return;
                 syncAllLayersToCanvas({ suppressEstimatingSync: true });
@@ -9386,7 +9891,7 @@
         if (canWrite()) {
             try {
                 const pId = String(window.ProjectState?.projectId || 0);
-                localStorage.setItem('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
+                safeSetTakeoffLocalStorage('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
             } catch (_) { }
         }
         return { sourceEstimateId: srcEstId, targetEstimateId: dstEstId, layerIdMap, groupIdMap, itemIdMap };
@@ -9684,6 +10189,25 @@
 
         $('takeoffZoomSlider')?.addEventListener('input', event => setZoom(event.target.value));
         initTakeoffState();
+        takeoffDomInitialized = true;
+        if (pendingInitialEstimatingItemsDetail) {
+            const queuedDetail = pendingInitialEstimatingItemsDetail;
+            pendingInitialEstimatingItemsDetail = null;
+            adoptAuthoritativeEstimateFromEstimating(queuedDetail);
+            syncEstimatingItemsToTakeoff(queuedDetail);
+            renderTakeoffPanel();
+        } else if (latestEstimatingState && Array.isArray(latestEstimatingState.estimates)) {
+            const estId = activeEstimateId();
+            const activeEst = latestEstimatingState.estimates.find(row => String(row?.id) === String(estId));
+            const currentLayersCount = takeoffState.groups
+                .filter(g => groupBelongsToEstimate(g, estId))
+                .reduce((sum, g) => sum + ((g.items || g.layers || []).length), 0);
+            if (activeEst && Array.isArray(activeEst.groups) && currentLayersCount === 0 && activeEst.groups.some(g => (g.items || []).length > 0)) {
+                adoptAuthoritativeEstimateFromEstimating({ activeEstimateId: estId, estimates: latestEstimatingState.estimates });
+                syncEstimatingItemsToTakeoff({ activeEstimateId: estId, groups: activeEst.groups });
+                renderTakeoffPanel();
+            }
+        }
         renderTakeoffEstimateFooter();
         $('takeoffEstimateTypesFooter')?.addEventListener('click', event => {
             const button = event.target.closest('[data-takeoff-estimate-id]');
@@ -9712,11 +10236,6 @@
             renderTakeoffEstimateFooter();
         });
         window.addEventListener('takeoff:estimating-lines-updated', renderTakeoffEstimateFooter);
-        window.addEventListener('takeoff:estimating-state-updated', renderTakeoffEstimateFooter);
-        window.addEventListener('takeoff:estimating-items-updated', event => {
-            syncEstimatingItemsToTakeoff(event.detail || {});
-            renderTakeoffEstimateFooter();
-        });
         window.addEventListener('estimating:takeoff-item-moved', event => {
             const detail = event.detail || {};
             if (detail.layerId && detail.targetGroupId) {
@@ -9782,7 +10301,7 @@
         window.addEventListener('resize', () => {
             refreshOpenRowMenu();
             syncWorkspaceDensity();
-            syncTakeoffSubheadAlignment();
+            syncTakeoffSubheadAlignment(true);
             repositionLayerModal();
         });
         setTimeout(syncTakeoffSubheadAlignment, 200);
@@ -9916,11 +10435,5 @@
             return (typeof allLayers === 'function' ? allLayers() : []).find(l => l.name === name) || null;
         };
         window.openTakeoffCatalogModal = openCatalogModal;
-        window.addEventListener('takeoff:estimating-items-updated', () => {
-            if (typeof renderTakeoffPanel === 'function') renderTakeoffPanel();
-        });
-        window.addEventListener('takeoff:estimating-state-updated', () => {
-            if (typeof renderTakeoffPanel === 'function') renderTakeoffPanel();
-        });
     });
 })();

@@ -3019,6 +3019,20 @@
             if (!layer) {
                 return;
             }
+            if (layer.metadata_json?.estimating_override_block) {
+                try {
+                    window.parent?.postMessage({
+                        type: 'takeoff-canvas-blocked-by-estimating-override',
+                        payload: {
+                            layerId: layer.client_uid || layer.id,
+                            name: layer.name || 'Takeoff Item',
+                            estimatingQty: Number(layer.metadata_json?.estimating_override_qty || 0),
+                            uom: layer.metadata_json?.estimating_override_uom || layer.unit_of_measure || 'ea'
+                        }
+                    }, '*');
+                } catch (_) {}
+                return;
+            }
             const pos = konvaStage.getPointerPosition();
             const world = screenToWorld(pos);
             if (layerType(layer) === 'linear') addLinearPoint(linearPointForPointer(world, evt.evt?.shiftKey || linearShiftPressed));
@@ -4300,7 +4314,10 @@
                 multiplier: layerMultiplierVal,
                 estimate_id: payload.estimate_id || payload.estimateId || null,
                 estimating_item_id: payload.estimating_item_id || payload.estimatingItemId || null,
-                estimating_group_id: payload.estimating_group_id || payload.estimatingGroupId || null }),
+                estimating_group_id: payload.estimating_group_id || payload.estimatingGroupId || null,
+                estimating_override_block: Boolean(payload.estimating_override_block ?? payload.metadata_json?.estimating_override_block),
+                estimating_override_qty: Number(payload.estimating_override_qty ?? payload.metadata_json?.estimating_override_qty ?? 0),
+                estimating_override_uom: String(payload.estimating_override_uom ?? payload.metadata_json?.estimating_override_uom ?? payload.unit_of_measure ?? payload.uom ?? 'ea') }),
         };
         if (layer) Object.assign(layer, data);
         else {
@@ -4358,7 +4375,10 @@
                     multiplier: syncedMultiplier,
                     estimate_id: payload.estimate_id || payload.estimateId || null,
                     estimating_item_id: payload.estimating_item_id || payload.estimatingItemId || null,
-                    estimating_group_id: payload.estimating_group_id || payload.estimatingGroupId || null }),
+                    estimating_group_id: payload.estimating_group_id || payload.estimatingGroupId || null,
+                    estimating_override_block: Boolean(payload.estimating_override_block ?? payload.metadata_json?.estimating_override_block),
+                    estimating_override_qty: Number(payload.estimating_override_qty ?? payload.metadata_json?.estimating_override_qty ?? 0),
+                    estimating_override_uom: String(payload.estimating_override_uom ?? payload.metadata_json?.estimating_override_uom ?? payload.unit_of_measure ?? payload.uom ?? 'ea') }),
             };
             if (layer) {
                 const layerKeys = new Set([externalId, String(layer.client_uid || ''), String(layer.id || ''), String(layer.metadata_json?.project_layer_id || ''), String(layer.integration_key || '')].filter(Boolean));
@@ -4819,11 +4839,23 @@
             ...state.segments.filter(segment => layerKeys.has(String(segment.layer_client_uid || '')) || layerKeys.has(String(segment.layer_id || '')))
         ];
         if (!layer) return false;
-        snapshot();
+        const metadataOnly = Boolean(patch.metadataOnly);
+        if (!metadataOnly) {
+            snapshot();
+        }
         const prevType = normalizeEditorLayerType(layer.takeoff_type || layer.type || layer.layer_type).type;
         const prevSubtype = normalizeLinearSubtype(layer.takeoff_subtype || layer.original_takeoff_type || layer.takeoff_type || layer.type);
         let nextType = prevType;
         let nextSubtype = prevSubtype;
+        if (patch.name !== undefined) layer.name = String(patch.name);
+        if (patch.tag !== undefined) {
+            layer.tag = String(patch.tag);
+            layer.metadata_json = { ...(layer.metadata_json || {}), tag: layer.tag };
+        }
+        if (patch.difficulty !== undefined) {
+            layer.difficulty = Number(patch.difficulty);
+            layer.metadata_json = { ...(layer.metadata_json || {}), difficulty: layer.difficulty };
+        }
         if (patch.type !== undefined || patch.takeoff_type !== undefined) {
             const rawNext = patch.takeoff_type ?? patch.type;
             const normNext = normalizeEditorLayerType(rawNext);
@@ -4857,66 +4889,72 @@
             layer.multiplier = nextMultiplier;
             layer.metadata_json = { ...(layer.metadata_json || {}), multiplier: nextMultiplier };
         }
-        targets.forEach(ref => {
-            if (isElementLocked(ref)) return;
-            const marker = state.markers.includes(ref);
-            if (patch.color !== undefined) ref.color = String(patch.color);
-            if (hasMultiplierPatch) ref.multiplier = nextMultiplier;
-            if (marker) {
-                if (hasMultiplierPatch) ref.quantity = calculateCountQuantity(ref);
-                if (patch.symbol !== undefined) ref.symbol = normalizeSymbol(patch.symbol);
-                if (patch.symbolSize !== undefined) {
-                    ref.symbol_size = symbolRadius(patch.symbolSize);
-                    ref.size = ref.symbol_size;
-                }
-                ref.metadata_json = { ...(ref.metadata_json || {}),
-                    symbol_size: ref.symbol_size,
-                    diameter: Math.max(8, Math.min(192, num(patch.diameter || ref.symbol_size * 2))) };
-                destroyMarkerNodes(ref);
-                createMarkerNode(ref);
-            } else {
-                if (subtypeChanged) ref.takeoff_subtype = nextSubtype;
-                if (hasDropPatch || subtypeChanged) {
-                    const effectiveSub = normalizeLinearSubtype(ref.takeoff_subtype || layer.takeoff_subtype || layer.type);
-                    ref.drop_length = effectiveSub === 'linear' || effectiveSub === 'count_by_distance'
-                        ? 0
-                        : Math.max(0, nextDropLength !== null ? nextDropLength : num(layer.drop_length || 0));
-                }
-                if (hasSpacingPatch || subtypeChanged) {
-                    const effectiveSub = normalizeLinearSubtype(ref.takeoff_subtype || layer.takeoff_subtype || layer.type);
-                    ref.spacing = effectiveSub === 'count_by_distance'
-                        ? Math.max(0, nextSpacing !== null ? nextSpacing : num(layer.spacing || 0))
-                        : 0;
-                }
-                if (patch.strokeWidth !== undefined) ref.stroke_width = Math.max(1, Math.min(3, num(patch.strokeWidth)));
-                ref.metadata_json = { ...(ref.metadata_json || {}),
-                    thickness: ref.stroke_width,
-                    takeoff_subtype: normalizeLinearSubtype(ref.takeoff_subtype || layer.takeoff_subtype || ref.type),
-                    drop_length: Math.max(0, num(ref.drop_length ?? ref.dropLength)),
-                    spacing: Math.max(0, num(ref.spacing ?? 0)) };
-                if (hasMultiplierPatch || hasDropPatch || hasSpacingPatch || subtypeChanged) {
-                    if (String(ref.takeoff_type || ref.type || '').toLowerCase() === 'area') calculateAreaQuantity(ref);
-                    else calculateLinearLength(ref);
-                }
-                const isAreaSeg = String(ref.takeoff_type || ref.type || '').toLowerCase() === 'area';
-                const viewportScale = Number(canvas?.viewportTransform?.[0] || 1);
-                const scaleFactor = viewportScale > 0 ? 1 / viewportScale : 1;
-                if (subtypeChanged) {
-                    destroySegmentNodes(ref);
-                    createSegmentNode(ref);
+        const markerVisualChanged = (patch.color !== undefined) || (patch.symbol !== undefined) || (patch.symbolSize !== undefined);
+        const segmentVisualChanged = (patch.color !== undefined) || (patch.strokeWidth !== undefined);
+        if (markerVisualChanged || segmentVisualChanged || hasMultiplierPatch || hasDropPatch || hasSpacingPatch || subtypeChanged || typeFamilyChanged) {
+            targets.forEach(ref => {
+                if (isElementLocked(ref)) return;
+                const marker = state.markers.includes(ref);
+                if (patch.color !== undefined) ref.color = String(patch.color);
+                if (hasMultiplierPatch) ref.multiplier = nextMultiplier;
+                if (marker) {
+                    if (hasMultiplierPatch) ref.quantity = calculateCountQuantity(ref);
+                    if (patch.symbol !== undefined) ref.symbol = normalizeSymbol(patch.symbol);
+                    if (patch.symbolSize !== undefined) {
+                        ref.symbol_size = symbolRadius(patch.symbolSize);
+                        ref.size = ref.symbol_size;
+                    }
+                    ref.metadata_json = { ...(ref.metadata_json || {}),
+                        symbol_size: ref.symbol_size,
+                        diameter: Math.max(8, Math.min(192, num(patch.diameter || ref.symbol_size * 2))) };
+                    if (markerVisualChanged) {
+                        destroyMarkerNodes(ref);
+                        createMarkerNode(ref);
+                    }
                 } else {
-                    ref.node?.stroke(String(ref.color || layer.color));
-                    ref.node?.strokeWidth(ref.stroke_width);
-                    ref.node?.hitStrokeWidth(segmentHitStrokeWidth(ref, isAreaSeg, scaleFactor));
-                    refreshSegment(ref);
+                    if (subtypeChanged) ref.takeoff_subtype = nextSubtype;
+                    if (hasDropPatch || subtypeChanged) {
+                        const effectiveSub = normalizeLinearSubtype(ref.takeoff_subtype || layer.takeoff_subtype || layer.type);
+                        ref.drop_length = effectiveSub === 'linear' || effectiveSub === 'count_by_distance'
+                            ? 0
+                            : Math.max(0, nextDropLength !== null ? nextDropLength : num(layer.drop_length || 0));
+                    }
+                    if (hasSpacingPatch || subtypeChanged) {
+                        const effectiveSub = normalizeLinearSubtype(ref.takeoff_subtype || layer.takeoff_subtype || layer.type);
+                        ref.spacing = effectiveSub === 'count_by_distance'
+                            ? Math.max(0, nextSpacing !== null ? nextSpacing : num(layer.spacing || 0))
+                            : 0;
+                    }
+                    if (patch.strokeWidth !== undefined) ref.stroke_width = Math.max(1, Math.min(3, num(patch.strokeWidth)));
+                    ref.metadata_json = { ...(ref.metadata_json || {}),
+                        thickness: ref.stroke_width,
+                        takeoff_subtype: normalizeLinearSubtype(ref.takeoff_subtype || layer.takeoff_subtype || ref.type),
+                        drop_length: Math.max(0, num(ref.drop_length ?? ref.dropLength)),
+                        spacing: Math.max(0, num(ref.spacing ?? 0)) };
+                    if (hasMultiplierPatch || hasDropPatch || hasSpacingPatch || subtypeChanged) {
+                        if (String(ref.takeoff_type || ref.type || '').toLowerCase() === 'area') calculateAreaQuantity(ref);
+                        else calculateLinearLength(ref);
+                    }
+                    const isAreaSeg = String(ref.takeoff_type || ref.type || '').toLowerCase() === 'area';
+                    const viewportScale = Number(canvas?.viewportTransform?.[0] || 1);
+                    const scaleFactor = viewportScale > 0 ? 1 / viewportScale : 1;
+                    if (subtypeChanged) {
+                        destroySegmentNodes(ref);
+                        createSegmentNode(ref);
+                    } else if (segmentVisualChanged || hasMultiplierPatch || hasDropPatch || hasSpacingPatch) {
+                        ref.node?.stroke(String(ref.color || layer.color));
+                        ref.node?.strokeWidth(ref.stroke_width);
+                        ref.node?.hitStrokeWidth(segmentHitStrokeWidth(ref, isAreaSeg, scaleFactor));
+                        refreshSegment(ref);
+                    }
                 }
+                ref.updatedAt = timestamp();
+                ref.updated_at = ref.updatedAt;
+            });
+            applyObjectSelectionVisuals();
+            if (targets.length) {
+                trackTakeoffObjects(targets.map(ref => ({ type: state.markers.includes(ref) ? 'marker' : 'segment', ref })));
             }
-            ref.updatedAt = timestamp();
-            ref.updated_at = ref.updatedAt;
-        });
-        applyObjectSelectionVisuals();
-        if (targets.length) {
-            trackTakeoffObjects(targets.map(ref => ({ type: state.markers.includes(ref) ? 'marker' : 'segment', ref })));
         }
         // A layer edit must persist even when the duplicate has no geometry yet.
         // The page fallback carries the layer row, while tracked objects carry
