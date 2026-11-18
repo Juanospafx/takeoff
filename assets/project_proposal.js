@@ -2250,14 +2250,44 @@
         }
     });
 
-    window.addEventListener('storage', (event) => {
-        if (event.key === estimatingKey) { renderPreview(); renderEstimateFooter(); }
-    });
-    window.addEventListener('takeoff:active-estimate-changed', () => { renderPreview(); renderEstimateFooter(); });
-    window.addEventListener('takeoff:estimating-state-updated', event => { renderPreview(); renderEstimateFooter(event); });
-    window.addEventListener('takeoff:estimate-summary-updated', (event) => {
-        if (window.ProjectState) window.ProjectState.estimateSummary = event.detail || {};
+    let proposalPreviewDirty = false;
+    function isProposalTabActive() {
+        const tab = document.getElementById('tab-proposal');
+        return !tab || (!tab.hidden && tab.classList.contains('active'));
+    }
+    function scheduleOrRunPreview() {
+        if (!isProposalTabActive()) {
+            proposalPreviewDirty = true;
+            return;
+        }
+        proposalPreviewDirty = false;
         renderPreview();
+    }
+
+    window.addEventListener('storage', (event) => {
+        if (event.key === estimatingKey) { scheduleOrRunPreview(); renderEstimateFooter(); }
+    });
+    window.addEventListener('takeoff:active-estimate-changed', () => { scheduleOrRunPreview(); renderEstimateFooter(); });
+    window.addEventListener('takeoff:estimating-state-updated', event => { scheduleOrRunPreview(); renderEstimateFooter(event); });
+    window.addEventListener('takeoff:estimate-summary-updated', (event) => {
+        if (window.ProjectState) {
+            const detail = event.detail;
+            window.ProjectState.estimateSummary = detail ? {
+                direct: detail.direct,
+                byCategory: detail.byCategory,
+                preTaxTotal: detail.preTaxTotal,
+                preTaxMarkup: detail.preTaxTotal,
+                totalTax: detail.totalTax,
+                taxes: detail.totalTax,
+                profit: detail.profit,
+                estimateTotal: detail.estimateTotal,
+                material: detail.direct?.materialSales,
+                labor: detail.direct?.laborSales,
+                equipment: detail.direct?.equipmentSales,
+                total: detail.estimateTotal
+            } : {};
+        }
+        scheduleOrRunPreview();
     });
     estimateFooter?.addEventListener('click', event => {
         const button = event.target.closest('[data-proposal-estimate-id]');
@@ -2265,6 +2295,17 @@
         const action = event.target.closest('[data-proposal-estimating-action]')?.dataset.proposalEstimatingAction;
         if (action) window.dispatchEvent(new CustomEvent('takeoff:estimating-action-requested', { detail: { action, sourceTab: 'proposal' } }));
     });
-    document.querySelector('[data-tab="proposal"]')?.addEventListener('click', () => window.setTimeout(() => { renderPreview(); renderEstimateFooter(); }, 0));
+    window.addEventListener('takeoff:tab-activated', event => {
+        if (event.detail?.tab === 'proposal' && proposalPreviewDirty) {
+            proposalPreviewDirty = false;
+            renderPreview();
+            renderEstimateFooter();
+        }
+    });
+    document.querySelector('[data-tab="proposal"]')?.addEventListener('click', () => window.setTimeout(() => {
+        proposalPreviewDirty = false;
+        renderPreview();
+        renderEstimateFooter();
+    }, 0));
     renderAll();
 })();

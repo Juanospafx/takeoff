@@ -690,13 +690,25 @@
         label.moveToTop();
     }
 
+    let linearStatusRaf = null;
+    let linearStatusPoint = null;
+    function scheduleLinearStatusUpdate(point) {
+        linearStatusPoint = point;
+        if (linearStatusRaf) return;
+        const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : cb => setTimeout(cb, 16);
+        linearStatusRaf = raf(() => {
+            linearStatusRaf = null;
+            updateDrawingStatus(linearStatusPoint);
+        });
+    }
+
     function renderLinearPreview(cursor = linearPointerWorld, shiftPressed = linearShiftPressed) {
         if (state.tool !== 'takeoff_linear' || !state.draftLine?.preview || !state.draftLine.points.length || !cursor) return false;
         const point = linearPointForPointer(cursor, shiftPressed);
         state.draftLine.preview.points([...state.draftLine.points, point].flatMap(value => [value.x, value.y]));
         const last = state.draftLine.points[state.draftLine.points.length - 1];
         positionLinearDraftLabel(last, point);
-        updateDrawingStatus(point);
+        scheduleLinearStatusUpdate(point);
         konvaLayer?.batchDraw();
         return true;
     }
@@ -999,8 +1011,11 @@
             handle.visible(!locked && state.selectedObjectUids.has(String(segment.client_uid))
                 && isElementVisibleOnPage(segment));
         });
-        const existing = segment.node.findOne('.takeoff-object-lock');
-        if (existing) existing.destroy();
+        const existing = typeof segment.node.findOne === 'function'
+            ? segment.node.findOne('.takeoff-object-lock')
+            : segment.lockNode;
+        if (existing && typeof existing.destroy === 'function') existing.destroy();
+        segment.lockNode = null;
         if (locked) {
             const segLayer = state.layers.find(l => String(l.client_uid) === String(segment.layer_client_uid));
             const col = segment.color || segLayer?.color || '#2563eb';
@@ -1012,7 +1027,12 @@
                 cy = pts.reduce((sum, p) => sum + p.y, 0) / pts.length;
             }
             const icon = createTakeoffLockIcon(col, cx - 6, cy - 7, isArea ? 0.85 : 0.7);
-            segment.node.add(icon);
+            if (typeof segment.node.add === 'function') {
+                segment.node.add(icon);
+            } else {
+                segment.lockNode = icon;
+                if (konvaLayer) konvaLayer.add(icon);
+            }
         }
     }
 
@@ -1037,43 +1057,49 @@
         // a visual label. Only render text explicitly entered by the user.
         group.add(new Konva.Text({ x: 12, y: -10, text: marker.label || '', fill: marker.color || '#2563eb', fontSize: 14, fontStyle: 'bold', listening: Boolean(marker.label) }));
         
-        // Compact, refined hover tooltip badge positioned close above the icon
-        const tooltip = new Konva.Label({
-            x: 0,
-            y: -(radius + 8),
-            visible: false,
-            listening: false,
-            name: 'takeoff-marker-tooltip'
-        });
-        tooltip.add(new Konva.Tag({
-            fill: 'rgba(15, 23, 42, 0.94)',
-            stroke: 'rgba(148, 163, 184, 0.40)',
-            strokeWidth: 0.75,
-            cornerRadius: 3.5,
-            shadowColor: 'rgba(0, 0, 0, 0.4)',
-            shadowBlur: 4,
-            shadowOffset: { x: 0, y: 1 },
-            pointerDirection: 'down',
-            pointerWidth: 4,
-            pointerHeight: 2.5
-        }));
-        tooltip.add(new Konva.Text({
-            text: itemName,
-            fill: '#f8fafc',
-            fontSize: 9,
-            fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
-            fontStyle: '600',
-            padding: 2.5
-        }));
-        group.add(tooltip);
+        // Lazy hover tooltip allocated only on first mouseenter to keep rapid placement lightweight
+        let tooltip = null;
+        const ensureTooltip = () => {
+            if (tooltip) return tooltip;
+            tooltip = new Konva.Label({
+                x: 0,
+                y: -(radius + 8),
+                visible: false,
+                listening: false,
+                name: 'takeoff-marker-tooltip'
+            });
+            tooltip.add(new Konva.Tag({
+                fill: 'rgba(15, 23, 42, 0.94)',
+                stroke: 'rgba(148, 163, 184, 0.40)',
+                strokeWidth: 0.75,
+                cornerRadius: 3.5,
+                shadowColor: 'rgba(0, 0, 0, 0.4)',
+                shadowBlur: 4,
+                shadowOffset: { x: 0, y: 1 },
+                pointerDirection: 'down',
+                pointerWidth: 4,
+                pointerHeight: 2.5
+            }));
+            tooltip.add(new Konva.Text({
+                text: itemName,
+                fill: '#f8fafc',
+                fontSize: 9,
+                fontFamily: 'Inter, system-ui, -apple-system, sans-serif',
+                fontStyle: '600',
+                padding: 2.5
+            }));
+            group.add(tooltip);
+            return tooltip;
+        };
         group.on('mouseenter', () => {
-            tooltip.visible(true);
-            tooltip.moveToTop();
+            const tip = ensureTooltip();
+            tip.visible(true);
+            tip.moveToTop();
             document.body.style.cursor = 'pointer';
             konvaLayer.batchDraw();
         });
         group.on('mouseleave', () => {
-            tooltip.visible(false);
+            if (tooltip) tooltip.visible(false);
             document.body.style.cursor = '';
             konvaLayer.batchDraw();
         });
@@ -1350,7 +1376,7 @@
                 tooltip.position({ x: 0, y: -(r + 4 * tScale) });
             }
         });
-        flushKonvaCanvasDraw(true);
+        flushKonvaCanvasDraw(false);
     }
 
     function destroySegmentNodes(segment) {
@@ -1624,7 +1650,7 @@
                 h.visible(isVisible && !isElementLocked(s) && state.selectedObjectUids.has(String(s.client_uid)));
             });
         });
-        applyObjectSelectionVisuals();
+        applyObjectSelectionVisuals(true);
         flushKonvaCanvasDraw();
     }
     window.setTakeoffPage = setTakeoffPage;
@@ -1676,32 +1702,60 @@
         return true;
     }
 
-    function applyObjectSelectionVisuals() {
-        state.markers.forEach(marker => {
-            if (!marker.node) return;
-            const selected = state.selectedObjectUids.has(String(marker.client_uid));
-            marker.node.scale({ x: 1, y: 1 });
-            marker.transformer?.visible(selected && !isElementLocked(marker) && isElementVisibleOnPage(marker));
-            const ring = marker.node.findOne('.takeoff-selection-ring');
-            if (ring) {
-                ring.visible(selected && !isElementLocked(marker) && isElementVisibleOnPage(marker));
-            }
-            if (typeof marker.node.shadowEnabled === 'function') marker.node.shadowEnabled(selected);
+    const prevSelectedVisualUids = new Set();
+
+    function applySingleMarkerSelectionVisual(marker, selected) {
+        if (!marker?.node) return;
+        const locked = isElementLocked(marker);
+        const showRing = selected && !locked && isElementVisibleOnPage(marker);
+        marker.node.scale({ x: 1, y: 1 });
+        marker.transformer?.visible(showRing);
+        const ring = marker.node.findOne('.takeoff-selection-ring');
+        if (ring) ring.visible(showRing);
+        const useGlow = selected && state.tool !== 'takeoff_count';
+        if (typeof marker.node.shadowEnabled === 'function') marker.node.shadowEnabled(useGlow);
+        if (useGlow) {
             if (typeof marker.node.shadowColor === 'function') marker.node.shadowColor('#38bdf8');
-            if (typeof marker.node.shadowBlur === 'function') marker.node.shadowBlur(selected ? 8 : 0);
+            if (typeof marker.node.shadowBlur === 'function') marker.node.shadowBlur(8);
+        } else if (typeof marker.node.shadowBlur === 'function') {
+            marker.node.shadowBlur(0);
+        }
+    }
+
+    function applySingleSegmentSelectionVisual(segment, selected) {
+        if (!segment?.node) return;
+        const showHandles = selected && !isElementLocked(segment) && isElementVisibleOnPage(segment);
+        (segment.handles || []).forEach(handle => {
+            handle.visible(showHandles);
+            if (selected) handle.moveToTop();
         });
-        state.segments.forEach(segment => {
-            if (!segment.node) return;
-            const selected = state.selectedObjectUids.has(String(segment.client_uid));
-            (segment.handles || []).forEach(handle => {
-                handle.visible(selected && !isElementLocked(segment)
-                    && isElementVisibleOnPage(segment));
-                if (selected) handle.moveToTop();
-            });
-            if (typeof segment.node.shadowEnabled === 'function') segment.node.shadowEnabled(selected);
+        if (typeof segment.node.shadowEnabled === 'function') segment.node.shadowEnabled(selected);
+        if (selected) {
             if (typeof segment.node.shadowColor === 'function') segment.node.shadowColor('#38bdf8');
-            if (typeof segment.node.shadowBlur === 'function') segment.node.shadowBlur(selected ? 8 : 0);
-        });
+            if (typeof segment.node.shadowBlur === 'function') segment.node.shadowBlur(8);
+        } else if (typeof segment.node.shadowBlur === 'function') {
+            segment.node.shadowBlur(0);
+        }
+    }
+
+    function applyObjectSelectionVisuals(fullSync = false) {
+        if (fullSync || prevSelectedVisualUids.size === 0 && state.selectedObjectUids.size === 0) {
+            if (fullSync) {
+                state.markers.forEach(marker => applySingleMarkerSelectionVisual(marker, state.selectedObjectUids.has(String(marker.client_uid))));
+                state.segments.forEach(segment => applySingleSegmentSelectionVisual(segment, state.selectedObjectUids.has(String(segment.client_uid))));
+            }
+        } else {
+            const dirtyUids = new Set([...prevSelectedVisualUids, ...state.selectedObjectUids]);
+            dirtyUids.forEach(uidVal => {
+                const found = findTakeoffObjectByUid(uidVal);
+                if (!found) return;
+                const isSel = state.selectedObjectUids.has(uidVal);
+                if (found.type === 'marker') applySingleMarkerSelectionVisual(found.ref, isSel);
+                else applySingleSegmentSelectionVisual(found.ref, isSel);
+            });
+        }
+        prevSelectedVisualUids.clear();
+        state.selectedObjectUids.forEach(uidVal => prevSelectedVisualUids.add(String(uidVal)));
         flushKonvaCanvasDraw();
     }
 
@@ -1759,12 +1813,17 @@
         trackTakeoffObjects([{ type: 'marker', ref: marker }], false);
         dirtyTakeoffPages.add(Number(marker.page_number || pageNum || 1));
         selectElement('marker', marker);
-        markDirty({ objectsTracked: true });
+        markDirty({ objectsTracked: true, fastPlacement: true, layer });
         finishToolUse();
     }
 
-    function emitToolState() {
+    let lastEmittedToolKey = '';
+
+    function emitToolState(force = false) {
         if (!state.projectControlled) return;
+        const toolKey = `${state.tool}:${Boolean(state.continuousTool)}`;
+        if (!force && toolKey === lastEmittedToolKey) return;
+        lastEmittedToolKey = toolKey;
         try {
             window.parent?.postMessage({
                 type: 'project-takeoff-tool-state',
@@ -1931,14 +1990,11 @@
         trackTakeoffObjects([{ type: 'segment', ref: segment }], false);
         dirtyTakeoffPages.add(Number(segment.page_number || pageNum || 1));
         clearTakeoffSelection();
-        markDirty({ objectsTracked: true });
+        markDirty({ objectsTracked: true, fastPlacement: true, layer });
         updateDrawingStatus();
         applyTakeoffDrawingInteractivity();
         if (konvaStage?.container()) konvaStage.container().style.cursor = 'crosshair';
-        renderLayers();
-        emitProjectState();
         emitToolState();
-        scheduleTakeoffAutosave(250);
         return true;
     }
 
@@ -2130,7 +2186,7 @@
         trackTakeoffObjects([{ type: 'segment', ref: segment }], false);
         dirtyTakeoffPages.add(Number(segment.page_number || pageNum || 1));
         clearTakeoffSelection();
-        markDirty({ objectsTracked: true });
+        markDirty({ objectsTracked: true, fastPlacement: true, layer });
         applyTakeoffDrawingInteractivity();
         if (konvaStage?.container()) konvaStage.container().style.cursor = 'crosshair';
         renderLayers();
@@ -2198,6 +2254,38 @@
         return deleteTakeoffSelection();
     }
 
+    let editorUiRefreshRaf = null;
+    function scheduleEditorUiRefresh() {
+        if (editorUiRefreshRaf) return;
+        const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : cb => setTimeout(cb, 0);
+        editorUiRefreshRaf = raf(() => {
+            editorUiRefreshRaf = null;
+            if (!state.projectControlled || document.getElementById('takeoffSummary')?.offsetParent !== null) {
+                renderSummary();
+            }
+            if (!state.projectControlled || document.getElementById('takeoffLayersTab')?.offsetParent !== null) {
+                renderLayers();
+            }
+        });
+    }
+
+    function emitFastLayerQuantityDelta(layer) {
+        if (!state.projectControlled || !layer?.client_uid || !window.parent || window.parent === window) return;
+        try {
+            window.parent.postMessage({
+                type: 'project-takeoff-layer-qty',
+                payload: {
+                    estimateKey: currentEstimateKey(),
+                    estimate_key: currentEstimateKey(),
+                    drawingId: typeof fileId !== 'undefined' ? fileId : null,
+                    layerId: layer.client_uid,
+                    quantity: layerQuantity(layer),
+                    userDirty: true
+                }
+            }, '*');
+        } catch (e) {}
+    }
+
     function markDirty(options = {}) {
         state.dirty = true;
         hasPendingManualCanvasCheckpoint = true;
@@ -2212,10 +2300,17 @@
                 dirtyTakeoffPageGenerations.set(Number(pageNum || 1), ++takeoffDirtyGeneration);
             }
         }
+        if (options.fastPlacement) {
+            scheduleEditorUiRefresh();
+            emitFastLayerQuantityDelta(options.layer || activeLayer());
+            scheduleTakeoffAutosave(1400);
+            scheduleEmitProjectState(true, 260);
+            return;
+        }
         renderSummary();
         renderLayers();
         scheduleTakeoffAutosave();
-        emitProjectState(true);
+        emitProjectState(true, true);
     }
 
     function layerQuantity(layer) {
@@ -2413,13 +2508,36 @@
         };
     }
 
+    let emitProjectStateTimer = null;
+    let pendingEmitUserDirty = false;
+
     function emitProjectState(isUserDirty = false) {
+        clearTimeout(emitProjectStateTimer);
+        emitProjectStateTimer = null;
+        const effectiveUserDirty = Boolean(isUserDirty || pendingEmitUserDirty);
+        pendingEmitUserDirty = false;
         if (window.parent && window.parent !== window) {
             try {
-                window.parent.postMessage({ type: 'project-takeoff-state', payload: projectSnapshot(isUserDirty) }, '*');
+                window.parent.postMessage({ type: 'project-takeoff-state', payload: projectSnapshot(effectiveUserDirty) }, '*');
             } catch (e) {}
         }
     }
+
+    function flushPendingProjectStateEmit() {
+        if (!emitProjectStateTimer && !pendingEmitUserDirty) return false;
+        emitProjectState(pendingEmitUserDirty);
+        return true;
+    }
+
+    function scheduleEmitProjectState(isUserDirty = false, delayMs = 260) {
+        pendingEmitUserDirty = pendingEmitUserDirty || Boolean(isUserDirty);
+        clearTimeout(emitProjectStateTimer);
+        emitProjectStateTimer = setTimeout(() => {
+            emitProjectStateTimer = null;
+            emitProjectState(pendingEmitUserDirty);
+        }, Math.max(40, Number(delayMs) || 260));
+    }
+    window.projectTakeoffFlushSnapshot = flushPendingProjectStateEmit;
 
     function filteredLayers() {
         const q = String(state.layerSearch || '').toLowerCase();
@@ -3242,130 +3360,8 @@
     function renderLayers() {
         const el = document.getElementById('takeoffLayersTab');
         if (!el) return;
-        el.innerHTML = `<div class="takeoff-list">${state.layers.map(l => `<div class="takeoff-list-item ${l.client_uid === state.selectedLayerUid ? 'active' : ''}" data-layer-uid="${l.client_uid}">
-            <div class="takeoff-list-title"><span style="color:${l.color}">●</span> ${escapeHtml(l.name)}</div>
-            <div class="takeoff-list-meta">Page ${l.page_number} · ${escapeHtml(l.type)}</div>
-        </div>`).join('') || '<div class="takeoff-list-meta">No layers yet.</div>'}</div>`;
-        el.querySelectorAll('[data-layer-uid]').forEach(row => row.addEventListener('click', () => {
-            state.selectedLayerUid = row.dataset.layerUid;
-            renderLayers();
-        }));
-    }
-
-    function renderLayers() {
-        const el = document.getElementById('takeoffLayersTab');
-        if (!el) return;
         const countEl = document.getElementById('takeoffLayerCount');
         if (countEl) countEl.textContent = String(state.layers.length);
-        const groups = {};
-        filteredLayers().forEach(layer => {
-            const group = layerGroup(layer);
-            if (!groups[group]) groups[group] = [];
-            groups[group].push(layer);
-        });
-        const groupOrder = ['Lighting', 'Controls'];
-        const sortedGroups = Object.keys(groups).sort((a, b) => {
-            const ai = groupOrder.indexOf(a);
-            const bi = groupOrder.indexOf(b);
-            if (ai !== -1 || bi !== -1) return (ai === -1 ? 99 : ai) - (bi === -1 ? 99 : bi);
-            return a.localeCompare(b);
-        });
-        el.innerHTML = `<div class="takeoff-layer-groups">${sortedGroups.map(group => {
-            const collapsed = state.collapsedGroups.has(group);
-            const rows = groups[group];
-            const groupQty = rows.reduce((sum, layer) => sum + layerQuantity(layer), 0);
-            return `<div class="takeoff-layer-group">
-                <button class="takeoff-layer-group-head" data-layer-group="${escapeHtml(group)}">
-                    <i class="fas fa-chevron-${collapsed ? 'right' : 'down'}"></i>
-                    <span>${escapeHtml(group)}</span>
-                    <small>${rows.length} | ${groupQty.toFixed(2)}</small>
-                </button>
-                <div ${collapsed ? 'hidden' : ''}>
-                    ${rows.map(l => `<div class="takeoff-list-item takeoff-layer-row ${l.client_uid === state.selectedLayerUid ? 'active' : ''}" data-layer-uid="${l.client_uid}">
-                        <input type="checkbox" class="takeoff-layer-check" data-layer-check="${l.client_uid}" ${state.selectedLayerUids.has(l.client_uid) ? 'checked' : ''}>
-                        ${layerSymbol(l)}
-                        <div class="takeoff-layer-copy">
-                            <div class="takeoff-list-title">${escapeHtml(l.name)}</div>
-                            <div class="takeoff-list-meta">Page ${l.page_number || pageNum} | ${escapeHtml(layerType(l))} | ${layerQuantity(l).toFixed(2)} ${escapeHtml(layerUnit(l))}</div>
-                        </div>
-                        <div class="takeoff-layer-actions">
-                            <button class="takeoff-mini-btn" data-layer-action="visible" data-layer-uid="${l.client_uid}" title="Show/hide"><i class="fas fa-eye${Number(l.visible) ? '' : '-slash'}"></i></button>
-                            <button class="takeoff-mini-btn" data-layer-action="lock" data-layer-uid="${l.client_uid}" title="Lock"><i class="fas fa-${Number(l.locked) ? 'lock' : 'lock-open'}"></i></button>
-                            <button class="takeoff-mini-btn" data-layer-action="menu" data-layer-uid="${l.client_uid}" title="Actions"><i class="fas fa-ellipsis-vertical"></i></button>
-                        </div>
-                    </div>`).join('')}
-                </div>
-            </div>`;
-        }).join('') || '<div class="takeoff-list-meta">No layers yet.</div>'}</div>`;
-        el.querySelectorAll('[data-layer-group]').forEach(btn => btn.addEventListener('click', () => {
-            const group = btn.dataset.layerGroup;
-            if (state.collapsedGroups.has(group)) state.collapsedGroups.delete(group);
-            else state.collapsedGroups.add(group);
-            renderLayers();
-        }));
-        el.querySelectorAll('[data-layer-uid]').forEach(row => row.addEventListener('click', () => {
-            state.selectedLayerUid = row.dataset.layerUid;
-            renderLayers();
-        }));
-        el.querySelectorAll('[data-layer-check]').forEach(box => {
-            box.addEventListener('click', event => event.stopPropagation());
-            box.addEventListener('change', () => {
-                if (box.checked) state.selectedLayerUids.add(box.dataset.layerCheck);
-                else state.selectedLayerUids.delete(box.dataset.layerCheck);
-            });
-        });
-        el.querySelectorAll('[data-layer-action]').forEach(btn => btn.addEventListener('click', event => {
-            event.stopPropagation();
-            const layer = state.layers.find(row => row.client_uid === btn.dataset.layerUid);
-            if (!layer) return;
-            const action = btn.dataset.layerAction;
-            if (action === 'visible') {
-                snapshot();
-                layer.visible = Number(layer.visible) ? 0 : 1;
-                setTakeoffPage(pageNum);
-                markDirty();
-                renderLayers();
-            }
-            if (action === 'lock') {
-                snapshot();
-                layer.locked = Number(layer.locked) ? 0 : 1;
-                markDirty();
-                renderLayers();
-            }
-            if (action === 'menu') {
-                const choice = prompt('Action: edit, duplicate, delete, color, symbol', 'edit');
-                if (!choice) return;
-                const selectedAction = choice.trim().toLowerCase();
-                if (selectedAction === 'edit') editLayer(layer);
-                if (selectedAction === 'duplicate') duplicateLayer(layer);
-                if (selectedAction === 'delete') deleteLayer(layer);
-                if (selectedAction === 'color') {
-                    const color = prompt('Hex color', layer.color || '#2563eb');
-                    if (color) {
-                        snapshot();
-                        layer.color = color;
-                        markDirty();
-                        renderAll();
-                    }
-                }
-                if (selectedAction === 'symbol') {
-                    const symbol = prompt('Symbol: circle, square, diamond, triangle, cross, line', layer.symbol || 'circle');
-                    if (symbol) {
-                        snapshot();
-                        layer.symbol = symbol;
-                        markDirty();
-                        renderAll();
-                    }
-                }
-            }
-        }));
-    }
-
-    function renderLayers() {
-        const el = document.getElementById('takeoffLayersTab');
-        if (!el) return;
-        const countEl = document.getElementById('takeoffLayerCount');
-        if (countEl) countEl.textContent = String(75);
 
         const groups = {};
         filteredLayers().forEach(layer => {
@@ -3564,31 +3560,34 @@
         }
     }
 
-    function activateLayerForInsert(uidValue) {
+    function activateLayerForInsert(uidValue, options = {}) {
         const layer = state.layers.find(row => row.client_uid === uidValue);
         if (!layer) return;
         if (state.draftLine && state.draftLine.layerUid !== layer.client_uid) finishLinear();
         state.selectedLayerUid = layer.client_uid;
         state.selectedLayerUids = new Set([layer.client_uid]);
+        const fast = Boolean(options?.fast);
+        const skipEmit = Boolean(options?.skipEmit);
+        const shouldRenderLayers = !fast || document.getElementById('takeoffLayersTab')?.offsetParent !== null;
         const type = layerType(layer);
         if ((type === 'linear' || type === 'area') && !hasPlanScale()) {
             if (type === 'linear') {
                 requirePlanScale('linear');
                 setTool('smart');
-                renderLayers();
-                emitProjectState();
+                if (shouldRenderLayers) renderLayers();
+                if (!skipEmit) emitProjectState();
                 return false;
             }
             requirePlanScale('area');
             setTool('smart');
-            renderLayers();
-            emitProjectState();
+            if (shouldRenderLayers) renderLayers();
+            if (!skipEmit) emitProjectState();
             return false;
         }
         setTool(type === 'linear' ? 'takeoff_linear' : (type === 'area' ? 'takeoff_area' : 'takeoff_count'));
-        showToast(`${layer.name} active`, 'success');
-        renderLayers();
-        emitProjectState();
+        if (!fast) showToast(`${layer.name} active`, 'success');
+        if (shouldRenderLayers) renderLayers();
+        if (!skipEmit) emitProjectState();
         return true;
     }
 
@@ -3829,6 +3828,7 @@
     function renderProperties() {
         const el = document.getElementById('takeoffProps');
         if (!el) return;
+        if (state.projectControlled && el.offsetParent === null) return;
         if (!state.selectedElement) {
             el.innerHTML = '<div class="takeoff-panel-header"><div class="takeoff-title">Properties</div></div><div class="takeoff-panel-section"><div class="takeoff-list-meta">Select a marker or line.</div></div>';
             return;
@@ -3896,17 +3896,6 @@
             markDirty();
             renderProperties();
         });
-    }
-
-    function renderSummary() {
-        const rows = calculateTakeoffSummary();
-        const el = document.getElementById('takeoffSummary');
-        if (!el) return;
-        el.innerHTML = `<div class="takeoff-summary-head"><div class="takeoff-title">Summary</div><div class="takeoff-list-meta">${rows.length} rows${state.dirty ? ' - unsaved' : ''}</div></div>
-            <div class="takeoff-summary-table-wrap"><table>
-            <thead><tr><th>Item</th><th>Assembly</th><th>Type</th><th>Unit</th><th>Qty</th><th>Unit Cost</th><th>Labor Hours</th><th>Material</th><th>Labor</th><th>Total</th><th>Waste</th><th>Markup</th></tr></thead>
-            <tbody>${rows.map(r => `<tr><td>${escapeHtml(r.item)}</td><td>${escapeHtml(r.assembly)}</td><td>${r.type}</td><td>${escapeHtml(r.unit)}</td><td>${r.quantity.toFixed(2)}</td><td>${money(r.unitCost)}</td><td>${r.laborHours.toFixed(2)}</td><td>${money(r.material)}</td><td>${money(r.labor)}</td><td>${money(r.total)}</td><td>${num(r.waste).toFixed(2)}</td><td>${money(r.markup)}</td></tr>`).join('')}</tbody>
-            </table></div>`;
     }
 
     function renderSummary() {
@@ -4228,8 +4217,12 @@
                 markDirty({ objectsTracked: true });
             }
         });
-        window.addEventListener('pagehide', flushTakeoffKeepalive);
+        window.addEventListener('pagehide', () => {
+            flushPendingProjectStateEmit();
+            flushTakeoffKeepalive();
+        });
         window.addEventListener('beforeunload', event => {
+            flushPendingProjectStateEmit();
             flushTakeoffKeepalive();
             if (state.projectControlled || !isEditorTakeoffDirty()) return;
             event.preventDefault();
@@ -4273,9 +4266,10 @@
 
     window.syncTakeoffInteractionScale = syncTakeoffHandleScale;
 
-    window.projectTakeoffActivateLayer = function (payload) {
+    window.projectTakeoffActivateLayer = function (payload, options = {}) {
         if (!payload?.id) return null;
         state.projectControlled = true;
+        const fast = options?.fast !== false;
         const externalId = String(payload.id);
         let layer = state.layers.find(row => row.client_uid === externalId || row.metadata_json?.project_layer_id === externalId);
         const normalizedType = String(payload.takeoff_type || payload.type || 'count').toLowerCase();
@@ -4323,6 +4317,10 @@
         else {
             layer = data;
             state.layers.push(layer);
+        }
+        if (fast) {
+            activateLayerForInsert(layer.client_uid, { fast: true, skipEmit: true });
+            return projectLayerPayload(layer);
         }
         activateLayerForInsert(layer.client_uid);
         renderAll();
@@ -4561,6 +4559,7 @@
     window.projectTakeoffSetTool = function (tool) {
         const normalized = String(tool || '').toLowerCase();
         if (normalized === 'pan') {
+            flushPendingProjectStateEmit();
             setTool('smart');
             state.panMode = true;
             applyTakeoffDrawingInteractivity();
@@ -4586,6 +4585,7 @@
                     clearDrafts();
                 }
             }
+            flushPendingProjectStateEmit();
             setTool('smart');
             applyTakeoffDrawingInteractivity();
             return true;
@@ -4731,6 +4731,7 @@
         state.segments.forEach(segment => (segment.handles || []).forEach(handle => handle.visible(false)));
         applyObjectSelectionVisuals();
         renderProperties();
+        if (konvaLayer) konvaLayer.batchDraw();
         return targets.map(target => String(target.ref.client_uid));
     };
 
@@ -4992,6 +4993,7 @@
     };
 
     window.projectTakeoffSave = function () {
+        flushPendingProjectStateEmit();
         return saveTakeoff(true, true).then(result => {
             hasPendingManualCanvasCheckpoint = false;
             return result;

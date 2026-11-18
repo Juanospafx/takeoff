@@ -1799,7 +1799,11 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             };
         }
 
-        function syncKonvaToFabric() {
+        let lastSyncedKonvaZoom = null;
+        let lastSyncedKonvaPage = null;
+        let lastSyncedKonvaRulerCount = -1;
+
+        function syncKonvaToFabric(options = {}) {
             if (!konvaLayer) return;
             const w = document.getElementById('canvas-wrapper');
             if (konvaStage && w && w.clientWidth > 0 && w.clientHeight > 0) {
@@ -1815,50 +1819,60 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
 
             // Clamping zoom limit strictly between 100% (1.0) and 250% (2.5)
             const zoom = Number(vpt.scaleX || 1);
-            const clampedZoom = Math.max(1.0, Math.min(2.5, zoom));
-            const rulerScale = 1 / clampedZoom;
+            const scaleChanged = lastSyncedKonvaZoom === null || Math.abs(zoom - lastSyncedKonvaZoom) > 0.0001;
+            const contextChanged = lastSyncedKonvaPage !== pageNum || lastSyncedKonvaRulerCount !== konvaRulers.length;
+            const panOnly = Boolean(options?.panOnly)
+                || (!options?.forceScale && !scaleChanged && !contextChanged);
 
-            try {
-                konvaRulers.forEach(r => {
-                    if (!r?.line || !r?.a1 || !r?.a2 || !r?.label || !r?.group) return;
-                    const rColor = r.color || '#22c55e';
-                    r.line.stroke(rColor);
-                    r.line.strokeWidth(Math.max(1.5, 2.0 * rulerScale));
-                    r.line.hitStrokeWidth(Math.max(18, Math.min(32, 20 * rulerScale)));
+            if (!panOnly) {
+                lastSyncedKonvaZoom = zoom;
+                lastSyncedKonvaPage = pageNum;
+                lastSyncedKonvaRulerCount = konvaRulers.length;
+                const clampedZoom = Math.max(1.0, Math.min(2.5, zoom));
+                const rulerScale = 1 / clampedZoom;
 
-                    // Refined ruler nodes (small, sleek and uncluttered)
-                    const handleR = 4.2 * rulerScale;
-                    r.a1.radius(handleR);
-                    r.a2.radius(handleR);
-                    r.a1.strokeWidth(Math.max(1.2, 1.6 * rulerScale));
-                    r.a2.strokeWidth(Math.max(1.2, 1.6 * rulerScale));
-                    r.a1.fill(rColor);
-                    r.a2.fill(rColor);
-                    r.a1.stroke('#ffffff');
-                    r.a2.stroke('#ffffff');
-                    r.a1.hitStrokeWidth(Math.max(14, Math.min(24, 16 * rulerScale)));
-                    r.a2.hitStrokeWidth(Math.max(14, Math.min(24, 16 * rulerScale)));
+                try {
+                    konvaRulers.forEach(r => {
+                        if (!r?.line || !r?.a1 || !r?.a2 || !r?.label || !r?.group) return;
+                        const rColor = r.color || '#22c55e';
+                        r.line.stroke(rColor);
+                        r.line.strokeWidth(Math.max(1.5, 2.0 * rulerScale));
+                        r.line.hitStrokeWidth(Math.max(18, Math.min(32, 20 * rulerScale)));
 
-                    // Refined ruler numbers: scaled cleanly within 100% - 250% zoom bounds (+15% larger)
-                    const fontSize = 14.4 * rulerScale;
-                    r.label.fontSize(fontSize);
-                    r.label.fill(rColor);
-                    r.label.stroke('#ffffff');
-                    r.label.strokeWidth(Math.max(2.0, 2.8 * rulerScale));
-                    r.label.fillAfterStrokeEnabled(true);
-                    r.label.padding(1.5);
-                    updateKonvaLabel(r);
-                    r.group.visible(r.page === pageNum && !r.hidden);
-                    r.group.moveToTop();
-                });
-            } catch (e) { }
-            try {
-                window.syncTakeoffInteractionScale?.(invScale);
-            } catch (e) { }
+                        // Refined ruler nodes (small, sleek and uncluttered)
+                        const handleR = 4.2 * rulerScale;
+                        r.a1.radius(handleR);
+                        r.a2.radius(handleR);
+                        r.a1.strokeWidth(Math.max(1.2, 1.6 * rulerScale));
+                        r.a2.strokeWidth(Math.max(1.2, 1.6 * rulerScale));
+                        r.a1.fill(rColor);
+                        r.a2.fill(rColor);
+                        r.a1.stroke('#ffffff');
+                        r.a2.stroke('#ffffff');
+                        r.a1.hitStrokeWidth(Math.max(14, Math.min(24, 16 * rulerScale)));
+                        r.a2.hitStrokeWidth(Math.max(14, Math.min(24, 16 * rulerScale)));
+
+                        // Refined ruler numbers: scaled cleanly within 100% - 250% zoom bounds (+15% larger)
+                        const fontSize = 14.4 * rulerScale;
+                        r.label.fontSize(fontSize);
+                        r.label.fill(rColor);
+                        r.label.stroke('#ffffff');
+                        r.label.strokeWidth(Math.max(2.0, 2.8 * rulerScale));
+                        r.label.fillAfterStrokeEnabled(true);
+                        r.label.padding(1.5);
+                        updateKonvaLabel(r);
+                        r.group.visible(r.page === pageNum && !r.hidden);
+                        r.group.moveToTop();
+                    });
+                } catch (e) { }
+                try {
+                    window.syncTakeoffInteractionScale?.(invScale);
+                } catch (e) { }
+            }
             // Reset any stalled batchDraw flag accumulated while the tab/iframe was hidden
             // (display: none skips rAF in Chromium), then draw synchronously with Fabric.
             konvaLayer._waitingForDraw = false;
-            if (w && w.clientWidth > 0 && w.clientHeight > 0 && !document.hidden) {
+            if (!panOnly && !options?.useBatchDraw && w && w.clientWidth > 0 && w.clientHeight > 0 && !document.hidden) {
                 konvaLayer.draw();
             } else {
                 konvaLayer.batchDraw();
@@ -2775,7 +2789,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
                 canvas.setViewportTransform(canvas.viewportTransform);
                 notifyTakeoffZoomChanged('wheel');
                 updateTextScales(zoom);
-                syncKonvaToFabric();
+                syncKonvaToFabric({ useBatchDraw: true });
                 schedulePdfRerender();
                 if (typeof window.projectTakeoffOnZoom === 'function') {
                     window.projectTakeoffOnZoom({ clientX: e.clientX, clientY: e.clientY, zoom });
@@ -2786,6 +2800,16 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             let panStart = null;
             let backgroundPanCandidate = null;
             let backgroundPanGestureActive = false;
+            let panRenderRaf = null;
+            const schedulePanFrameRender = () => {
+                if (panRenderRaf) return;
+                const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : cb => setTimeout(cb, 0);
+                panRenderRaf = raf(() => {
+                    panRenderRaf = null;
+                    canvas.requestRenderAll();
+                    syncKonvaToFabric({ panOnly: true, useBatchDraw: true });
+                });
+            };
             const emitBackgroundPanState = (active) => {
                 try {
                     window.parent?.postMessage({
@@ -2796,6 +2820,11 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
             };
             const releaseCanvasPointerState = () => {
                 const notifyGestureEnd = backgroundPanGestureActive;
+                const wasPanning = konvaIsPanning;
+                if (panRenderRaf) {
+                    if (typeof cancelAnimationFrame === 'function') cancelAnimationFrame(panRenderRaf);
+                    panRenderRaf = null;
+                }
                 if (backgroundPanGestureActive || konvaIsPanning) {
                     window.__takeoffJustPanned = true;
                     setTimeout(() => { window.__takeoffJustPanned = false; }, 140);
@@ -2805,6 +2834,11 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
                 panStart = null;
                 backgroundPanCandidate = null;
                 backgroundPanGestureActive = false;
+                if (konvaLayer) konvaLayer.listening(true);
+                if (wasPanning) {
+                    canvas?.requestRenderAll();
+                    syncKonvaToFabric({ panOnly: true });
+                }
                 if (canvas) {
                     canvas.isDragging = false;
                     canvas.selection = currentMode === 'smart';
@@ -2839,6 +2873,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
                     evt.stopImmediatePropagation();
                     panStart = { x: evt.clientX, y: evt.clientY };
                     konvaIsPanning = true;
+                    if (konvaLayer) konvaLayer.listening(false);
                     panContainer.style.cursor = 'grabbing';
                     try { panContainer.setPointerCapture(evt.pointerId); } catch (e) { }
                 }, true);
@@ -2851,8 +2886,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
                     vpt[5] += evt.clientY - panStart.y;
                     clampViewportTransform(vpt);
                     panStart = { x: evt.clientX, y: evt.clientY };
-                    canvas.requestRenderAll();
-                    syncKonvaToFabric();
+                    schedulePanFrameRender();
                 }, true);
                 const finishPointerPan = evt => {
                     if (!konvaIsPanning) return;
@@ -3014,11 +3048,16 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
                     }
                 }
 
-                if (currentMode === 'smart' && isEmpty && konvaTransformer) {
+                const hadKonvaSelection = Boolean(
+                    konvaSelectedNode
+                    || konvaSelectedNote
+                    || konvaTransformer?.nodes?.()?.length
+                );
+                if (currentMode === 'smart' && isEmpty && !window.projectTakeoffIsDrawingToolActive?.() && konvaTransformer?.nodes?.()?.length) {
                     konvaTransformer.nodes([]);
                     konvaLayer.batchDraw();
                 }
-                if (currentMode === 'smart' && isEmpty) {
+                if (currentMode === 'smart' && isEmpty && !window.projectTakeoffIsDrawingToolActive?.() && hadKonvaSelection) {
                     konvaSelectedNode = null;
                     konvaSelectedNote = null;
                     konvaRulers.forEach(r => {
@@ -3059,6 +3098,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
                         backgroundPanCandidate = null;
                         backgroundPanGestureActive = true;
                         konvaIsPanning = true;
+                        if (konvaLayer) konvaLayer.listening(false);
                         window.__takeoffIsPanning = true;
                         konvaStage.container().style.cursor = 'grabbing';
                         emitBackgroundPanState(true);
@@ -3070,8 +3110,7 @@ $filePath = implode('/', array_map('rawurlencode', explode('/', $resolvedDrawing
                 vpt[5] += clientY - panStart.y;
                 clampViewportTransform(vpt);
                 panStart = { x: clientX, y: clientY };
-                canvas.requestRenderAll();
-                syncKonvaToFabric();
+                schedulePanFrameRender();
             });
             konvaStage.on('mouseup touchend', releaseCanvasPointerState);
             konvaStage.container().addEventListener('mouseleave', releaseCanvasPointerState);

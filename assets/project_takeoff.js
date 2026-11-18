@@ -1600,8 +1600,32 @@
     }
 
     let estimatingSyncTimer = null;
+    let saveTakeoffLocalTimer = null;
+    let pendingLocalSaveEstimateGroups = false;
+
+    function flushTakeoffLocalSave() {
+        if (saveTakeoffLocalTimer) {
+            clearTimeout(saveTakeoffLocalTimer);
+            saveTakeoffLocalTimer = null;
+        }
+        if (!pendingLocalSaveEstimateGroups) return false;
+        pendingLocalSaveEstimateGroups = false;
+        const pId = String(window.ProjectState?.projectId || 0);
+        safeSetTakeoffLocalStorage('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
+        return true;
+    }
+
+    function scheduleTakeoffLocalSave(delayMs = 350) {
+        pendingLocalSaveEstimateGroups = true;
+        clearTimeout(saveTakeoffLocalTimer);
+        saveTakeoffLocalTimer = setTimeout(() => {
+            saveTakeoffLocalTimer = null;
+            flushTakeoffLocalSave();
+        }, Math.max(80, Number(delayMs) || 350));
+    }
 
     function flushEstimatingSyncFromCanvas() {
+        flushTakeoffLocalSave();
         if (estimatingSyncTimer) {
             clearTimeout(estimatingSyncTimer);
             estimatingSyncTimer = null;
@@ -1609,15 +1633,17 @@
         syncTakeoffToEstimating();
     }
 
-    function scheduleEstimatingSyncFromCanvas(delayMs = 1400) {
+    function scheduleEstimatingSyncFromCanvas(delayMs = 1000) {
         clearTimeout(estimatingSyncTimer);
         estimatingSyncTimer = setTimeout(() => {
             estimatingSyncTimer = null;
+            flushTakeoffLocalSave();
             syncTakeoffToEstimating();
-        }, delayMs);
+        }, Math.max(200, Number(delayMs) || 1000));
     }
 
     window.flushTakeoffEstimatingSync = flushEstimatingSyncFromCanvas;
+    window.hasPendingTakeoffEstimatingSync = () => Boolean(estimatingSyncTimer);
 
     function saveTakeoffState() {
         if (!canWrite()) return false;
@@ -1626,13 +1652,17 @@
         if (!options.suppressDirty) {
             takeoffIsDirty = true;
         }
-        const pId = String(window.ProjectState?.projectId || 0);
-        safeSetTakeoffLocalStorage('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
+        if (options && (options.debounceEstimatingSync || options.debounceLocalSave)) {
+            scheduleTakeoffLocalSave();
+        } else {
+            pendingLocalSaveEstimateGroups = true;
+            flushTakeoffLocalSave();
+        }
         if (options && options.skipEstimatingSync) {
             return true;
         }
         if (options && options.debounceEstimatingSync) {
-            scheduleEstimatingSyncFromCanvas();
+            scheduleEstimatingSyncFromCanvas(1000);
         } else {
             flushEstimatingSyncFromCanvas();
         }
@@ -1786,7 +1816,7 @@
         if (!takeoffDomInitialized) return;
         adoptAuthoritativeEstimateFromEstimating(detail);
         if (typeof renderTakeoffEstimateFooter === 'function') renderTakeoffEstimateFooter();
-        if (typeof renderTakeoffPanel === 'function') renderTakeoffPanel();
+        if (detail.syncSource !== 'takeoff-sync' && typeof renderTakeoffPanel === 'function') renderTakeoffPanel();
     });
 
     window.addEventListener('takeoff:estimating-items-updated', event => {
@@ -1796,9 +1826,14 @@
             pendingInitialEstimatingItemsDetail = detail;
             return;
         }
+        const isEcho = detail.syncSource === 'takeoff-sync';
         adoptAuthoritativeEstimateFromEstimating(detail);
-        syncEstimatingItemsToTakeoff(detail);
-        if (typeof renderTakeoffPanel === 'function') renderTakeoffPanel();
+        const changedStructure = syncEstimatingItemsToTakeoff({ ...detail, skipCanvasResync: isEcho });
+        if (!isEcho || changedStructure) {
+            if (typeof renderTakeoffPanel === 'function') renderTakeoffPanel();
+        } else {
+            patchAllTakeoffLayerQuantityDom();
+        }
         if (typeof renderTakeoffEstimateFooter === 'function') renderTakeoffEstimateFooter();
     });
 
@@ -2137,11 +2172,13 @@
                         catalogNumber: item.costCode || item.budgetCode || '', itemType: item.itemType || 'part'
                     };
                     group.layers.push(layer);
+                    didMutateGroupMeta = true;
                 } else {
                     const oldGroup = groupForLayer(layer);
                     if (oldGroup !== group) {
                         oldGroup.layers = oldGroup.layers.filter(row => row !== layer);
                         group.layers.push(layer); layer.groupId = group.id;
+                        didMutateGroupMeta = true;
                     }
                     Object.assign(layer, {
                         estimateId, estimatingItemId: itemId, name: item.name || layer.name,
@@ -2158,10 +2195,13 @@
                 if (!item.takeoffLayerId) pendingLinks.push({ itemId, layerId: String(layer.id) });
             });
         });
+        const existingEstLayerCount = allLayers().filter(row => String(row.estimateId || '') === estimateId && row.estimatingItemId).length;
         takeoffState.groups.forEach(group => {
             group.layers = (group.layers || []).filter(layer => String(layer.estimateId || '') !== estimateId
                 || !layer.estimatingItemId || seen.has(String(layer.id)));
         });
+        const nextEstLayerCount = allLayers().filter(row => String(row.estimateId || '') === estimateId && row.estimatingItemId).length;
+        if (nextEstLayerCount !== existingEstLayerCount) didMutateGroupMeta = true;
         const scopedIndexes = takeoffState.groups.map((group, index) => groupBelongsToEstimate(group, estimateId) ? index : -1).filter(index => index >= 0);
         const order = new Map(orderedGroupIds.map((id, index) => [id, index]));
         const scopedGroups = scopedIndexes.map(index => takeoffState.groups[index]).sort((a, b) =>
@@ -2190,8 +2230,14 @@
             }
         }));
         const editorReloading = ensureEditorEstimate(estimateId);
-        if (!editorReloading) syncAllLayersToCanvas({ suppressEstimatingSync: true });
-        renderTakeoffPanel(); renderActiveLayerToolbar();
+        if (!detail.skipCanvasResync && !editorReloading) syncAllLayersToCanvas({ suppressEstimatingSync: true });
+        if (!detail.skipCanvasResync || didMutateGroupMeta || nextOrderSignature !== previousOrderSignature) {
+            renderTakeoffPanel();
+        } else {
+            patchAllTakeoffLayerQuantityDom();
+        }
+        renderActiveLayerToolbar();
+        return Boolean(didMutateGroupMeta || nextOrderSignature !== previousOrderSignature);
     }
 
     function estimateLineFromLayer(layer) {
@@ -2240,16 +2286,18 @@
         };
     }
 
-    function syncTakeoffToEstimating() {
+    function syncTakeoffToEstimating(targetEstimateOverrideId = null) {
         const state = loadEstimatingStateForSync();
+        const scopedEstimateId = String(targetEstimateOverrideId || state.activeEstimateId || '');
+        const isBackgroundEstimate = Boolean(targetEstimateOverrideId) && scopedEstimateId !== String(state.activeEstimateId || '');
         const activeEstimate = Array.isArray(state.estimates)
-            ? (state.estimates.find(estimate => String(estimate.id) === String(state.activeEstimateId)) || state.estimates[0])
+            ? (state.estimates.find(estimate => String(estimate.id) === scopedEstimateId) || state.estimates[0])
             : null;
-        const currentGroups = activeEstimate?.groups || state.groups || [];
+        const currentGroups = activeEstimate?.groups || (!isBackgroundEstimate ? state.groups : []) || [];
         const existingByLayerId = new Map();
         const manualByGroupName = new Map();
         const layerByEstimatingItemId = new Map(allLayers()
-            .filter(layer => layerBelongsToEstimate(layer, state.activeEstimateId) && layer.estimatingItemId)
+            .filter(layer => layerBelongsToEstimate(layer, scopedEstimateId) && layer.estimatingItemId)
             .map(layer => [String(layer.estimatingItemId), layer]));
 
         currentGroups.forEach(group => {
@@ -2286,7 +2334,7 @@
         });
 
         const projectedLayerIds = new Set();
-        const targetEstimateId = String(state.activeEstimateId || '');
+        const targetEstimateId = scopedEstimateId;
         const scopedTakeoffGroups = takeoffState.groups.filter(group => groupBelongsToEstimate(group, targetEstimateId));
         const totalScopedLayerCount = scopedTakeoffGroups.reduce((sum, group) => {
             const groupItems = Array.isArray(group?.items) ? group.items : (Array.isArray(group?.layers) ? group.layers : []);
@@ -2385,14 +2433,15 @@
             });
         });
 
-        state.groups = projectedGroups;
+        if (!isBackgroundEstimate) state.groups = projectedGroups;
         if (activeEstimate) activeEstimate.groups = projectedGroups;
         try {
             window.dispatchEvent(new CustomEvent('takeoff:estimating-lines-updated', {
                 detail: {
                     version: 2,
                     projectId: String(window.ProjectState?.projectId || ''),
-                    activeEstimateId: String(state.activeEstimateId || ''),
+                    activeEstimateId: String(targetEstimateId || ''),
+                    allowBackgroundEstimate: isBackgroundEstimate,
                     authoritative: true,
                     complete: true,
                     groups: projectedGroups,
@@ -2786,6 +2835,51 @@
         updateSubheadSelectedItem();
         syncTakeoffSubheadAlignment();
     }
+
+    function patchTakeoffSelectionClassesDom() {
+        const tree = $('takeoffItemsTree');
+        if (!tree) return false;
+        const estimateId = activeEstimateId();
+        const activeLabel = $('takeoffActiveLayerLabel');
+        const activeLayer = findLayer(takeoffState.activeLayerId);
+        if (activeLabel) activeLabel.textContent = activeLayer ? activeLayer.name : 'None';
+
+        const selectedGroups = new Set((selectionState.selectedGroupIds || []).map(String));
+        const selectedLayers = new Set((selectionState.selectedLayerIds || []).map(String));
+        const activeIdStr = String(takeoffState.activeLayerId || '');
+        const rows = tree.querySelectorAll('[data-layer-row]');
+        const expectedVisibleLayers = allLayers().filter(layer => layerBelongsToEstimate(layer, estimateId));
+        if (!String(takeoffState.query || '').trim() && rows.length !== expectedVisibleLayers.length) {
+            return false;
+        }
+
+        tree.querySelectorAll('[data-takeoff-group-row]').forEach(gRow => {
+            const gid = String(gRow.dataset.takeoffGroupRow || '');
+            const gSel = selectedGroups.has(gid);
+            gRow.classList.toggle('active', gSel);
+            gRow.classList.toggle('group-selected', gSel);
+            gRow.setAttribute('aria-selected', gSel ? 'true' : 'false');
+            const gBox = gRow.querySelector('[data-group-select]');
+            if (gBox) gBox.checked = gSel;
+        });
+
+        rows.forEach(row => {
+            const lid = String(row.dataset.layerRow || '');
+            const layer = findLayer(lid);
+            const gid = String(layer?.groupId || '');
+            const isLocked = row.classList.contains('is-locked-item') || Boolean(layer?.locked);
+            const groupSelected = selectedGroups.has(gid);
+            const isLayerSelected = !isLocked && (activeIdStr === lid || selectedLayers.has(lid));
+            row.classList.toggle('active', isLayerSelected || groupSelected);
+            row.classList.toggle('group-selected', groupSelected);
+            row.setAttribute('aria-selected', groupSelected ? 'true' : 'false');
+            const box = row.querySelector('[data-layer-select]');
+            if (box) box.checked = isLayerSelected || groupSelected;
+        });
+
+        renderActiveLayerToolbar();
+        return true;
+    }
     window.updateTakeoffSubheadInfo = updateSubheadSelectedItem;
 
     function renderInspector() {
@@ -3175,11 +3269,6 @@
                 }
                 const checked = box.checked;
                 toggleLayerSelection(layerId, checked);
-                if (checked) {
-                    setActiveTakeoffLayer(layerId);
-                } else if (String(takeoffState.activeLayerId || '') === String(layerId)) {
-                    clearActiveTakeoffLayer();
-                }
             });
         });
         document.querySelectorAll('[data-layer-lock]').forEach(button => {
@@ -4338,6 +4427,43 @@
         );
     }
 
+    function patchTakeoffLayerRowQuantityDom(layer) {
+        if (!layer || !layer.id || typeof document === 'undefined') return false;
+        const escId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(String(layer.id)) : String(layer.id);
+        const row = document.querySelector(`[data-layer-row="${escId}"]`);
+        if (!row) return false;
+        const qtyEl = row.querySelector('.pro-tree-qty');
+        if (qtyEl) {
+            qtyEl.textContent = itemQuantitySubtitle(layer);
+        }
+        const overrideInfo = getLayerEstimatingOverride(layer, activeEstimateId());
+        const existingBadge = row.querySelector('[data-qty-override-badge]');
+        if (Boolean(existingBadge) !== Boolean(overrideInfo.overridden)) {
+            return false;
+        }
+        if (existingBadge && overrideInfo.overridden) {
+            const uom = layer.uom || typeToUom(layer.type) || 'ea';
+            const estQtyNum = Number(overrideInfo.estimatingQuantity || 0);
+            const estQtyFormatted = estQtyNum % 1 === 0 ? estQtyNum.toFixed(0) : estQtyNum.toFixed(2);
+            const tkQtyNum = Number(layer.quantity || 0);
+            const tkQtyFormatted = tkQtyNum % 1 === 0 ? tkQtyNum.toFixed(0) : tkQtyNum.toFixed(2);
+            existingBadge.title = `Quantity altered in Estimating: ${estQtyFormatted} ${uom} (Takeoff measured: ${tkQtyFormatted} ${uom})`;
+            const spanEl = existingBadge.querySelector('span');
+            if (spanEl) spanEl.textContent = `Est: ${estQtyFormatted} ${uom}`;
+        }
+        return true;
+    }
+
+    function patchAllTakeoffLayerQuantityDom() {
+        const layers = allLayers().filter(layer => layerBelongsToEstimate(layer));
+        if (!layers.length) return false;
+        let allPatched = true;
+        for (const layer of layers) {
+            if (!patchTakeoffLayerRowQuantityDom(layer)) allPatched = false;
+        }
+        return allPatched;
+    }
+
     function refreshTakeoffLayerRowDom(layer) {
         if (!layer || !layer.id) return false;
         const escId = CSS.escape ? CSS.escape(String(layer.id)) : String(layer.id);
@@ -4372,9 +4498,9 @@
                 subEl.insertAdjacentHTML('afterbegin', renderLayerBadgeHtml(layer, 13));
             }
         }
-        const qtyEl = row.querySelector('.pro-tree-qty');
-        if (qtyEl) {
-            qtyEl.textContent = itemQuantitySubtitle(layer);
+        if (!patchTakeoffLayerRowQuantityDom(layer)) {
+            renderTakeoffPanel();
+            return false;
         }
         return true;
     }
@@ -6939,6 +7065,75 @@
         updateSubheadSelectedItem();
     }
 
+    function selectedValidLayerIds() {
+        const estId = activeEstimateId();
+        const unique = Array.from(new Set((selectionState.selectedLayerIds || []).map(String)));
+        return unique.filter(id => {
+            const l = findLayer(id);
+            return Boolean(l && layerBelongsToEstimate(l, estId));
+        });
+    }
+
+    async function deleteTakeoffLayers(layerIds) {
+        if (!requireWrite()) return false;
+        const estId = activeEstimateId();
+        const targetIds = Array.from(new Set((Array.isArray(layerIds) ? layerIds : []).map(String))).filter(id => {
+            const l = findLayer(id);
+            return Boolean(l && layerBelongsToEstimate(l, estId));
+        });
+        if (!targetIds.length) return false;
+        const targetSet = new Set(targetIds);
+        const lockedLayers = targetIds.filter(id => {
+            const layer = findLayer(id);
+            const editorState = callEditor('projectTakeoffGetLayerLockState', id) || {};
+            return Boolean(layer?.locked || editorState.locked);
+        });
+        if (lockedLayers.length) {
+            return showPrepared('Unlock the selected items before deleting them.');
+        }
+        const msg = targetIds.length === 1
+            ? `Are you sure you want to delete takeoff layer "${findLayer(targetIds[0])?.name || 'Item'}" and its measurements?`
+            : `Are you sure you want to delete ${targetIds.length} selected takeoff items and all their measurements?`;
+        let confirmed = false;
+        if (typeof window.showConfirmDialog === 'function') {
+            confirmed = await window.showConfirmDialog({
+                title: targetIds.length === 1 ? 'Delete Takeoff Layer' : 'Delete Selected Items',
+                message: msg,
+                confirmText: targetIds.length === 1 ? 'Delete Layer' : `Delete ${targetIds.length} Items`,
+                primaryDanger: true
+            });
+        } else {
+            confirmed = confirm(msg);
+        }
+        if (!confirmed) return false;
+        const deleted = callEditor('projectTakeoffDeleteLayers', targetIds);
+        if (deleted === false) {
+            return showPrepared('Unlock the selected items before deleting them.');
+        }
+        pushTakeoffHistory('delete-layers');
+        takeoffState.groups.forEach(group => {
+            if (!groupBelongsToEstimate(group, estId)) return;
+            group.layers = (group.layers || []).filter(layer => !targetSet.has(String(layer.id)));
+        });
+        selectionState.selectedLayerIds = [];
+        selectionState.selectedGroupIds = [];
+        selectionState.selectedObjectIds = [];
+        if (takeoffState.activeLayerId && targetSet.has(String(takeoffState.activeLayerId))) {
+            takeoffState.activeLayerId = null;
+            callEditor('projectTakeoffClearActiveLayer');
+            setActiveTool('smart');
+        }
+        if (selectionState.activeLayerId && targetSet.has(String(selectionState.activeLayerId))) {
+            selectionState.activeLayerId = null;
+        }
+        saveTakeoffState();
+        renderTakeoffPanel();
+        renderSelectionBar();
+        renderInspector();
+        showPrepared(targetIds.length === 1 ? 'Takeoff item deleted.' : `${targetIds.length} takeoff items deleted.`);
+        return true;
+    }
+
     function duplicateLayer(layerId) {
         if (!requireWrite()) return false;
         const layer = findLayer(layerId);
@@ -6958,6 +7153,8 @@
             metadata: { ...(JSON.parse(JSON.stringify(layer.metadata || {}))), project_layer_id: copyId },
             metadata_json: { ...(JSON.parse(JSON.stringify(layer.metadata_json || {}))), project_layer_id: copyId }
         };
+        delete copy.estimatingItemId;
+        if (copy.metadata_json) delete copy.metadata_json.estimating_item_id;
         group.layers.push(copy);
         setActiveTakeoffLayer(copy.id, false);
         saveTakeoffState();
@@ -7011,23 +7208,629 @@
         renderTakeoffPanel();
     }
 
-    function moveLayerToGroup(layerId) {
-        if (!requireWrite()) return false;
-        const layer = findLayer(layerId);
-        if (!layer) return;
-        const names = takeoffState.groups.map(group => group.name).join(', ');
-        const targetName = prompt(`Move to group (${names})`, findGroup(layer.groupId).name);
-        const target = takeoffState.groups.find(group => group.name.toLowerCase() === String(targetName || '').trim().toLowerCase());
-        if (!target || target.id === layer.groupId) return;
-        pushTakeoffHistory('move-layer');
-        findGroup(layer.groupId).layers = findGroup(layer.groupId).layers.filter(item => item.id !== layerId);
-        layer.groupId = target.id;
-        target.layers.push(layer);
-        target.isExpanded = true;
+    function closeTakeoffActionModal() {
+        document.querySelector('[data-takeoff-action-portal]')?.remove();
+    }
+
+    function moveLayersToTargetGroup(layerIds, targetGroup) {
+        if (!requireWrite() || !targetGroup) return false;
+        const estId = activeEstimateId();
+        const ids = Array.from(new Set((Array.isArray(layerIds) ? layerIds : []).map(String)));
+        const layersToMove = ids.map(id => findLayer(id)).filter(l => l && layerBelongsToEstimate(l, estId));
+        if (!layersToMove.length) return false;
+        pushTakeoffHistory('move-layers');
+        let movedCount = 0;
+        layersToMove.forEach(layer => {
+            const oldGroup = findGroup(layer.groupId);
+            if (oldGroup && String(oldGroup.id) === String(targetGroup.id)) return;
+            if (oldGroup) {
+                oldGroup.layers = (oldGroup.layers || []).filter(item => String(item.id) !== String(layer.id));
+            }
+            layer.groupId = targetGroup.id;
+            layer.groupName = targetGroup.name;
+            if (targetGroup.estimatingGroupId) layer.estimatingGroupId = targetGroup.estimatingGroupId;
+            if (layer.metadata_json && typeof layer.metadata_json === 'object' && targetGroup.estimatingGroupId) {
+                layer.metadata_json.estimating_group_id = targetGroup.estimatingGroupId;
+            }
+            targetGroup.layers = targetGroup.layers || [];
+            targetGroup.layers.push(layer);
+            movedCount++;
+        });
+        if (!movedCount) return false;
+        targetGroup.isExpanded = true;
         syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
         callEditor('projectTakeoffSave');
         saveTakeoffState();
         renderTakeoffPanel();
+        updateSubheadSelectedItem();
+        showPrepared(movedCount === 1
+            ? `Moved "${layersToMove[0].name}" to "${targetGroup.name}".`
+            : `Moved ${movedCount} items to "${targetGroup.name}".`);
+        return true;
+    }
+
+    function openMoveLayersModal(layerIds) {
+        if (!requireWrite()) return false;
+        const estId = activeEstimateId();
+        const layers = Array.from(new Set((Array.isArray(layerIds) ? layerIds : []).map(String)))
+            .map(id => findLayer(id))
+            .filter(l => l && layerBelongsToEstimate(l, estId));
+        if (!layers.length) return false;
+        closeTakeoffActionModal();
+
+        const groups = takeoffState.groups.filter(g => groupBelongsToEstimate(g, estId));
+        const currentGroupIds = new Set(layers.map(l => String(l.groupId || '')));
+        const defaultTarget = groups.find(g => !currentGroupIds.has(String(g.id))) || groups[0];
+        const summaryText = layers.length === 1
+            ? `Move "${layers[0].name}" to another takeoff group`
+            : `Move ${layers.length} selected items to another takeoff group`;
+
+        const portal = document.createElement('div');
+        portal.className = 'tk-modal-portal';
+        portal.dataset.takeoffActionPortal = 'move';
+        portal.innerHTML = `
+            <div class="pd-modal bb-studio-modal tk-action-modal" role="dialog" aria-modal="true" aria-labelledby="tkMoveModalTitle">
+                <div class="tk-action-modal-head">
+                    <div class="tk-action-modal-head-left">
+                        <div class="tk-action-icon-badge"><i class="fas fa-folder-tree"></i></div>
+                        <div>
+                            <h3 id="tkMoveModalTitle" class="tk-action-modal-title">${layers.length === 1 ? 'Move Takeoff Item' : `Move ${layers.length} Items`}</h3>
+                            <p class="tk-action-modal-sub">${esc(summaryText)}</p>
+                        </div>
+                    </div>
+                    <button type="button" class="tk-action-modal-close" data-tk-modal-close aria-label="Close"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="tk-action-modal-body">
+                    <div class="tk-field-group">
+                        <label class="tk-field-label" for="tkMoveTargetGroup">
+                            <span>Destination Group</span>
+                            <button type="button" class="tk-inline-link-btn" id="tkMoveNewGroupToggle">+ New Group</button>
+                        </label>
+                        <select id="tkMoveTargetGroup" class="tk-select">
+                            ${groups.map(g => {
+                                const isCurrent = currentGroupIds.size === 1 && currentGroupIds.has(String(g.id));
+                                const count = (g.layers || []).length;
+                                return `<option value="${esc(g.id)}" ${defaultTarget && String(defaultTarget.id) === String(g.id) ? 'selected' : ''}>${esc(g.name)} (${count} ${count === 1 ? 'item' : 'items'})${isCurrent ? ' — current' : ''}</option>`;
+                            }).join('')}
+                        </select>
+                    </div>
+                    <div class="tk-field-group" id="tkMoveNewGroupWrap" hidden>
+                        <label class="tk-field-label" for="tkMoveNewGroupName"><span>New Group Name</span></label>
+                        <input type="text" id="tkMoveNewGroupName" class="tk-input" placeholder="e.g. Exterior Lighting">
+                    </div>
+                </div>
+                <div class="tk-action-modal-foot">
+                    <button type="button" class="tk-btn-cancel" data-tk-modal-close>Cancel</button>
+                    <button type="button" class="tk-btn-primary" id="tkMoveSubmitBtn"><i class="fas fa-arrow-right"></i> Move ${layers.length === 1 ? 'Item' : `${layers.length} Items`}</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(portal);
+
+        const groupSelect = portal.querySelector('#tkMoveTargetGroup');
+        const newWrap = portal.querySelector('#tkMoveNewGroupWrap');
+        const newInput = portal.querySelector('#tkMoveNewGroupName');
+        const newToggle = portal.querySelector('#tkMoveNewGroupToggle');
+        let creatingNew = false;
+
+        newToggle?.addEventListener('click', () => {
+            creatingNew = !creatingNew;
+            newWrap.hidden = !creatingNew;
+            groupSelect.disabled = creatingNew;
+            newToggle.textContent = creatingNew ? 'Select Existing' : '+ New Group';
+            if (creatingNew) setTimeout(() => newInput?.focus(), 20);
+        });
+
+        const closeOnEsc = (e) => {
+            if (e.key === 'Escape') {
+                e.stopPropagation();
+                cleanup();
+            }
+        };
+        const cleanup = () => {
+            document.removeEventListener('keydown', closeOnEsc, true);
+            closeTakeoffActionModal();
+        };
+        document.addEventListener('keydown', closeOnEsc, true);
+        portal.addEventListener('click', (e) => { if (e.target === portal) cleanup(); });
+        portal.querySelectorAll('[data-tk-modal-close]').forEach(b => b.addEventListener('click', cleanup));
+
+        portal.querySelector('#tkMoveSubmitBtn')?.addEventListener('click', () => {
+            let targetGroup = null;
+            if (creatingNew) {
+                const name = String(newInput?.value || '').trim().replace(/\s+/g, ' ');
+                if (!name) {
+                    newInput?.focus();
+                    return;
+                }
+                const gid = makeId('grp');
+                targetGroup = {
+                    id: gid,
+                    estimatingGroupId: `takeoff_group_${gid}`,
+                    estimateId: estId,
+                    name,
+                    isExpanded: true,
+                    isDefault: false,
+                    layers: []
+                };
+                takeoffState.groups.push(targetGroup);
+            } else {
+                targetGroup = findGroupExact(groupSelect?.value);
+            }
+            if (!targetGroup) return;
+            cleanup();
+            moveLayersToTargetGroup(layers.map(l => l.id), targetGroup);
+        });
+    }
+
+    async function copyLayersToGroup({ layerIds, targetGroupId, includeQuantity = true }) {
+        const estId = activeEstimateId();
+        const targetGroup = findGroupExact(targetGroupId);
+        if (!targetGroup) return false;
+        const sourceLayers = layerIds.map(id => findLayer(id)).filter(l => l && layerBelongsToEstimate(l, estId));
+        if (!sourceLayers.length) return false;
+        pushTakeoffHistory('copy-layers-group');
+        const created = [];
+        sourceLayers.forEach(layer => {
+            const copyId = makeId('layer');
+            const qtyVal = includeQuantity ? Number(layer.quantity || 0) : 0;
+            const clonedMeta = JSON.parse(JSON.stringify(layer.metadata_json || {}));
+            delete clonedMeta.estimating_item_id;
+            clonedMeta.project_layer_id = copyId;
+            clonedMeta.base_quantity = qtyVal;
+            clonedMeta.estimate_id = estId;
+            clonedMeta.estimating_group_id = targetGroup.estimatingGroupId || `takeoff_group_${targetGroup.id}`;
+            const existingColors = (targetGroup.layers || []).map(item => item.color);
+            const copy = {
+                ...JSON.parse(JSON.stringify(layer)),
+                id: copyId,
+                client_uid: copyId,
+                integration_key: copyId,
+                groupId: targetGroup.id,
+                groupName: targetGroup.name,
+                estimateId: estId,
+                estimatingGroupId: clonedMeta.estimating_group_id,
+                name: String(layer.groupId) === String(targetGroup.id) ? `${layer.name} Copy` : layer.name,
+                color: window.TakeoffColorPalette.duplicateColor(layer.color, existingColors),
+                quantity: qtyVal,
+                baseQuantity: qtyVal,
+                shapes: [],
+                takeoffObjects: [],
+                metadata: { ...(JSON.parse(JSON.stringify(layer.metadata || {}))), project_layer_id: copyId, base_quantity: qtyVal },
+                metadata_json: clonedMeta
+            };
+            delete copy.estimatingItemId;
+            targetGroup.layers = targetGroup.layers || [];
+            targetGroup.layers.push(copy);
+            created.push(copy);
+        });
+        targetGroup.isExpanded = true;
+        if (created.length === 1) {
+            setActiveTakeoffLayer(created[0].id, false, { fast: false, skipLayerSync: false });
+        } else {
+            syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
+        }
+        saveTakeoffState();
+        renderTakeoffPanel();
+        updateSubheadSelectedItem();
+        showPrepared(created.length === 1
+            ? `Copied "${created[0].name}" to "${targetGroup.name}".`
+            : `Copied ${created.length} items to "${targetGroup.name}".`);
+        return true;
+    }
+
+    async function copyLayersToDrawingAndEstimate({
+        layerIds,
+        targetEstimateId,
+        targetDrawingId = 0,
+        targetPage = 1,
+        targetGroupChoice = '__same__',
+        copyShapes = true
+    }) {
+        const srcEstId = activeEstimateId();
+        const dstEstId = String(targetEstimateId || srcEstId);
+        const dstDrawingId = Number(targetDrawingId || 0);
+        const dstPage = Math.max(1, Number(targetPage || 1));
+        const sourceLayers = layerIds.map(id => findLayer(id)).filter(l => l && layerBelongsToEstimate(l, srcEstId));
+        if (!sourceLayers.length) return false;
+
+        pushTakeoffHistory('copy-layers-drawing-estimate');
+        const createdLayers = [];
+        const srcDocId = Number(activeDrawingDoc()?.id || 0);
+
+        // Ensure current editor drawing is saved when copying shapes from current drawing
+        if (copyShapes && dstDrawingId > 0 && srcDocId > 0) {
+            try {
+                if (typeof takeoffWindow()?.projectTakeoffSave === 'function') {
+                    await takeoffWindow().projectTakeoffSave();
+                }
+            } catch (_) { }
+        }
+
+        const findOrCreateTargetGroup = (sourceLayer) => {
+            if (targetGroupChoice && targetGroupChoice !== '__same__') {
+                const chosen = findGroupExact(targetGroupChoice);
+                if (chosen && groupBelongsToEstimate(chosen, dstEstId)) return chosen;
+            }
+            const srcGroup = findGroup(sourceLayer.groupId);
+            const wantedName = srcGroup?.name || sourceLayer.groupName || 'Project Takeoff';
+            let existing = takeoffState.groups.find(g => groupBelongsToEstimate(g, dstEstId)
+                && String(g.name || '').trim().toLowerCase() === wantedName.trim().toLowerCase());
+            if (!existing) {
+                const gid = makeId('grp');
+                existing = {
+                    id: gid,
+                    estimatingGroupId: `takeoff_group_${gid}`,
+                    estimateId: dstEstId,
+                    name: wantedName,
+                    isExpanded: true,
+                    isDefault: false,
+                    layers: []
+                };
+                takeoffState.groups.push(existing);
+            }
+            return existing;
+        };
+
+        // Load source & destination drawing states from API if copying to a specific drawing
+        let srcServerState = null;
+        let dstServerState = null;
+        if (dstDrawingId > 0) {
+            if (copyShapes && srcDocId > 0) {
+                try {
+                    const rSrc = await fetch(`../api/takeoff.php?action=state&drawing_id=${encodeURIComponent(srcDocId)}&estimate_key=${encodeURIComponent(srcEstId)}&inherit_legacy=1`);
+                    const jSrc = await rSrc.json();
+                    if (jSrc?.status === 'success' && jSrc.data) srcServerState = jSrc.data;
+                } catch (_) { }
+            }
+            try {
+                const rDst = await fetch(`../api/takeoff.php?action=state&drawing_id=${encodeURIComponent(dstDrawingId)}&estimate_key=${encodeURIComponent(dstEstId)}&inherit_legacy=1`);
+                const jDst = await rDst.json();
+                if (jDst?.status === 'success' && jDst.data) dstServerState = jDst.data;
+            } catch (_) { }
+        }
+
+        const dstLayers = Array.isArray(dstServerState?.layers) ? [...dstServerState.layers] : [];
+        const dstMarkers = Array.isArray(dstServerState?.markers) ? [...dstServerState.markers] : [];
+        const dstSegments = Array.isArray(dstServerState?.segments) ? [...dstServerState.segments] : [];
+
+        sourceLayers.forEach(srcLayer => {
+            const targetGroup = findOrCreateTargetGroup(srcLayer);
+            const newId = makeId('layer');
+            const srcKeys = new Set([
+                String(srcLayer.id || ''),
+                String(srcLayer.client_uid || ''),
+                String(srcLayer.integration_key || ''),
+                String(srcLayer.metadata_json?.project_layer_id || '')
+            ].filter(Boolean));
+            const srcQty = Number(srcLayer.quantity || 0);
+
+            // Match canvas shapes for this layer in source drawing if copyShapes requested
+            let copiedMarkersForLayer = [];
+            let copiedSegmentsForLayer = [];
+            if (copyShapes && srcServerState) {
+                copiedMarkersForLayer = (srcServerState.markers || [])
+                    .filter(m => srcKeys.has(String(m.layer_client_uid || m.layer_id || '')))
+                    .map(m => {
+                        const cloneM = JSON.parse(JSON.stringify(m));
+                        cloneM.client_uid = makeId('m');
+                        cloneM.id = undefined;
+                        cloneM.layer_client_uid = newId;
+                        cloneM.page_number = dstPage;
+                        cloneM.document_id = String(dstDrawingId);
+                        return cloneM;
+                    });
+                copiedSegmentsForLayer = (srcServerState.segments || [])
+                    .filter(s => srcKeys.has(String(s.layer_client_uid || s.layer_id || '')))
+                    .map(s => {
+                        const cloneS = JSON.parse(JSON.stringify(s));
+                        cloneS.client_uid = makeId('seg');
+                        cloneS.id = undefined;
+                        cloneS.layer_client_uid = newId;
+                        cloneS.page_number = dstPage;
+                        cloneS.document_id = String(dstDrawingId);
+                        return cloneS;
+                    });
+            }
+
+            const hasCopiedCanvasGeometry = copiedMarkersForLayer.length > 0 || copiedSegmentsForLayer.length > 0;
+            // Only assign baseQuantity if geometry wasn't copied (prevents double counting!)
+            const baseQtyToPersist = hasCopiedCanvasGeometry ? Number(srcLayer.baseQuantity || 0) : srcQty;
+
+            const existingColors = (targetGroup.layers || []).map(item => item.color);
+            const isSameGroupAndEst = dstEstId === srcEstId && String(targetGroup.id) === String(srcLayer.groupId);
+            const copyName = isSameGroupAndEst ? `${srcLayer.name} Copy` : srcLayer.name;
+
+            const clonedMeta = JSON.parse(JSON.stringify(srcLayer.metadata_json || {}));
+            delete clonedMeta.estimating_item_id;
+            clonedMeta.project_layer_id = newId;
+            clonedMeta.base_quantity = baseQtyToPersist;
+            clonedMeta.estimate_id = dstEstId;
+            clonedMeta.estimating_group_id = targetGroup.estimatingGroupId || `takeoff_group_${targetGroup.id}`;
+
+            const newLayer = {
+                ...JSON.parse(JSON.stringify(srcLayer)),
+                id: newId,
+                client_uid: newId,
+                integration_key: newId,
+                groupId: targetGroup.id,
+                groupName: targetGroup.name,
+                estimateId: dstEstId,
+                estimatingGroupId: clonedMeta.estimating_group_id,
+                name: copyName,
+                color: isSameGroupAndEst ? window.TakeoffColorPalette.duplicateColor(srcLayer.color, existingColors) : srcLayer.color,
+                quantity: srcQty,
+                baseQuantity: baseQtyToPersist,
+                shapes: [],
+                takeoffObjects: [],
+                metadata: { ...(JSON.parse(JSON.stringify(srcLayer.metadata || {}))), project_layer_id: newId, base_quantity: baseQtyToPersist },
+                metadata_json: clonedMeta
+            };
+            delete newLayer.estimatingItemId;
+            targetGroup.layers = targetGroup.layers || [];
+            targetGroup.layers.push(newLayer);
+            createdLayers.push(newLayer);
+
+            if (dstDrawingId > 0) {
+                const payloadLayer = {
+                    ...layerCanvasPayload(newLayer),
+                    client_uid: newId,
+                    integration_key: newId,
+                    page_number: dstPage,
+                    seed_quantity: baseQtyToPersist,
+                    quantity: srcQty,
+                    group_name: targetGroup.name,
+                    metadata_json: clonedMeta
+                };
+                dstLayers.push(payloadLayer);
+                dstMarkers.push(...copiedMarkersForLayer);
+                dstSegments.push(...copiedSegmentsForLayer);
+            }
+        });
+
+        // Persist into target drawing's takeoff_estimate_states row
+        if (dstDrawingId > 0) {
+            try {
+                await fetch('../api/takeoff.php', {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'save_state',
+                        drawing_id: dstDrawingId,
+                        project_id: Number(window.ProjectState?.projectId || 0),
+                        estimate_key: dstEstId,
+                        layers: dstLayers,
+                        markers: dstMarkers,
+                        segments: dstSegments,
+                        dirty_page_numbers: [dstPage]
+                    })
+                });
+            } catch (err) {
+                console.warn('Could not save copied drawing state:', err);
+            }
+            if (dstDrawingId === srcDocId && dstEstId === srcEstId) {
+                const frame = $('takeoffFrame');
+                if (frame?.contentWindow?.location) {
+                    syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
+                }
+            }
+        }
+
+        if (dstEstId === srcEstId) {
+            syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
+            saveTakeoffState();
+            renderTakeoffPanel();
+            updateSubheadSelectedItem();
+        } else {
+            saveTakeoffState({ skipEstimatingSync: true });
+            syncTakeoffToEstimating(dstEstId);
+            renderTakeoffPanel();
+        }
+
+        const estObj = (loadEstimatingStateForSync()?.estimates || []).find(e => String(e.id) === dstEstId);
+        const dstEstLabel = estObj?.name || (dstEstId === srcEstId ? 'current estimate' : dstEstId);
+        const dstDocObj = drawingDocs().find(d => Number(d.id) === dstDrawingId);
+        const whereText = dstDrawingId > 0
+            ? `"${dstDocObj?.name || 'Drawing'}" (Page ${dstPage}) in "${dstEstLabel}"`
+            : `"${dstEstLabel}"`;
+        showPrepared(createdLayers.length === 1
+            ? `Copied "${createdLayers[0].name}" (${createdLayers[0].quantity} ${createdLayers[0].uom}) to ${whereText}.`
+            : `Copied ${createdLayers.length} items to ${whereText}.`);
+        return true;
+    }
+
+    function openCopyLayersModal(layerIds) {
+        if (!requireWrite()) return false;
+        const estId = activeEstimateId();
+        const layers = Array.from(new Set((Array.isArray(layerIds) ? layerIds : []).map(String)))
+            .map(id => findLayer(id))
+            .filter(l => l && layerBelongsToEstimate(l, estId));
+        if (!layers.length) return false;
+        closeTakeoffActionModal();
+
+        const groupsInActive = takeoffState.groups.filter(g => groupBelongsToEstimate(g, estId));
+        const activeGroupId = String(layers[0]?.groupId || groupsInActive[0]?.id || '');
+        const estimatesList = loadEstimatingStateForSync()?.estimates || [];
+        const docs = drawingDocs();
+        const currentDoc = activeDrawingDoc();
+        const defaultEst = estimatesList.find(e => String(e.id) !== estId) || estimatesList[0] || { id: estId, name: 'Current Estimate' };
+        const defaultDoc = docs.find(d => Number(d.id) !== Number(currentDoc?.id || 0)) || currentDoc || docs[0] || null;
+        const summaryText = layers.length === 1
+            ? `${layers[0].name} (${quantityLabel(layers[0])})`
+            : `${layers.length} selected takeoff items`;
+
+        const portal = document.createElement('div');
+        portal.className = 'tk-modal-portal';
+        portal.dataset.takeoffActionPortal = 'copy';
+        portal.innerHTML = `
+            <div class="pd-modal bb-studio-modal tk-action-modal" role="dialog" aria-modal="true" aria-labelledby="tkCopyModalTitle">
+                <div class="tk-action-modal-head">
+                    <div class="tk-action-modal-head-left">
+                        <div class="tk-action-icon-badge"><i class="fas fa-copy"></i></div>
+                        <div>
+                            <h3 id="tkCopyModalTitle" class="tk-action-modal-title">${layers.length === 1 ? 'Copy Takeoff Item' : `Copy ${layers.length} Selected Items`}</h3>
+                            <p class="tk-action-modal-sub">${esc(summaryText)}</p>
+                        </div>
+                    </div>
+                    <button type="button" class="tk-action-modal-close" data-tk-modal-close aria-label="Close"><i class="fas fa-times"></i></button>
+                </div>
+                <div class="tk-action-modal-body">
+                    <div class="tk-mode-grid">
+                        <button type="button" class="bb-mode-card bb-studio-card tk-studio-card active" data-tk-copy-mode="group">
+                            <div class="tk-studio-card-head">
+                                <span class="tk-studio-card-icon"><i class="fas fa-folder-plus"></i></span>
+                                <span class="tk-studio-card-title">Copy to Group</span>
+                            </div>
+                            <span class="tk-studio-card-desc">Duplicate ${layers.length === 1 ? 'this item' : 'these items'} inside a group of the current estimate.</span>
+                        </button>
+                        <button type="button" class="bb-mode-card bb-studio-card tk-studio-card" data-tk-copy-mode="drawing_estimate">
+                            <div class="tk-studio-card-head">
+                                <span class="tk-studio-card-icon"><i class="fas fa-map"></i></span>
+                                <span class="tk-studio-card-title">Copy Quantity / Drawing</span>
+                            </div>
+                            <span class="tk-studio-card-desc">Copy quantity or shapes to another drawing sheet and/or another estimate.</span>
+                        </button>
+                    </div>
+
+                    <div id="tkCopyModeGroupPane">
+                        <div class="tk-field-group">
+                            <label class="tk-field-label" for="tkCopyGroupSelect"><span>Target Group (Current Estimate)</span></label>
+                            <select id="tkCopyGroupSelect" class="tk-select">
+                                ${groupsInActive.map(g => `<option value="${esc(g.id)}" ${String(g.id) === activeGroupId ? 'selected' : ''}>${esc(g.name)}${String(g.id) === activeGroupId ? ' (current)' : ''}</option>`).join('')}
+                            </select>
+                        </div>
+                        <label class="tk-check-row" style="margin-top:8px;">
+                            <input type="checkbox" id="tkCopyGroupIncludeQty" checked>
+                            <span>Include current quantity as base quantity</span>
+                        </label>
+                    </div>
+
+                    <div id="tkCopyModeDrawingPane" hidden>
+                        <div class="tk-field-row-2">
+                            <div class="tk-field-group">
+                                <label class="tk-field-label" for="tkCopyTargetEstimate"><span>Target Estimate</span></label>
+                                <select id="tkCopyTargetEstimate" class="tk-select">
+                                    ${(estimatesList.length ? estimatesList : [{ id: estId, name: 'Primary Estimate' }]).map(est => `<option value="${esc(est.id)}" ${String(est.id) === String(defaultEst.id) ? 'selected' : ''}>${esc(est.name || 'Estimate')}${String(est.id) === estId ? ' (current)' : ''}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div class="tk-field-group">
+                                <label class="tk-field-label" for="tkCopyDestGroup"><span>Target Group</span></label>
+                                <select id="tkCopyDestGroup" class="tk-select"></select>
+                            </div>
+                        </div>
+                        <div class="tk-field-row-2" style="margin-top:10px;">
+                            <div class="tk-field-group">
+                                <label class="tk-field-label" for="tkCopyTargetDrawing"><span>Target Drawing</span></label>
+                                <select id="tkCopyTargetDrawing" class="tk-select">
+                                    <option value="0">Base quantity only (no drawing placement)</option>
+                                    ${docs.map(doc => `<option value="${esc(doc.id)}" ${defaultDoc && Number(defaultDoc.id) === Number(doc.id) ? 'selected' : ''}>${esc(doc.name)}${currentDoc && Number(currentDoc.id) === Number(doc.id) ? ' (current)' : ''}</option>`).join('')}
+                                </select>
+                            </div>
+                            <div class="tk-field-group">
+                                <label class="tk-field-label" for="tkCopyTargetPage"><span>Page / Sheet</span></label>
+                                <input type="number" min="1" step="1" id="tkCopyTargetPage" class="tk-input" value="1">
+                            </div>
+                        </div>
+                        <label class="tk-check-row" style="margin-top:8px;">
+                            <input type="checkbox" id="tkCopyShapesCheck" checked>
+                            <span>Copy drawing marks &amp; lines (falls back to base quantity if empty)</span>
+                        </label>
+                    </div>
+                </div>
+                <div class="tk-action-modal-foot">
+                    <button type="button" class="tk-btn-cancel" data-tk-modal-close>Cancel</button>
+                    <button type="button" class="tk-btn-primary" id="tkCopySubmitBtn"><i class="fas fa-copy"></i> Copy ${layers.length === 1 ? 'Item' : `${layers.length} Items`}</button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(portal);
+
+        let selectedMode = 'group';
+        const modeCards = portal.querySelectorAll('[data-tk-copy-mode]');
+        const groupPane = portal.querySelector('#tkCopyModeGroupPane');
+        const drawingPane = portal.querySelector('#tkCopyModeDrawingPane');
+        const estSelect = portal.querySelector('#tkCopyTargetEstimate');
+        const destGroupSelect = portal.querySelector('#tkCopyDestGroup');
+        const drawingSelect = portal.querySelector('#tkCopyTargetDrawing');
+        const pageInput = portal.querySelector('#tkCopyTargetPage');
+        const shapesCheck = portal.querySelector('#tkCopyShapesCheck');
+
+        const refreshDestGroupsForEst = () => {
+            const targetEst = String(estSelect?.value || estId);
+            const targetGroups = takeoffState.groups.filter(g => groupBelongsToEstimate(g, targetEst));
+            if (destGroupSelect) {
+                destGroupSelect.innerHTML = `<option value="__same__">Keep source group name (create if needed)</option>`
+                    + targetGroups.map(g => `<option value="${esc(g.id)}">${esc(g.name)}</option>`).join('');
+            }
+        };
+        const syncPageInputState = () => {
+            const did = Number(drawingSelect?.value || 0);
+            const docObj = docs.find(d => Number(d.id) === did);
+            if (pageInput) {
+                pageInput.disabled = did <= 0;
+                if (docObj?.pageCount) pageInput.max = String(docObj.pageCount);
+                else pageInput.removeAttribute('max');
+                if (did <= 0) pageInput.value = '1';
+            }
+            if (shapesCheck) shapesCheck.disabled = did <= 0;
+        };
+        refreshDestGroupsForEst();
+        syncPageInputState();
+        estSelect?.addEventListener('change', refreshDestGroupsForEst);
+        drawingSelect?.addEventListener('change', syncPageInputState);
+
+        modeCards.forEach(card => {
+            card.addEventListener('click', () => {
+                selectedMode = card.dataset.tkCopyMode;
+                modeCards.forEach(c => c.classList.toggle('active', c === card));
+                if (groupPane) groupPane.hidden = selectedMode !== 'group';
+                if (drawingPane) drawingPane.hidden = selectedMode !== 'drawing_estimate';
+            });
+        });
+
+        const closeOnEsc = (e) => {
+            if (e.key === 'Escape') {
+                e.stopPropagation();
+                cleanup();
+            }
+        };
+        const cleanup = () => {
+            document.removeEventListener('keydown', closeOnEsc, true);
+            closeTakeoffActionModal();
+        };
+        document.addEventListener('keydown', closeOnEsc, true);
+        portal.addEventListener('click', (e) => { if (e.target === portal) cleanup(); });
+        portal.querySelectorAll('[data-tk-modal-close]').forEach(b => b.addEventListener('click', cleanup));
+
+        const submitBtn = portal.querySelector('#tkCopySubmitBtn');
+        submitBtn?.addEventListener('click', async () => {
+            submitBtn.disabled = true;
+            try {
+                if (selectedMode === 'group') {
+                    await copyLayersToGroup({
+                        layerIds: layers.map(l => l.id),
+                        targetGroupId: portal.querySelector('#tkCopyGroupSelect')?.value,
+                        includeQuantity: Boolean(portal.querySelector('#tkCopyGroupIncludeQty')?.checked)
+                    });
+                } else {
+                    await copyLayersToDrawingAndEstimate({
+                        layerIds: layers.map(l => l.id),
+                        targetEstimateId: estSelect?.value || estId,
+                        targetDrawingId: Number(drawingSelect?.value || 0),
+                        targetPage: Number(pageInput?.value || 1),
+                        targetGroupChoice: destGroupSelect?.value || '__same__',
+                        copyShapes: Boolean(shapesCheck?.checked)
+                    });
+                }
+                cleanup();
+            } finally {
+                if (submitBtn.isConnected) submitBtn.disabled = false;
+            }
+        });
+    }
+
+    function moveLayerToGroup(layerId) {
+        return openMoveLayersModal([layerId]);
     }
 
     function bindSubheadItemActions() {
@@ -7137,24 +7940,34 @@
             event.stopPropagation();
             const action = btn.dataset.subheadItemAction;
             const activeLayerId = takeoffState.activeLayerId || selectionState.activeLayerId;
+            const selectedLayerIds = selectedValidLayerIds();
+            const hasMultiLayers = selectedLayerIds.length > 1;
             const hasSelection = selectionState.selectedObjectIds.length > 0;
 
             if (action === 'add-node') {
                 callEditor('projectTakeoffArmAddNode', true);
                 showPrepared('Click anywhere on the line to insert a new node.');
             } else if (action === 'copy') {
-                if (hasSelection) {
+                if (hasMultiLayers) {
+                    openCopyLayersModal(selectedLayerIds);
+                } else if (hasSelection && !selectedLayerIds.length) {
                     runSelectionAction('copy');
+                } else if (selectedLayerIds.length === 1) {
+                    openCopyLayersModal(selectedLayerIds);
                 } else if (activeLayerId) {
-                    duplicateLayer(activeLayerId);
+                    openCopyLayersModal([activeLayerId]);
                 } else {
                     showPrepared('Select a takeoff item first.');
                 }
             } else if (action === 'move') {
-                if (hasSelection) {
+                if (hasMultiLayers) {
+                    openMoveLayersModal(selectedLayerIds);
+                } else if (hasSelection && !selectedLayerIds.length && !activeLayerId) {
                     runSelectionAction('move');
+                } else if (selectedLayerIds.length === 1) {
+                    openMoveLayersModal(selectedLayerIds);
                 } else if (activeLayerId) {
-                    moveLayerToGroup(activeLayerId);
+                    openMoveLayersModal([activeLayerId]);
                 } else {
                     showPrepared('Select a takeoff item first.');
                 }
@@ -7174,8 +7987,12 @@
                     selectionState.selectedRuler = null;
                     updateSubheadSelectedItem();
                     showPrepared('Ruler measurement deleted.');
+                } else if (hasMultiLayers) {
+                    deleteTakeoffLayers(selectedLayerIds);
                 } else if (hasSelection) {
                     runSelectionAction('delete');
+                } else if (selectedLayerIds.length === 1) {
+                    deleteTakeoffLayers(selectedLayerIds);
                 } else if (activeLayerId) {
                     deleteLayer(activeLayerId);
                 } else {
@@ -7272,6 +8089,8 @@
         const selectedGroupIds = selectionState.selectedGroupIds || [];
         const isGroupSelected = selectedGroupIds.length > 0;
         const selectedGroup = isGroupSelected ? findGroup(selectedGroupIds[0]) : null;
+        const selectedLayerObjects = selectedValidLayerIds().map(id => findLayer(id)).filter(Boolean);
+        const isMultiLayerSelected = !isGroupSelected && selectedLayerObjects.length > 1;
 
         const activeLayerId = takeoffState.activeLayerId || selectionState.activeLayerId;
         const activeLayer = typeof findLayer === 'function' ? findLayer(activeLayerId) : null;
@@ -7281,8 +8100,11 @@
         const name = $('takeoffSubheadItemName');
         const meta = $('takeoffSubheadItemMeta');
         const actionsContainer = info.querySelector('.takeoff-subhead-item-actions');
+        const prevActionMode = info.dataset.subheadActionMode || '';
+        let nextActionMode = '';
 
         if (selectionState.selectedNote) {
+            nextActionMode = 'note';
             info.classList.add('is-visible');
             info.classList.remove('is-group-info');
             info.style.display = 'inline-flex';
@@ -7376,6 +8198,7 @@
                 `;
             }
         } else if (isGroupSelected && selectedGroup) {
+            nextActionMode = 'group';
             info.classList.add('is-visible', 'is-group-info');
             info.style.display = 'inline-flex';
             if (dot) {
@@ -7390,7 +8213,7 @@
                 meta.textContent = `${layerCount} ${layerCount === 1 ? 'item' : 'items'}`;
             }
 
-            if (actionsContainer) {
+            if (actionsContainer && prevActionMode !== nextActionMode) {
                 actionsContainer.innerHTML = `
                     <button type="button" class="subhead-item-act-btn" data-subhead-group-action="create-layer" title="Create New Takeoff Layer">
                         <i class="fas fa-plus"></i><span>New Item</span>
@@ -7409,6 +8232,43 @@
                     </button>
                     <button type="button" class="subhead-item-act-btn icon-only" data-subhead-group-action="more" title="More group options">
                         <i class="fas fa-ellipsis-vertical"></i>
+                    </button>
+                `;
+            }
+        } else if (isMultiLayerSelected) {
+            nextActionMode = 'multi-items';
+            info.classList.add('is-visible');
+            info.classList.remove('is-group-info');
+            info.style.display = 'inline-flex';
+            if (dot) {
+                dot.style.background = 'transparent';
+                dot.style.color = '#2563eb';
+                dot.innerHTML = '<i class="fas fa-layer-group" style="font-size: 11.5px;"></i>';
+            }
+            if (name) {
+                name.textContent = `${selectedLayerObjects.length} items selected`;
+            }
+            if (meta) {
+                const uoms = Array.from(new Set(selectedLayerObjects.map(l => l.uom || typeToUom(l.type) || 'ea')));
+                if (uoms.length === 1) {
+                    const sumQty = selectedLayerObjects.reduce((sum, l) => sum + Number(l.quantity || 0), 0);
+                    const formatted = sumQty % 1 === 0 ? sumQty.toFixed(0) : sumQty.toFixed(2);
+                    meta.textContent = `Total: ${formatted} ${uoms[0]}`;
+                } else {
+                    const typesSummary = Array.from(new Set(selectedLayerObjects.map(l => l.type || 'Count'))).slice(0, 3).join(', ');
+                    meta.textContent = activeLayer ? `${typesSummary} · Drawing: ${activeLayer.name}` : typesSummary;
+                }
+            }
+            if (actionsContainer && prevActionMode !== nextActionMode) {
+                actionsContainer.innerHTML = `
+                    <button type="button" class="subhead-item-act-btn" data-subhead-item-action="copy" title="Copy selected items">
+                        <i class="fas fa-copy"></i><span>Copy</span>
+                    </button>
+                    <button type="button" class="subhead-item-act-btn" data-subhead-item-action="move" title="Move selected items to group">
+                        <i class="fas fa-folder-tree"></i><span>Move to</span>
+                    </button>
+                    <button type="button" class="subhead-item-act-btn danger" data-subhead-item-action="delete" title="Delete selected items">
+                        <i class="fas fa-trash"></i><span>Delete</span>
                     </button>
                 `;
             }
@@ -7441,13 +8301,14 @@
             const layerTypeStr = String(activeLayer?.type || activeLayer?.takeoff_type || '').toLowerCase();
             const isLinear = Boolean((activeLayer && layerTypeStr.includes('linear'))
                 || selectionState.selectedObjectType === 'segment');
+            nextActionMode = isLinear ? 'item-linear' : 'item-single';
             const addNodeHtml = isLinear ? `
                     <button type="button" class="subhead-item-act-btn" data-subhead-item-action="add-node" title="Add node to adjust line">
                         <i class="fas fa-bezier-curve"></i><span>Add Node</span>
                     </button>
             ` : '';
 
-            if (actionsContainer) {
+            if (actionsContainer && prevActionMode !== nextActionMode) {
                 actionsContainer.innerHTML = `
                     ${addNodeHtml}
                     <button type="button" class="subhead-item-act-btn" data-subhead-item-action="copy" title="Copy item or selection">
@@ -7462,23 +8323,34 @@
                 `;
             }
         } else {
+            nextActionMode = '';
             info.classList.remove('is-visible', 'is-group-info');
             info.style.display = 'none';
         }
-        syncTakeoffSubheadAlignment();
+        info.dataset.subheadActionMode = nextActionMode;
+        if (prevActionMode !== nextActionMode) {
+            syncTakeoffSubheadAlignment();
+        }
     }
     window.updateTakeoffSubheadInfo = updateSubheadSelectedItem;
 
-    function setActiveTakeoffLayer(layerId, rerender = true) {
+    function setActiveTakeoffLayer(layerId, rerender = true, options = {}) {
         const layer = findLayer(layerId);
         if (!layer) return;
 
         takeoffState.activeLayerId = layer.id;
         takeoffState.activeGroupId = layer.groupId;
-        applyLayerToCanvas(layer);
-        saveTakeoffState();
-        if (rerender) renderTakeoffPanel();
-        renderActiveLayerToolbar();
+        applyLayerToCanvas(layer, {
+            skipLayerSync: options.skipLayerSync !== false,
+            fast: options.fast !== false
+        });
+        saveTakeoffState({
+            skipEstimatingSync: options.skipEstimatingSync !== false,
+            suppressDirty: options.suppressDirty !== false,
+            debounceLocalSave: true
+        });
+        if (rerender && !patchTakeoffSelectionClassesDom()) renderTakeoffPanel();
+        else renderActiveLayerToolbar();
         updateSubheadSelectedItem();
         if ($('takeoffDrawingDropdown')?.classList.contains('open')) renderDrawingDropdown();
     }
@@ -7486,10 +8358,12 @@
     function selectTakeoffContext(layerId, rerender = true) {
         const layer = findLayer(layerId);
         if (!layer) return;
+        const activeChanged = String(takeoffState.activeLayerId || '') !== String(layer.id)
+            || String(takeoffState.activeGroupId || '') !== String(layer.groupId || '');
         takeoffState.activeLayerId = layer.id;
         takeoffState.activeGroupId = layer.groupId;
-        if (rerender) renderTakeoffPanel();
-        renderActiveLayerToolbar();
+        if (rerender && activeChanged && !patchTakeoffSelectionClassesDom()) renderTakeoffPanel();
+        else renderActiveLayerToolbar();
         updateSubheadSelectedItem();
         if ($('takeoffDrawingDropdown')?.classList.contains('open')) renderDrawingDropdown();
     }
@@ -7497,9 +8371,13 @@
     function clearActiveTakeoffLayer(rerender = true) {
         takeoffState.activeLayerId = null;
         callEditor('projectTakeoffClearActiveLayer');
-        saveTakeoffState();
-        if (rerender) renderTakeoffPanel();
-        renderActiveLayerToolbar();
+        saveTakeoffState({
+            skipEstimatingSync: true,
+            suppressDirty: true,
+            debounceLocalSave: true
+        });
+        if (rerender && !patchTakeoffSelectionClassesDom()) renderTakeoffPanel();
+        else renderActiveLayerToolbar();
         updateSubheadSelectedItem();
         if ($('takeoffDrawingDropdown')?.classList.contains('open')) renderDrawingDropdown();
     }
@@ -7532,13 +8410,55 @@
     function applyLayerToCanvas(layer, options = {}) {
         const win = takeoffWindow();
         if (!win) return;
-        if (!options.skipLayerSync) syncAllLayersToCanvas();
+        if (options.skipLayerSync === false) syncAllLayersToCanvas();
         const payload = layerCanvasPayload(layer);
         win.__projectActiveTakeoffLayer = payload;
-        callEditor('projectTakeoffActivateLayer', payload);
+        callEditor('projectTakeoffActivateLayer', payload, { fast: options.fast !== false });
         if (isLinearType(layer.type) || layer.type === 'Count by distance') setActiveTool('linear');
         else if (isAreaType(layer.type)) setActiveTool('area');
         else setActiveTool('count');
+    }
+
+    const fastDrawingLayerQty = new Map();
+
+    function handleFastLayerQtyUpdate(payload = {}) {
+        if (!payload?.layerId) return false;
+        const estimateId = String(payload.estimateId || payload.estimateKey || activeEstimateId());
+        if (estimateId && estimateId !== activeEstimateId()) return false;
+        const remoteId = String(payload.layerId);
+        const layer = findLayer(remoteId) || allLayers().find(row => String(row.id) === remoteId
+            || String(row.client_uid || '') === remoteId);
+        if (!layer) return false;
+        const doc = activeDrawingDoc();
+        const rawDocId = Number(payload.drawingId || payload.drawing_id || doc?.id || 0);
+        const docKey = rawDocId > 0 ? String(rawDocId) : 'active';
+        const cacheKey = `${estimateId}:${docKey}:${String(layer.id)}`;
+        let prevDrawingQty = fastDrawingLayerQty.get(cacheKey);
+        if (prevDrawingQty === undefined) {
+            const snap = takeoffState.canvasSnapshots?.[`${estimateId}:${docKey}`]
+                || takeoffState.canvasSnapshots?.[`${estimateId}:active`];
+            const remote = snap?.layers?.find(r => String(r.id || r.layerId || '') === remoteId || String(r.id || '') === String(layer.id));
+            if (remote) {
+                const rawShapes = remote.shapes || remote.takeoffObjects || [];
+                const remoteBase = Number(remote.baseQuantity ?? layer.baseQuantity ?? 0);
+                if (rawShapes.length) {
+                    const shapeSum = rawShapes.reduce((s, o) => s + Number(o?.quantityValue ?? o?.quantity ?? 0), 0);
+                    prevDrawingQty = remoteBase + shapeSum;
+                } else {
+                    prevDrawingQty = Number(remote.quantity ?? layer.quantity ?? 0);
+                }
+            } else {
+                prevDrawingQty = Number(layer.quantity || 0);
+            }
+        }
+        const nextDrawingQty = Number(payload.quantity || 0);
+        fastDrawingLayerQty.set(cacheKey, nextDrawingQty);
+        layer.quantity = Math.max(0, Number(layer.quantity || 0) + (nextDrawingQty - prevDrawingQty));
+        if (payload.userDirty) takeoffIsDirty = true;
+        if (!patchTakeoffLayerRowQuantityDom(layer)) renderTakeoffPanel();
+        if (String(takeoffState.activeLayerId || '') === String(layer.id)) updateSubheadSelectedItem();
+        saveTakeoffState({ debounceEstimatingSync: true, suppressDirty: !payload.userDirty });
+        return true;
     }
 
     function syncTakeoffFromCanvasSnapshot(snapshot, options = {}) {
@@ -7548,6 +8468,9 @@
         const doc = activeDrawingDoc();
         const rawDocId = Number(snapshot.drawingId || snapshot.drawing_id || doc?.id || 0);
         const documentId = rawDocId > 0 ? String(rawDocId) : 'active';
+        fastDrawingLayerQty.clear();
+        const prevActiveLayerId = takeoffState.activeLayerId;
+        let lockOrUomChanged = false;
         if (rawDocId > 0 && takeoffState.canvasSnapshots?.[`${estimateId}:active`]) {
             delete takeoffState.canvasSnapshots[`${estimateId}:active`];
         }
@@ -7572,8 +8495,16 @@
             // Canvas snapshots report current state, but selection/state events
             // must never act as visibility commands. Only explicit eye/checkbox
             // actions are allowed to mutate layer.visible.
-            if (remote.unit_of_measure || remote.uom) layer.uom = remote.unit_of_measure || remote.uom;
-            if (remote.locked !== undefined) layer.locked = Boolean(remote.locked);
+            if (remote.unit_of_measure || remote.uom) {
+                const nextUom = remote.unit_of_measure || remote.uom;
+                if (nextUom !== layer.uom) lockOrUomChanged = true;
+                layer.uom = nextUom;
+            }
+            if (remote.locked !== undefined) {
+                const nextLocked = Boolean(remote.locked);
+                if (nextLocked !== Boolean(layer.locked)) lockOrUomChanged = true;
+                layer.locked = nextLocked;
+            }
             if (remote.catalogMetadata) {
                 layer.catalogMetadata = window.CatalogMetadata.clone(remote.catalogMetadata);
                 layer.metadata_json = window.CatalogMetadata.mergeMetadata(layer.metadata_json, remote.catalogMetadata);
@@ -7591,8 +8522,16 @@
                 suppressDirty: !(snapshot.userDirty === true || snapshot.dirty === true)
             });
         }
-        renderTakeoffPanel();
-        renderViewerLayersPopover();
+        const canPatchOnly = !lockOrUomChanged
+            && prevActiveLayerId === takeoffState.activeLayerId
+            && !String(takeoffState.searchQuery || '').trim()
+            && patchAllTakeoffLayerQuantityDom();
+        if (!canPatchOnly) renderTakeoffPanel();
+        if (canPatchOnly && !($('takeoffViewerLayersPopover')?.hidden ?? true)) {
+            renderViewerLayersPopover();
+        } else if (!canPatchOnly) {
+            renderViewerLayersPopover();
+        }
         renderActiveLayerToolbar();
         updateSubheadSelectedItem();
     }
@@ -7809,13 +8748,16 @@
         selectionState.selectedObjectType = null;
         callEditor('projectTakeoffClearSelection');
         callEditor('projectTakeoffClearActiveLayer');
-        renderTakeoffPanel();
+        if (!patchTakeoffSelectionClassesDom()) renderTakeoffPanel();
         renderSelectionBar();
         renderInspector();
-        updateSubheadSelectedItem();
     }
 
     function setSelectedObjects(ids = [], layerId = null) {
+        const prevActive = String(selectionState.activeLayerId || takeoffState.activeLayerId || '');
+        const prevGroupKey = (selectionState.selectedGroupIds || []).join(',');
+        const prevLayerKey = (selectionState.selectedLayerIds || []).join(',');
+        const isDrawingToolActive = ['count', 'linear', 'area'].includes(viewerState.activeTool);
         selectionState.selectedObjectIds = Array.from(new Set(ids.map(String).filter(Boolean)));
         if (!ids.length && !layerId) {
             selectionState.activeLayerId = null;
@@ -7825,13 +8767,25 @@
             selectionState.selectedLayerIds = [];
         } else {
             selectionState.activeLayerId = layerId || selectionState.activeLayerId || takeoffState.activeLayerId;
-            selectionState.selectedGroupIds = [];
-            selectionState.selectedLayerIds = layerId ? [String(layerId)] : [];
+            if (isDrawingToolActive && selectionState.selectedLayerIds.length > 1
+                && (!layerId || selectionState.selectedLayerIds.includes(String(layerId)))) {
+                // Keep batch checkbox selection intact while placing shapes
+            } else {
+                selectionState.selectedGroupIds = [];
+                selectionState.selectedLayerIds = layerId ? [String(layerId)] : [];
+            }
         }
-        renderTakeoffPanel();
+        const nextActive = String(selectionState.activeLayerId || takeoffState.activeLayerId || '');
+        const nextGroupKey = (selectionState.selectedGroupIds || []).join(',');
+        const nextLayerKey = (selectionState.selectedLayerIds || []).join(',');
+        const treeSelectionChanged = prevActive !== nextActive
+            || prevGroupKey !== nextGroupKey
+            || (prevLayerKey !== nextLayerKey && !(nextLayerKey === prevActive && prevLayerKey === ''));
+        if (treeSelectionChanged && !patchTakeoffSelectionClassesDom()) {
+            renderTakeoffPanel();
+        }
         renderSelectionBar();
         renderInspector();
-        updateSubheadSelectedItem();
     }
 
     function toggleGroupSelection(groupId) {
@@ -7863,10 +8817,9 @@
             ? callEditor('projectTakeoffSelectGroup', selectionState.selectedLayerIds)
             : (callEditor('projectTakeoffClearSelection'), []);
         selectionState.selectedObjectIds = Array.isArray(selectedIds) ? selectedIds : [];
-        renderTakeoffPanel();
+        if (!patchTakeoffSelectionClassesDom()) renderTakeoffPanel();
         renderSelectionBar();
         renderInspector();
-        updateSubheadSelectedItem();
     }
 
     function selectSingleLayer(layerId) {
@@ -7880,14 +8833,14 @@
         selectionState.selectedLayerIds = [String(layer.id)];
         selectionState.activeLayerId = layer.id;
 
-        // Activate this layer in the takeoff editor for drawing
-        setActiveTakeoffLayer(layer.id, false);
+        // Activate this layer in the takeoff editor for drawing (fast path)
+        setActiveTakeoffLayer(layer.id, false, { fast: true, skipLayerSync: true });
 
         // Select objects for this single layer on canvas
         const selectedIds = callEditor('projectTakeoffSelectGroup', [String(layer.id)]);
         selectionState.selectedObjectIds = Array.isArray(selectedIds) ? selectedIds : [];
 
-        renderTakeoffPanel();
+        if (!patchTakeoffSelectionClassesDom()) renderTakeoffPanel();
         renderSelectionBar();
         renderInspector();
     }
@@ -7899,17 +8852,14 @@
         if (selected) ids.add(String(layer.id));
         else ids.delete(String(layer.id));
         selectionState.selectedLayerIds = Array.from(ids);
-        const group = findGroup(layer.groupId);
-        const groupLayerIds = (group?.layers || []).map(item => String(item.id));
-        const selectedGroups = new Set(selectionState.selectedGroupIds.map(String));
-        if (groupLayerIds.length && groupLayerIds.every(id => ids.has(id))) selectedGroups.add(String(group.id));
-        else selectedGroups.delete(String(group.id));
-        selectionState.selectedGroupIds = Array.from(selectedGroups);
-        selectionState.activeLayerId = selected ? layer.id : (selectionState.selectedLayerIds[0] || null);
+        // Individual item checkboxes accumulate multi-item selection without switching
+        // the subhead toolbar into folder/group actions.
+        selectionState.selectedGroupIds = [];
+        selectionState.activeLayerId = selected ? layer.id : (selectionState.selectedLayerIds[selectionState.selectedLayerIds.length - 1] || null);
         // Checking an item is also the user's placement-layer choice. Keep the
         // multi-layer/object selection below, but activate this specific layer
         // in the editor so the next drawing uses its type and catalog data.
-        if (selected) setActiveTakeoffLayer(layer.id, false);
+        if (selected) setActiveTakeoffLayer(layer.id, false, { fast: true, skipLayerSync: true });
         else if (String(takeoffState.activeLayerId || '') === String(layer.id)) {
             // Checkbox selection and placement activation are separate state.
             // Clearing the checkbox for the active layer must also terminate
@@ -7921,10 +8871,9 @@
         }
         const selectedIds = callEditor('projectTakeoffSelectGroup', selectionState.selectedLayerIds);
         selectionState.selectedObjectIds = Array.isArray(selectedIds) ? selectedIds : [];
-        renderTakeoffPanel();
+        if (!patchTakeoffSelectionClassesDom()) renderTakeoffPanel();
         renderSelectionBar();
         renderInspector();
-        updateSubheadSelectedItem();
     }
 
     function toggleLayerLock(layerId) {
@@ -9583,6 +10532,11 @@
                 showPrepared(event.data?.payload?.message || 'Set the drawing scale before adding linear items.');
                 return;
             }
+            if (event.data?.type === 'project-takeoff-layer-qty') {
+                if (event.source !== takeoffWindow()) return;
+                handleFastLayerQtyUpdate(event.data.payload);
+                return;
+            }
             if (event.data?.type === 'project-takeoff-state') {
                 if (event.source !== takeoffWindow()) return;
                 syncTakeoffFromCanvasSnapshot(event.data.payload);
@@ -9603,7 +10557,7 @@
                                 .find(row => row.dataset.layerRow === String(layer.id))
                                 ?.scrollIntoView({ block: 'nearest', behavior: 'smooth' });
                         });
-                    } else selectTakeoffContext(payload.layerId);
+                    } else selectTakeoffContext(payload.layerId, false);
                 }
                 return;
             }
@@ -9639,9 +10593,14 @@
             }
             if (event.data?.type === 'project-takeoff-ruler-selected') {
                 const payload = event.data.payload || {};
-                selectionState.selectedRuler = payload.selected ? payload : null;
-                updateSubheadSelectedItem();
-                renderTakeoffPanel();
+                const nextRuler = payload.selected ? payload : null;
+                const prevRulerId = selectionState.selectedRuler ? String(selectionState.selectedRuler.id || '') : null;
+                const nextRulerId = nextRuler ? String(nextRuler.id || '') : null;
+                selectionState.selectedRuler = nextRuler;
+                if (prevRulerId !== nextRulerId) {
+                    updateSubheadSelectedItem();
+                    renderTakeoffPanel();
+                }
                 return;
             }
             if (event.data?.type === 'project-takeoff-note-selected') {
@@ -10287,7 +11246,7 @@
             closeGroupContextMenu();
             $('takeoffMoreToolsPanel')?.setAttribute('hidden', '');
 
-            if (!event.target.closest('[data-takeoff-group-row], [data-layer-row], button, input, .pro-tree-inline-edit, .pro-row-menu, .pro-tree-search-bar, .pro-floating-controls, .pro-floating-tools, #takeoffSubheadItemInfo, .est-version-tab, .est-version-menu, #saveProjectBtn, #takeoffDownloadDrawingBtn, #takeoffCompareBtn, #takeoffScaleStatus')) {
+            if (!event.target.closest('[data-takeoff-group-row], [data-layer-row], button, input, .pro-tree-inline-edit, .pro-row-menu, .pro-tree-search-bar, .pro-floating-controls, .pro-floating-tools, #takeoffSubheadItemInfo, .est-version-tab, .est-version-menu, #saveProjectBtn, #takeoffDownloadDrawingBtn, #takeoffCompareBtn, #takeoffScaleStatus, .tk-modal-portal, .tk-action-modal, .pd-modal-backdrop, .pd-modal')) {
                 if (document.body.classList.contains('is-takeoff-tab') || document.querySelector('.project-subhead-wrapper')?.classList.contains('is-takeoff-tab')) {
                     clearAllSelections();
                 }

@@ -43,6 +43,37 @@
     let dirtyGeneration = 0;
     const pendingTakeoffByEstimate = new Map();
     let estimatingHasUnsavedCheckpoint = false;
+    let estimatingTableDirty = false;
+    let estimatingLoadingActive = false;
+
+    function isEstimatingTabActive() {
+        const tab = document.getElementById('tab-estimating');
+        return !tab || (!tab.hidden && tab.classList.contains('active'));
+    }
+
+    function setEstimatingLoading(visible, message = 'Loading estimate...') {
+        const main = root.querySelector('.est-main');
+        if (!main) return;
+        let overlay = main.querySelector('#estLoadingOverlay');
+        if (!overlay && visible) {
+            overlay = document.createElement('div');
+            overlay.id = 'estLoadingOverlay';
+            overlay.className = 'est-loading-overlay';
+            overlay.setAttribute('role', 'status');
+            overlay.setAttribute('aria-live', 'polite');
+            overlay.innerHTML = '<div class="est-loading-card"><i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i><span id="estLoadingOverlayText"></span></div>';
+            main.appendChild(overlay);
+        }
+        if (!overlay) return;
+        estimatingLoadingActive = Boolean(visible);
+        if (visible) {
+            const textEl = overlay.querySelector('#estLoadingOverlayText');
+            if (textEl) textEl.textContent = message;
+            overlay.hidden = false;
+        } else {
+            overlay.hidden = true;
+        }
+    }
 
     function restoreDirtyTracking() {
         dirtyEstimateIds.clear();
@@ -384,6 +415,17 @@
             curEst.grand_total = curSummary.estimateTotal;
             curEst.total_amount = curSummary.estimateTotal;
         }
+        if (options.targetEstimateId && String(options.targetEstimateId) !== String(curEst?.id || '')) {
+            const targetEst = state.estimates.find(row => String(row.id) === String(options.targetEstimateId));
+            if (targetEst) {
+                const targetSummary = buildEstimateSummaryPayload(targetEst);
+                targetEst.estimateSummary = targetSummary;
+                targetEst.estimateTotal = targetSummary.estimateTotal;
+                targetEst.totalSales = targetSummary.estimateTotal;
+                targetEst.grand_total = targetSummary.estimateTotal;
+                targetEst.total_amount = targetSummary.estimateTotal;
+            }
+        }
         syncPrimaryEstimateProjectMeta();
         state.dirtyEstimateIds = [...dirtyEstimateIds];
         state.takeoffSyncDirtyIds = [...takeoffSyncDirtyIds];
@@ -391,7 +433,7 @@
         const stored = Workspace.clone(state);
         if (!stored.pendingProjectCreationSync) delete stored.pendingProjectCreationSync;
         safeSetLocalStorage(storageKey, JSON.stringify(stored));
-        if (options.publish !== false) publish();
+        if (options.publish !== false) publish(options);
     }
 
     function applyDeletedEstimateTombstones(workspace, additionalIds = []) {
@@ -411,10 +453,12 @@
         return workspace;
     }
 
-    function publish() {
+    function publish(options = {}) {
         const total = summary();
+        const syncSource = options.syncSource || 'estimating';
         window.dispatchEvent(new CustomEvent('takeoff:estimating-state-updated', { detail: {
             projectId: String(projectId), activeEstimateId: state.activeEstimateId,
+            syncSource,
             estimates: state.estimates.map(row => ({
                 id: row.id,
                 name: row.name,
@@ -428,11 +472,20 @@
                 equipment: total.direct.equipmentSales, preTaxMarkup: total.preTaxTotal,
                 taxes: total.totalTax, total: total.estimateTotal, profit: total.profit }
         } }));
-        window.dispatchEvent(new CustomEvent('takeoff:estimating-items-updated', { detail: {
-            version: 1, origin: 'estimating', projectId: String(projectId),
-            activeEstimateId: String(state.activeEstimateId), revision: Number(current().revision || 0),
-            groups: Workspace.clone(current().groups)
-        } }));
+        const currentGroups = current().groups || [];
+        const currentSummaryRow = (window.ProjectState?.estimatesSummary || []).find(
+            row => String(row?.id || '') === String(state.activeEstimateId || '')
+        );
+        const isUnloadedShell = ui.loadState === 'loading'
+            && currentGroups.length === 0
+            && Number(currentSummaryRow?.itemCount || 0) > 0;
+        if (!isUnloadedShell) {
+            window.dispatchEvent(new CustomEvent('takeoff:estimating-items-updated', { detail: {
+                version: 1, origin: 'estimating', syncSource, projectId: String(projectId),
+                activeEstimateId: String(state.activeEstimateId), revision: Number(current().revision || 0),
+                groups: Workspace.clone(currentGroups)
+            } }));
+        }
         window.dispatchEvent(new CustomEvent('takeoff:estimate-summary-updated', { detail: total }));
     }
 
@@ -651,13 +704,13 @@
         }
     }
 
-    function scheduleSave(source = 'manual') {
+    function scheduleSave(source = 'manual', targetEstimateId = null) {
         if (!projectId) return;
-        const activeId = String(state.activeEstimateId || '');
+        const activeId = String(targetEstimateId || state.activeEstimateId || '');
         if (source === 'takeoff') takeoffSyncDirtyIds.add(activeId);
         else takeoffSyncDirtyIds.delete(activeId);
         conflictedEstimateIds.delete(activeId);
-        markEstimateDirty();
+        markEstimateDirty(activeId);
         ui.saveRequested = true;
         clearTimeout(ui.saveTimer);
         ui.loadState = 'pending';
@@ -874,6 +927,7 @@
 
     async function loadServer() {
         if (!projectId) { render(); return; }
+        setEstimatingLoading(true, 'Loading estimate...');
         const requestLocalTimestamp = state.clientUiUpdatedAt;
         const forceMigratedLocal = state.pendingProjectCreationSync === true;
         try {
@@ -965,6 +1019,8 @@
         } catch (error) {
             ui.loadState = 'error';
             ui.message = `Offline: ${error.message}`;
+        } finally {
+            setEstimatingLoading(false);
         }
         render();
         drainPendingTakeoff();
@@ -1135,17 +1191,30 @@
         if (groupsContentSignature(currentEstimate.groups) === groupsContentSignature(reconciled)) return;
         currentEstimate.groups = reconciled;
         currentEstimate.updatedAt = Workspace.now();
-        currentEstimate.auditLog.push({ id: Workspace.uid('audit'), at: currentEstimate.updatedAt,
-            action: 'Synchronized items from Takeoff' });
-        currentEstimate.auditLog = currentEstimate.auditLog.slice(-100);
+        const lastAudit = currentEstimate.auditLog[currentEstimate.auditLog.length - 1];
+        if (lastAudit && lastAudit.action === 'Synchronized items from Takeoff') {
+            lastAudit.at = currentEstimate.updatedAt;
+        } else {
+            currentEstimate.auditLog.push({ id: Workspace.uid('audit'), at: currentEstimate.updatedAt,
+                action: 'Synchronized items from Takeoff' });
+            currentEstimate.auditLog = currentEstimate.auditLog.slice(-100);
+        }
         takeoffSyncDirtyIds.add(activeId);
         markEstimateDirty(activeId);
-        saveLocal();
-        scheduleSave('takeoff');
-        render();
+        saveLocal({ syncSource: 'takeoff-sync', targetEstimateId: activeId });
+        scheduleSave('takeoff', activeId);
+        if (!options.backgroundEstimate) render();
     }
 
-    function render() {
+    function render(forceTable = false) {
+        if (!forceTable && !isEstimatingTabActive()) {
+            estimatingTableDirty = true;
+            renderFooter();
+            renderStatus();
+            renderModal();
+            return;
+        }
+        estimatingTableDirty = false;
         renderTable();
         renderDetails();
         renderFooter();
@@ -6419,26 +6488,57 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         ui.selected.clear(); syncEstimatingSubheadInfo(); saveLocal(); render(); publish();
     }
 
+    function refreshTableIfActive() {
+        if (!isEstimatingTabActive()) {
+            estimatingTableDirty = true;
+            return;
+        }
+        estimatingTableDirty = false;
+        renderTable();
+    }
+
+    function flushEstimatingTabView() {
+        const hasPendingSync = typeof window.hasPendingTakeoffEstimatingSync === 'function' && window.hasPendingTakeoffEstimatingSync();
+        if (!estimatingTableDirty && !hasPendingSync) return;
+        setEstimatingLoading(true, 'Synchronizing estimate items...');
+        const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : cb => setTimeout(cb, 0);
+        raf(() => setTimeout(() => {
+            try {
+                if (typeof window.flushTakeoffEstimatingSync === 'function') {
+                    window.flushTakeoffEstimatingSync();
+                }
+                render(true);
+            } finally {
+                if (ui.loadState !== 'loading') setEstimatingLoading(false);
+            }
+        }, 0));
+    }
+
     window.addEventListener('takeoff:estimating-lines-updated', event => {
         if (event.detail?.projectId && String(event.detail.projectId) !== String(projectId)) return;
-        if (event.detail?.activeEstimateId && String(event.detail.activeEstimateId) !== String(state.activeEstimateId)) return;
+        const incomingEstId = String(event.detail?.activeEstimateId || '');
+        const isBackgroundEstimate = Boolean(event.detail?.allowBackgroundEstimate);
+        if (!isBackgroundEstimate && incomingEstId && incomingEstId !== String(state.activeEstimateId)) return;
         if (!(event.detail?.groups || []).length && event.detail?.complete !== true) return;
-        const scopedSnapshot = Boolean(event.detail?.activeEstimateId)
+        const scopedSnapshot = Boolean(incomingEstId)
             && Number(event.detail?.version || 0) >= 2;
-        reconcileGroups(event.detail?.activeEstimateId || state.activeEstimateId,
-            event.detail?.groups || [], { importNewLayers: scopedSnapshot });
+        reconcileGroups(incomingEstId || state.activeEstimateId,
+            event.detail?.groups || [], {
+                importNewLayers: scopedSnapshot,
+                backgroundEstimate: isBackgroundEstimate && incomingEstId !== String(state.activeEstimateId)
+            });
     });
-    window.addEventListener('takeoff:layer-updated', () => renderTable());
-    window.addEventListener('takeoff:layers-updated', () => renderTable());
-    window.addEventListener('takeoff:layer-visuals-updated', () => renderTable());
-    window.addEventListener('takeoff:project-state-updated', () => renderTable());
+    window.addEventListener('takeoff:layer-updated', refreshTableIfActive);
+    window.addEventListener('takeoff:layers-updated', refreshTableIfActive);
+    window.addEventListener('takeoff:layer-visuals-updated', refreshTableIfActive);
+    window.addEventListener('takeoff:project-state-updated', refreshTableIfActive);
     window.addEventListener('takeoff:tab-activated', event => {
-        if (event.detail?.tab === 'estimating') renderTable();
+        if (event.detail?.tab === 'estimating') flushEstimatingTabView();
         else syncEstimatingSubheadInfo();
     });
     document.addEventListener('click', e => {
         if (e.target.closest('#tabBtnEstimating, [data-tab="estimating"], [href="#tab-estimating"]')) {
-            setTimeout(renderTable, 40);
+            setTimeout(flushEstimatingTabView, 0);
         }
     });
     window.addEventListener('takeoff:estimating-link-requested', event => {
@@ -6472,15 +6572,6 @@ const estimateMenu = target.closest('[data-estimate-menu]');
     window.addEventListener('takeoff:active-estimate-changed', event => {
         if (event.detail?.projectId && String(event.detail.projectId) !== String(projectId)) return;
         selectEstimate(event.detail?.estimateId);
-    });
-    window.addEventListener('takeoff:layer-visuals-updated', () => {
-        renderTable();
-    });
-    window.addEventListener('takeoff:layers-updated', () => {
-        renderTable();
-    });
-    window.addEventListener('takeoff:layer-updated', () => {
-        renderTable();
     });
     window.addEventListener('takeoff:layer-properties-updated', event => {
         const detail = event.detail || {};
@@ -7117,7 +7208,12 @@ function initEstimatingResizer() {
         window.addEventListener('pointercancel', stopDragging);
     }
 
-    saveLocal();
+    const hasInitialGroups = (current()?.groups || []).length > 0;
+    if (!projectId || hasInitialGroups || dirtyEstimateIds.size > 0) {
+        saveLocal();
+    } else {
+        saveLocal({ publish: false });
+    }
     render();
     initEstimatingResizer();
     loadServer();

@@ -52,12 +52,17 @@ $selectedDocumentId = (int) ($_GET['file_id'] ?? $_GET['document_id'] ?? 0);
 if (!function_exists('dash_table_exists')) {
     function dash_table_exists(PDO $pdo, string $table): bool
     {
+        static $tableCache = [];
+        $cacheKey = spl_object_id($pdo) . ':' . $table;
+        if (array_key_exists($cacheKey, $tableCache)) {
+            return $tableCache[$cacheKey];
+        }
         try {
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?");
             $stmt->execute([$table]);
-            return (int) $stmt->fetchColumn() > 0;
+            return $tableCache[$cacheKey] = ((int) $stmt->fetchColumn() > 0);
         } catch (Throwable $e) {
-            return false;
+            return $tableCache[$cacheKey] = false;
         }
     }
 }
@@ -65,14 +70,19 @@ if (!function_exists('dash_table_exists')) {
 if (!function_exists('dash_column_exists')) {
     function dash_column_exists(PDO $pdo, string $table, string $column): bool
     {
+        static $colCache = [];
+        $cacheKey = spl_object_id($pdo) . ':' . $table . '.' . $column;
+        if (array_key_exists($cacheKey, $colCache)) {
+            return $colCache[$cacheKey];
+        }
         try {
-        $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");
-        $stmt->execute([$column]);
-        return (bool) $stmt->fetch(PDO::FETCH_ASSOC);
-    } catch (Throwable $e) {
-        return false;
+            $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");
+            $stmt->execute([$column]);
+            return $colCache[$cacheKey] = (bool) $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            return $colCache[$cacheKey] = false;
+        }
     }
-}
 }
 
 function dash_public_path(?string $path): string
@@ -503,44 +513,144 @@ if (!empty($takeoffLayers)) {
     }
 }
 
-$estimateItems = [];
-if ($projectId > 0 && dash_table_exists($pdo, 'estimate_items') && dash_table_exists($pdo, 'estimates')) {
-    $stmt = $pdo->prepare("
-        SELECT ei.*, ci.name AS catalog_item_name
-        FROM estimate_items ei
-        INNER JOIN estimates e ON e.id = ei.estimate_id
-        LEFT JOIN catalog_items ci ON ci.id = ei.catalog_item_id
-        WHERE e.project_id = ? AND ei.deleted_at IS NULL AND e.deleted_at IS NULL
-        ORDER BY ei.sort_order ASC, ei.id DESC
-    ");
-    $stmt->execute([$projectId]);
-    $estimateItems = array_map(function ($ei) {
-        if (!empty($ei['metadata_json'])) {
-            $meta = is_array($ei['metadata_json']) ? $ei['metadata_json'] : json_decode($ei['metadata_json'], true);
-            if (is_array($meta)) {
-                $ws = isset($meta['workspace']) && is_array($meta['workspace']) ? $meta['workspace'] : $meta;
-                if (isset($ws['difficulty']) && !isset($ei['difficulty'])) {
-                    $ei['difficulty'] = (float)$ws['difficulty'];
-                }
-                if (isset($ws['laborWaste']) && !isset($ei['laborWaste'])) {
-                    $ei['laborWaste'] = (float)$ws['laborWaste'];
-                }
-                if (isset($ws['laborMargin']) && !isset($ei['laborMargin'])) {
-                    $ei['laborMargin'] = (float)$ws['laborMargin'];
-                }
-                if (isset($ws['factorOverride']) && !isset($ei['factorOverride'])) {
-                    $ei['factorOverride'] = (float)$ws['factorOverride'];
-                }
-                if (isset($ws['ratio']) && !isset($ei['ratio'])) {
-                    $ei['ratio'] = (float)$ws['ratio'];
-                }
-                if (isset($ws['children']) && !isset($ei['children'])) {
-                    $ei['children'] = $ws['children'];
+$projectMeta = [];
+if (!empty($project['metadata_json'])) {
+    $decodedMeta = json_decode((string) $project['metadata_json'], true);
+    if (is_array($decodedMeta)) {
+        $projectMeta = $decodedMeta;
+    }
+}
+
+$dashEstimatesSummary = [];
+$hasPopulatedWorkspaceState = false;
+$resolvedActiveEstimateId = trim((string)($projectMeta['primary_estimate_id'] ?? ''));
+if ($projectId > 0 && dash_table_exists($pdo, 'estimates')) {
+    try {
+        $hasWsState = dash_table_exists($pdo, 'estimate_workspace_states');
+        $estSql = $hasWsState
+            ? "SELECT e.id, e.name, e.total_cost, ws.client_estimate_id, ws.state_json FROM estimates e LEFT JOIN estimate_workspace_states ws ON ws.estimate_id = e.id WHERE e.project_id = ? AND e.deleted_at IS NULL ORDER BY e.id ASC"
+            : "SELECT e.id, e.name, e.total_cost, NULL AS client_estimate_id, NULL AS state_json FROM estimates e WHERE e.project_id = ? AND e.deleted_at IS NULL ORDER BY e.id ASC";
+        $estRowsStmt = $pdo->prepare($estSql);
+        $estRowsStmt->execute([$projectId]);
+        $estRows = $estRowsStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $activeCandidate = '';
+        $primaryCandidate = '';
+        foreach ($estRows as $er) {
+            $snap = !empty($er['state_json']) ? json_decode((string)$er['state_json'], true) : [];
+            if (!is_array($snap)) $snap = [];
+            if (!empty($snap) && isset($snap['groups']) && is_array($snap['groups'])) {
+                $hasPopulatedWorkspaceState = true;
+            }
+            $estItemCount = 0;
+            foreach (($snap['groups'] ?? []) as $wsGroup) {
+                if (is_array($wsGroup) && !empty($wsGroup['items']) && is_array($wsGroup['items'])) {
+                    $estItemCount += count($wsGroup['items']);
                 }
             }
+            $cid = trim((string)($er['client_estimate_id'] ?: ($snap['id'] ?? $er['id'])));
+            $isPrim = !empty($snap['isPrimary']) || !empty($snap['is_primary']);
+            $isAct = !empty($snap['isActive']);
+            $estVal = (float)($snap['estimateTotal'] ?? $snap['totalSales'] ?? $er['total_cost'] ?? 0);
+            $dashEstimatesSummary[] = [
+                'id' => $cid,
+                'dbEstimateId' => (int)$er['id'],
+                'name' => (string)($snap['name'] ?? $er['name'] ?? 'Estimate'),
+                'isPrimary' => $isPrim,
+                'is_primary' => $isPrim,
+                'isActive' => $isAct,
+                'estimateTotal' => $estVal,
+                'totalSales' => $estVal,
+                'itemCount' => $estItemCount,
+            ];
+            if ($isAct && $activeCandidate === '') $activeCandidate = $cid;
+            if ($isPrim && $primaryCandidate === '') $primaryCandidate = $cid;
         }
-        return $ei;
-    }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+        if ($activeCandidate !== '') {
+            $resolvedActiveEstimateId = $activeCandidate;
+        } elseif ($primaryCandidate !== '') {
+            $resolvedActiveEstimateId = $primaryCandidate;
+        } elseif (!empty($dashEstimatesSummary)) {
+            $resolvedActiveEstimateId = (string)$dashEstimatesSummary[0]['id'];
+        }
+        if ($resolvedActiveEstimateId === '' && !empty($takeoffLayers[0]['estimate_key'])) {
+            $resolvedActiveEstimateId = (string)$takeoffLayers[0]['estimate_key'];
+        }
+        if ($primaryCandidate !== '') {
+            $projectMeta['primary_estimate_id'] = $primaryCandidate;
+        } elseif ($resolvedActiveEstimateId !== '' && empty($projectMeta['primary_estimate_id'])) {
+            $projectMeta['primary_estimate_id'] = $resolvedActiveEstimateId;
+        }
+    } catch (Throwable $e) {
+    }
+}
+if ($resolvedActiveEstimateId === '' && !empty($takeoffLayers[0]['estimate_key'])) {
+    $resolvedActiveEstimateId = (string)$takeoffLayers[0]['estimate_key'];
+}
+if ($resolvedActiveEstimateId === '') {
+    $resolvedActiveEstimateId = 'est_primary';
+}
+
+$estimateItems = [];
+$estimateItemAggTotals = null;
+if ($projectId > 0 && dash_table_exists($pdo, 'estimate_items') && dash_table_exists($pdo, 'estimates')) {
+    if ($hasPopulatedWorkspaceState) {
+        try {
+            $aggStmt = $pdo->prepare("
+                SELECT
+                    COALESCE(SUM(ei.material_cost), 0) AS material_subtotal,
+                    COALESCE(SUM(ei.labor_cost), 0) AS labor_subtotal,
+                    COALESCE(SUM(ei.equipment_cost), 0) AS equipment_subtotal,
+                    COALESCE(SUM(COALESCE(ei.total_cost, ei.subtotal_cost, 0)), 0) AS estimate_total,
+                    COALESCE(SUM(COALESCE(ei.subtotal_cost, 0) * (COALESCE(ei.waste_factor_percent, ei.waste_percentage, 0) / 100)), 0) AS waste_total,
+                    COALESCE(SUM(COALESCE(ei.subtotal_cost, 0) * (COALESCE(ei.markup_percent, ei.margin_percentage, 0) / 100)), 0) AS markup_total
+                FROM estimate_items ei
+                INNER JOIN estimates e ON e.id = ei.estimate_id
+                WHERE e.project_id = ? AND ei.deleted_at IS NULL AND e.deleted_at IS NULL
+            ");
+            $aggStmt->execute([$projectId]);
+            $estimateItemAggTotals = $aggStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        } catch (Throwable $e) {
+            $estimateItemAggTotals = null;
+        }
+    }
+    if ($estimateItemAggTotals === null) {
+        $stmt = $pdo->prepare("
+            SELECT ei.*, ci.name AS catalog_item_name
+            FROM estimate_items ei
+            INNER JOIN estimates e ON e.id = ei.estimate_id
+            LEFT JOIN catalog_items ci ON ci.id = ei.catalog_item_id
+            WHERE e.project_id = ? AND ei.deleted_at IS NULL AND e.deleted_at IS NULL
+            ORDER BY ei.sort_order ASC, ei.id DESC
+        ");
+        $stmt->execute([$projectId]);
+        $estimateItems = array_map(function ($ei) {
+            if (!empty($ei['metadata_json'])) {
+                $meta = is_array($ei['metadata_json']) ? $ei['metadata_json'] : json_decode($ei['metadata_json'], true);
+                if (is_array($meta)) {
+                    $ws = isset($meta['workspace']) && is_array($meta['workspace']) ? $meta['workspace'] : $meta;
+                    if (isset($ws['difficulty']) && !isset($ei['difficulty'])) {
+                        $ei['difficulty'] = (float)$ws['difficulty'];
+                    }
+                    if (isset($ws['laborWaste']) && !isset($ei['laborWaste'])) {
+                        $ei['laborWaste'] = (float)$ws['laborWaste'];
+                    }
+                    if (isset($ws['laborMargin']) && !isset($ei['laborMargin'])) {
+                        $ei['laborMargin'] = (float)$ws['laborMargin'];
+                    }
+                    if (isset($ws['factorOverride']) && !isset($ei['factorOverride'])) {
+                        $ei['factorOverride'] = (float)$ws['factorOverride'];
+                    }
+                    if (isset($ws['ratio']) && !isset($ei['ratio'])) {
+                        $ei['ratio'] = (float)$ws['ratio'];
+                    }
+                    if (isset($ws['children']) && !isset($ei['children'])) {
+                        $ei['children'] = $ws['children'];
+                    }
+                }
+            }
+            return $ei;
+        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
 }
 
 $proposals = [];
@@ -597,13 +707,6 @@ if (empty($availableEstimators)) {
     ];
 }
 
-$projectMeta = [];
-if (!empty($project['metadata_json'])) {
-    $decodedMeta = json_decode((string) $project['metadata_json'], true);
-    if (is_array($decodedMeta)) {
-        $projectMeta = $decodedMeta;
-    }
-}
 $estimatorName = $projectMeta['estimator'] ?? $estimatorName;
 $measurementSystem = $projectMeta['measurement_system'] ?? 'US';
 $estimatePricing = $projectMeta['estimate_pricing'] ?? 'Unlocked';
@@ -623,13 +726,22 @@ $equipmentSubtotal = 0.0;
 $wasteTotal = 0.0;
 $markupTotal = 0.0;
 $estimateTotal = 0.0;
-foreach ($estimateItems as $item) {
-    $materialSubtotal += (float) ($item['material_cost'] ?? 0);
-    $laborSubtotal += (float) ($item['labor_cost'] ?? 0);
-    $equipmentSubtotal += (float) ($item['equipment_cost'] ?? 0);
-    $estimateTotal += (float) ($item['total_cost'] ?? $item['subtotal_cost'] ?? 0);
-    $wasteTotal += ((float) ($item['subtotal_cost'] ?? 0)) * ((float) ($item['waste_factor_percent'] ?? $item['waste_percentage'] ?? 0) / 100);
-    $markupTotal += ((float) ($item['subtotal_cost'] ?? 0)) * ((float) ($item['markup_percent'] ?? $item['margin_percentage'] ?? 0) / 100);
+if ($estimateItemAggTotals !== null) {
+    $materialSubtotal = (float) ($estimateItemAggTotals['material_subtotal'] ?? 0);
+    $laborSubtotal = (float) ($estimateItemAggTotals['labor_subtotal'] ?? 0);
+    $equipmentSubtotal = (float) ($estimateItemAggTotals['equipment_subtotal'] ?? 0);
+    $estimateTotal = (float) ($estimateItemAggTotals['estimate_total'] ?? 0);
+    $wasteTotal = (float) ($estimateItemAggTotals['waste_total'] ?? 0);
+    $markupTotal = (float) ($estimateItemAggTotals['markup_total'] ?? 0);
+} else {
+    foreach ($estimateItems as $item) {
+        $materialSubtotal += (float) ($item['material_cost'] ?? 0);
+        $laborSubtotal += (float) ($item['labor_cost'] ?? 0);
+        $equipmentSubtotal += (float) ($item['equipment_cost'] ?? 0);
+        $estimateTotal += (float) ($item['total_cost'] ?? $item['subtotal_cost'] ?? 0);
+        $wasteTotal += ((float) ($item['subtotal_cost'] ?? 0)) * ((float) ($item['waste_factor_percent'] ?? $item['waste_percentage'] ?? 0) / 100);
+        $markupTotal += ((float) ($item['subtotal_cost'] ?? 0)) * ((float) ($item['markup_percent'] ?? $item['margin_percentage'] ?? 0) / 100);
+    }
 }
 
 $displayFolders = array_values(array_filter($folders, function ($folder) {
@@ -671,64 +783,6 @@ if ($activeTab === 'takeoff' && (!$selectedDoc || $selectedDoc['source'] !== 'le
             break;
         }
     }
-}
-
-$dashEstimatesSummary = [];
-$resolvedActiveEstimateId = trim((string)($projectMeta['primary_estimate_id'] ?? ''));
-if ($projectId > 0 && dash_table_exists($pdo, 'estimates')) {
-    try {
-        $hasWsState = dash_table_exists($pdo, 'estimate_workspace_states');
-        $estSql = $hasWsState
-            ? "SELECT e.id, e.name, e.total_cost, ws.client_estimate_id, ws.state_json FROM estimates e LEFT JOIN estimate_workspace_states ws ON ws.estimate_id = e.id WHERE e.project_id = ? AND e.deleted_at IS NULL ORDER BY e.id ASC"
-            : "SELECT e.id, e.name, e.total_cost, NULL AS client_estimate_id, NULL AS state_json FROM estimates e WHERE e.project_id = ? AND e.deleted_at IS NULL ORDER BY e.id ASC";
-        $estRowsStmt = $pdo->prepare($estSql);
-        $estRowsStmt->execute([$projectId]);
-        $estRows = $estRowsStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
-        $activeCandidate = '';
-        $primaryCandidate = '';
-        foreach ($estRows as $er) {
-            $snap = !empty($er['state_json']) ? json_decode((string)$er['state_json'], true) : [];
-            if (!is_array($snap)) $snap = [];
-            $cid = trim((string)($er['client_estimate_id'] ?: ($snap['id'] ?? $er['id'])));
-            $isPrim = !empty($snap['isPrimary']) || !empty($snap['is_primary']);
-            $isAct = !empty($snap['isActive']);
-            $estVal = (float)($snap['estimateTotal'] ?? $snap['totalSales'] ?? $er['total_cost'] ?? 0);
-            $dashEstimatesSummary[] = [
-                'id' => $cid,
-                'dbEstimateId' => (int)$er['id'],
-                'name' => (string)($snap['name'] ?? $er['name'] ?? 'Estimate'),
-                'isPrimary' => $isPrim,
-                'is_primary' => $isPrim,
-                'isActive' => $isAct,
-                'estimateTotal' => $estVal,
-                'totalSales' => $estVal,
-            ];
-            if ($isAct && $activeCandidate === '') $activeCandidate = $cid;
-            if ($isPrim && $primaryCandidate === '') $primaryCandidate = $cid;
-        }
-        if ($activeCandidate !== '') {
-            $resolvedActiveEstimateId = $activeCandidate;
-        } elseif ($primaryCandidate !== '') {
-            $resolvedActiveEstimateId = $primaryCandidate;
-        } elseif (!empty($dashEstimatesSummary)) {
-            $resolvedActiveEstimateId = (string)$dashEstimatesSummary[0]['id'];
-        }
-        if ($resolvedActiveEstimateId === '' && !empty($takeoffLayers[0]['estimate_key'])) {
-            $resolvedActiveEstimateId = (string)$takeoffLayers[0]['estimate_key'];
-        }
-        if ($primaryCandidate !== '') {
-            $projectMeta['primary_estimate_id'] = $primaryCandidate;
-        } elseif ($resolvedActiveEstimateId !== '' && empty($projectMeta['primary_estimate_id'])) {
-            $projectMeta['primary_estimate_id'] = $resolvedActiveEstimateId;
-        }
-    } catch (Throwable $e) {
-    }
-}
-if ($resolvedActiveEstimateId === '' && !empty($takeoffLayers[0]['estimate_key'])) {
-    $resolvedActiveEstimateId = (string)$takeoffLayers[0]['estimate_key'];
-}
-if ($resolvedActiveEstimateId === '') {
-    $resolvedActiveEstimateId = 'est_primary';
 }
 
 $state = [
