@@ -5,6 +5,7 @@ const path = require('node:path');
 
 const editor = fs.readFileSync(path.join(__dirname, '..', 'assets', 'editor', 'takeoff.js'), 'utf8');
 const parent = fs.readFileSync(path.join(__dirname, '..', 'assets', 'project_takeoff.js'), 'utf8');
+const viewerController = fs.readFileSync(path.join(__dirname, '..', 'assets', 'takeoff_viewer_controller.js'), 'utf8');
 const shell = fs.readFileSync(path.join(__dirname, '..', 'pages', 'editor.php'), 'utf8');
 
 function section(source, startMarker, endMarker) {
@@ -16,7 +17,7 @@ function section(source, startMarker, endMarker) {
 }
 
 test('Rectangle select is wired from the parent toolbar into the Konva editor', () => {
-    assert.match(parent, /command === 'multi-select'[\s\S]*projectTakeoffSetTool', 'multi-select'[\s\S]*setActiveTool\(command\)/);
+    assert.match(viewerController, /command === 'multi-select'[\s\S]*projectTakeoffSetTool', 'multi-select'[\s\S]*setActiveTool\(command\)/);
     assert.match(editor, /normalized === 'multi-select' \|\| normalized === 'select-rect'[\s\S]*setTool\('multi-select'\)/);
     assert.match(editor, /konvaStage\.on\('click tap'[\s\S]*state\.tool === 'multi-select'[\s\S]*new Konva\.Rect/);
     assert.match(editor, /konvaStage\.on\('pointermove mousemove touchmove'[\s\S]*selectionRectDraft\.node\.size/);
@@ -81,7 +82,7 @@ test('Dragging any selected marker, line, or area applies one common delta and p
 });
 
 test('Delete and trash reuse the authoritative selection deletion flow', () => {
-    const action = section(parent, 'function runSelectionAction', 'function runLayerTool');
+    const action = section(viewerController, 'function runSelectionAction', 'function runLayerTool');
     assert.match(action, /action === 'delete'[\s\S]*projectTakeoffDeleteSelection/);
     assert.match(parent, /event\.key === 'Delete'[\s\S]*runSelectionAction\('delete'\)/);
     assert.match(shell, /projectTakeoffHandleDeleteKey\?\.\(e\)[\s\S]*stopImmediatePropagation\(\)/);

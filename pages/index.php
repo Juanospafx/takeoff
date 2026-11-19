@@ -123,23 +123,7 @@ else {
 include __DIR__ . '/../views/header.php'; 
 ?>
 
-<style>
-    @media (max-width: 992px) {
-        .proj-actions { flex-wrap: wrap; gap: 8px; }
-        .proj-actions .btn,
-        .proj-actions .btn-main { width: 100%; }
-        .folder-grid .col-md-3,
-        .file-grid .col-md-3 { flex: 0 0 100%; max-width: 100%; }
-        .box-card { padding: 16px; }
-        .file-card-item { padding: 16px; }
-    }
-    @media (max-width: 768px) {
-        .header { flex-direction: column; align-items: flex-start; gap: 12px; }
-        .breadcrumbs { margin-top: 4px; }
-        .main-content { padding: 20px; }
-        .d-flex.justify-content-between.align-items-end { flex-direction: column; align-items: flex-start; gap: 12px; }
-    }
-</style>
+<link rel="stylesheet" href="../assets/portal_index.css?v=<?= filemtime(__DIR__ . '/../assets/portal_index.css') ?>">
 
     <main class="main-content">
         

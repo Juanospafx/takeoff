@@ -4,12 +4,13 @@ const fs = require('node:fs');
 const path = require('node:path');
 
 const dashboard = fs.readFileSync(path.join(__dirname, '..', 'assets', 'project_takeoff.js'), 'utf8');
+const viewerController = fs.readFileSync(path.join(__dirname, '..', 'assets', 'takeoff_viewer_controller.js'), 'utf8');
 const editor = fs.readFileSync(path.join(__dirname, '..', 'assets', 'editor', 'takeoff.js'), 'utf8');
 const shell = fs.readFileSync(path.join(__dirname, '..', 'pages', 'editor.php'), 'utf8');
 
 test('pointer and hand are mutually exclusive visual tools', () => {
-    assert.match(dashboard, /function setActiveTool\(command\)[\s\S]*?button\.classList\.toggle\('active',\s*button\.dataset\.toolCommand\s*===\s*command\)/);
-    assert.match(dashboard, /if \(command === 'smart' \|\| command === 'pan'\)[\s\S]*?projectTakeoffSetTool[\s\S]*?setActiveTool\(command\)[\s\S]*?setMode',\s*'smart'/);
+    assert.match(viewerController, /function setActiveTool\(command\)[\s\S]*?button\.classList\.toggle\('active',\s*button\.dataset\.toolCommand\s*===\s*command\)/);
+    assert.match(viewerController, /if \(command === 'smart' \|\| command === 'pan'\)[\s\S]*?projectTakeoffSetTool[\s\S]*?setActiveTool\(command\)[\s\S]*?setMode',\s*'smart'/);
 });
 
 test('holding Space activates the hand visually and restores the prior tool on release', () => {

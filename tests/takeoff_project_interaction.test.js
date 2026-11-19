@@ -6,6 +6,7 @@ const vm = require('node:vm');
 
 const sourcePath = path.join(__dirname, '..', 'assets', 'project_takeoff.js');
 const source = fs.readFileSync(sourcePath, 'utf8');
+const viewerController = fs.readFileSync(path.join(__dirname, '..', 'assets', 'takeoff_viewer_controller.js'), 'utf8');
 const CatalogMetadata = require('../assets/catalog_metadata.js');
 const editor = fs.readFileSync(path.join(__dirname, '..', 'assets', 'editor', 'takeoff.js'), 'utf8');
 const dashboard = fs.readFileSync(path.join(__dirname, '..', 'pages', 'project_dashboard.php'), 'utf8');
@@ -50,7 +51,7 @@ test('group and layer checkboxes activate from their change event without bubbli
 });
 
 test('unchecking the active dashboard item clears both parent and editor placement state', () => {
-    const toggle = source.slice(source.indexOf('function toggleLayerSelection'), source.indexOf('function toggleLayerLock'));
+    const toggle = viewerController.slice(viewerController.indexOf('function toggleLayerSelection'), viewerController.indexOf('function toggleLayerLock'));
     assert.match(toggle, /if \(selected\) setActiveTakeoffLayer\(layer\.id, false\)/);
     assert.match(toggle, /else if \(String\(takeoffState\.activeLayerId/);
     assert.match(toggle, /clearActiveTakeoffLayer\(false\)/);

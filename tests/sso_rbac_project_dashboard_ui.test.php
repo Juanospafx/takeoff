@@ -3,7 +3,9 @@ declare(strict_types=1);
 
 $dashboard = file_get_contents(__DIR__ . '/../pages/project_dashboard.php');
 $client = file_get_contents(__DIR__ . '/../assets/project_takeoff.js');
-if ($dashboard === false || $client === false) {
+$layerModal = file_get_contents(__DIR__ . '/../assets/takeoff_layer_modal.js');
+$scaleController = file_get_contents(__DIR__ . '/../assets/takeoff_scale_controller.js');
+if ($dashboard === false || $client === false || $layerModal === false || $scaleController === false) {
     throw new RuntimeException('Unable to read dashboard RBAC sources.');
 }
 
@@ -23,11 +25,11 @@ $checks = [
     'takeoff client has strict capability helper' => preg_match('/function canWrite\(\)\s*\{\s*return window\.TakeoffAuth\?\.canWrite === true;/s', $client) === 1,
     'state persistence is guarded before storage' => preg_match('/function saveTakeoffState\(\)\s*\{\s*if \(!canWrite\(\)\) return false;.*?localStorage\.setItem/s', $client) === 1,
     'layer creation is guarded' => preg_match('/function submitCreateLayerModal\(\)\s*\{\s*if \(!requireWrite\(\)\) return false;/s', $client) === 1,
-    'layer save is guarded' => preg_match('/async function submitLayerModal\(\)\s*\{\s*if \(!requireWrite\(\)\) return false;/s', $client) === 1,
+    'layer save is guarded' => preg_match('/async function submitLayerModal\(\)\s*\{\s*if \(!requireWrite\(\)\) return false;/s', $layerModal) === 1,
     'group creation is guarded' => preg_match('/function createTakeoffGroup\(name\)\s*\{\s*if \(!requireWrite\(\)\) return false;/s', $client) === 1,
     'group deletion is guarded' => preg_match('/async function deleteGroup\(groupId\)\s*\{\s*if \(!requireWrite\(\)\) return false;/s', $client) === 1,
     'layer deletion is guarded' => preg_match('/async function deleteLayer\(layerId\)\s*\{\s*if \(!requireWrite\(\)\) return false;/s', $client) === 1,
-    'scale editing is guarded' => preg_match('/function openScalePanel\(mode\)\s*\{\s*if \(!requireWrite\(\)\) return false;/s', $client) === 1,
+    'scale editing is guarded' => preg_match('/function openScalePanel\(mode\)\s*\{\s*if \(!requireWrite\(\)\) return false;/s', $scaleController) === 1,
     'browser metadata does not expose token fields' => !preg_match('/clientAuthMetadata\s*=\s*\[[^\]]*(token|secret|password|subject|\bsub\b)/is', $dashboard),
 ];
 

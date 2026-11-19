@@ -59,25 +59,7 @@ $pageTitle = "Directory | Brightronix";
 include __DIR__ . '/../views/header.php';
 ?>
 
-<style>
-    .table-responsive { border-radius: var(--radius-box); overflow: auto; border: 1px solid rgba(255,255,255,0.05); }
-    .table-rounded { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--bg-card); }
-    .table-rounded th { background: rgba(0,0,0,0.2); color: var(--text-gray); font-weight: 600; text-transform: uppercase; font-size: 0.75rem; padding: 18px 25px; border-bottom: 1px solid rgba(255,255,255,0.05); }
-    .table-rounded td { padding: 20px 25px; color: white; vertical-align: middle; border-bottom: 1px solid rgba(255,255,255,0.02); }
-    .table-rounded tr:last-child td { border-bottom: none; }
-    .table-rounded tr:hover td { background: rgba(255,255,255,0.02); }
-    .user-chip { display: inline-flex; align-items: center; gap: 6px; padding: 4px 8px; border-radius: 8px; background: rgba(255,255,255,0.08); margin-right: 6px; margin-bottom: 6px; font-size: 0.75rem; }
-    .user-role { opacity: 0.7; font-size: 0.7rem; }
-
-    @media (max-width: 768px) {
-        .header { flex-direction: column; align-items: flex-start; gap: 12px; }
-        .breadcrumbs { margin-top: 4px; }
-        .main-content { padding: 20px; }
-        .d-flex.justify-content-between.align-items-end { flex-direction: column; align-items: flex-start; gap: 12px; }
-        form.d-flex { width: 100%; }
-        form.d-flex .form-control { flex: 1; }
-    }
-</style>
+<link rel="stylesheet" href="../assets/portal_directorio.css?v=<?= filemtime(__DIR__ . '/../assets/portal_directorio.css') ?>">
 
 <main class="main-content">
     <header class="header">

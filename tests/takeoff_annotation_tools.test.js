@@ -5,6 +5,7 @@ const path = require('node:path');
 
 const dashboard = fs.readFileSync(path.join(__dirname, '..', 'pages', 'project_dashboard.php'), 'utf8');
 const parent = fs.readFileSync(path.join(__dirname, '..', 'assets', 'project_takeoff.js'), 'utf8');
+const viewerController = fs.readFileSync(path.join(__dirname, '..', 'assets', 'takeoff_viewer_controller.js'), 'utf8');
 const editor = fs.readFileSync(path.join(__dirname, '..', 'pages', 'editor.php'), 'utf8');
 
 function section(source, startMarker, endMarker) {
@@ -18,7 +19,7 @@ function section(source, startMarker, endMarker) {
 test('Notes and Cloud have distinct toolbar buttons and activate their placement APIs', () => {
     assert.match(dashboard, /data-tool-command="text"[^>]*title="Note"[\s\S]*?fa-note-sticky/);
     assert.match(dashboard, /data-tool-command="cloud"[^>]*title="Cloud"[\s\S]*?fa-cloud/);
-    const tools = section(parent, 'function runTool', 'function runViewerCommand');
+    const tools = section(viewerController, 'function runTool', 'function runViewerCommand');
     const textBranch = section(tools, "if (command === 'text')", "if (command === 'cloud')");
     const cloudBranch = section(tools, "if (command === 'cloud')", "if (command === 'stamp')");
     assert.match(textBranch, /projectTakeoffSetTool', 'select'/);
@@ -54,7 +55,7 @@ test('Notes transition from drag area to inline editing and persist or discard d
 });
 
 test('Select, Pan, and Escape cancel pending annotation placement and restore the pointer', () => {
-    const tools = section(parent, 'function runTool', 'function runViewerCommand');
+    const tools = section(viewerController, 'function runTool', 'function runViewerCommand');
     const selectPan = section(tools, "if (command === 'smart' || command === 'pan')", 'const modeMap');
     assert.match(selectPan, /callEditor\('clearPlacementTool'\)/);
     const escapeHandler = section(parent, "if (event.key === 'Escape')", "if ((event.ctrlKey || event.metaKey)");

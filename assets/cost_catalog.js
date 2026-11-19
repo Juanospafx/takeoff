@@ -66,7 +66,9 @@
     let uomFilter = 'all';
     let currentPage = 1;
     const PAGE_SIZE = 30;
+    const TABLE_RENDER_CHUNK_SIZE = 12;
     let currentTotalPages = 1;
+    let tableRenderGeneration = 0;
     const expandedCatalogs = new Set();
     const expandedGroups = new Set();
     let entityEditor = null;
@@ -74,6 +76,46 @@
     let assemblyPartsByAssembly = new Map();
     let stagedAssemblyComponents = new Map();
     function rebuildAssemblyIndex(){assemblyPartsByAssembly=new Map();state.assemblyParts.forEach(part=>{const key=Number(part.assembly_catalog_item_id);if(!assemblyPartsByAssembly.has(key))assemblyPartsByAssembly.set(key,[]);assemblyPartsByAssembly.get(key).push(part);});assemblyPartsByAssembly.forEach(parts=>parts.sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||Number(a.id)-Number(b.id)));}
+
+    function renderTableRowsIncrementally(body, rows, emptyHtml, onComplete) {
+        const generation = ++tableRenderGeneration;
+        const rowHtml = Array.isArray(rows) ? rows : [];
+        const selectAll = document.getElementById('ccSelectAll');
+        body.innerHTML = '';
+        body.setAttribute('aria-busy', 'true');
+        body.classList.add('is-rendering');
+        if (selectAll) selectAll.disabled = true;
+
+        const finish = () => {
+            if (generation !== tableRenderGeneration) return;
+            body.removeAttribute('aria-busy');
+            body.classList.remove('is-rendering');
+            if (selectAll) selectAll.disabled = false;
+            if (typeof onComplete === 'function') onComplete();
+        };
+        if (!rowHtml.length) {
+            body.innerHTML = emptyHtml;
+            finish();
+            return;
+        }
+
+        let offset = 0;
+        const appendChunk = () => {
+            if (generation !== tableRenderGeneration) return;
+            const nextOffset = Math.min(offset + TABLE_RENDER_CHUNK_SIZE, rowHtml.length);
+            body.insertAdjacentHTML('beforeend', rowHtml.slice(offset, nextOffset).join(''));
+            offset = nextOffset;
+            if (offset >= rowHtml.length) {
+                finish();
+                return;
+            }
+            const schedule = typeof window.requestAnimationFrame === 'function'
+                ? window.requestAnimationFrame.bind(window)
+                : callback => setTimeout(callback, 0);
+            schedule(appendChunk);
+        };
+        appendChunk();
+    }
 
     const MEASUREMENT_DEFAULT_UOM = {
         count: 'ea',
@@ -887,31 +929,40 @@
         const endIndex = Math.min(startIndex + PAGE_SIZE, totalItems);
         const pagedItems = items.slice(startIndex, endIndex);
 
+        let renderedRows = [];
+        let emptyRowsHtml = '<tr class="cc-empty-row"><td colspan="8"><i class="fas fa-box-open" aria-hidden="true"></i>No catalog items match this view.</td></tr>';
         if (selection.view === 'archived') {
             const sub = state.archiveSubTab || 'all';
             if (sub === 'catalogs') {
-                body.innerHTML = (state.archivedCatalogs || []).map(CatalogArchivedRow).join('') || '<tr class="cc-empty-row"><td colspan="8"><i class="fas fa-box-open"></i>No archived catalogs.</td></tr>';
+                renderedRows = (state.archivedCatalogs || []).map(CatalogArchivedRow);
+                emptyRowsHtml = '<tr class="cc-empty-row"><td colspan="8"><i class="fas fa-box-open"></i>No archived catalogs.</td></tr>';
                 renderPagination(state.archivedCatalogs?.length || 0, 1, (state.archivedCatalogs?.length || 0) > 0 ? 1 : 0, state.archivedCatalogs?.length || 0);
             } else if (sub === 'groups') {
-                body.innerHTML = (state.archivedGroups || []).map(GroupArchivedRow).join('') || '<tr class="cc-empty-row"><td colspan="8"><i class="fas fa-box-open"></i>No archived groups.</td></tr>';
+                renderedRows = (state.archivedGroups || []).map(GroupArchivedRow);
+                emptyRowsHtml = '<tr class="cc-empty-row"><td colspan="8"><i class="fas fa-box-open"></i>No archived groups.</td></tr>';
                 renderPagination(state.archivedGroups?.length || 0, 1, (state.archivedGroups?.length || 0) > 0 ? 1 : 0, state.archivedGroups?.length || 0);
             } else if (sub === 'items') {
-                body.innerHTML = pagedItems.map(CatalogItemRow).join('') || '<tr class="cc-empty-row"><td colspan="8"><i class="fas fa-box-open"></i>No archived items.</td></tr>';
+                renderedRows = pagedItems.map(CatalogItemRow);
+                emptyRowsHtml = '<tr class="cc-empty-row"><td colspan="8"><i class="fas fa-box-open"></i>No archived items.</td></tr>';
                 renderPagination(totalItems, currentTotalPages, totalItems === 0 ? 0 : startIndex + 1, endIndex);
             } else {
-                const catRows = (state.archivedCatalogs || []).map(CatalogArchivedRow).join('');
-                const grpRows = (state.archivedGroups || []).map(GroupArchivedRow).join('');
-                const itmRows = pagedItems.map(CatalogItemRow).join('');
-                body.innerHTML = (catRows + grpRows + itmRows) || '<tr class="cc-empty-row"><td colspan="8"><i class="fas fa-box-open"></i>No archived entities found.</td></tr>';
+                renderedRows = [
+                    ...(state.archivedCatalogs || []).map(CatalogArchivedRow),
+                    ...(state.archivedGroups || []).map(GroupArchivedRow),
+                    ...pagedItems.map(CatalogItemRow)
+                ];
+                emptyRowsHtml = '<tr class="cc-empty-row"><td colspan="8"><i class="fas fa-box-open"></i>No archived entities found.</td></tr>';
                 renderPagination(totalItems, currentTotalPages, totalItems === 0 ? 0 : startIndex + 1, endIndex);
             }
         } else {
-            body.innerHTML = pagedItems.map(CatalogItemRow).join('') || '<tr class="cc-empty-row"><td colspan="8"><i class="fas fa-box-open" aria-hidden="true"></i>No catalog items match this view.</td></tr>';
+            renderedRows = pagedItems.map(CatalogItemRow);
             renderPagination(totalItems, currentTotalPages, totalItems === 0 ? 0 : startIndex + 1, endIndex);
         }
 
-        updateSelectAllCheckbox();
-        updateBulkToolbar();
+        renderTableRowsIncrementally(body, renderedRows, emptyRowsHtml, () => {
+            updateSelectAllCheckbox();
+            updateBulkToolbar();
+        });
 
         const uom = document.getElementById('ccUomFilter');
         if (uom) {

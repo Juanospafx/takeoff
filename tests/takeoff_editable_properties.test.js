@@ -6,6 +6,8 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const editor = fs.readFileSync(path.join(root, 'assets/editor/takeoff.js'), 'utf8');
 const parent = fs.readFileSync(path.join(root, 'assets/project_takeoff.js'), 'utf8');
+const layerModal = fs.readFileSync(path.join(root, 'assets/takeoff_layer_modal.js'), 'utf8');
+const viewerController = fs.readFileSync(path.join(root, 'assets/takeoff_viewer_controller.js'), 'utf8');
 const page = fs.readFileSync(path.join(root, 'pages/editor.php'), 'utf8');
 const dashboard = fs.readFileSync(path.join(root, 'pages/project_dashboard.php'), 'utf8');
 
@@ -20,12 +22,12 @@ test('existing Takeoff geometry remains interactive while repeated Count placeme
 });
 
 test('item three-dot menu opens size and thickness properties that update existing objects', () => {
-    assert.match(parent, /Item properties & size/);
-    assert.match(parent, /id="layerDiameterInput"/);
-    assert.match(parent, /id="layerStrokeInput"/);
-    assert.match(parent, /projectTakeoffUpdateLayerObjects/);
+    assert.match(viewerController, /Item properties & size/);
+    assert.match(layerModal, /id="layerDiameterInput"/);
+    assert.match(layerModal, /id="layerStrokeInput"/);
+    assert.match(layerModal, /projectTakeoffUpdateLayerObjects/);
     assert.match(editor, /window\.projectTakeoffUpdateLayerObjects/);
-    assert.match(editor, /ref\.symbol_size = Math\.max/);
+    assert.match(editor, /const nextSize = Math\.max[\s\S]*?ref\.symbol_size = nextSize/);
     assert.match(editor, /ref\.stroke_width = Math\.max/);
     assert.match(editor, /metadata_json[\s\S]*?diameter/);
     assert.match(editor, /trackTakeoffObjects\(targets/);
@@ -36,7 +38,8 @@ test('measurement labels stay hidden without removing measured model values', ()
     assert.match(editor, /const label = new Konva\.Text\([\s\S]*?visible: false/);
     assert.match(editor, /lengthLabel: new Konva\.Text\([\s\S]*?visible: false/);
     assert.match(editor, /s\.labelNode\.visible\(false\)/);
-    assert.match(editor, /segment\.labelNode\.text\(isArea \? formatAreaLabel\(segment\.total_area\) : formatFeetLabel\(segment\.total_length\)\)/);
+    assert.match(editor, /let segLabelText = isArea \? formatAreaLabel\(segment\.total_area\) : formatFeetLabel\(segment\.total_length\)/);
+    assert.match(editor, /segment\.labelNode\.text\(segLabelText\)/);
 });
 
 test('deleting a marker removes its transformer and fallback notes start editable', () => {
@@ -47,6 +50,6 @@ test('deleting a marker removes its transformer and fallback notes start editabl
 });
 
 test('dashboard and editor bypass the previous cached Takeoff scripts', () => {
-    assert.match(dashboard, /project_takeoff\.js\?v=takeoff-duplicate-edit-persistence-20260831-1/);
-    assert.match(page, /editor\/takeoff\.js\?v=takeoff-shift-angle-snap-20260831-1/);
+    assert.match(dashboard, /project_takeoff\.js\?v=<\?=\s*filemtime\(/);
+    assert.match(page, /editor\/takeoff\.js\?v=<\?=\s*filemtime\(/);
 });

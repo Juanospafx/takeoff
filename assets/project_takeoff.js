@@ -3580,7 +3580,7 @@
                 const isOpen = modal && !modal.hidden && workspace?.classList.contains('has-layer-drawer') && takeoffState.editingLayerId === layerId;
                 closeGroupContextMenu();
                 if (isOpen) {
-                    void commitLayerModalChanges();
+                    void layerModalController.commit();
                     return;
                 }
                 const layer = findLayer(layerId);
@@ -3651,331 +3651,55 @@
         syncTakeoffToEstimating();
     }
 
-    function ensureTakeoffModal() {
-        let modal = $('takeoffLayerModal');
-        if (modal && modal.querySelector('.pro-layer-modal')) return;
-        if (!modal) {
-            modal = document.createElement('aside');
-            modal.id = 'takeoffLayerModal';
-            const workspace = $('takeoffWorkspace');
-            const viewer = workspace?.querySelector('.pro-takeoff-viewer');
-            if (workspace && viewer) {
-                workspace.insertBefore(modal, viewer);
-            } else {
-                document.body.appendChild(modal);
-            }
+    const layerModalController = window.TakeoffLayerModalController.create({
+        dom: { getElement: $ },
+        state: { takeoffState },
+        constants: {
+            TAKEOFF_TYPES, TAKEOFF_SYMBOLS, TAKEOFF_SIZES, TAKEOFF_RICH_COLORS,
+            TAKEOFF_UOMS, TAKEOFF_TYPE_HELP
+        },
+        presentation: {
+            setupTypeDropdown, setupUomDropdown, setupSymbolDropdown, setupSizeDropdown,
+            setupColorDropdown, filterUomDropdownByType, updateTypeDropdownTrigger,
+            updateUomDropdownTrigger, updateSymbolDropdownTrigger, updateSizeDropdownTrigger,
+            updateColorDropdownTrigger, setSelectValue, takeoffDisplaySymbol,
+            takeoffDisplaySize, takeoffSizeRadius, esc, renderCatalogPill, quantityLabel,
+            itemQuantitySubtitle, getLayerBadgeSvg, renderLayerBadgeHtml,
+            updateCatalogSelectionIndicator, renderTakeoffPanel, renderActiveLayerToolbar,
+            updateSubheadSelectedItem, notifyEditorVisible
+        },
+        domain: {
+            openCatalogModal, ensureCatalogModal, deleteLayer, duplicateLayer, toggleLayerLock,
+            findLayer, findGroup, allLayers, layerBelongsToEstimate, groupBelongsToEstimate,
+            activeEstimateId, typeToUom, defaultUomForType, isUomValidForType,
+            needsTakeoffTypeChangeWarning, confirmTakeoffTypeChange,
+            getLayerEstimatingOverride, ensureEstimateTakeoffWorkspace, catalogItemMeta,
+            makeId, clearLayerCachedStateOnTypeChange, setActiveTakeoffLayer,
+            syncAllLayersToCanvas, syncTakeoffFromCanvasSnapshot, showPrepared
+        },
+        persistence: {
+            canWrite, requireWrite, callEditor, pushTakeoffHistory, saveTakeoffState
         }
-        modal.className = 'pro-layer-drawer';
-        modal.hidden = true;
-        modal.innerHTML = `<div class="pro-layer-modal" role="region" aria-labelledby="takeoffLayerModalTitle">
-            <div class="pro-layer-modal-tabs">
-                <button type="button" class="pro-modal-tab active" data-layer-tab="details">Main Details</button>
-                <button type="button" class="pro-modal-tab" data-layer-tab="drawings">List of Drawings</button>
-                <button class="pro-icon-btn pro-modal-tab-close" type="button" data-layer-modal-close aria-label="Close" title="Close Panel"><i class="fas fa-times"></i></button>
-            </div>
-            <div class="pro-layer-tab-pane" id="layerTabPaneDetails">
-                <div class="pro-layer-form">
-                    <div class="pro-field">
-                        <label>Takeoff Type</label>
-                        <div class="pro-custom-dropdown" id="editLayerTypeDropdown">
-                            <button type="button" class="pro-custom-dropdown-trigger" id="editLayerTypeTrigger">
-                                <span class="pcd-trigger-left">
-                                    <span class="pcd-trigger-icon" id="editLayerTypeIconPreview"></span>
-                                    <span class="pcd-trigger-text" id="editLayerTypeText">Count</span>
-                                </span>
-                                <span class="pcd-caret"></span>
-                            </button>
-                            <div class="pro-custom-dropdown-menu pcd-type-menu" id="editLayerTypeMenu"></div>
-                            <select id="layerTypeInput" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
-                                ${TAKEOFF_TYPES.map(type => `<option value="${type}">${type}</option>`).join('')}
-                            </select>
-                        </div>
-                    </div>
-                    <div class="pro-field">
-                        <label for="layerNameInput">Takeoff Display Name</label>
-                        <textarea id="layerNameInput" rows="2" placeholder="Enter takeoff display name"></textarea>
-                    </div>
-                    <div class="pro-field">
-                        <label for="layerTagInput">Tag</label>
-                        <textarea id="layerTagInput" rows="2" placeholder="Enter your own short text to tag this takeoff"></textarea>
-                    </div>
-                    <div class="pro-edit-selectors-row">
-                        <div class="pro-field col-symbol" id="layerSymbolCol">
-                            <label>Symbol</label>
-                            <div class="pro-custom-dropdown" id="editLayerSymbolDropdown">
-                                <button type="button" class="pro-custom-dropdown-trigger pcd-compact" id="editLayerSymbolTrigger">
-                                    <span class="pcd-trigger-icon" id="editLayerSymbolPreview"></span>
-                                    <span class="pcd-caret"></span>
-                                </button>
-                                <div class="pro-custom-dropdown-menu pcd-symbol-menu" id="editLayerSymbolMenu"></div>
-                                <select id="layerSymbolInput" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
-                                    ${TAKEOFF_SYMBOLS.map(symbol => `<option value="${symbol}">${symbol}</option>`).join('')}
-                                </select>
-                            </div>
-                        </div>
-                        <div class="pro-field col-size" id="layerSizeCol">
-                            <label>Size</label>
-                            <div class="pro-custom-dropdown" id="editLayerSizeDropdown">
-                                <button type="button" class="pro-custom-dropdown-trigger pcd-compact" id="editLayerSizeTrigger">
-                                    <span class="pcd-trigger-icon" id="editLayerSizePreview"></span>
-                                    <span class="pcd-caret"></span>
-                                </button>
-                                <div class="pro-custom-dropdown-menu pcd-size-menu" id="editLayerSizeMenu"></div>
-                                <select id="layerSizeInput" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
-                                    ${TAKEOFF_SIZES.map(size => `<option value="${size}">${size}</option>`).join('')}
-                                </select>
-                            </div>
-                        </div>
-                        <div class="pro-field col-color" id="layerColorCol">
-                            <label>Color</label>
-                            <div class="pro-custom-dropdown" id="editLayerColorDropdown">
-                                <button type="button" class="pro-custom-dropdown-trigger pcd-compact" id="editLayerColorTrigger">
-                                    <span class="pcd-color-dot" id="editLayerColorSwatch" style="background:#00d2ff;"></span>
-                                    <span class="pcd-caret"></span>
-                                </button>
-                                <div class="pro-custom-dropdown-menu pcd-color-menu" id="editLayerColorMenu"></div>
-                                <select id="layerColorInput" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
-                                    ${TAKEOFF_RICH_COLORS.map(c => `<option value="${c}">${c}</option>`).join('')}
-                                    <option value="__custom__">Custom color...</option>
-                                </select>
-                                <input type="color" id="layerCustomColorPicker" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
-                            </div>
-                        </div>
-                        <div class="pro-field col-uom" id="layerUomCol">
-                            <label>UoM</label>
-                            <div class="pro-custom-dropdown" id="editLayerUomDropdown">
-                                <button type="button" class="pro-custom-dropdown-trigger pcd-compact" id="editLayerUomTrigger">
-                                    <span class="pcd-trigger-text" id="editLayerUomText">ea</span>
-                                    <span class="pcd-caret"></span>
-                                </button>
-                                <div class="pro-custom-dropdown-menu pcd-uom-menu" id="editLayerUomMenu"></div>
-                                <select id="layerUomInput" data-no-custom-select="true" class="native-raw-select" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
-                                    ${TAKEOFF_UOMS.map(uom => `<option value="${uom}">${uom}</option>`).join('')}
-                                </select>
-                            </div>
-                        </div>
-                        <div class="pro-field col-stroke" id="layerStrokeCol">
-                            <label for="layerStrokeInput">Line width</label>
-                            <div class="pro-custom-select-wrap">
-                                <span class="pro-stroke-preview" id="layerStrokePreview"></span>
-                                <select id="layerStrokeInput" data-no-custom-select="true" class="native-raw-select">
-                                    <option value="1">1 px</option>
-                                    <option value="1.5">1.5 px</option>
-                                    <option value="2">2 px</option>
-                                    <option value="2.5" selected>2.5 px</option>
-                                    <option value="3">3 px</option>
-                                </select>
-                            </div>
-                        </div>
-                    </div>
-                    <div class="pro-field">
-                        <label>Associated Catalog item</label>
-                        <div class="pro-associated-catalog-card" id="layerCatalogCard">
-                            <div class="pro-acc-info">
-                                <div class="pro-acc-top-row">
-                                    <span class="pro-acc-title cc-item-name" id="layerAccTitle">Catalog Item</span>
-                                </div>
-                                <div class="pro-acc-details-row cc-item-meta" id="layerAccMeta">
-                                    <span class="pro-cat-info-tag tag-price cc-money" title="Unit Cost">
-                                        <i class="fas fa-tag"></i>
-                                        <span class="tag-label">Price:</span>
-                                        <strong class="tag-val" id="layerAccUc">$0.00</strong>
-                                        <span class="tag-uom" id="layerAccUomSlash">/ ea</span>
-                                    </span>
-                                    <span class="pro-cat-info-tag tag-labor" title="Labor Time">
-                                        <i class="far fa-clock"></i>
-                                        <span class="tag-label">Labor:</span>
-                                        <strong class="tag-val" id="layerAccUlt">0.00 hrs</strong>
-                                    </span>
-                                    <span id="layerAccCatPillWrap"></span>
-                                </div>
-                            </div>
-                            <button type="button" class="pro-catalog-swap-btn" id="layerSwapCatalogBtn" title="Change item from Cost Catalog" aria-label="Change item from Cost Catalog">
-                                <i class="fas fa-arrows-rotate"></i>
-                            </button>
-                        </div>
-                    </div>
-                    <div style="display: grid; grid-template-columns: 1fr 1fr; gap: 12px;">
-                        <div class="pro-field" id="layerMultiplierField">
-                            <label for="layerMultiplierInput">Multiplier</label>
-                            <input id="layerMultiplierInput" type="number" min="0" step="any" value="1">
-                        </div>
-                        <div class="pro-field" id="layerDifficultyField">
-                            <label for="layerDifficultyInput">Difficulty Factor</label>
-                            <input id="layerDifficultyInput" type="number" min="0.1" step="0.1" value="1.0" placeholder="1.0">
-                        </div>
-                    </div>
-                    <div class="pro-field" id="layerDropField">
-                        <label for="layerDropInput">Default Drop Length (ft)</label>
-                        <input id="layerDropInput" type="number" min="0" step="0.1" placeholder="0">
-                    </div>
-                    <div class="pro-field" id="layerSpacingField" style="display:none;">
-                        <label for="layerSpacingInput">Spacing (ft)</label>
-                        <input id="layerSpacingInput" type="number" min="0.1" step="0.1" placeholder="1">
-                    </div>
-                    <div style="display:none;">
-                        <h3 id="takeoffLayerModalTitle">Edit takeoff layer</h3>
-                        <p id="layerTypeHelp"></p>
-                        <div id="layerCatalogSelected"></div>
-                        <input id="layerDiameterInput" type="number">
-                        <input id="layerHeightInput" type="number">
-                        <input id="layerDepthInput" type="number">
-                        <button type="button" id="layerCreateSubmit">Save</button>
-                    </div>
-                </div>
-            </div>
-            <div class="pro-layer-tab-pane" id="layerTabPaneDrawings" hidden>
-                <div class="pro-drawings-list-wrap" id="layerDrawingsList"></div>
-            </div>
-            <div class="pro-layer-modal-foot">
-                <div class="pro-modal-foot-left">
-                    <button type="button" class="pro-foot-btn danger" data-layer-act="delete" title="Delete takeoff layer"><i class="fas fa-trash-can"></i> Delete</button>
-                    <button type="button" class="pro-foot-btn" data-layer-act="copy" title="Copy takeoff layer"><i class="far fa-copy"></i> Copy</button>
-                    <button type="button" class="pro-foot-btn" data-layer-act="lock" title="Lock/Unlock takeoff layer"><i class="fas fa-lock"></i> <span id="layerModalLockLabel">Lock</span></button>
-                </div>
-                <div class="pro-modal-foot-right">
-                    <button type="button" class="pro-btn-save-layer" id="layerDrawerSaveBtn"><i class="fas fa-xmark"></i> Close</button>
-                </div>
-            </div>
-        </div>`;
-        $('layerDrawerSaveBtn')?.addEventListener('click', () => {
-            void commitLayerModalChanges();
-        });
+    });
 
-        modal.querySelectorAll('[data-layer-modal-close]').forEach(btn => btn.addEventListener('click', () => {
-            void commitLayerModalChanges();
-        }));
-
-        modal.querySelectorAll('[data-layer-tab]').forEach(tabBtn => {
-            tabBtn.addEventListener('click', () => switchLayerModalTab(tabBtn.dataset.layerTab));
-        });
-
-        $('layerCatalogCard')?.addEventListener('click', () => {
-            openCatalogModal({ singleSelect: true });
-        });
-
-        $('layerSwapCatalogBtn')?.addEventListener('click', event => {
-            event.stopPropagation();
-            openCatalogModal({ singleSelect: true });
-        });
-
-        modal.querySelector('[data-layer-act="delete"]')?.addEventListener('click', () => {
-            if (takeoffState.editingLayerId) {
-                deleteLayer(takeoffState.editingLayerId);
-                closeLayerModal();
-            }
-        });
-
-        modal.querySelector('[data-layer-act="copy"]')?.addEventListener('click', () => {
-            if (takeoffState.editingLayerId) {
-                duplicateLayer(takeoffState.editingLayerId);
-                closeLayerModal();
-            }
-        });
-
-        modal.querySelector('[data-layer-act="lock"]')?.addEventListener('click', () => {
-            if (takeoffState.editingLayerId) {
-                toggleLayerLock(takeoffState.editingLayerId);
-                const layer = findLayer(takeoffState.editingLayerId);
-                const isLocked = Boolean(layer?.locked);
-                if ($('layerModalLockLabel')) $('layerModalLockLabel').textContent = isLocked ? 'Unlock' : 'Lock';
-                const lockIcon = modal.querySelector('[data-layer-act="lock"] i');
-                if (lockIcon) lockIcon.className = `fas fa-${isLocked ? 'lock' : 'lock-open'}`;
-            }
-        });
-
-        modal.querySelector('[data-layer-act="split"]')?.addEventListener('click', () => {
-            showPrepared('Split takeoff layer is ready.');
-        });
-
-        $('layerNameInput').addEventListener('input', updateLayerSubmitState);
-        modal.addEventListener('keydown', event => {
-            if (event.key !== 'Enter') return;
-            if (event.isComposing || event.metaKey || event.ctrlKey || event.altKey) return;
-            const target = event.target;
-            if (!target || !target.matches?.('input, textarea, select')) return;
-            if (target.id === 'layerTagInput' && event.shiftKey) return;
-            if (modal.querySelector('.pro-custom-dropdown.is-open')) return;
-            event.preventDefault();
-            void commitLayerModalChanges();
-        });
-
-        setupTypeDropdown('editLayer', $('layerTypeInput'));
-        setupUomDropdown('editLayer', $('layerUomInput'));
-        setupSymbolDropdown('editLayer', $('layerSymbolInput'));
-        setupSizeDropdown('editLayer', $('layerSizeInput'));
-        setupColorDropdown('editLayer', $('layerColorInput'), $('layerCustomColorPicker'));
-
-        $('layerTypeInput').addEventListener('change', async () => {
-            const type = $('layerTypeInput').value;
-            if (!layerModalPopulating && takeoffState.editingLayerId && needsTakeoffTypeChangeWarning(layerModalActiveFormType, type)) {
-                const editingLayer = findLayer(takeoffState.editingLayerId);
-                const prevType = layerModalActiveFormType;
-                const confirmed = await confirmTakeoffTypeChange({ layer: editingLayer, prevType, nextType: type });
-                if (!confirmed) {
-                    $('layerTypeInput').value = prevType;
-                    $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[prevType] || TAKEOFF_TYPE_HELP.Count;
-                    filterUomDropdownByType('editLayer', prevType);
-                    updateTypeDropdownTrigger('editLayer', prevType);
-                    updateLayerTypeIcon();
-                    updateLayerTypeFields(prevType);
-                    updateLayerSubmitState();
-                    return;
-                }
-            }
-            layerModalActiveFormType = type;
-            $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[type] || TAKEOFF_TYPE_HELP.Count;
-            filterUomDropdownByType('editLayer', type);
-            if (!isUomValidForType($('layerUomInput')?.value, type)) {
-                const newUom = defaultUomForType(type);
-                if ($('layerUomInput')) $('layerUomInput').value = newUom;
-                updateUomDropdownTrigger('editLayer', newUom);
-            }
-            updateTypeDropdownTrigger('editLayer', type);
-            updateLayerTypeIcon();
-            updateLayerTypeFields(type);
-            updateLayerSubmitState();
-        });
-
-        $('layerUomInput')?.addEventListener('change', () => {
-            updateUomDropdownTrigger('editLayer', $('layerUomInput').value);
-            scheduleLiveLayerModalSave({ immediate: true });
-        });
-
-        $('layerSymbolInput')?.addEventListener('change', () => {
-            updateSymbolDropdownTrigger('editLayer', $('layerSymbolInput').value);
-            scheduleLiveLayerModalSave({ immediate: true });
-        });
-
-        $('layerSizeInput')?.addEventListener('change', () => {
-            const nextSize = $('layerSizeInput').value;
-            updateSizeDropdownTrigger('editLayer', nextSize);
-            const r = takeoffSizeRadius(nextSize);
-            if ($('layerDiameterInput')) $('layerDiameterInput').value = r * 2;
-            scheduleLiveLayerModalSave({ immediate: true });
-        });
-
-        $('layerStrokeInput').addEventListener('change', updateLayerStrokePreview);
-
-        $('layerColorInput').addEventListener('change', () => {
-            if ($('layerColorInput').value === '__custom__') {
-                $('layerCustomColorPicker')?.click();
-            } else {
-                updateLayerColorSwatch();
-                scheduleLiveLayerModalSave({ immediate: true });
-            }
-        });
-        $('layerCustomColorPicker')?.addEventListener('input', event => {
-            setLayerColor(event.target.value);
-            scheduleLiveLayerModalSave({ debounceMs: 120 });
-        });
-        $('layerCustomColorPicker')?.addEventListener('change', event => {
-            setLayerColor(event.target.value);
-            scheduleLiveLayerModalSave({ immediate: true });
-        });
-        $('layerCreateSubmit').addEventListener('click', submitLayerModal);
-        ensureCatalogModal();
-    }
+    function ensureTakeoffModal() { return layerModalController.ensure(); }
+    function openLayerModal(...args) { return layerModalController.open(...args); }
+    function closeLayerModal() { return layerModalController.close(); }
+    function repositionLayerModal() { return layerModalController.reposition(); }
+    function setLayerColor(...args) { return layerModalController.setColor(...args); }
+    function switchLayerModalTab(...args) { return layerModalController.switchTab(...args); }
+    function updateLayerTypeIcon() { return layerModalController.updateTypeIcon(); }
+    function updateLayerStrokePreview() { return layerModalController.updateStrokePreview(); }
+    function updateAssociatedCatalogCard(...args) { return layerModalController.updateAssociatedCatalogCard(...args); }
+    function updateLayerDrawingsList(...args) { return layerModalController.updateDrawingsList(...args); }
+    function updateLayerTypeFields(...args) { return layerModalController.updateTypeFields(...args); }
+    function updateLayerColorSwatch() { return layerModalController.updateColorSwatch(); }
+    function updateLayerSubmitState() { return layerModalController.updateSubmitState(); }
+    function patchTakeoffLayerRowQuantityDom(...args) { return layerModalController.patchLayerQuantity(...args); }
+    function patchAllTakeoffLayerQuantityDom() { return layerModalController.patchAllQuantities(); }
+    function refreshTakeoffLayerRowDom(...args) { return layerModalController.refreshLayerRow(...args); }
+    function getLayerModalActiveFormType() { return layerModalController.getActiveFormType(); }
+    function setLayerModalActiveFormType(type) { return layerModalController.setActiveFormType(type); }
 
     function ensureCreateLayerModal() {
         if ($('takeoffCreateLayerModal')) return;
@@ -4493,571 +4217,6 @@
         showPrepared(`Takeoff layer "${name}" created.`);
     }
 
-    function switchLayerModalTab(tabName) {
-        document.querySelectorAll('.pro-modal-tab').forEach(tab => {
-            tab.classList.toggle('active', tab.dataset.layerTab === tabName);
-        });
-        const detailsPane = $('layerTabPaneDetails');
-        const drawingsPane = $('layerTabPaneDrawings');
-        if (detailsPane) detailsPane.hidden = tabName !== 'details';
-        if (drawingsPane) drawingsPane.hidden = tabName !== 'drawings';
-    }
-
-    function updateLayerTypeIcon() {
-        const icon = $('layerTypeIconPreview');
-        if (!icon) return;
-        const type = $('layerTypeInput')?.value || 'Count';
-        if (type === 'Linear avg. with drop') {
-            icon.innerHTML = '<i class="fas fa-network-wired"></i>';
-        } else if (type.includes('Linear')) {
-            icon.innerHTML = '<i class="fas fa-minus"></i>';
-        } else if (type.includes('Area')) {
-            icon.innerHTML = '<i class="far fa-square"></i>';
-        } else {
-            icon.innerHTML = '<i class="fas fa-circle-dot"></i>';
-        }
-    }
-
-    function updateLayerStrokePreview() {
-        const preview = $('layerStrokePreview');
-        const input = $('layerStrokeInput');
-        if (preview && input) {
-            preview.style.height = `${Math.max(1, Math.min(3, Number(input.value) || 2.5))}px`;
-        }
-    }
-
-    function updateAssociatedCatalogCard(layer) {
-        const item = takeoffState.pendingCatalogItem || (layer?.catalogItemId ? {
-            name: layer.name,
-            description: layer.description,
-            uom: layer.uom,
-            unitCost: layer.unitCost,
-            laborHours: layer.laborHours,
-            code: layer.catalogCode || '',
-            catalog_name: layer.catalog_name || layer.catalogName || '',
-            catalog_id: layer.catalog_id || layer.catalogId || '',
-            group_name: layer.category || layer.group_name || ''
-        } : null);
-
-        const card = $('layerCatalogCard');
-        if (!card) return;
-
-        if (item) {
-            const cost = Number(item.unit_cost ?? item.unitCost ?? 0);
-            const labor = Number(item.labor_hours ?? item.laborHours ?? 0);
-            const uom = esc(item.uom || layer?.uom || 'ea');
-            const code = item.code || item.item_code || item.supplier?.catalogNumber || layer?.catalogCode || '';
-            const catName = item.catalog?.name || item.catalog_name || '';
-            const catId = item.catalog?.id || item.catalog_id || '';
-            const grpName = item.category?.name || item.group_name || '';
-            const grpId = item.category?.id || item.catalog_group_id || '';
-
-            if ($('layerAccTitle')) $('layerAccTitle').textContent = item.name || layer?.name || 'Catalog Item';
-            if ($('layerAccDesc')) $('layerAccDesc').style.display = 'none';
-            if ($('layerAccUc')) $('layerAccUc').textContent = cost > 0 ? `$${cost.toFixed(2)}` : '$0.00';
-            if ($('layerAccUomSlash')) $('layerAccUomSlash').textContent = `/ ${uom}`;
-            if ($('layerAccUlt')) $('layerAccUlt').textContent = labor > 0 ? `${labor.toFixed(2)} hrs` : '0.00 hrs';
-            if ($('layerAccUom')) $('layerAccUom').textContent = uom;
-            if ($('layerAccCnTag')) $('layerAccCnTag').style.display = 'none';
-
-            const catWrap = $('layerAccCatPillWrap');
-            if (catWrap) {
-                catWrap.innerHTML = catName ? renderCatalogPill(catName, catId) : '';
-                catWrap.style.display = catName ? '' : 'none';
-            }
-            const grpWrap = $('layerAccGrpPillWrap');
-            if (grpWrap) grpWrap.style.display = 'none';
-        } else {
-            const uom = esc(layer?.uom || 'ea');
-            const cost = Number(layer?.unitCost || 0);
-            const labor = Number(layer?.laborHours || 0);
-
-            if ($('layerAccTitle')) $('layerAccTitle').textContent = layer?.name || 'Custom Layer';
-            if ($('layerAccDesc')) $('layerAccDesc').style.display = 'none';
-            if ($('layerAccUc')) $('layerAccUc').textContent = cost > 0 ? `$${cost.toFixed(2)}` : '$0.00';
-            if ($('layerAccUomSlash')) $('layerAccUomSlash').textContent = `/ ${uom}`;
-            if ($('layerAccUlt')) $('layerAccUlt').textContent = labor > 0 ? `${labor.toFixed(2)} hrs` : '0.00 hrs';
-            if ($('layerAccUom')) $('layerAccUom').textContent = uom;
-            if ($('layerAccCnTag')) $('layerAccCnTag').style.display = 'none';
-            if ($('layerAccCatPillWrap')) {
-                $('layerAccCatPillWrap').innerHTML = '';
-                $('layerAccCatPillWrap').style.display = 'none';
-            }
-            if ($('layerAccGrpPillWrap')) $('layerAccGrpPillWrap').style.display = 'none';
-        }
-    }
-
-    function updateLayerDrawingsList(layer) {
-        const container = $('layerDrawingsList');
-        if (!container) return;
-        const currentDoc = (window.documentState?.drawings || []).find(d => String(d.id) === String(window.currentDrawingId));
-        const docName = currentDoc?.name || 'Current Drawing (E1.0 - Power Plan)';
-        const count = layer ? (layer.quantity ? `${quantityLabel(layer)}` : '0 items') : '0 items';
-        container.innerHTML = `
-            <div class="pro-drawing-row-item">
-                <span class="pro-drawing-row-title"><i class="fas fa-file-lines" style="margin-right:8px;color:var(--tk-primary);"></i> ${esc(docName)}</span>
-                <span class="pro-drawing-row-qty">${esc(count)}</span>
-            </div>
-            <div style="font-size:0.75rem;color:var(--tk-text-muted);margin-top:8px;">
-                <i class="fas fa-info-circle"></i> This takeoff layer is active on the current drawing plan.
-            </div>
-        `;
-    }
-
-    function updateLayerTypeFields(type = $('layerTypeInput')?.value || 'Count') {
-        const dropField = $('layerDropField');
-        if (dropField) {
-            const hasDrop = ['Linear with drop', 'Linear avg. with drop'].includes(type);
-            dropField.style.display = hasDrop ? 'flex' : 'none';
-        }
-        const spacingField = $('layerSpacingField');
-        if (spacingField) {
-            spacingField.style.display = type === 'Count by distance' ? 'flex' : 'none';
-        }
-        const isPointCount = type === 'Count';
-        const symCol = $('layerSymbolCol');
-        const sizeCol = $('layerSizeCol');
-        const strokeCol = $('layerStrokeCol');
-        if (symCol) symCol.style.display = isPointCount ? 'block' : 'none';
-        if (sizeCol) sizeCol.style.display = isPointCount ? 'block' : 'none';
-        if (strokeCol) strokeCol.style.display = isPointCount ? 'none' : 'block';
-    }
-
-    let layerModalLiveSaveTimer = null;
-    let layerModalPendingSave = false;
-    let layerModalPopulating = false;
-    let layerModalHistorySnapshotId = null;
-    let layerModalActiveFormType = 'Count';
-    let layerModalNonAutoBaseline = null;
-    let layerModalLiveBackendTimer = null;
-    let layerModalNeedsBackendSave = false;
-
-    function getLayerModalNonAutoSnapshot() {
-        const rawMult = $('layerMultiplierInput')?.value;
-        const parsedMult = (rawMult !== undefined && rawMult !== '' && Number.isFinite(Number(rawMult)) && Number(rawMult) >= 0)
-            ? Number(rawMult)
-            : 1;
-        return {
-            type: $('layerTypeInput')?.value || 'Count',
-            name: ($('layerNameInput')?.value || '').replace(/\r?\n+/g, ' ').trim(),
-            tag: ($('layerTagInput')?.value || '').replace(/\r?\n+/g, ' ').trim(),
-            strokeWidth: Math.max(1, Math.min(3, parseFloat($('layerStrokeInput')?.value || '2.5') || 2.5)),
-            difficulty: parseFloat($('layerDifficultyInput')?.value || '1.0') || 1.0,
-            multiplier: parsedMult,
-            dropLength: Number($('layerDropInput')?.value || 0),
-            spacing: Number($('layerSpacingInput')?.value || 0),
-            height: Number($('layerHeightInput')?.value || 0),
-            depth: Number($('layerDepthInput')?.value || 0),
-            hasNewCatalogPickerItem: Boolean(takeoffState.pendingCatalogItem && takeoffState.pendingCatalogItem._fromCatalogPicker === true)
-        };
-    }
-
-    function isLayerModalNonAutoDirty() {
-        if (!takeoffState.editingLayerId) return Boolean(($('layerNameInput')?.value || '').trim());
-        if (!layerModalNonAutoBaseline) return false;
-        const curr = getLayerModalNonAutoSnapshot();
-        return (
-            curr.type !== layerModalNonAutoBaseline.type ||
-            curr.name !== layerModalNonAutoBaseline.name ||
-            curr.tag !== layerModalNonAutoBaseline.tag ||
-            curr.strokeWidth !== layerModalNonAutoBaseline.strokeWidth ||
-            curr.difficulty !== layerModalNonAutoBaseline.difficulty ||
-            curr.multiplier !== layerModalNonAutoBaseline.multiplier ||
-            curr.dropLength !== layerModalNonAutoBaseline.dropLength ||
-            curr.spacing !== layerModalNonAutoBaseline.spacing ||
-            curr.height !== layerModalNonAutoBaseline.height ||
-            curr.depth !== layerModalNonAutoBaseline.depth ||
-            Boolean(curr.hasNewCatalogPickerItem)
-        );
-    }
-
-    async function commitLayerModalChanges() {
-        if (takeoffState.editingLayerId) {
-            flushActiveLayerModalSave();
-            if (!isLayerModalNonAutoDirty()) {
-                closeLayerModal();
-                return true;
-            }
-        }
-        return submitLayerModal();
-    }
-
-    function patchTakeoffLayerRowQuantityDom(layer) {
-        if (!layer || !layer.id || typeof document === 'undefined') return false;
-        const escId = typeof CSS !== 'undefined' && CSS.escape ? CSS.escape(String(layer.id)) : String(layer.id);
-        const row = document.querySelector(`[data-layer-row="${escId}"]`);
-        if (!row) return false;
-        const qtyEl = row.querySelector('.pro-tree-qty');
-        if (qtyEl) {
-            qtyEl.textContent = itemQuantitySubtitle(layer);
-        }
-        const overrideInfo = getLayerEstimatingOverride(layer, activeEstimateId());
-        const existingBadge = row.querySelector('[data-qty-override-badge]');
-        if (Boolean(existingBadge) !== Boolean(overrideInfo.overridden)) {
-            return false;
-        }
-        if (existingBadge && overrideInfo.overridden) {
-            const uom = layer.uom || typeToUom(layer.type) || 'ea';
-            const estQtyNum = Number(overrideInfo.estimatingQuantity || 0);
-            const estQtyFormatted = estQtyNum % 1 === 0 ? estQtyNum.toFixed(0) : estQtyNum.toFixed(2);
-            const tkQtyNum = Number(layer.quantity || 0);
-            const tkQtyFormatted = tkQtyNum % 1 === 0 ? tkQtyNum.toFixed(0) : tkQtyNum.toFixed(2);
-            existingBadge.title = `Quantity altered in Estimating: ${estQtyFormatted} ${uom} (Takeoff measured: ${tkQtyFormatted} ${uom})`;
-            const spanEl = existingBadge.querySelector('span');
-            if (spanEl) spanEl.textContent = `Est: ${estQtyFormatted} ${uom}`;
-        }
-        return true;
-    }
-
-    function patchAllTakeoffLayerQuantityDom() {
-        const layers = allLayers().filter(layer => layerBelongsToEstimate(layer));
-        if (!layers.length) return false;
-        let allPatched = true;
-        for (const layer of layers) {
-            if (!patchTakeoffLayerRowQuantityDom(layer)) allPatched = false;
-        }
-        return allPatched;
-    }
-
-    function refreshTakeoffLayerRowDom(layer) {
-        if (!layer || !layer.id) return false;
-        const escId = CSS.escape ? CSS.escape(String(layer.id)) : String(layer.id);
-        const row = document.querySelector(`[data-layer-row="${escId}"]`);
-        if (!row) {
-            renderTakeoffPanel();
-            return false;
-        }
-        const existingTagEl = row.querySelector('.pro-tree-item-tag');
-        const hasTagDom = Boolean(existingTagEl);
-        const hasTagModel = Boolean(layer.tag);
-        if (hasTagDom !== hasTagModel) {
-            renderTakeoffPanel();
-            return false;
-        }
-        const titleEl = row.querySelector('.pro-tree-item-title');
-        if (titleEl) {
-            titleEl.textContent = layer.name || '';
-            titleEl.title = layer.name || '';
-        }
-        if (existingTagEl && hasTagModel) {
-            existingTagEl.innerHTML = `<i class="fas fa-tag"></i> ${esc(layer.tag)}`;
-        }
-        const badgeWrap = row.querySelector('.pro-layer-symbol-badge');
-        if (badgeWrap) {
-            const symbolLabel = layer.symbol || layer.type || 'Item';
-            badgeWrap.title = `${symbolLabel} (${layer.color || '#3b82f6'})`;
-            badgeWrap.innerHTML = getLayerBadgeSvg(layer, 13);
-        } else {
-            const subEl = row.querySelector('.pro-tree-item-sub');
-            if (subEl) {
-                subEl.insertAdjacentHTML('afterbegin', renderLayerBadgeHtml(layer, 13));
-            }
-        }
-        if (!patchTakeoffLayerRowQuantityDom(layer)) {
-            renderTakeoffPanel();
-            return false;
-        }
-        return true;
-    }
-
-    function scheduleLiveLayerBackendSave(delayMs = 380) {
-        layerModalNeedsBackendSave = true;
-        if (layerModalLiveBackendTimer) {
-            clearTimeout(layerModalLiveBackendTimer);
-            layerModalLiveBackendTimer = null;
-        }
-        if (delayMs <= 0) {
-            flushLiveLayerBackendSave();
-            return;
-        }
-        layerModalLiveBackendTimer = setTimeout(() => {
-            layerModalLiveBackendTimer = null;
-            flushLiveLayerBackendSave();
-        }, delayMs);
-    }
-
-    function flushLiveLayerBackendSave() {
-        if (layerModalLiveBackendTimer) {
-            clearTimeout(layerModalLiveBackendTimer);
-            layerModalLiveBackendTimer = null;
-        }
-        if (!layerModalNeedsBackendSave || !canWrite()) return;
-        layerModalNeedsBackendSave = false;
-        try {
-            const saved = callEditor('projectTakeoffSave');
-            if (saved && typeof saved.then === 'function') {
-                saved.catch(err => console.warn('Takeoff live layer save warning:', err));
-            }
-        } catch (editorErr) {
-            console.warn('Takeoff live layer save warning:', editorErr);
-        }
-    }
-
-    function applyLiveLayerModalEdits({ syncBackend = true } = {}) {
-        if (layerModalPopulating || !canWrite()) return false;
-        const editingLayerId = takeoffState.editingLayerId;
-        if (!editingLayerId) return false;
-        const layer = findLayer(editingLayerId);
-        if (!layer) return false;
-        if (layerModalHistorySnapshotId !== editingLayerId) {
-            pushTakeoffHistory('edit-layer');
-            layerModalHistorySnapshotId = editingLayerId;
-        }
-        // Auto-save applies strictly to UoM, Symbol, Size, and Color; remaining fields save through Close.
-        const chosenColor = ($('layerColorInput')?.value === '__custom__'
-            ? $('layerCustomColorPicker')?.value
-            : $('layerColorInput')?.value) || layer.color || '#ef4444';
-        const chosenSize = $('layerSizeInput')?.value || layer.size || 'Medium';
-        const calcRadius = takeoffSizeRadius(chosenSize);
-        const markerDiameter = calcRadius * 2;
-        if ($('layerDiameterInput')) $('layerDiameterInput').value = markerDiameter;
-        const chosenUom = $('layerUomInput')?.value || layer.uom || typeToUom(layer.type || 'Count');
-        const chosenSymbol = $('layerSymbolInput')?.value || layer.symbol || 'Solid Circle';
-        const uomChanged = String(layer.uom || '') !== String(chosenUom || '');
-
-        layer.uom = chosenUom;
-        layer.symbol = chosenSymbol;
-        layer.size = chosenSize;
-        layer.markerDiameter = markerDiameter;
-        layer.color = chosenColor;
-
-        callEditor('projectTakeoffUpdateLayerObjects', editingLayerId, {
-            uom: chosenUom,
-            symbol: chosenSymbol,
-            color: chosenColor,
-            symbolSize: calcRadius,
-            diameter: markerDiameter
-        });
-        saveTakeoffState(uomChanged ? { debounceEstimatingSync: true } : { skipEstimatingSync: true });
-        refreshTakeoffLayerRowDom(layer);
-        renderActiveLayerToolbar();
-        updateSubheadSelectedItem();
-        if (takeoffState.editingLayerId === editingLayerId) {
-            const activeMenuBtn = document.querySelector(`[data-layer-menu="${CSS.escape ? CSS.escape(editingLayerId) : editingLayerId}"]`);
-            if (activeMenuBtn) {
-                activeMenuBtn.setAttribute('aria-expanded', 'true');
-                activeMenuBtn.classList.add('is-active');
-            }
-        }
-        window.dispatchEvent(new CustomEvent('takeoff:layer-visuals-updated', { detail: { projectId: String(window.ProjectState?.projectId || '') } }));
-        if (syncBackend) {
-            scheduleLiveLayerBackendSave(360);
-            layerModalPendingSave = false;
-        }
-        return true;
-    }
-
-    function scheduleLiveLayerModalSave({ immediate = false, debounceMs = 220 } = {}) {
-        if (layerModalPopulating || !takeoffState.editingLayerId || !canWrite()) return;
-        layerModalPendingSave = true;
-        if (layerModalLiveSaveTimer) {
-            clearTimeout(layerModalLiveSaveTimer);
-            layerModalLiveSaveTimer = null;
-        }
-        if (immediate) {
-            applyLiveLayerModalEdits({ syncBackend: true });
-            return;
-        }
-        applyLiveLayerModalEdits({ syncBackend: false });
-        layerModalLiveSaveTimer = setTimeout(() => {
-            layerModalLiveSaveTimer = null;
-            applyLiveLayerModalEdits({ syncBackend: true });
-        }, debounceMs);
-    }
-
-    function flushActiveLayerModalSave() {
-        if (layerModalLiveSaveTimer) {
-            clearTimeout(layerModalLiveSaveTimer);
-            layerModalLiveSaveTimer = null;
-        }
-        if (!takeoffState.editingLayerId || !canWrite()) {
-            layerModalPendingSave = false;
-            return false;
-        }
-        if (!layerModalPendingSave) return false;
-        return applyLiveLayerModalEdits({ syncBackend: true });
-    }
-
-    function openLayerModal(groupId = takeoffState.activeGroupId, layerId = null, triggerEl = null) {
-        if (!requireWrite()) return false;
-        if (takeoffState.editingLayerId && takeoffState.editingLayerId !== layerId) {
-            flushActiveLayerModalSave();
-        }
-        if (!layerId && !takeoffState.groups.some(group => groupBelongsToEstimate(group))) {
-            ensureEstimateTakeoffWorkspace(activeEstimateId(), true);
-            groupId = takeoffState.activeGroupId;
-        }
-        ensureTakeoffModal();
-        layerModalPopulating = true;
-        layerModalHistorySnapshotId = null;
-        const layer = layerId ? findLayer(layerId) : null;
-        takeoffState.pendingLayerGroupId = groupId || layer?.groupId || takeoffState.activeGroupId || 'default';
-        takeoffState.editingLayerId = layerId;
-        takeoffState.pendingCatalogItem = layer?.catalogItemId ? {
-            id: layer.catalogItemId,
-            name: layer.name,
-            unit_of_measure: layer.uom,
-            unit_cost: layer.unitCost,
-            labor_hours: layer.laborHours,
-            catalog_name: layer.category,
-            group_name: layer.category,
-            description: layer.description,
-            code: layer.catalogCode || layer.code || 'EMT-ASM-2025'
-        } : null;
-
-        switchLayerModalTab('details');
-
-        if ($('takeoffLayerModalTitle')) $('takeoffLayerModalTitle').textContent = layer ? 'Edit takeoff layer' : 'Create new takeoff layer';
-        $('layerNameInput').value = layer?.name || '';
-        if ($('layerTagInput')) $('layerTagInput').value = layer?.tag || '';
-        if ($('layerMultiplierInput')) $('layerMultiplierInput').value = (layer?.multiplier !== undefined && layer?.multiplier !== null && layer?.multiplier !== '') ? layer.multiplier : 1;
-        if ($('layerDifficultyInput')) $('layerDifficultyInput').value = layer?.difficulty !== undefined ? layer.difficulty : (layer?.metadata_json?.difficulty !== undefined ? layer.metadata_json.difficulty : 1.0);
-        ['layerDifficultyInput', 'layerMultiplierInput'].forEach(id => {
-            const el = $(id);
-            if (el && !el._selectBound) {
-                el._selectBound = true;
-                el.addEventListener('focus', () => el.select());
-                el.addEventListener('click', () => el.select());
-            }
-        });
-        $('layerTypeInput').value = layer?.type || 'Linear avg. with drop';
-        if (!$('layerTypeInput').value) $('layerTypeInput').value = 'Count';
-        if ($('layerTypeHelp')) $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[$('layerTypeInput').value] || TAKEOFF_TYPE_HELP.Count;
-        setSelectValue($('layerUomInput'), layer?.uom || typeToUom($('layerTypeInput').value));
-        if ($('layerSymbolInput')) $('layerSymbolInput').value = takeoffDisplaySymbol(layer?.symbol);
-        if ($('layerSizeInput')) $('layerSizeInput').value = takeoffDisplaySize(layer?.size);
-        if ($('layerDiameterInput')) $('layerDiameterInput').value = Number(layer?.markerDiameter || (takeoffSizeRadius(layer?.size || 'Medium') * 2));
-
-        const strokeVal = Number(layer?.strokeWidth || 2.5);
-        setSelectValue($('layerStrokeInput'), String(strokeVal));
-        updateLayerStrokePreview();
-
-        setLayerColor(layer?.color || '#ef4444');
-        if ($('layerDropInput')) $('layerDropInput').value = layer?.dropLength || 0;
-        if ($('layerSpacingInput')) $('layerSpacingInput').value = layer?.spacing || '';
-        if ($('layerHeightInput')) $('layerHeightInput').value = layer?.height || '';
-        if ($('layerDepthInput')) $('layerDepthInput').value = layer?.depth || '';
-        if ($('layerCreateSubmit')) $('layerCreateSubmit').textContent = layer ? 'Save' : 'Create';
-
-        const isLocked = Boolean(layer?.locked);
-        if ($('layerModalLockLabel')) $('layerModalLockLabel').textContent = isLocked ? 'Unlock' : 'Lock';
-        const lockIcon = $('takeoffLayerModal')?.querySelector('[data-layer-act="lock"] i');
-        if (lockIcon) lockIcon.className = `fas fa-${isLocked ? 'lock' : 'lock-open'}`;
-
-        updateAssociatedCatalogCard(layer);
-        updateLayerDrawingsList(layer);
-        const currentEditType = $('layerTypeInput').value;
-        filterUomDropdownByType('editLayer', currentEditType);
-        if (!$('layerUomInput')?.value) {
-            setSelectValue($('layerUomInput'), defaultUomForType(currentEditType));
-        }
-        updateTypeDropdownTrigger('editLayer', currentEditType);
-        updateUomDropdownTrigger('editLayer', $('layerUomInput')?.value || 'ea');
-        updateSymbolDropdownTrigger('editLayer', $('layerSymbolInput')?.value || 'Solid Circle');
-        updateSizeDropdownTrigger('editLayer', $('layerSizeInput')?.value || 'Medium');
-        updateCatalogSelectionIndicator();
-        updateLayerColorSwatch();
-        updateLayerTypeFields($('layerTypeInput').value);
-        layerModalActiveFormType = $('layerTypeInput').value || 'Count';
-        updateLayerSubmitState();
-
-        document.querySelectorAll('[data-layer-menu]').forEach(b => {
-            b.setAttribute('aria-expanded', 'false');
-            b.classList.remove('is-active');
-        });
-        if (typeof window.closeAllOpenPopouts === 'function') window.closeAllOpenPopouts();
-        if (triggerEl) {
-            triggerEl.setAttribute('aria-expanded', 'true');
-            triggerEl.classList.add('is-active');
-        }
-
-        const modal = $('takeoffLayerModal');
-        const workspace = $('takeoffWorkspace');
-        if (modal) {
-            const wasDrawerOpen = Boolean(!modal.hidden && workspace?.classList.contains('has-layer-drawer'));
-            modal.hidden = false;
-            void modal.offsetWidth;
-            workspace?.classList.add('has-layer-drawer');
-            if (!wasDrawerOpen) {
-                notifyEditorVisible();
-                setTimeout(() => notifyEditorVisible(), 260);
-            }
-        }
-        layerModalNonAutoBaseline = getLayerModalNonAutoSnapshot();
-        layerModalPopulating = false;
-        layerModalPendingSave = false;
-        setTimeout(() => $('layerNameInput')?.focus(), 50);
-    }
-
-    function repositionLayerModal() {
-        notifyEditorVisible();
-    }
-
-    function closeLayerModal() {
-        flushActiveLayerModalSave();
-        flushLiveLayerBackendSave();
-        layerModalHistorySnapshotId = null;
-        layerModalNonAutoBaseline = null;
-        const modal = $('takeoffLayerModal');
-        const workspace = $('takeoffWorkspace');
-        if (modal) {
-            workspace?.classList.remove('has-layer-drawer');
-            notifyEditorVisible();
-            setTimeout(() => {
-                if (!workspace?.classList.contains('has-layer-drawer')) {
-                    modal.hidden = true;
-                }
-                notifyEditorVisible();
-            }, 260);
-        }
-        document.querySelectorAll('[data-layer-menu]').forEach(b => {
-            b.setAttribute('aria-expanded', 'false');
-            b.classList.remove('is-active');
-        });
-        takeoffState.editingLayerId = null;
-        takeoffState.pendingCatalogItem = null;
-    }
-
-    function setLayerColor(color, { notify = false } = {}) {
-        const input = $('layerColorInput');
-        const picker = $('layerCustomColorPicker');
-        if (!input) return;
-        const hex = String(color || '#ef4444').trim();
-        let match = Array.from(input.options).find(opt => opt.value.toLowerCase() === hex.toLowerCase());
-        if (!match && hex !== '__custom__') {
-            const opt = document.createElement('option');
-            opt.value = hex;
-            opt.textContent = `Custom (${hex})`;
-            const customOpt = input.querySelector('option[value="__custom__"]');
-            if (customOpt) input.insertBefore(opt, customOpt);
-            else input.appendChild(opt);
-            match = opt;
-        }
-        if (match) input.value = match.value;
-        if (picker && hex.startsWith('#') && (hex.length === 7 || hex.length === 4)) {
-            picker.value = hex.length === 4 ? `#${hex[1]}${hex[1]}${hex[2]}${hex[2]}${hex[3]}${hex[3]}` : hex;
-        }
-        updateLayerColorSwatch();
-        updateColorDropdownTrigger('editLayer', hex);
-        if (notify && !layerModalPopulating && hex !== '__custom__') {
-            input.dispatchEvent(new Event('change', { bubbles: true }));
-        }
-    }
-
-    function updateLayerColorSwatch() {
-        const swatch = $('layerColorSwatch');
-        const editSwatch = $('editLayerColorSwatch');
-        const color = ($('layerColorInput')?.value === '__custom__' ? $('layerCustomColorPicker')?.value : $('layerColorInput')?.value) || '#ef4444';
-        if (swatch) swatch.style.background = color;
-        if (editSwatch) editSwatch.style.background = color;
-        updateColorDropdownTrigger('editLayer', color);
-    }
-
-    function updateLayerSubmitState() {
-        const submit = $('layerCreateSubmit');
-        if (submit) submit.disabled = !$('layerNameInput')?.value.trim();
-    }
-
     function updateCatalogSelectionIndicator() {
         const box = $('layerCatalogSelected');
         if (!box) return;
@@ -5392,7 +4551,7 @@
         if (!inCreateFlow && items.length && takeoffState.editingLayerId) {
             const editingLayer = findLayer(takeoffState.editingLayerId);
             const inferred = items[0].type;
-            const prevType = layerModalActiveFormType || editingLayer?.type || 'Count';
+            const prevType = getLayerModalActiveFormType() || editingLayer?.type || 'Count';
             if (editingLayer && inferred && needsTakeoffTypeChangeWarning(prevType, inferred)) {
                 const confirmed = await confirmTakeoffTypeChange({ layer: editingLayer, prevType, nextType: inferred });
                 if (!confirmed) return false;
@@ -5419,7 +4578,7 @@
             $('layerNameInput').value = item.name || '';
             const inferred = item.type;
             if (inferred) {
-                layerModalActiveFormType = inferred;
+                setLayerModalActiveFormType(inferred);
                 $('layerTypeInput').value = inferred;
                 if ($('layerTypeHelp')) $('layerTypeHelp').textContent = TAKEOFF_TYPE_HELP[inferred] || TAKEOFF_TYPE_HELP.Count;
                 filterUomDropdownByType('editLayer', inferred);
@@ -5463,215 +4622,7 @@
     }
 
     async function submitLayerModal() {
-        if (!requireWrite()) return false;
-        const name = $('layerNameInput')?.value.replace(/\r?\n+/g, ' ').trim();
-        if (!name) return dismissEmptyLayerModal();
-        const submit = $('layerCreateSubmit');
-        if (submit?.dataset.saving === '1') return;
-        const editingLayerId = takeoffState.editingLayerId;
-        const editingLayer = editingLayerId ? findLayer(editingLayerId) : null;
-        const previousLayerType = editingLayer?.type || 'Count';
-        const nextFormType = $('layerTypeInput').value;
-        const typeFamilyChanged = Boolean(editingLayer && needsTakeoffTypeChangeWarning(previousLayerType, nextFormType));
-        if (typeFamilyChanged && needsTakeoffTypeChangeWarning(layerModalActiveFormType, nextFormType)) {
-            const confirmed = await confirmTakeoffTypeChange({ layer: editingLayer, prevType: previousLayerType, nextType: nextFormType });
-            if (!confirmed) return false;
-        }
-        const drawerSaveBtn = $('layerDrawerSaveBtn');
-        if (drawerSaveBtn) {
-            drawerSaveBtn.disabled = true;
-            drawerSaveBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Saving...';
-        }
-        if (submit) {
-            submit.dataset.saving = '1';
-            submit.disabled = true;
-            submit.textContent = 'Saving...';
-        }
-        try {
-            pushTakeoffHistory(editingLayerId ? 'edit-layer' : 'create-layer');
-            const type = nextFormType;
-            const chosenColor = ($('layerColorInput')?.value === '__custom__'
-                ? $('layerCustomColorPicker')?.value
-                : $('layerColorInput')?.value) || '#ef4444';
-            const chosenSize = $('layerSizeInput')?.value || 'Medium';
-            const calcRadius = takeoffSizeRadius(chosenSize);
-            const markerDiameter = calcRadius * 2;
-            if ($('layerDiameterInput')) $('layerDiameterInput').value = markerDiameter;
-            const strokeVal = parseFloat($('layerStrokeInput')?.value || '2.5') || 2.5;
-            const diffVal = parseFloat($('layerDifficultyInput')?.value || '1.0') || 1.0;
-            const rawMult = $('layerMultiplierInput')?.value;
-            const parsedMult = (rawMult !== undefined && rawMult !== '' && Number.isFinite(Number(rawMult)) && Number(rawMult) >= 0)
-                ? Number(rawMult)
-                : 1;
-            const payload = {
-                name,
-                type,
-                tag: $('layerTagInput')?.value.replace(/\r?\n+/g, ' ').trim() || '',
-                multiplier: parsedMult,
-                difficulty: diffVal,
-                uom: $('layerUomInput')?.value || typeToUom(type),
-                symbol: $('layerSymbolInput')?.value || 'Solid Circle',
-                size: chosenSize,
-                markerDiameter: markerDiameter,
-                strokeWidth: Math.max(1, Math.min(3, strokeVal)),
-                color: chosenColor,
-                dropLength: Number($('layerDropInput')?.value || 0),
-                spacing: Number($('layerSpacingInput')?.value || 0),
-                height: Number($('layerHeightInput')?.value || 0),
-                depth: Number($('layerDepthInput')?.value || 0)
-            };
-            if (takeoffState.pendingCatalogItem && takeoffState.pendingCatalogItem._fromCatalogPicker === true) {
-                try {
-                    Object.assign(payload, catalogItemMeta(takeoffState.pendingCatalogItem));
-                } catch (metaError) {
-                    console.warn('catalogItemMeta failed', metaError);
-                    payload.catalogItemId = takeoffState.pendingCatalogItem.id;
-                    payload.catalog_item_id = takeoffState.pendingCatalogItem.id;
-                }
-            }
-            let savedLayerId = editingLayerId;
-            const prevLayer = editingLayer;
-            const nameChanged = prevLayer ? (String(prevLayer.name || '') !== String(payload.name || '')) : true;
-            const tagChanged = prevLayer ? (String(prevLayer.tag || '') !== String(payload.tag || '')) : Boolean(payload.tag);
-            const diffChanged = prevLayer ? (Number(prevLayer.difficulty ?? prevLayer.metadata_json?.difficulty ?? 1) !== Number(payload.difficulty)) : false;
-            const multChanged = prevLayer ? (Number(prevLayer.multiplier ?? prevLayer.metadata_json?.multiplier ?? 1) !== Number(payload.multiplier)) : false;
-            const dropChanged = prevLayer ? (Number(prevLayer.dropLength || 0) !== Number(payload.dropLength)) : false;
-            const spacingChanged = prevLayer ? (Number(prevLayer.spacing || 0) !== Number(payload.spacing)) : false;
-            const strokeChanged = prevLayer ? (Number(prevLayer.strokeWidth || 2.5) !== Number(payload.strokeWidth)) : false;
-            const uomChanged = prevLayer ? (String(prevLayer.uom || '') !== String(payload.uom || '')) : true;
-            const subtypeChanged = prevLayer ? (previousLayerType !== nextFormType && !typeFamilyChanged) : false;
-            const visualChanged = prevLayer ? (
-                String(prevLayer.color || '').toLowerCase() !== String(payload.color || '').toLowerCase() ||
-                takeoffDisplaySymbol(prevLayer.symbol) !== takeoffDisplaySymbol(payload.symbol) ||
-                takeoffDisplaySize(prevLayer.size) !== takeoffDisplaySize(payload.size) ||
-                strokeChanged
-            ) : true;
-            const catalogChanged = Boolean(takeoffState.pendingCatalogItem && takeoffState.pendingCatalogItem._fromCatalogPicker === true);
-            const formulaChanged = typeFamilyChanged || subtypeChanged || multChanged || dropChanged || spacingChanged || uomChanged;
-            const metadataOnly = Boolean(editingLayerId && !typeFamilyChanged && !subtypeChanged && !visualChanged && !formulaChanged);
-            const needsEstimatingSync = Boolean(!editingLayerId || typeFamilyChanged || formulaChanged || catalogChanged || nameChanged || diffChanged);
-
-            if (editingLayerId) {
-                const layer = findLayer(editingLayerId);
-                if (layer) {
-                    if (typeFamilyChanged) {
-                        clearLayerCachedStateOnTypeChange(layer);
-                    }
-                    const prevCostCode = layer.costCode || '';
-                    Object.assign(layer, payload);
-                    layer.tag = payload.tag;
-                    layer.costCode = prevCostCode || layer.catalogNumber || '';
-                    if (!layer.metadata_json || typeof layer.metadata_json !== 'object') layer.metadata_json = {};
-                    layer.metadata_json.tag = payload.tag;
-                    if (payload.unitCost !== undefined) layer.unitCost = payload.unitCost;
-                    if (payload.laborHours !== undefined) layer.laborHours = payload.laborHours;
-                    if (payload.difficulty !== undefined) {
-                        layer.difficulty = payload.difficulty;
-                        layer.metadata_json.difficulty = payload.difficulty;
-                    }
-                    if (payload.multiplier !== undefined) {
-                        layer.multiplier = payload.multiplier;
-                        layer.metadata_json.multiplier = payload.multiplier;
-                    }
-                }
-                callEditor('projectTakeoffUpdateLayerObjects', editingLayerId, {
-                    name: payload.name,
-                    tag: payload.tag,
-                    difficulty: payload.difficulty,
-                    type: payload.type,
-                    uom: payload.uom,
-                    purgeIncompatibleGeometry: typeFamilyChanged,
-                    symbol: payload.symbol,
-                    color: payload.color,
-                    symbolSize: calcRadius,
-                    diameter: markerDiameter,
-                    strokeWidth: payload.strokeWidth,
-                    multiplier: payload.multiplier,
-                    dropLength: payload.dropLength,
-                    spacing: payload.spacing,
-                    metadataOnly
-                });
-                const shouldReactivateTool = typeFamilyChanged && takeoffState.activeLayerId === editingLayerId;
-                if (typeFamilyChanged || takeoffState.activeLayerId === editingLayerId) {
-                    setActiveTakeoffLayer(editingLayerId, shouldReactivateTool);
-                }
-                const updatedLayer = findLayer(editingLayerId);
-                if (updatedLayer) refreshTakeoffLayerRowDom(updatedLayer);
-            } else {
-                const group = findGroup(takeoffState.pendingLayerGroupId);
-                const layer = {
-                    id: makeId('layer'),
-                    groupId: group.id,
-                    estimateId: activeEstimateId(),
-                    quantity: 0,
-                    tag: payload.tag,
-                    costCode: payload.catalogNumber || '',
-                    metadata_json: { tag: payload.tag, difficulty: payload.difficulty || 1.0, multiplier: payload.multiplier ?? 1 },
-                    difficulty: payload.difficulty || 1.0,
-                    ...payload
-                };
-                savedLayerId = layer.id;
-                group.layers.push(layer);
-                group.isExpanded = true;
-                takeoffState.activeGroupId = group.id;
-                setActiveTakeoffLayer(layer.id, false);
-            }
-            if (!editingLayerId || typeFamilyChanged || catalogChanged) {
-                syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true }); // Modal Save is a durable operation
-            }
-            if (!editingLayerId || typeFamilyChanged || formulaChanged || catalogChanged) {
-                const liveSnap = callEditor('projectTakeoffSnapshot');
-                if (liveSnap && Array.isArray(liveSnap.layers)) {
-                    syncTakeoffFromCanvasSnapshot(liveSnap, { suppressEstimatingSync: !typeFamilyChanged, immediateEstimatingSync: typeFamilyChanged });
-                }
-            }
-            // Commit the parent workspace immediately. Waiting for the iframe
-            // request before this point made the first Close/Enter appear to
-            // retain the previous title and allowed another close to win the race.
-            saveTakeoffState(needsEstimatingSync
-                ? { debounceEstimatingSync: !typeFamilyChanged && !catalogChanged }
-                : { skipEstimatingSync: true });
-            // Cancel any pending live debounce since Save commits durably now.
-            if (layerModalLiveBackendTimer) {
-                clearTimeout(layerModalLiveBackendTimer);
-                layerModalLiveBackendTimer = null;
-            }
-            layerModalNeedsBackendSave = false;
-            // Modal Save is a durable operation, not merely a request for the
-            // editor's delayed autosave. Waiting for this ACK prevents a quick
-            // close/reload from restoring the duplicate's previous appearance.
-            try {
-                const saved = callEditor('projectTakeoffSave');
-                if (saved && typeof saved.then === 'function') await saved;
-            } catch (editorErr) {
-                console.warn('Takeoff editor background save notification warning:', editorErr);
-            }
-            closeLayerModal();
-            const savedLayer = findLayer(savedLayerId);
-            if (editingLayerId && savedLayer && !catalogChanged && !typeFamilyChanged && !tagChanged) {
-                refreshTakeoffLayerRowDom(savedLayer);
-            } else {
-                renderTakeoffPanel();
-            }
-            window.dispatchEvent(new CustomEvent('takeoff:layer-visuals-updated', { detail: { projectId: String(window.ProjectState?.projectId || '') } }));
-            window.dispatchEvent(new CustomEvent('takeoff:layer-properties-updated', { detail: { layerId: savedLayerId, difficulty: payload.difficulty, multiplier: payload.multiplier } }));
-            return true;
-        } catch (error) {
-            console.warn('Takeoff layer save failed', error);
-            showPrepared('Unable to save Takeoff item changes. Please try again.');
-            return false;
-        } finally {
-            const drawerSaveBtn = $('layerDrawerSaveBtn');
-            if (drawerSaveBtn) {
-                drawerSaveBtn.disabled = false;
-                drawerSaveBtn.innerHTML = '<i class="fas fa-xmark"></i> Close';
-            }
-            if (submit) {
-                submit.dataset.saving = '0';
-                submit.disabled = !$('layerNameInput')?.value.trim();
-                submit.textContent = editingLayerId ? 'Save' : 'Create';
-            }
-        }
+        return layerModalController.submit();
     }
 
     const CATALOG_PALETTE = [
@@ -5806,18 +4757,19 @@
         return Number(p.laborHoursPerUnit ?? item.labor_hours ?? item.laborHours ?? 0);
     }
 
-    const browseCatalogState = {
-        activeTab: 'cost_catalog',
-        selectedCatalogId: null,
-        selectedGroupId: null,
-        selectedItemIds: new Set(),
-        singleSelect: false,
-        itemQuery: '',
-        catalogQuery: '',
-        page: 1,
-        pageSize: 40,
-        expandedCatalogs: {}
-    };
+    const catalogBrowserController = window.TakeoffCatalogBrowser.create({
+        getElement: $,
+        takeoffState,
+        catalogState,
+        requireWrite,
+        ensureTakeoffModal,
+        ensureCatalogModal,
+        render: renderCatalogBrowser,
+        getCatalogItemUnitCost,
+        getCatalogItemLaborHours,
+        window
+    });
+    const browseCatalogState = catalogBrowserController.state;
 
     function ensureCatalogModal() {
         if ($('takeoffCatalogModal')) return;
@@ -6018,142 +4970,11 @@
     }
 
     function openCatalogModal(options = {}) {
-        if (!requireWrite()) return false;
-        ensureTakeoffModal();
-        ensureCatalogModal();
-        browseCatalogState.singleSelect = Boolean(options?.singleSelect);
-        browseCatalogState.onSelect = typeof options?.onSelect === 'function' ? options.onSelect : null;
-        browseCatalogState.targetGroupId = options?.groupId || null;
-        const createModal = $('takeoffCreateLayerModal');
-        if (createModal && !createModal.hidden) {
-            createModal.classList.add('is-behind');
-            createModal.style.visibility = 'hidden';
-        }
-        const preselectedIds = browseCatalogState.singleSelect
-            ? (takeoffState.pendingCatalogItem?.id ? [String(takeoffState.pendingCatalogItem.id)] : [])
-            : (takeoffState.pendingCatalogItems || []).map(i => String(i.id));
-        browseCatalogState.selectedItemIds = new Set(preselectedIds);
-        browseCatalogState.page = 1;
-        browseCatalogState.itemQuery = '';
-        browseCatalogState.catalogQuery = '';
-        if ($('proBrowseItemSearch')) $('proBrowseItemSearch').value = '';
-        if ($('proBrowseCatSearch')) $('proBrowseCatSearch').value = '';
-        const modal = $('takeoffCatalogModal');
-        if (modal) {
-            modal.classList.toggle('is-single-select', browseCatalogState.singleSelect);
-            modal.hidden = false;
-            modal.style.display = 'flex';
-        }
-        loadCatalogItems();
-        setTimeout(() => $('proBrowseItemSearch')?.focus(), 50);
+        return catalogBrowserController.open(options);
     }
 
     function closeCatalogModal() {
-        browseCatalogState.singleSelect = false;
-        const modal = $('takeoffCatalogModal');
-        if (modal) {
-            modal.classList.remove('is-single-select');
-            modal.hidden = true;
-            modal.style.display = 'none';
-        }
-        const createModal = $('takeoffCreateLayerModal');
-        if (createModal && !createModal.hidden) {
-            createModal.classList.remove('is-behind');
-            createModal.style.visibility = '';
-            setTimeout(() => $('createLayerCatalogName')?.focus(), 50);
-        }
-    }
-
-    async function loadCatalogItems() {
-        if (catalogState.loaded || catalogState.loading) {
-            renderCatalogBrowser();
-            return;
-        }
-        catalogState.loading = true;
-        catalogState.error = '';
-        renderCatalogBrowser();
-        try {
-            if (window.CatalogService) {
-                const snapshot = await window.CatalogService.getSnapshot({ enabledForProjectsOnly: false });
-                catalogState.catalogs = (snapshot.catalogs || []).map(c => ({
-                    id: c.id,
-                    name: c.name,
-                    locked: Boolean(c.locked)
-                }));
-                catalogState.groups = (snapshot.categories || []).map(g => ({
-                    id: g.id,
-                    catalogId: g.catalogId || g.catalog_id,
-                    parentGroupId: g.parentId || g.parent_group_id,
-                    name: g.name
-                }));
-                catalogState.items = (snapshot.items || []).map(i => {
-                    const cost = getCatalogItemUnitCost(i);
-                    const labor = getCatalogItemLaborHours(i);
-                    const uom = i.unit_of_measure || i.uom || 'ea';
-                    const mType = i.measurement_type || i.measurementType || '';
-                    return {
-                        ...i,
-                        unit_of_measure: uom,
-                        uom: uom,
-                        measurement_type: mType,
-                        measurementType: mType,
-                        item_type: i.item_type || i.type || 'material',
-                        unitCost: cost,
-                        unit_cost: cost,
-                        laborHours: labor,
-                        labor_hours: labor,
-                        pricing: {
-                            ...(i.pricing || {}),
-                            unitCost: cost,
-                            laborHoursPerUnit: labor,
-                            materialUnitCost: i.pricing?.materialUnitCost ?? cost
-                        }
-                    };
-                });
-            } else {
-                const res = await fetch('../api/cost_catalog.php?action=list');
-                const json = await res.json();
-                if (json.status === 'success' && json.data) {
-                    catalogState.catalogs = (json.data.catalogs || []).map(c => ({ id: c.id, name: c.name, locked: Boolean(Number(c.locked || 0)) }));
-                    catalogState.groups = (json.data.groups || []).map(g => ({ id: g.id, catalogId: g.catalog_id, parentGroupId: g.parent_group_id, name: g.name }));
-                    catalogState.items = (json.data.items || json.data.allItems || []).map(i => {
-                        const cost = Number(i.unit_cost ?? i.unitCost ?? i.cost ?? i.price ?? 0);
-                        const labor = Number(i.labor_hours ?? i.laborHours ?? 0);
-                        const uom = i.unit_of_measure || i.uom || 'ea';
-                        const mType = i.measurement_type || i.measurementType || '';
-                        return {
-                            id: i.id,
-                            name: i.name,
-                            description: i.description || '',
-                            type: i.item_type || i.type || 'material',
-                            item_type: i.item_type || i.type || 'material',
-                            measurement_type: mType,
-                            measurementType: mType,
-                            unit_of_measure: uom,
-                            uom: uom,
-                            color: i.color,
-                            symbol: i.symbol,
-                            unitCost: cost,
-                            unit_cost: cost,
-                            laborHours: labor,
-                            labor_hours: labor,
-                            pricing: { unitCost: cost, laborHoursPerUnit: labor, materialUnitCost: cost },
-                            catalog: { id: i.catalog_id, name: i.catalog_name || '' },
-                            category: { id: i.catalog_group_id, name: i.group_name || '' },
-                            supplier: { catalogNumber: i.catalog_number || '' },
-                            classification: { costCode: i.cost_code || '', masterformat: i.masterformat || '', uniformat: i.uniformat || '' }
-                        };
-                    });
-                }
-            }
-            catalogState.loaded = true;
-        } catch (e) {
-            console.warn('Cost Catalog load failed', e);
-            catalogState.error = e.message || 'Unable to load Cost Catalog';
-        } finally {
-            catalogState.loading = false;
-            renderCatalogBrowser();
-        }
+        return catalogBrowserController.close();
     }
 
     function renderCatalogBrowser() {
@@ -6217,79 +5038,11 @@
     }
 
     function normalizeCatalogSearchText(value) {
-        return String(value || '')
-            .normalize('NFD')
-            .replace(/[\u0300-\u036f]/g, '')
-            .toLowerCase()
-            .replace(/["'""'']/g, '')
-            .replace(/\s+/g, ' ')
-            .trim();
+        return catalogBrowserController.normalizeSearchText(value);
     }
 
     function compactCatalogSearchText(value) {
-        return normalizeCatalogSearchText(value).replace(/[^a-z0-9]+/g, ' ').replace(/\s+/g, ' ').trim();
-    }
-
-    function scoreCatalogItemMatch(item, queryNorm, tokens, compactTokens) {
-        if (!tokens.length) return 1;
-        const nameNorm = normalizeCatalogSearchText(item.name);
-        const nameCompact = compactCatalogSearchText(item.name);
-        const codeParts = [
-            item.supplier?.catalogNumber,
-            item.supplier?.sku,
-            item.classification?.costCode,
-            item.catalogNumber,
-            item.code,
-            item.sku
-        ].filter(Boolean);
-        const codeNorm = normalizeCatalogSearchText(codeParts.join(' '));
-        const codeCompact = compactCatalogSearchText(codeParts.join(' '));
-        const descNorm = normalizeCatalogSearchText([item.description, item.notes].filter(Boolean).join(' '));
-        const metaNorm = normalizeCatalogSearchText([
-            item.catalog?.name,
-            item.category?.name,
-            item.uom || item.unit_of_measure,
-            item.item_type || item.type,
-            item.measurement_type || item.measurementType,
-            item.supplier?.name,
-            item.supplier?.manufacturer,
-            item.manufacturer
-        ].filter(Boolean).join(' '));
-
-        const fullNorm = `${nameNorm} ${codeNorm} ${descNorm} ${metaNorm}`.trim();
-        const fullCompact = `${nameCompact} ${codeCompact} ${compactCatalogSearchText(descNorm)} ${compactCatalogSearchText(metaNorm)}`.trim();
-
-        for (let i = 0; i < tokens.length; i++) {
-            const tok = tokens[i];
-            const cTok = compactTokens[i];
-            const matched = fullNorm.includes(tok) || (cTok && fullCompact.includes(cTok));
-            if (!matched) return 0;
-        }
-
-        let score = 10;
-        if (codeNorm && (codeNorm === queryNorm || codeCompact === compactTokens.join(' '))) score += 140;
-        else if (codeNorm && codeNorm.startsWith(queryNorm)) score += 90;
-        else if (codeNorm && codeNorm.includes(queryNorm)) score += 55;
-
-        if (nameNorm === queryNorm) score += 120;
-        else if (nameNorm.startsWith(queryNorm)) score += 85;
-        else if (nameNorm.includes(queryNorm)) score += 50;
-
-        for (let i = 0; i < tokens.length; i++) {
-            const tok = tokens[i];
-            const cTok = compactTokens[i];
-            if (nameNorm.includes(tok) || (cTok && nameCompact.includes(cTok))) {
-                score += 24;
-                if (nameNorm.startsWith(tok) || nameNorm.includes(` ${tok}`)) score += 8;
-            } else if (codeNorm.includes(tok) || (cTok && codeCompact.includes(cTok))) {
-                score += 18;
-            } else if (descNorm.includes(tok)) {
-                score += 8;
-            } else if (metaNorm.includes(tok)) {
-                score += 5;
-            }
-        }
-        return score;
+        return catalogBrowserController.compactSearchText(value);
     }
 
     function resetBrowseCatalogScrollTop() {
@@ -6415,31 +5168,7 @@
     }
 
     function filterBrowseCatalogItems() {
-        const items = catalogState.items || [];
-        const queryNorm = normalizeCatalogSearchText(browseCatalogState.itemQuery);
-        const tokens = queryNorm ? queryNorm.split(' ').filter(Boolean) : [];
-        const compactTokens = tokens.map(compactCatalogSearchText);
-        const catId = browseCatalogState.selectedCatalogId;
-        const grpId = browseCatalogState.selectedGroupId;
-
-        const scoped = items.filter(item => {
-            if (catId === '__recent__') {
-                return true;
-            } else if (grpId) {
-                if (String(item.category?.id || '') !== String(grpId)) return false;
-            } else if (catId) {
-                if (String(item.catalog?.id || '') !== String(catId)) return false;
-            }
-            return true;
-        });
-
-        if (!tokens.length) return scoped;
-
-        return scoped
-            .map(item => ({ item, score: scoreCatalogItemMatch(item, queryNorm, tokens, compactTokens) }))
-            .filter(entry => entry.score > 0)
-            .sort((a, b) => b.score - a.score)
-            .map(entry => entry.item);
+        return catalogBrowserController.filterItems();
     }
 
     function renderCatalogItems(options = {}) {
@@ -9090,1028 +7819,273 @@
         });
     }
 
-    function ensureViewerLayersPopover() {
-        if ($('takeoffViewerLayersPopover')) return;
-        const popover = document.createElement('div');
-        popover.id = 'takeoffViewerLayersPopover';
-        popover.className = 'pro-viewer-layers-popover';
-        popover.hidden = true;
-        document.querySelector('.pro-canvas-shell')?.appendChild(popover);
-    }
-
-    function renderViewerLayersPopover() {
-        const popover = $('takeoffViewerLayersPopover');
-        if (!popover) return;
-        const layers = allLayers().filter(layer => layerBelongsToEstimate(layer));
-        popover.innerHTML = `<div class="pro-viewer-layers-head">
-                <strong>Layers</strong>
-                <button class="pro-icon-btn" type="button" data-viewer-layers-close aria-label="Close"><i class="fas fa-times"></i></button>
-            </div>
-            <div class="pro-viewer-layers-list">
-                ${layers.map(layer => `<label class="pro-viewer-layer-row">
-                    <input type="checkbox" ${layer.visible === false ? '' : 'checked'} data-viewer-layer-visible="${esc(layer.id)}">
-                    ${renderLayerBadgeHtml(layer, 14)}
-                    <span>${esc(layer.name)}</span>
-                    <small>${esc(quantityLabel(layer))}</small>
-                </label>`).join('') || '<div class="pro-drawing-empty">No takeoff layers yet.</div>'}
-            </div>`;
-        popover.querySelector('[data-viewer-layers-close]')?.addEventListener('click', closeViewerLayersPopover);
-        popover.querySelectorAll('[data-viewer-layer-visible]').forEach(box => {
-            box.addEventListener('change', () => toggleLayerVisibility(box.dataset.viewerLayerVisible, box.checked));
-        });
-    }
-
-    function openViewerLayersPopover() {
-        ensureViewerLayersPopover();
-        viewerState.isLayersPopoverOpen = true;
-        renderViewerLayersPopover();
-        const popover = $('takeoffViewerLayersPopover');
-        if (popover) popover.hidden = false;
-        document.querySelector('[data-viewer-command="layers"]')?.classList.add('active');
-    }
-
-    function closeViewerLayersPopover() {
-        viewerState.isLayersPopoverOpen = false;
-        $('takeoffViewerLayersPopover')?.setAttribute('hidden', '');
-        document.querySelector('[data-viewer-command="layers"]')?.classList.remove('active');
-    }
-
-    function toggleViewerLayersPopover() {
-        if (viewerState.isLayersPopoverOpen) closeViewerLayersPopover();
-        else openViewerLayersPopover();
-    }
-
-    function toggleGrid() {
-        viewerState.isGridVisible = !viewerState.isGridVisible;
-        document.querySelector('.pro-canvas-shell')?.classList.toggle('grid-visible', viewerState.isGridVisible);
-        document.querySelector('[data-viewer-command="grid"]')?.classList.toggle('active', viewerState.isGridVisible);
-    }
-
-    function ensureTakeoffOverlays() {
-        const viewer = document.querySelector('.pro-takeoff-viewer');
-        const shell = document.querySelector('.pro-canvas-shell');
-        $('takeoffActiveLayerToolbar')?.remove();
-        $('takeoffSelectionBar')?.remove();
-        if (shell && !$('takeoffComparePanel')) {
-            const panel = document.createElement('div');
-            panel.id = 'takeoffComparePanel';
-            panel.className = 'pro-compare-panel';
-            panel.hidden = true;
-            shell.appendChild(panel);
+    const takeoffViewerController = window.TakeoffViewerController.create({
+        state: {
+            viewerState,
+            takeoffState,
+            selectionState,
+            drawingState
+        },
+        dom: {
+            getElement: $,
+            document,
+            window
+        },
+        actions: {
+            allLayers,
+            layerBelongsToEstimate,
+            esc,
+            renderLayerBadgeHtml,
+            quantityLabel,
+            toggleLayerVisibility,
+            updateSubheadSelectedItem,
+            callEditor,
+            patchTakeoffSelectionClassesDom,
+            renderTakeoffPanel,
+            renderInspector,
+            findGroupExact,
+            findGroup,
+            findLayer,
+            setActiveTakeoffLayer,
+            clearActiveTakeoffLayer,
+            requireWrite,
+            pushTakeoffHistory,
+            saveTakeoffState,
+            deleteTakeoffGroups,
+            layerCanvasPayload,
+            syncTakeoffFromCanvasSnapshot,
+            activeDrawingDoc,
+            drawingDocs,
+            ensurePageCount,
+            buildSheets,
+            openCreateLayerModal,
+            renameGroup,
+            duplicateGroup,
+            deleteGroup,
+            openLayerModal,
+            renameLayer,
+            duplicateLayer,
+            deleteLayer,
+            toggleGroupLock,
+            changeLayerColor,
+            moveLayerToGroup,
+            openTakeoffGroupModal,
+            collapseAllTakeoffGroups,
+            openCatalogModal,
+            submitTakeoffGroupModal,
+            syncVisibilityToEditorBatch,
+            groupForLayer,
+            typeToUom,
+            makeId,
+            undoTakeoff,
+            redoTakeoff,
+            hasScaleSet,
+            openScalePanel,
+            setZoom,
+            currentZoomPercent,
+            updateZoomUi,
+            changeActiveSheet,
+            syncTakeoffToEstimating
         }
-        if (shell && !$('takeoffMoreToolsPanel')) {
-            const panel = document.createElement('div');
-            panel.id = 'takeoffMoreToolsPanel';
-            panel.className = 'pro-more-tools-panel';
-            panel.hidden = true;
-            shell.appendChild(panel);
-        }
+    });
+
+    function ensureViewerLayersPopover(...args) {
+        return takeoffViewerController.ensureViewerLayersPopover(...args);
     }
 
-    function renderActiveLayerToolbar() {
-        $('takeoffActiveLayerToolbar')?.remove();
+    function renderViewerLayersPopover(...args) {
+        return takeoffViewerController.renderViewerLayersPopover(...args);
     }
 
-    function renderSelectionBar() {
-        $('takeoffSelectionBar')?.remove();
-        updateSubheadSelectedItem();
+    function openViewerLayersPopover(...args) {
+        return takeoffViewerController.openViewerLayersPopover(...args);
     }
 
-    function clearAllSelections() {
-        takeoffState.activeLayerId = null;
-        takeoffState.activeGroupId = null;
-        selectionState.activeLayerId = null;
-        selectionState.selectedGroupIds = [];
-        selectionState.selectedLayerIds = [];
-        selectionState.selectedObjectIds = [];
-        selectionState.selectedRuler = null;
-        selectionState.selectedNote = null;
-        selectionState.selectedObjectType = null;
-        callEditor('projectTakeoffClearSelection');
-        callEditor('projectTakeoffClearActiveLayer');
-        if (!patchTakeoffSelectionClassesDom()) renderTakeoffPanel();
-        renderSelectionBar();
-        renderInspector();
+    function closeViewerLayersPopover(...args) {
+        return takeoffViewerController.closeViewerLayersPopover(...args);
     }
 
-    function setSelectedObjects(ids = [], layerId = null) {
-        const prevActive = String(selectionState.activeLayerId || takeoffState.activeLayerId || '');
-        const prevGroupKey = (selectionState.selectedGroupIds || []).join(',');
-        const prevLayerKey = (selectionState.selectedLayerIds || []).join(',');
-        const isDrawingToolActive = ['count', 'linear', 'area'].includes(viewerState.activeTool);
-        selectionState.selectedObjectIds = Array.from(new Set(ids.map(String).filter(Boolean)));
-        if (!ids.length && !layerId) {
-            selectionState.activeLayerId = null;
-            takeoffState.activeLayerId = null;
-            takeoffState.activeGroupId = null;
-            selectionState.selectedGroupIds = [];
-            selectionState.selectedLayerIds = [];
-        } else {
-            selectionState.activeLayerId = layerId || selectionState.activeLayerId || takeoffState.activeLayerId;
-            if (isDrawingToolActive && selectionState.selectedLayerIds.length > 1
-                && (!layerId || selectionState.selectedLayerIds.includes(String(layerId)))) {
-                // Keep batch checkbox selection intact while placing shapes
-            } else {
-                selectionState.selectedGroupIds = [];
-                selectionState.selectedLayerIds = layerId ? [String(layerId)] : [];
-            }
-        }
-        const nextActive = String(selectionState.activeLayerId || takeoffState.activeLayerId || '');
-        const nextGroupKey = (selectionState.selectedGroupIds || []).join(',');
-        const nextLayerKey = (selectionState.selectedLayerIds || []).join(',');
-        const treeSelectionChanged = prevActive !== nextActive
-            || prevGroupKey !== nextGroupKey
-            || (prevLayerKey !== nextLayerKey && !(nextLayerKey === prevActive && prevLayerKey === ''));
-        if (treeSelectionChanged && !patchTakeoffSelectionClassesDom()) {
-            renderTakeoffPanel();
-        }
-        renderSelectionBar();
-        renderInspector();
+    function toggleViewerLayersPopover(...args) {
+        return takeoffViewerController.toggleViewerLayersPopover(...args);
     }
 
-    function toggleGroupSelection(groupId) {
-        const isSelected = selectionState.selectedGroupIds.includes(String(groupId)) || (takeoffState.activeGroupId === groupId && !takeoffState.activeLayerId && selectionState.selectedGroupIds.length > 0);
-        setGroupSelection(groupId, !isSelected);
+    function toggleGrid(...args) {
+        return takeoffViewerController.toggleGrid(...args);
     }
 
-    function setGroupSelection(groupId, selected) {
-        const group = findGroupExact(groupId);
-        if (!group) return;
-        const groupIds = new Set(selectionState.selectedGroupIds.map(String));
-        const layerIds = new Set(selectionState.selectedLayerIds.map(String));
-        if (!selected) {
-            groupIds.delete(String(group.id));
-            (group.layers || []).forEach(layer => layerIds.delete(String(layer.id)));
-            if (takeoffState.activeGroupId === group.id) takeoffState.activeGroupId = null;
-            if (selectionState.activeLayerId && (group.layers || []).some(l => l.id === selectionState.activeLayerId)) {
-                selectionState.activeLayerId = null;
-            }
-        } else {
-            takeoffState.activeGroupId = group.id;
-            groupIds.add(String(group.id));
-            (group.layers || []).forEach(layer => layerIds.add(String(layer.id)));
-            selectionState.activeLayerId = group.layers?.[0]?.id || null;
-        }
-        selectionState.selectedGroupIds = Array.from(groupIds);
-        selectionState.selectedLayerIds = Array.from(layerIds);
-        const selectedIds = selectionState.selectedLayerIds.length
-            ? callEditor('projectTakeoffSelectGroup', selectionState.selectedLayerIds)
-            : (callEditor('projectTakeoffClearSelection'), []);
-        selectionState.selectedObjectIds = Array.isArray(selectedIds) ? selectedIds : [];
-        if (!patchTakeoffSelectionClassesDom()) renderTakeoffPanel();
-        renderSelectionBar();
-        renderInspector();
+    function ensureTakeoffOverlays(...args) {
+        return takeoffViewerController.ensureTakeoffOverlays(...args);
     }
 
-    function selectSingleLayer(layerId) {
-        const layer = findLayer(layerId);
-        if (!layer) return;
-        const editorLockState = callEditor('projectTakeoffGetLayerLockState', layer.id) || {};
-        if (layer.locked || editorLockState.locked) return;
-
-        // Reset any existing multi-group and multi-layer selection
-        selectionState.selectedGroupIds = [];
-        selectionState.selectedLayerIds = [String(layer.id)];
-        selectionState.activeLayerId = layer.id;
-
-        // Activate this layer in the takeoff editor for drawing (fast path)
-        setActiveTakeoffLayer(layer.id, false, { fast: true, skipLayerSync: true });
-
-        // Select objects for this single layer on canvas
-        const selectedIds = callEditor('projectTakeoffSelectGroup', [String(layer.id)]);
-        selectionState.selectedObjectIds = Array.isArray(selectedIds) ? selectedIds : [];
-
-        if (!patchTakeoffSelectionClassesDom()) renderTakeoffPanel();
-        renderSelectionBar();
-        renderInspector();
+    function renderActiveLayerToolbar(...args) {
+        return takeoffViewerController.renderActiveLayerToolbar(...args);
     }
 
-    function toggleLayerSelection(layerId, selected) {
-        const layer = findLayer(layerId);
-        if (!layer) return;
-        const ids = new Set(selectionState.selectedLayerIds.map(String));
-        if (selected) ids.add(String(layer.id));
-        else ids.delete(String(layer.id));
-        selectionState.selectedLayerIds = Array.from(ids);
-        // Individual item checkboxes accumulate multi-item selection without switching
-        // the subhead toolbar into folder/group actions.
-        selectionState.selectedGroupIds = [];
-        selectionState.activeLayerId = selected ? layer.id : (selectionState.selectedLayerIds[selectionState.selectedLayerIds.length - 1] || null);
-        // Checking an item is also the user's placement-layer choice. Keep the
-        // multi-layer/object selection below, but activate this specific layer
-        // in the editor so the next drawing uses its type and catalog data.
-        if (selected) setActiveTakeoffLayer(layer.id, false, { fast: true, skipLayerSync: true });
-        else if (String(takeoffState.activeLayerId || '') === String(layer.id)) {
-            // Checkbox selection and placement activation are separate state.
-            // Clearing the checkbox for the active layer must also terminate
-            // the editor's drawing mode; otherwise Count keeps using the last
-            // selected layer even though the sidebar presents it as inactive.
-            clearActiveTakeoffLayer(false);
-            selectionState.activeLayerId = selectionState.selectedLayerIds[0] || null;
-            setActiveTool('smart');
-        }
-        const selectedIds = callEditor('projectTakeoffSelectGroup', selectionState.selectedLayerIds);
-        selectionState.selectedObjectIds = Array.isArray(selectedIds) ? selectedIds : [];
-        if (!patchTakeoffSelectionClassesDom()) renderTakeoffPanel();
-        renderSelectionBar();
-        renderInspector();
+    function renderSelectionBar(...args) {
+        return takeoffViewerController.renderSelectionBar(...args);
     }
 
-    function toggleLayerLock(layerId) {
-        if (!requireWrite()) return false;
-        const layer = findLayer(layerId);
-        if (!layer) return;
-        const editorState = callEditor('projectTakeoffGetLayerLockState', layer.id) || {};
-        layer.locked = !Boolean(layer.locked || editorState.locked);
-        pushTakeoffHistory(layer.locked ? 'lock-layer' : 'unlock-layer');
-        callEditor('projectTakeoffSetLayerLocked', layer.id, layer.locked);
-        saveTakeoffState();
-        renderTakeoffPanel();
+    function clearAllSelections(...args) {
+        return takeoffViewerController.clearAllSelections(...args);
     }
 
-    function runSelectionAction(action) {
-        if (action === 'clear') {
-            setSelectedObjects([]);
-            callEditor('projectTakeoffClearSelection');
-            return;
-        }
-        if (action === 'delete' && selectionState.selectedGroupIds.length) {
-            deleteTakeoffGroups(selectionState.selectedGroupIds);
-            return;
-        }
-        if (!selectionState.selectedObjectIds.length) {
-            const editorIds = callEditor('projectTakeoffGetSelectionIds');
-            if (Array.isArray(editorIds)) selectionState.selectedObjectIds = editorIds;
-        }
-        if (!selectionState.selectedObjectIds.length && action !== 'delete') return showPrepared('Select one or more takeoff objects first.');
-        pushTakeoffHistory(`selection-${action}`);
-        if (action === 'copy') {
-            const copied = callEditor('projectTakeoffCopySelection', selectionState.selectedObjectIds);
-            if (!copied) showPrepared('Copy selection is ready to be connected.');
-            else if (Array.isArray(copied)) selectionState.selectedObjectIds = copied;
-        }
-        if (action === 'delete') {
-            const deleted = callEditor('projectTakeoffDeleteSelection', selectionState.selectedObjectIds);
-            if (!deleted) showPrepared('Select an unlocked element before deleting.');
-            else {
-                selectionState.selectedObjectIds = [];
-                selectionState.selectedGroupIds = [];
-                selectionState.selectedLayerIds = [];
-            }
-        }
-        if (action === 'lock' || action === 'unlock') {
-            const changed = callEditor('projectTakeoffSetSelectionLocked', selectionState.selectedObjectIds, action === 'lock');
-            if (!changed) showPrepared(`Unable to ${action} the selected elements.`);
-        }
-        if (action === 'properties') {
-            const multiplier = prompt('Multiplier for all selected elements', '1');
-            if (multiplier === null) return;
-            const numeric = Number(multiplier);
-            if (!Number.isFinite(numeric) || numeric < 0) return showPrepared('Enter a valid multiplier of 0 or greater.');
-            const changed = callEditor('projectTakeoffUpdateSelection', selectionState.selectedObjectIds, { multiplier: numeric });
-            if (!changed) showPrepared('Unlock selected elements before changing their properties.');
-        }
-        if (action === 'move') {
-            const names = allLayers().map(layer => layer.name).join(', ');
-            const targetName = prompt(`Move selected objects to layer (${names})`, findLayer(takeoffState.activeLayerId)?.name || '');
-            const target = allLayers().find(layer => layer.name.toLowerCase() === String(targetName || '').trim().toLowerCase());
-            if (!target) return;
-            const moved = callEditor('projectTakeoffMoveSelectionToLayer', selectionState.selectedObjectIds, layerCanvasPayload(target));
-            if (!moved) showPrepared('Move selection is ready to be connected.');
-        }
-        const snapshot = callEditor('projectTakeoffSnapshot');
-        if (snapshot) syncTakeoffFromCanvasSnapshot(snapshot);
+    function setSelectedObjects(...args) {
+        return takeoffViewerController.setSelectedObjects(...args);
     }
 
-    function runLayerTool(command) {
-        if (command === 'auto-count') return showPrepared('Auto-Count is ready to be connected to detection service.');
-        if (command === 'auto-area') return showPrepared('Auto-Area Takeoff is ready to be connected to detection service.');
-        const map = {
-            'linear-straight': 'linear',
-            'linear-angled': 'linear-angled',
-            'linear-curved': 'linear-curved',
-            'linear-freehand': 'freehand',
-            'area-polygon': 'area',
-            'count-point': 'count'
-        };
-        runTool(map[command] || command);
+    function toggleGroupSelection(...args) {
+        return takeoffViewerController.toggleGroupSelection(...args);
     }
 
-    function openComparePanel() {
-        ensureTakeoffOverlays();
-        const panel = $('takeoffComparePanel');
-        if (!panel) return;
-        const activeDoc = activeDrawingDoc();
-        const docs = drawingState.documents.length ? drawingState.documents : drawingDocs();
-        panel.hidden = false;
-        panel.innerHTML = `
-            <div class="pro-compare-head">
-                <div><strong>Compare Drawings</strong><span>Base: ${esc(activeDoc?.name || 'Current drawing')}</span></div>
-                <button class="pro-icon-btn" type="button" data-compare-action="cancel" aria-label="Close"><i class="fas fa-times"></i></button>
-            </div>
-            <div class="pro-compare-body">
-                <div>
-                    <label>Documents</label>
-                    <div class="pro-compare-list">
-                        ${docs.map(doc => `<button type="button" data-compare-doc="${esc(doc.id)}">${esc(doc.name)}<small>${esc(doc.folder || '')}</small></button>`).join('') || '<span>No drawings available.</span>'}
-                    </div>
-                </div>
-                <div>
-                    <label>Pages</label>
-                    <div class="pro-compare-list" id="takeoffComparePages"><span>Select a drawing.</span></div>
-                </div>
-            </div>
-            <div class="pro-compare-actions">
-                <button type="button" data-compare-action="align">Align</button>
-                <button type="button" data-compare-action="swap">Swap</button>
-                <button type="button" data-compare-action="start">Compare</button>
-            </div>
-        `;
-        panel.querySelectorAll('[data-compare-doc]').forEach(button => {
-            button.addEventListener('click', async () => {
-                panel.querySelectorAll('[data-compare-doc]').forEach(item => item.classList.toggle('active', item === button));
-                const doc = docs.find(item => String(item.id) === String(button.dataset.compareDoc));
-                if (!doc) return;
-                await ensurePageCount(doc);
-                const pages = buildSheets(doc);
-                const pageBox = $('takeoffComparePages');
-                if (pageBox) pageBox.innerHTML = pages.map(sheet => `<button type="button" data-compare-page="${sheet.pageNumber}">${esc(sheet.name)}</button>`).join('');
-                panel.dataset.compareDoc = doc.id;
-            });
-        });
-        panel.querySelectorAll('[data-compare-action]').forEach(button => {
-            button.addEventListener('click', () => runCompareAction(button.dataset.compareAction));
-        });
+    function setGroupSelection(...args) {
+        return takeoffViewerController.setGroupSelection(...args);
     }
 
-    function runCompareAction(action) {
-        if (action === 'cancel') {
-            takeoffState.compare = null;
-            $('takeoffComparePanel')?.setAttribute('hidden', '');
-            saveTakeoffState();
-            return;
-        }
-        if (action === 'align' || action === 'swap') return showPrepared(`${action.charAt(0).toUpperCase() + action.slice(1)} is ready to be connected.`);
-        takeoffState.compare = {
-            baseDocumentId: drawingState.selectedDocumentId,
-            basePage: drawingState.selectedPage,
-            compareDocumentId: $('takeoffComparePanel')?.dataset.compareDoc || null,
-            updatedAt: Date.now()
-        };
-        saveTakeoffState();
-        showPrepared('Drawing comparison is ready to be connected.');
+    function selectSingleLayer(...args) {
+        return takeoffViewerController.selectSingleLayer(...args);
     }
 
-    function toggleMoreToolsPanel() {
-        ensureTakeoffOverlays();
-        const panel = $('takeoffMoreToolsPanel');
-        if (!panel) return;
-        const open = panel.hidden;
-        panel.hidden = !open;
-        if (!open) return;
-        panel.innerHTML = `
-            <button type="button" data-tool-command-inline="transform"><i class="fas fa-up-down-left-right"></i><span>Transform / Scale</span></button>
-            <button type="button" data-tool-command-inline="vertices"><i class="fas fa-vector-square"></i><span>Edit vertices</span></button>
-            <button type="button" data-tool-command-inline="multi-select"><i class="fas fa-object-group"></i><span>Rectangle select</span></button>
-            <button type="button" data-tool-command-inline="freehand"><i class="fas fa-signature"></i><span>Freehand / Lasso</span></button>
-        `;
-        panel.querySelectorAll('[data-tool-command-inline]').forEach(button => {
-            button.addEventListener('click', () => {
-                panel.hidden = true;
-                runTool(button.dataset.toolCommandInline);
-            });
-        });
+    function toggleLayerSelection(...args) {
+        return takeoffViewerController.toggleLayerSelection(...args);
     }
 
-    function openTakeoffContextMenu(button, type, id) {
-        const menu = $('takeoffRowMenu');
-        if (!menu) return;
-        const group = type === 'group' ? findGroup(id) : null;
-        menu.innerHTML = type === 'group'
-            ? `<button type="button" data-menu-act="group-create"><i class="fas fa-plus"></i> Create New Takeoff Layer</button>
-               <button type="button" data-menu-act="group-rename"><i class="fas fa-pen"></i> Rename</button>
-               <button type="button" data-menu-act="group-copy"><i class="fas fa-copy"></i> Copy</button>
-               <button type="button" data-menu-act="group-copy-estimate"><i class="fas fa-copy"></i> Copy to other estimate</button>
-               <button type="button" data-menu-act="group-move-estimate"><i class="fas fa-arrow-right"></i> Move to other estimate</button>
-               <button type="button" class="danger" data-menu-act="group-delete"><i class="fas fa-trash"></i> Delete</button>`
-            : `<button type="button" data-menu-act="layer-edit"><i class="fas fa-sliders"></i> Item properties & size</button>
-               <button type="button" data-menu-act="layer-rename"><i class="fas fa-pen"></i> Rename</button>
-               <button type="button" data-menu-act="layer-duplicate"><i class="fas fa-copy"></i> Duplicate</button>
-               <button type="button" data-menu-act="layer-color"><i class="fas fa-palette"></i> Change Color</button>
-               <button type="button" data-menu-act="layer-move"><i class="fas fa-folder-tree"></i> Move to Group</button>
-               <button type="button" class="danger" data-menu-act="layer-delete"><i class="fas fa-trash"></i> Delete</button>`;
-        menu.querySelectorAll('[data-menu-act]').forEach(item => {
-            item.addEventListener('click', () => {
-                const action = item.dataset.menuAct;
-                menu.classList.remove('open');
-                activeRowMenuAnchor = null;
-                if (action === 'group-create') openCreateLayerModal(id);
-                if (action === 'group-rename') renameGroup(id);
-                if (action === 'group-copy') duplicateGroup(id);
-                if (action === 'group-copy-estimate') showPrepared('Copy to other estimate is ready to be connected.');
-                if (action === 'group-move-estimate') showPrepared('Move to other estimate is ready to be connected.');
-                if (action === 'group-delete') deleteGroup(id);
-                if (action === 'layer-edit') openLayerModal(findLayer(id)?.groupId, id);
-                if (action === 'layer-rename') renameLayer(id);
-                if (action === 'layer-duplicate') duplicateLayer(id);
-                if (action === 'layer-color') changeLayerColor(id);
-                if (action === 'layer-move') moveLayerToGroup(id);
-                if (action === 'layer-delete') deleteLayer(id);
-            });
-        });
-        toggleRowMenu(button);
+    function toggleLayerLock(...args) {
+        return takeoffViewerController.toggleLayerLock(...args);
     }
 
-    function handleTakeoffAction(action) {
-        document.querySelectorAll('.pro-menu').forEach(menu => menu.classList.remove('open'));
-        document.querySelectorAll('[data-takeoff-menu-toggle]').forEach(btn => btn.setAttribute('aria-expanded', 'false'));
-        if (action === 'create-group') return openTakeoffGroupModal(document.activeElement);
-        if (action === 'create-layer') return openCreateLayerModal(null);
-        if (action === 'collapse-all') return collapseAllTakeoffGroups();
-        if (action === 'toggle-global-visibility') return toggleGlobalVisibility();
-        if (action === 'export-excel') return exportTakeoffQuantities();
-        if (action === 'browse-catalog') return openCatalogModal();
-        if (action === 'upload-drawing') return document.querySelector('[data-tab="documents"]')?.click();
-        if (action === 'save-workspace') {
-            saveTakeoffState();
-            try {
-                const saved = callEditor('projectTakeoffSave');
-                if (saved && typeof saved.then === 'function') {
-                    saved.catch(e => console.warn('Canvas save warning:', e));
-                }
-            } catch (e) {
-                console.warn('Canvas save error:', e);
-            }
-            if (typeof window.projectEstimatingSave === 'function') {
-                try {
-                    window.projectEstimatingSave().catch?.(e => console.warn('Estimating save warning:', e));
-                } catch (e) {
-                    console.warn('Estimating save error:', e);
-                }
-            }
-            callEditor('projectTakeoffSnapshot');
-            return showPrepared('Workspace saved.');
-        }
-        showPrepared(action);
+    function runSelectionAction(...args) {
+        return takeoffViewerController.runSelectionAction(...args);
     }
 
-    // Bind mutation entry points through delegation as soon as this script is
-    // evaluated.  The Takeoff workspace can be rendered or refreshed after the
-    // initial DOMContentLoaded pass, so snapshotting the current buttons left
-    // Actions -> Create New Group without a listener in that state.
-    function bindTakeoffActionDelegation() {
-        document.addEventListener('click', event => {
-            const button = event.target?.closest?.('[data-takeoff-action]');
-            if (!button) return;
-            handleTakeoffAction(button.dataset.takeoffAction);
-        });
-        document.addEventListener('submit', event => {
-            if (event.target?.id !== 'takeoffGroupForm') return;
-            submitTakeoffGroupModal(event);
-        });
+    function runLayerTool(...args) {
+        return takeoffViewerController.runLayerTool(...args);
     }
 
-    bindTakeoffActionDelegation();
-
-    function toggleGlobalVisibility() {
-        pushTakeoffHistory('toggle-global-visibility');
-        takeoffState.globalVisible = !takeoffState.globalVisible;
-        const targetVisible = Boolean(takeoffState.globalVisible);
-        const activeLayers = [];
-        allLayers().forEach(layer => {
-            layer.visible = targetVisible;
-            if (layerBelongsToEstimate(layer)) activeLayers.push(layer);
-        });
-        syncVisibilityToEditorBatch(activeLayers, targetVisible);
-        saveTakeoffState({ skipEstimatingSync: true, debounceLocalSave: true });
-        renderTakeoffPanel();
-        const button = document.querySelector('[data-takeoff-action="toggle-global-visibility"] i');
-        if (button) button.className = targetVisible ? 'fas fa-eye' : 'fas fa-eye-slash';
+    function openComparePanel(...args) {
+        return takeoffViewerController.openComparePanel(...args);
     }
 
-    function exportTakeoffQuantities() {
-        const rows = allLayers().map(layer => {
-            const group = groupForLayer(layer);
-            const activeDoc = activeDrawingDoc();
-            return {
-                project: window.ProjectState?.projectName || document.querySelector('.project-title h1')?.textContent || 'Project',
-                estimate: 'Primary Estimate',
-                group: group?.name || 'Default Group',
-                layer: layer.name,
-                catalog: layer.catalogItemId || '',
-                type: layer.type,
-                quantity: Number(layer.quantity || 0),
-                uom: layer.uom || typeToUom(layer.type),
-                document: activeDoc?.name || '',
-                sheet: drawingState.selectedPage ? `Page ${drawingState.selectedPage}` : '',
-                unitCost: Number(layer.unitCost || layer.unit_cost || 0),
-                labor: Number(layer.laborHours || layer.labor_hours || 0)
-            };
-        });
-        const headers = ['Project name', 'Estimate name', 'Group', 'Takeoff layer', 'Catalog item', 'Takeoff type', 'Quantity', 'UoM', 'Document', 'Sheet/Page', 'Unit cost', 'Labor'];
-        const body = rows.map(row => [
-            row.project, row.estimate, row.group, row.layer, row.catalog, row.type, row.quantity, row.uom, row.document, row.sheet, row.unitCost, row.labor
-        ]);
-        const html = `<table><thead><tr>${headers.map(header => `<th>${esc(header)}</th>`).join('')}</tr></thead><tbody>${body.map(cells => `<tr>${cells.map(cell => `<td>${esc(cell)}</td>`).join('')}</tr>`).join('')}</tbody></table>`;
-        const blob = new Blob([html], { type: 'application/vnd.ms-excel;charset=utf-8' });
-        const url = URL.createObjectURL(blob);
-        const link = document.createElement('a');
-        link.href = url;
-        link.download = `takeoff-quantities-${Date.now()}.xls`;
-        document.body.appendChild(link);
-        link.click();
-        link.remove();
-        URL.revokeObjectURL(url);
+    function runCompareAction(...args) {
+        return takeoffViewerController.runCompareAction(...args);
     }
 
-    function setActiveTool(command) {
-        viewerState.activeTool = command;
-        document.querySelectorAll('[data-tool-command]').forEach(button => {
-            button.classList.toggle('active', button.dataset.toolCommand === command);
-        });
-        const layerToolMap = {
-            count: ['count-point'],
-            linear: ['linear-straight', 'linear-angled'],
-            area: ['area-polygon'],
-            freehand: ['linear-freehand']
-        };
-        document.querySelectorAll('[data-layer-tool]').forEach(button => {
-            button.classList.toggle('active', (layerToolMap[command] || []).includes(button.dataset.layerTool));
-        });
+    function toggleMoreToolsPanel(...args) {
+        return takeoffViewerController.toggleMoreToolsPanel(...args);
     }
 
-    function runTool(command) {
-        if (command === 'count' || command === 'linear' || command === 'area') {
-            const active = findLayer(takeoffState.activeLayerId);
-            if (!active) {
-                showPrepared('Select a takeoff layer before drawing.');
-                return;
-            }
-            pushTakeoffHistory(`tool-${command}`);
-            callEditor('projectTakeoffSetTool', command);
-            setActiveTool(command);
-            if ((command === 'linear' || command === 'area') && !hasScaleSet()) openScalePanel();
-            return;
-        }
-        if (command === 'smart' || command === 'pan') {
-            if (command === 'smart') {
-                callEditor('resolveMeasurementOnPointer');
-                callEditor('projectTakeoffResolveDraftOnPointer');
-            }
-            callEditor('clearPlacementTool');
-            callEditor('projectTakeoffSetTool', command === 'pan' ? 'pan' : 'select');
-            setActiveTool(command);
-            callEditor('setMode', 'smart');
-            if (command === 'smart') {
-                clearActiveTakeoffLayer(true);
-                clearAllSelections();
-            }
-            document.querySelector('.pro-canvas-shell')?.classList.toggle('is-panning', command === 'pan');
-            return;
-        }
-        const modeMap = {
-            smart: 'smart',
-            pan: 'smart',
-            count: 'smart',
-            linear: 'measure',
-            area: 'draw',
-            calibrate: 'cal',
-            text: 'text',
-            note: 'text',
-            cloud: 'cloud',
-            stamp: 'stamp'
-        };
-        if (['measure', 'calibrate', 'cloud', 'pin', 'freehand', 'stamp', 'text', 'note'].includes(command)) {
-            clearActiveTakeoffLayer(true);
-            clearAllSelections();
-            callEditor('projectTakeoffClearSelection');
-        }
-        if (command === 'measure') {
-            callEditor('projectTakeoffSetTool', 'measure');
-            callEditor('setMode', 'measure');
-            setActiveTool(command);
-            showPrepared("Ruler active. Click and drag or click two points to measure.", "info");
-            return;
-        }
-        if (command === 'calibrate') {
-            callEditor('setMode', 'cal');
-            setActiveTool(command);
-            openScalePanel('manual');
-            return;
-        }
-        if (command === 'multi-select') {
-            callEditor('projectTakeoffSetTool', 'multi-select');
-            setActiveTool(command);
-            return;
-        }
-        if (command === 'snapshot') {
-            takeoffState.snapshots.push({
-                id: makeId('snapshot'),
-                documentId: drawingState.selectedDocumentId,
-                page: drawingState.selectedPage,
-                createdAt: Date.now()
-            });
-            saveTakeoffState();
-            return showPrepared('Snapshot is ready to be connected.');
-        }
-        if (command === 'freehand') {
-            callEditor('projectTakeoffSetTool', 'freehand');
-            callEditor('setMode', 'draw');
-            setActiveTool(command);
-            return;
-        }
-        if (command === 'pin') {
-            callEditor('projectTakeoffSetTool', 'select');
-            callEditor('addPin');
-            setActiveTool(command);
-            showPrepared('Click the drawing to place a reference pin.');
-            return;
-        }
-        if (command === 'text') {
-            // Notes are annotations, not a Takeoff drawing type. Explicitly
-            // leave the quantity tool, then arm the annotation placement API.
-            callEditor('projectTakeoffSetTool', 'select');
-            const added = callEditor('addText');
-            setActiveTool(command);
-            if (!added) showPrepared('Click the drawing to add a text annotation.');
-            return;
-        }
-        if (command === 'cloud') {
-            // Annotation clouds are independent from Takeoff areas. Stop any
-            // active quantity tool before arming the one-shot cloud placement.
-            callEditor('projectTakeoffSetTool', 'select');
-            const activated = callEditor('addCloud');
-            setActiveTool(command);
-            if (!activated) showPrepared('Click or drag on the drawing to place a cloud annotation.');
-            return;
-        }
-        if (command === 'stamp') {
-            callEditor('toggleStampMenu');
-            setActiveTool(command);
-            return;
-        }
-        if (command === 'undo') return undoTakeoff();
-        if (command === 'redo') return redoTakeoff();
-        if (command === 'delete') return runSelectionAction('delete');
-        if (command === 'more') return toggleMoreToolsPanel();
-        if (command === 'transform') {
-            const activated = callEditor('projectTakeoffSetTool', 'transform');
-            setActiveTool(command);
-            if (!activated) showPrepared('Select an item before transforming it.');
-            return;
-        }
-        if (command === 'vertices') {
-            const activated = callEditor('projectTakeoffSetTool', 'vertices');
-            setActiveTool(command);
-            if (!activated) showPrepared('Select a line or area before editing vertices.');
-            return;
-        }
+    function openTakeoffContextMenu(...args) {
+        return takeoffViewerController.openTakeoffContextMenu(...args);
     }
 
-    function runViewerCommand(command) {
-        if (command === 'zoom-out') return setZoom(currentZoomPercent() - 25);
-        if (command === 'zoom-in') return setZoom(currentZoomPercent() + 25);
-        if (command === 'fit') {
-            const zoom = callEditor('projectTakeoffFitToView') || callEditor('fitPdfToView', true) || currentZoomPercent();
-            setTimeout(() => updateZoomUi(zoom || currentZoomPercent()), 40);
-            return;
+    function handleTakeoffAction(...args) {
+        return takeoffViewerController.handleTakeoffAction(...args);
+    }
+
+    function bindTakeoffActionDelegation(...args) {
+        return takeoffViewerController.bindTakeoffActionDelegation(...args);
+    }
+
+    function toggleGlobalVisibility(...args) {
+        return takeoffViewerController.toggleGlobalVisibility(...args);
+    }
+
+    function exportTakeoffQuantities(...args) {
+        return takeoffViewerController.exportTakeoffQuantities(...args);
+    }
+
+    function setActiveTool(...args) {
+        return takeoffViewerController.setActiveTool(...args);
+    }
+
+    function runTool(...args) {
+        return takeoffViewerController.runTool(...args);
+    }
+
+    function runViewerCommand(...args) {
+        return takeoffViewerController.runViewerCommand(...args);
+    }
+
+    function showPrepared(...args) {
+        return takeoffViewerController.showPrepared(...args);
+    }
+
+    function getTakeoffBoundary(...args) {
+        return takeoffViewerController.getTakeoffBoundary(...args);
+    }
+
+    function positionRowMenu(...args) {
+        return takeoffViewerController.positionRowMenu(...args);
+    }
+
+    function toggleRowMenu(...args) {
+        return takeoffViewerController.toggleRowMenu(...args);
+    }
+
+    function refreshOpenRowMenu(...args) {
+        return takeoffViewerController.refreshOpenRowMenu(...args);
+    }
+
+    function clearActiveRowMenuAnchor(...args) {
+        return takeoffViewerController.clearActiveRowMenuAnchor(...args);
+    }
+    const takeoffScaleController = window.TakeoffScaleController.create({
+        dom: {
+            getElement: $,
+            document,
+            window
+        },
+        actions: {
+            takeoffWindow,
+            callEditor,
+            syncTakeoffSubheadAlignment,
+            requireWrite,
+            showToast: (...args) => window.showToast?.(...args)
         }
-        if (command === 'previous' || command === 'next') return changeActiveSheet(command === 'next' ? 1 : -1);
-        if (command === 'fullscreen') {
-            const shell = $('takeoffWorkspace') || document.querySelector('.pro-takeoff-workspace') || document.querySelector('.pro-canvas-shell');
-            if (!document.fullscreenElement && shell?.requestFullscreen) {
-                shell.requestFullscreen().catch(() => showPrepared('Fullscreen could not start.'));
-            } else if (document.fullscreenElement && document.exitFullscreen) {
-                document.exitFullscreen().catch(() => showPrepared('Fullscreen could not close.'));
-            }
-            return;
-        }
-        if (command === 'popout') {
-            const frame = $('takeoffFrame');
-            if (frame?.src) window.open(frame.src, '_blank', 'noopener');
-            return;
-        }
-        if (command === 'download') {
-            const downloaded = callEditor('projectTakeoffDownloadAnnotatedDrawing');
-            if (downloaded) return;
-            const link = document.getElementById('downloadDocBtn');
-            if (link?.href && link.href !== '#') link.click();
-            return;
-        }
-        if (command === 'grid') return toggleGrid();
-        if (command === 'layers') return toggleViewerLayersPopover();
-        if (command === 'compare') return openComparePanel();
-        if (command === 'show-estimate') {
-            syncTakeoffToEstimating();
-            if (typeof window.setActiveTab === 'function') window.setActiveTab('estimating');
-            else document.querySelector('[data-tab="estimating"]')?.click();
-        }
+    });
+
+    function editorDocument(...args) {
+        return takeoffScaleController.editorDocument(...args);
     }
 
-    function showPrepared(command, type = 'info') {
-        const text = String(command || '').includes('.') || String(command || '').includes(' ') ? command : `${command.replace('-', ' ')} is ready to connect.`;
-        const frame = $('takeoffFrame') || document.querySelector('iframe#takeoffFrame');
-        if (frame && frame.contentWindow) {
-            try {
-                frame.contentWindow.postMessage({ type: 'editor-show-toast', message: text, toastType: type }, '*');
-                return;
-            } catch (_) { }
-        }
-
-        const old = document.querySelector('.toast-lite');
-        if (old) old.remove();
-        const toast = document.createElement('div');
-        toast.className = 'toast-lite';
-        toast.setAttribute('role', 'status');
-        toast.setAttribute('aria-live', 'polite');
-        toast.style.cssText = 'position:fixed !important; top:16px !important; bottom:auto !important; left:50% !important; right:auto !important; transform:translateX(-50%) !important; z-index:999999 !important; border-radius:9999px !important; padding:4px 14px !important; height:28px !important; font-size:12px !important; display:inline-flex !important; align-items:center !important; gap:7px !important; pointer-events:none !important; white-space:nowrap !important;';
-        const iconClass = type === 'error' ? 'fa-circle-exclamation' : (type === 'success' ? 'fa-circle-check' : 'fa-info-circle');
-        const iconColor = type === 'error' ? '#ef4444' : (type === 'success' ? '#22c55e' : '#38bdf8');
-        toast.innerHTML = `<i class="fas ${iconClass}" style="color:${iconColor}; font-size:12px; margin-right:4px;"></i><span>${esc(text)}</span>`;
-        document.body.appendChild(toast);
-        setTimeout(() => toast.remove(), 2400);
+    function syncScaleStatus(...args) {
+        return takeoffScaleController.syncScaleStatus(...args);
     }
 
-    let activeRowMenuAnchor = null;
-
-    function getTakeoffBoundary(el) {
-        const margin = 8;
-        const boundaryEl = el?.closest?.('.pro-takeoff-workspace, .workspace-shell, body') || document.body;
-        if (!boundaryEl || boundaryEl === document.body || boundaryEl === document.documentElement) {
-            return {
-                left: margin,
-                top: margin,
-                right: window.innerWidth - margin,
-                bottom: window.innerHeight - margin,
-                width: window.innerWidth - (margin * 2),
-                height: window.innerHeight - (margin * 2)
-            };
-        }
-        const bRect = boundaryEl.getBoundingClientRect();
-        return {
-            left: Math.max(margin, bRect.left + margin),
-            top: Math.max(margin, bRect.top + margin),
-            right: Math.min(window.innerWidth - margin, bRect.right - margin),
-            bottom: Math.min(window.innerHeight - margin, bRect.bottom - margin),
-            width: Math.max(0, Math.min(window.innerWidth - margin, bRect.right - margin) - Math.max(margin, bRect.left + margin)),
-            height: Math.max(0, Math.min(window.innerHeight - margin, bRect.bottom - margin) - Math.max(margin, bRect.top + margin))
-        };
+    function hasScaleSet(...args) {
+        return takeoffScaleController.hasScaleSet(...args);
     }
 
-    function positionRowMenu(button) {
-        const menu = $('takeoffRowMenu');
-        if (!menu) return;
-        const rect = button.getBoundingClientRect();
-        const bounds = getTakeoffBoundary(button);
-        const margin = 8;
-        const gap = 6;
-        menu.style.left = '0px';
-        menu.style.top = '0px';
-        menu.style.visibility = 'hidden';
-        menu.classList.add('open');
-        const menuRect = menu.getBoundingClientRect();
-        let left = rect.right - menuRect.width;
-        let top = rect.bottom + gap;
-        if (top + menuRect.height > bounds.bottom) {
-            top = rect.top - menuRect.height - gap;
-        }
-        left = Math.max(bounds.left, Math.min(left, bounds.right - menuRect.width));
-        top = Math.max(bounds.top, Math.min(top, bounds.bottom - menuRect.height));
-        menu.style.left = `${Math.round(left)}px`;
-        menu.style.top = `${Math.round(top)}px`;
-        menu.style.visibility = 'visible';
+    function syncScaleHint(...args) {
+        return takeoffScaleController.syncScaleHint(...args);
     }
 
-    function toggleRowMenu(button) {
-        const menu = $('takeoffRowMenu');
-        if (!menu) return;
-        const isSameOpen = menu.classList.contains('open') && activeRowMenuAnchor === button;
-        document.querySelectorAll('.pro-row-menu').forEach(item => {
-            item.classList.remove('open');
-            item.__trigger = null;
-        });
-        document.querySelectorAll('[data-row-menu]').forEach(btn => {
-            btn.classList.remove('is-active');
-            btn.setAttribute('aria-expanded', 'false');
-        });
-        if (isSameOpen) {
-            activeRowMenuAnchor = null;
-            return;
-        }
-        activeRowMenuAnchor = button;
-        menu.__trigger = button;
-        button.classList.add('is-active');
-        button.setAttribute('aria-expanded', 'true');
-        positionRowMenu(button);
+    function syncScalePresets(...args) {
+        return takeoffScaleController.syncScalePresets(...args);
     }
 
-    function refreshOpenRowMenu() {
-        const menu = $('takeoffRowMenu');
-        if (!menu?.classList.contains('open') || !activeRowMenuAnchor?.isConnected) return;
-        positionRowMenu(activeRowMenuAnchor);
+    function setScaleMode(...args) {
+        return takeoffScaleController.setScaleMode(...args);
     }
 
-    function editorDocument() {
-        const win = takeoffWindow();
-        try {
-            return win?.document || null;
-        } catch (e) {
-            return null;
-        }
+    function openScalePanel(...args) {
+        return takeoffScaleController.openScalePanel(...args);
     }
 
-    function syncScaleStatus(forcePresetSync = false) {
-        const button = $('takeoffScaleStatus');
-        if (!button) return;
-        const editorWin = takeoffWindow();
-        const editorDoc = editorDocument();
-        const rawDisplay = (editorDoc?.getElementById('scale-display')?.textContent || callEditor('getActiveScaleLabel') || '').trim();
-        const activePpf = Number(editorWin?.pixelsPerFoot || 0);
-        const scaleText = (rawDisplay && rawDisplay !== '--') ? rawDisplay : (activePpf > 0 ? 'Custom' : '');
-        const label = button.querySelector('#takeoffScaleLabel') || button.querySelector('span:not(.pro-scale-dot)') || button.querySelector('span');
-        const icon = button.querySelector('i');
-        const hasScale = Boolean(scaleText && scaleText !== '--' && !scaleText.toLowerCase().includes('not set') && scaleText !== '0');
-        button.classList.toggle('is-set', hasScale);
-        if (icon) icon.style.display = 'none';
-        if (label) label.textContent = hasScale ? `Scale: ${scaleText}` : 'Not Drawing Scale';
-        button.title = hasScale ? `Drawing scale: ${scaleText}` : 'Set drawing scale';
-        syncTakeoffSubheadAlignment();
-
-        const panel = $('takeoffScalePanel');
-        const isPanelOpen = panel?.classList.contains('open');
-        const presetSelect = $('takeoffScalePreset');
-        const isUserDirty = presetSelect?.dataset?.userDirty === '1';
-
-        // Only update preset dropdown if forced, or if panel is closed and user isn't actively selecting
-        if (presetSelect && (forcePresetSync || (!isPanelOpen && !isUserDirty))) {
-            let matched = false;
-            if (hasScale) {
-                for (let i = 0; i < presetSelect.options.length; i++) {
-                    if (presetSelect.options[i].text.trim().toLowerCase() === scaleText.toLowerCase() ||
-                        presetSelect.options[i].value.trim().toLowerCase() === scaleText.toLowerCase()) {
-                        presetSelect.selectedIndex = i;
-                        matched = true;
-                        break;
-                    }
-                }
-            }
-            if (!matched) {
-                presetSelect.value = '';
-            }
-            presetSelect._syncCustom?.();
-        }
-    }
-    window.syncScaleStatus = syncScaleStatus;
-
-    function hasScaleSet() {
-        const editorWin = takeoffWindow();
-        const scaleText = (editorDocument()?.getElementById('scale-display')?.textContent || callEditor('getActiveScaleLabel') || '').trim();
-        if (scaleText && scaleText !== '--' && !scaleText.toLowerCase().includes('not set') && scaleText !== '0') return true;
-        return Number(editorWin?.pixelsPerFoot || 0) > 0;
+    function closeScalePanel(...args) {
+        return takeoffScaleController.closeScalePanel(...args);
     }
 
-    function syncScaleHint() {
-        const hint = $('takeoffScaleHint');
-        if (!hint) return;
-        const editorHint = (editorDocument()?.getElementById('cal-hint')?.textContent || '').trim();
-        hint.textContent = editorHint || 'Choose a preset scale or calibrate manually.';
+    function applyScalePreset(...args) {
+        return takeoffScaleController.applyScalePreset(...args);
     }
 
-    function syncScalePresets() {
-        const source = editorDocument()?.getElementById('cal-preset');
-        const target = $('takeoffScalePreset');
-        if (!target) return false;
-        if (source && source.options && source.options.length > 1) {
-            if (target.dataset.loaded === '1' && target.dataset.optionCount === String(source.options.length)) {
-                target._syncCustom?.();
-                return true;
-            }
-            target.innerHTML = source.innerHTML;
-            target.value = source.value || '';
-            target.dataset.loaded = '1';
-            target.dataset.optionCount = String(source.options.length);
-            target._syncCustom?.();
-            return true;
-        }
-        return false;
+    function applyManualScale(...args) {
+        return takeoffScaleController.applyManualScale(...args);
     }
 
-    function setScaleMode(mode) {
-        const nextMode = mode === 'manual' ? 'manual' : 'preset';
-        const modeSelect = $('takeoffScaleMode');
-        if (modeSelect) modeSelect.value = nextMode;
-        $('takeoffPresetWrap')?.toggleAttribute('hidden', nextMode !== 'preset');
-        $('takeoffManualWrap')?.toggleAttribute('hidden', nextMode !== 'manual');
-        callEditor('setCalMode', nextMode);
-        if (nextMode === 'manual') callEditor('setMode', 'cal');
-        syncScaleHint();
+    function bindScalePanel(...args) {
+        return takeoffScaleController.bindScalePanel(...args);
     }
-
-    function openScalePanel(mode) {
-        if (!requireWrite()) return false;
-        const panel = $('takeoffScalePanel');
-        const toggle = $('takeoffScaleStatus');
-        const presetSelect = $('takeoffScalePreset');
-        if (!panel) return;
-        if (presetSelect) delete presetSelect.dataset.userDirty;
-        syncScalePresets();
-        syncScaleStatus(true);
-        panel.classList.add('open');
-        toggle?.setAttribute('aria-expanded', 'true');
-        if (mode) setScaleMode(mode);
-    }
-
-    function closeScalePanel() {
-        const presetSelect = $('takeoffScalePreset');
-        if (presetSelect) delete presetSelect.dataset.userDirty;
-        $('takeoffScalePanel')?.classList.remove('open');
-        $('takeoffScaleStatus')?.setAttribute('aria-expanded', 'false');
-    }
-
-    function applyScalePreset(value) {
-        if (value === '' || value === null || value === undefined) return;
-        const applyCheckbox = $('takeoffScaleApplyAll');
-        const applyAll = Boolean(applyCheckbox?.checked);
-        const editorSelect = editorDocument()?.getElementById('cal-preset');
-        if (editorSelect) editorSelect.value = value;
-        const result = callEditor('applyScalePreset', value, applyAll);
-        const presetSelect = $('takeoffScalePreset');
-        if (presetSelect) delete presetSelect.dataset.userDirty;
-        syncScaleStatus(true);
-        Promise.resolve(result).finally(() => {
-            if (applyCheckbox) applyCheckbox.checked = false;
-            syncScaleStatus(true);
-            syncScaleHint();
-        });
-    }
-
-    function applyManualScale() {
-        const feet = $('takeoffManualFeet')?.value;
-        const applyCheckbox = $('takeoffScaleApplyAll');
-        const applyAll = Boolean(applyCheckbox?.checked);
-        const editorInput = editorDocument()?.getElementById('cal-val');
-        if (editorInput) editorInput.value = feet || '';
-        const result = callEditor('finishCal', true, applyAll);
-        const presetSelect = $('takeoffScalePreset');
-        if (presetSelect) delete presetSelect.dataset.userDirty;
-        syncScaleStatus(true);
-        Promise.resolve(result).finally(() => {
-            if (applyCheckbox) applyCheckbox.checked = false;
-            syncScaleStatus(true);
-            syncScaleHint();
-        });
-    }
-
-    function bindScalePanel() {
-        $('takeoffScaleStatus')?.addEventListener('click', event => {
-            event.stopPropagation();
-            const panel = $('takeoffScalePanel');
-            if (panel?.classList.contains('open')) closeScalePanel();
-            else openScalePanel();
-        });
-        document.querySelector('[data-scale-close]')?.addEventListener('click', closeScalePanel);
-        $('takeoffScaleMode')?.addEventListener('change', event => setScaleMode(event.target.value));
-        $('takeoffScalePreset')?.addEventListener('change', () => {
-            const target = $('takeoffScalePreset');
-            if (target) target.dataset.userDirty = '1';
-        });
-        $('takeoffScaleApplyBtn')?.addEventListener('click', () => {
-            const mode = $('takeoffScaleMode')?.value;
-            if (mode === 'manual') {
-                applyManualScale();
-            } else {
-                syncScalePresets();
-                const presetVal = $('takeoffScalePreset')?.value;
-                if (presetVal !== '' && presetVal !== null && presetVal !== undefined) {
-                    applyScalePreset(presetVal);
-                } else {
-                    showToast('Please select a scale preset', 'warning');
-                    return;
-                }
-            }
-            closeScalePanel();
-        });
-        document.querySelector('[data-scale-apply-manual]')?.addEventListener('click', () => {
-            applyManualScale();
-            closeScalePanel();
-        });
-        document.querySelector('[data-scale-clear-line]')?.addEventListener('click', () => {
-            callEditor('clearCalLine');
-            syncScaleHint();
-        });
-        $('takeoffFrame')?.addEventListener('load', () => {
-            setTimeout(() => {
-                syncScalePresets();
-                syncScaleStatus();
-                syncScaleHint();
-            }, 250);
-        });
-        setInterval(() => {
-            if (document.hidden || !$('takeoffScalePanel')?.classList.contains('open')) return;
-            syncScaleHint();
-        }, 1200);
-    }
-
     let isDropdownScrolling = false;
     let dropdownScrollTimer = null;
     let activeSheetHoverTimer = null;
@@ -10962,7 +8936,7 @@
                     btn.classList.remove('is-active');
                     btn.setAttribute('aria-expanded', 'false');
                 });
-                activeRowMenuAnchor = null;
+                clearActiveRowMenuAnchor();
                 if (typeof window.closeAllOpenPopouts === 'function') window.closeAllOpenPopouts();
                 closeScalePanel();
                 closeDrawingDropdown();
@@ -11708,7 +9682,7 @@
                 button.classList.remove('is-active');
                 button.setAttribute('aria-expanded', 'false');
             });
-            activeRowMenuAnchor = null;
+            clearActiveRowMenuAnchor();
             if (typeof window.closeAllOpenPopouts === 'function') window.closeAllOpenPopouts();
             closeScalePanel();
             closeDrawingDropdown();

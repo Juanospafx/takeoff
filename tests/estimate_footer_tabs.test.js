@@ -7,6 +7,10 @@ const read = file => fs.readFileSync(path.join(root, file), 'utf8');
 
 const page = read('pages/project_dashboard.php');
 const takeoff = read('assets/project_takeoff.js');
+const layerModal = read('assets/takeoff_layer_modal.js');
+const catalogBrowser = read('assets/takeoff_catalog_browser.js');
+const viewerController = read('assets/takeoff_viewer_controller.js');
+const scaleController = read('assets/takeoff_scale_controller.js');
 const proposal = read('assets/project_proposal.js');
 const estimating = read('assets/project_estimating.js');
 const sharedFooter = read('assets/project_estimate_footer.js');
@@ -71,6 +75,10 @@ dom.window.localStorage.setItem('takeoff.estimating.module.2', JSON.stringify({
     ]
 }));
 dom.window.eval(sharedFooter);
+dom.window.eval(layerModal);
+dom.window.eval(catalogBrowser);
+dom.window.eval(viewerController);
+dom.window.eval(scaleController);
 dom.window.eval(takeoff);
 dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
 const renderedFooter = dom.window.document.getElementById('takeoffEstimateTypesFooter');

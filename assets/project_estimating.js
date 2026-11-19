@@ -47,6 +47,9 @@
     let estimatingHasUnsavedCheckpoint = false;
     let estimatingTableDirty = false;
     let estimatingLoadingActive = false;
+    let estimatingTableRenderGeneration = 0;
+    const ESTIMATING_TABLE_CHUNK_SIZE = 60;
+    const ESTIMATING_TABLE_CHUNK_THRESHOLD = 120;
 
     function isEstimatingTabActive() {
         const tab = document.getElementById('tab-estimating');
@@ -90,7 +93,7 @@
 
     root.classList.add('est-v2');
     if (!$('estTableHead')) {
-        root.innerHTML = `<div class="est-main"><aside class="est-table-settings-drawer" id="estTableSettingsDrawer" aria-label="Table Settings" hidden></aside><section class="est-left"><div class="est-toolbar"><div class="bb-search-field-procore cc-search-procore est-search-box"><input id="estSearch" type="search" placeholder="Search estimate items..." autocomplete="off"></div><div class="est-toolbar-actions" style="display: flex; align-items: center; gap: 8px; margin-left: auto;"><button class="btn-main est-toolbar-btn est-btn-import" id="estBtnImport" type="button" data-est-option="import" title="Import Project Estimate (.xlsx)"><i class="fas fa-file-import"></i> <span>Import</span></button><button class="btn-main est-toolbar-btn est-btn-export" id="estBtnExport" type="button" data-est-option="export" title="Export Estimate"><i class="fas fa-file-export"></i> <span>Export</span></button><button class="est-icon-btn" id="estBtnCreateGroup" type="button" data-est-action="create-group" title="Create Group"><i class="fas fa-folder-plus"></i></button><button class="est-icon-btn" id="estBtnTableSettings" type="button" data-est-action="table-settings" title="Table Settings"><i class="fas fa-sliders"></i></button><button class="est-icon-btn" id="estBtnFullscreen" type="button" data-est-action="fullscreen" title="Full screen"><i class="fas fa-expand"></i></button><div class="est-menu-wrap"><button class="est-icon-btn" id="estBtnMoreOptions" type="button" data-est-action="options" title="Options"><i class="fas fa-ellipsis-vertical"></i></button><div class="est-menu" id="optionsMenu"><button type="button" data-est-action="catalog-update"><i class="fas fa-arrows-rotate"></i> Update from Cost Catalog</button><button type="button" data-est-action="reset-quantities"><i class="fas fa-rotate-left"></i> Reset Quantities</button></div></div><button class="est-icon-btn est-toggle-right-btn" id="estToolbarToggleRight" type="button" data-est-action="toggle-right" title="Hide summary panel"><i class="fas fa-chevron-right"></i></button></div></div><div class="est-table-wrap bb-table-scroll"><table class="est-table bb-table" id="estMainTable"><thead id="estTableHead"></thead><tbody id="estTableBody"></tbody></table></div></section><div class="pro-sidebar-resizer est-sidebar-resizer" id="estSplitResizer" role="separator" aria-orientation="vertical" title="Drag to resize panels"><div class="pro-resizer-handle"></div></div><aside class="est-right"><div class="est-right-scroll"></div><div class="est-total-box"><div id="estimateTotal" class="est-total-value"></div><div class="est-total-label">Estimate Total</div><div id="estimateSqft" class="est-total-sub"></div></div></aside></div><footer class="est-version-bar" id="versionBar"></footer>`;
+        root.innerHTML = `<div class="est-main"><aside class="est-table-settings-drawer" id="estTableSettingsDrawer" aria-label="Table Settings" hidden></aside><section class="est-left"><div class="est-toolbar"><div class="bb-search-field-procore cc-search-procore est-search-box"><input id="estSearch" type="search" placeholder="Search estimate items..." autocomplete="off"></div><div class="est-toolbar-actions"><button class="btn-main est-toolbar-btn est-btn-import" id="estBtnImport" type="button" data-est-option="import" title="Import Project Estimate (.xlsx)"><i class="fas fa-file-import"></i> <span>Import</span></button><button class="btn-main est-toolbar-btn est-btn-export" id="estBtnExport" type="button" data-est-option="export" title="Export Estimate"><i class="fas fa-file-export"></i> <span>Export</span></button><button class="est-icon-btn" id="estBtnCreateGroup" type="button" data-est-action="create-group" title="Create Group"><i class="fas fa-folder-plus"></i></button><button class="est-icon-btn" id="estBtnTableSettings" type="button" data-est-action="table-settings" title="Table Settings"><i class="fas fa-sliders"></i></button><button class="est-icon-btn" id="estBtnFullscreen" type="button" data-est-action="fullscreen" title="Full screen"><i class="fas fa-expand"></i></button><div class="est-menu-wrap"><button class="est-icon-btn" id="estBtnMoreOptions" type="button" data-est-action="options" title="Options"><i class="fas fa-ellipsis-vertical"></i></button><div class="est-menu" id="optionsMenu"><button type="button" data-est-action="catalog-update"><i class="fas fa-arrows-rotate"></i> Update from Cost Catalog</button><button type="button" data-est-action="reset-quantities"><i class="fas fa-rotate-left"></i> Reset Quantities</button></div></div><button class="est-icon-btn est-toggle-right-btn" id="estToolbarToggleRight" type="button" data-est-action="toggle-right" title="Hide summary panel"><i class="fas fa-chevron-right"></i></button></div></div><div class="est-table-wrap bb-table-scroll"><table class="est-table bb-table" id="estMainTable"><thead id="estTableHead"></thead><tbody id="estTableBody"></tbody></table></div></section><div class="pro-sidebar-resizer est-sidebar-resizer" id="estSplitResizer" role="separator" aria-orientation="vertical" title="Drag to resize panels"><div class="pro-resizer-handle"></div></div><aside class="est-right"><div class="est-right-scroll"></div><div class="est-total-box"><div id="estimateTotal" class="est-total-value"></div><div class="est-total-label">Estimate Total</div><div id="estimateSqft" class="est-total-sub"></div></div></aside></div><footer class="est-version-bar" id="versionBar"></footer>`;
     }
 
     function safeSetLocalStorage(key, value) {
@@ -2586,10 +2589,48 @@
         });
     }
 
+    function finalizeEstimatingTableRender(generation) {
+        if (generation !== estimatingTableRenderGeneration) return;
+        root.querySelectorAll('input[type="checkbox"][data-indeterminate="true"]').forEach(cb => {
+            cb.indeterminate = true;
+        });
+    }
+
+    function renderEstimatingRows(body, rows, emptyHtml, generation) {
+        if (!rows.length) {
+            body.innerHTML = emptyHtml;
+            finalizeEstimatingTableRender(generation);
+            return;
+        }
+        const canChunk = rows.length > ESTIMATING_TABLE_CHUNK_THRESHOLD
+            && typeof requestAnimationFrame === 'function';
+        if (!canChunk) {
+            body.innerHTML = rows.join('');
+            finalizeEstimatingTableRender(generation);
+            return;
+        }
+
+        body.innerHTML = rows.slice(0, ESTIMATING_TABLE_CHUNK_SIZE).join('');
+        let offset = ESTIMATING_TABLE_CHUNK_SIZE;
+        const appendChunk = () => {
+            if (generation !== estimatingTableRenderGeneration || !body.isConnected) return;
+            const nextOffset = Math.min(offset + ESTIMATING_TABLE_CHUNK_SIZE, rows.length);
+            body.insertAdjacentHTML('beforeend', rows.slice(offset, nextOffset).join(''));
+            offset = nextOffset;
+            if (offset < rows.length) {
+                requestAnimationFrame(appendChunk);
+                return;
+            }
+            finalizeEstimatingTableRender(generation);
+        };
+        requestAnimationFrame(appendChunk);
+    }
+
     function renderTable() {
         const head = $('estTableHead');
         const body = $('estTableBody');
         if (!head || !body) return;
+        const renderGeneration = ++estimatingTableRenderGeneration;
 
         const widths = getColumnWidths();
         const activeColumns = getOrderedActiveColumns();
@@ -2669,14 +2710,14 @@
                     return `<td><span class="est-budget-code-pill">${esc(bCode)} <span class="est-budget-code-clear">âœ•</span></span></td>`;
                 }
                 if (col.id === 'quantity') {
-                    return `<td class="text-right"><span style="color: #2563eb; font-size: 12px; font-weight: 600;">${visible.length} x</span></td>`;
+                    return `<td class="text-right"><span class="est-group-item-count">${visible.length} x</span></td>`;
                 }
                 if (col.id === 'subtotal_item_cost') {
-                    return `<td class="text-right est-money" style="font-weight: 700;" data-live-group-subtotal="${esc(group.id)}">${number(groupSubtotalCost, 2)}</td>`;
+                    return `<td class="text-right est-money est-group-subtotal" data-live-group-subtotal="${esc(group.id)}">${number(groupSubtotalCost, 2)}</td>`;
                 }
                 if (col.id === 'labor_margin') {
                     const gMargin = Number(current()?.settings?.globalLaborMargin ?? 34.6);
-                    return `<td class="text-right" data-live-group-labor-margin="${esc(group.id)}" style="color: #64748b; font-size: 11.5px; font-weight: 500;">${gMargin.toFixed(1)}%</td>`;
+                    return `<td class="text-right est-group-labor-margin" data-live-group-labor-margin="${esc(group.id)}">${gMargin.toFixed(1)}%</td>`;
                 }
                 return `<td></td>`;
             }).join('')}
@@ -2707,7 +2748,7 @@
                         <td class="col-cost-item">
                             <div class="est-item-cell-singleline is-component">
                                 <span class="est-assembly-branch-line" aria-hidden="true">&#8627;</span>
-                                <span style="font-style: italic; color: var(--text-muted, #94a3b8); font-size: 11px;">No components defined in this assembly</span>
+                                <span class="est-assembly-empty-note">No components defined in this assembly</span>
                             </div>
                         </td>
                         ${activeColumns.map(() => `<td></td>`).join('')}
@@ -2723,12 +2764,12 @@
             });
         });
 
-        body.innerHTML = html.join('') || `<tr><td colspan="${activeColumns.length + 3}" class="est-empty">No estimate items. Create a group or add items in Takeoff.</td></tr>`;
-
-        // Apply indeterminate state to checkboxes
-        root.querySelectorAll('input[type="checkbox"][data-indeterminate="true"]').forEach(cb => {
-            cb.indeterminate = true;
-        });
+        renderEstimatingRows(
+            body,
+            html,
+            `<tr><td colspan="${activeColumns.length + 3}" class="est-empty">No estimate items. Create a group or add items in Takeoff.</td></tr>`,
+            renderGeneration
+        );
 
         const deleteButton = root.querySelector('[data-est-action="delete-selected"]');
         if (deleteButton) deleteButton.disabled = ui.selected.size === 0;

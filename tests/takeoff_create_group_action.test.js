@@ -6,6 +6,10 @@ const { JSDOM } = require('jsdom');
 
 const root = path.resolve(__dirname, '..');
 const source = fs.readFileSync(path.join(root, 'assets', 'project_takeoff.js'), 'utf8');
+const layerModalSource = fs.readFileSync(path.join(root, 'assets', 'takeoff_layer_modal.js'), 'utf8');
+const catalogBrowserSource = fs.readFileSync(path.join(root, 'assets', 'takeoff_catalog_browser.js'), 'utf8');
+const viewerControllerSource = fs.readFileSync(path.join(root, 'assets', 'takeoff_viewer_controller.js'), 'utf8');
+const scaleControllerSource = fs.readFileSync(path.join(root, 'assets', 'takeoff_scale_controller.js'), 'utf8');
 
 function actionRuntime() {
     const dom = new JSDOM(`
@@ -23,18 +27,22 @@ function actionRuntime() {
     dom.window.TakeoffAuth = { canWrite: true };
     dom.window.TakeoffAuthorization = { requireWrite: () => true };
     dom.window.fetch = async () => ({ ok: true, json: async () => ({ status: 'success', data: {} }) });
+    dom.window.eval(layerModalSource);
+    dom.window.eval(catalogBrowserSource);
+    dom.window.eval(viewerControllerSource);
+    dom.window.eval(scaleControllerSource);
     dom.window.eval(source);
     return dom;
 }
 
 test('Takeoff actions use one delegated click path that survives workspace rerenders', () => {
-    assert.match(source, /function bindTakeoffActionDelegation\(\)[\s\S]*document\.addEventListener\('click',[\s\S]*closest\?\.\('\[data-takeoff-action\]'\)[\s\S]*handleTakeoffAction\(button\.dataset\.takeoffAction\)/);
-    assert.match(source, /bindTakeoffActionDelegation\(\);[\s\S]*document\.addEventListener\('DOMContentLoaded'/);
+    assert.match(viewerControllerSource, /function bindTakeoffActionDelegation\(\)[\s\S]*document\.addEventListener\('click',[\s\S]*closest\?\.\('\[data-takeoff-action\]'\)[\s\S]*handleTakeoffAction\(button\.dataset\.takeoffAction\)/);
+    assert.match(viewerControllerSource, /bindTakeoffActionDelegation\(\);/);
     assert.doesNotMatch(source, /querySelectorAll\('\[data-takeoff-action\]'\)\.forEach\(button => \{\s*button\.addEventListener/);
 });
 
 test('Create New Group routes to the existing authorized dialog', () => {
-    assert.match(source, /if \(action === 'create-group'\) return openTakeoffGroupModal\(document\.activeElement\)/);
+    assert.match(viewerControllerSource, /if \(action === 'create-group'\) return openTakeoffGroupModal\(document\.activeElement\)/);
     assert.match(source, /function openTakeoffGroupModal\([\s\S]*if \(!requireWrite\(\)\) return false;[\s\S]*modal\.hidden = false;[\s\S]*modal\.style\.display = 'flex'/);
 });
 
@@ -57,7 +65,7 @@ test('the production click target opens the dialog even before DOMContentLoaded 
 });
 
 test('group form submission is delegated and creates only through the guarded path', () => {
-    assert.match(source, /document\.addEventListener\('submit',[\s\S]*event\.target\?\.id !== 'takeoffGroupForm'[\s\S]*submitTakeoffGroupModal\(event\)/);
+    assert.match(viewerControllerSource, /document\.addEventListener\('submit',[\s\S]*event\.target\?\.id !== 'takeoffGroupForm'[\s\S]*submitTakeoffGroupModal\(event\)/);
     assert.match(source, /function submitTakeoffGroupModal\(event\)[\s\S]*if \(!requireWrite\(\)\) return false;[\s\S]*if \(createTakeoffGroup\(name\)\) closeTakeoffGroupModal\(\)/);
     assert.match(source, /function createTakeoffGroup\(name\)[\s\S]*if \(!requireWrite\(\)\) return false;/);
 });

@@ -32,37 +32,7 @@ $pageTitle = "Files | Brightronix";
 include __DIR__ . '/../views/header.php';
 ?>
 
-<style>
-    .table-responsive { border-radius: var(--radius-box); overflow: hidden; border: 1px solid rgba(255,255,255,0.05); }
-    .table-rounded { width: 100%; border-collapse: separate; border-spacing: 0; background: var(--bg-card); }
-    .table-rounded th { background: rgba(0,0,0,0.2); color: var(--text-gray); font-weight: 600; text-transform: uppercase; font-size: 0.75rem; padding: 18px 25px; border-bottom: 1px solid rgba(255,255,255,0.05); white-space: nowrap; }
-    .table-rounded td { padding: 20px 25px; color: white; vertical-align: middle; border-bottom: 1px solid rgba(255,255,255,0.02); }
-    .table-rounded tr:last-child td { border-bottom: none; }
-    .table-rounded tr:hover td { background: rgba(255,255,255,0.02); }
-
-    .btn-action { width: 32px; height: 32px; border-radius: 8px; display: inline-flex; align-items: center; justify-content: center; border: 1px solid rgba(255,255,255,0.1); color: var(--text-gray); transition: 0.2s; background: transparent; }
-    .btn-action:hover { background: white; color: var(--bg-body); }
-
-    /* Responsive cards */
-    .file-cards { display: none; }
-    .file-card { background: var(--bg-card); border: 1px solid rgba(255,255,255,0.08); border-radius: 16px; padding: 16px; }
-    .file-card + .file-card { margin-top: 12px; }
-    .file-meta { font-size: 0.8rem; color: var(--text-gray); }
-
-    @media (max-width: 992px) {
-        .table-responsive { display: none; }
-        .file-cards { display: block; }
-    }
-
-    @media (max-width: 768px) {
-        .header { flex-direction: column; align-items: flex-start; gap: 12px; }
-        .breadcrumbs { margin-top: 4px; }
-        .main-content { padding: 20px; }
-        .d-flex.justify-content-between.align-items-end { flex-direction: column; align-items: flex-start; gap: 12px; }
-        form.d-flex { width: 100%; }
-        form.d-flex .form-control { flex: 1; }
-    }
-</style>
+<link rel="stylesheet" href="../assets/portal_archivos.css?v=<?= filemtime(__DIR__ . '/../assets/portal_archivos.css') ?>">
 
 <main class="main-content">
     <header class="header">

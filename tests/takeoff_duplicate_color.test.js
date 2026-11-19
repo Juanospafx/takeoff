@@ -6,6 +6,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const palette = require('../assets/takeoff_color_palette.js');
 const dashboard = fs.readFileSync(path.join(root, 'assets', 'project_takeoff.js'), 'utf8');
+const layerModal = fs.readFileSync(path.join(root, 'assets', 'takeoff_layer_modal.js'), 'utf8');
 const editor = fs.readFileSync(path.join(root, 'assets', 'editor', 'takeoff.js'), 'utf8');
 const dashboardPage = fs.readFileSync(path.join(root, 'pages', 'project_dashboard.php'), 'utf8');
 const editorPage = fs.readFileSync(path.join(root, 'pages', 'editor.php'), 'utf8');
@@ -53,11 +54,11 @@ test('both duplicate handlers deep clone and use the shared palette', () => {
 });
 
 test('duplicate edits persist layer and geometry appearance before the modal closes', () => {
-    const submit = dashboard.slice(dashboard.indexOf('async function submitLayerModal'), dashboard.indexOf('function openCatalogModal'));
+    const submit = layerModal.slice(layerModal.indexOf('async function submitLayerModal'), layerModal.indexOf('function getActiveFormType'));
     assert.match(submit, /projectTakeoffUpdateLayerObjects/);
     assert.match(submit, /callEditor\('projectTakeoffSave'\)/);
     assert.match(submit, /await saved/);
-    assert.ok(submit.indexOf("callEditor('projectTakeoffSave')") < submit.indexOf('closeLayerModal()'));
+    assert.ok(submit.indexOf("callEditor('projectTakeoffSave')") < submit.lastIndexOf('closeLayerModal()'));
 
     const update = editor.slice(editor.indexOf('window.projectTakeoffUpdateLayerObjects'), editor.indexOf('window.projectTakeoffMoveSelectionToLayer'));
     assert.match(update, /patch\.symbol[\s\S]*layer\.symbol/);
@@ -71,7 +72,7 @@ test('duplicate edits persist layer and geometry appearance before the modal clo
 test('reopened edit form normalizes persisted editor symbols and numeric sizes', () => {
     assert.match(dashboard, /const takeoffDisplaySize =/);
     assert.match(dashboard, /const takeoffDisplaySymbol =/);
-    const modal = dashboard.slice(dashboard.indexOf('function openLayerModal'), dashboard.indexOf('function closeLayerModal'));
+    const modal = layerModal.slice(layerModal.indexOf('function openLayerModal'), layerModal.indexOf('function repositionLayerModal'));
     assert.match(modal, /takeoffDisplaySymbol\(layer\?\.symbol\)/);
     assert.match(modal, /takeoffDisplaySize\(layer\?\.size\)/);
 });

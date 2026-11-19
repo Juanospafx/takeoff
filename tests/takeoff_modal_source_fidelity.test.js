@@ -7,6 +7,7 @@ const read = (file) => fs.readFileSync(path.join(root, file), 'utf8');
 
 const globalTools = read('assets/global_tools.js');
 const takeoffJs = read('assets/project_takeoff.js');
+const layerModalJs = read('assets/takeoff_layer_modal.js');
 const takeoffCss = read('assets/project_takeoff.css');
 const dashboard = read('pages/project_dashboard.php');
 
@@ -19,11 +20,11 @@ assert.match(globalTools, /selectEl\.closest\('\.pro-create-layer-modal'\)/,
 assert.match(globalTools, /selectEl\.closest\('\.pro-layer-modal'\)/,
     'Edit Layer native selects must not be replaced by the global enhancer');
 
-assert.match(dashboard, /<aside class="pro-layer-drawer" id="takeoffLayerModal"[^>]*hidden><\/aside>/,
+assert.match(dashboard, /<aside class="pro-layer-drawer" id="takeoffLayerModal"[^>]*hidden>\s*<\/aside>/,
     'dashboard must provide the source drawer container');
-assert.match(takeoffJs, /modal\.className = 'pro-layer-drawer'/,
+assert.match(layerModalJs, /modal\.className = 'pro-layer-drawer'/,
     'Edit Layer must render as the source side drawer');
-assert.match(takeoffJs, /function repositionLayerModal\(\)/,
+assert.match(layerModalJs, /function repositionLayerModal\(\)/,
     'drawer must reposition with the responsive workspace');
 assert.match(takeoffJs, /window\.closeAllOpenPopouts\(\)/,
     'Takeoff must close competing popouts before opening another');

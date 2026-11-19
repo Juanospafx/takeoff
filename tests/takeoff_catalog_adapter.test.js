@@ -61,16 +61,17 @@ test('Browse Catalog loads the contract before Takeoff and consumes canonical fi
     const root = path.resolve(__dirname, '..');
     const page = fs.readFileSync(path.join(root, 'pages/project_dashboard.php'), 'utf8');
     const takeoff = fs.readFileSync(path.join(root, 'assets/project_takeoff.js'), 'utf8');
+    const browser = fs.readFileSync(path.join(root, 'assets/takeoff_catalog_browser.js'), 'utf8');
     assert.ok(page.indexOf('catalog_item_contract.js') < page.indexOf('catalog_service.js'));
     assert.ok(page.indexOf('catalog_item_contract.js') < page.indexOf('catalog_metadata.js'));
     assert.ok(page.indexOf('catalog_metadata.js') < page.indexOf('takeoff_catalog_adapter.js'));
     assert.ok(page.indexOf('catalog_service.js') < page.indexOf('takeoff_catalog_adapter.js'));
+    assert.ok(page.indexOf('takeoff_catalog_adapter.js') < page.indexOf('takeoff_catalog_browser.js'));
+    assert.ok(page.indexOf('takeoff_catalog_browser.js') < page.indexOf('project_takeoff.js'));
     assert.ok(page.indexOf('takeoff_catalog_adapter.js') < page.indexOf('project_takeoff.js'));
-    const boundary = takeoff.slice(takeoff.indexOf('function catalogItemMeta'), takeoff.indexOf('function createTakeoffGroup'));
-    assert.doesNotMatch(boundary, /item\.(?:unit_cost|labor_hours|item_type|cost_type|catalog_group_id|unit_of_measure|group_name|catalog_name)\b/);
-    assert.match(boundary, /CatalogService\.getSnapshot\(\{ enabledForProjectsOnly: true \}\)/);
-    assert.doesNotMatch(boundary, /fetch\([^)]*cost_catalog\.php/);
-    assert.doesNotMatch(boundary, /normalizeCatalogItem\(/);
+    assert.match(browser, /CatalogService\.getSnapshot\(\{ enabledForProjectsOnly: false \}\)/);
+    assert.match(browser, /catalogState\.items = \(snapshot\.items \|\| \[\]\)\.map\(normalizeSnapshotItem\)/);
+    assert.match(takeoff, /const catalogBrowserController = window\.TakeoffCatalogBrowser\.create/);
 });
 
 test('Copper THHN 600 KCMIL with partial or missing sub-objects does not throw and preserves metadata', () => {

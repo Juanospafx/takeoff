@@ -5,6 +5,7 @@ const path = require('node:path');
 
 const root = path.resolve(__dirname, '..');
 const takeoff = fs.readFileSync(path.join(root, 'assets/project_takeoff.js'), 'utf8');
+const layerModal = fs.readFileSync(path.join(root, 'assets/takeoff_layer_modal.js'), 'utf8');
 const editor = fs.readFileSync(path.join(root, 'assets/editor/takeoff.js'), 'utf8');
 const syncService = require(path.join(root, 'assets/takeoff_estimating_sync_service.js'));
 const CatalogSnapshot = require(path.join(root, 'assets/estimating_catalog_snapshot_service.js'));
@@ -30,7 +31,7 @@ test('Takeoff editor projectTakeoffUpdateLayerObjects resolves all layer keys to
 });
 
 test('Takeoff dashboard submitLayerModal and changeLayerColor sync to canvas before saving', () => {
-    assert.match(takeoff, /syncAllLayersToCanvas\(\{ immediate: true, suppressEstimatingSync: true \}\);\s*\/\/\s*Modal Save is a durable operation/);
+    assert.match(layerModal, /syncAllLayersToCanvas\(\{ immediate: true, suppressEstimatingSync: true \}\);\s*\/\/\s*Modal Save is a durable operation/);
     assert.match(takeoff, /function changeLayerColor[\s\S]*?callEditor\('projectTakeoffUpdateLayerObjects'/);
     assert.match(takeoff, /function changeLayerColor[\s\S]*?syncAllLayersToCanvas/);
     assert.match(takeoff, /function changeLayerColor[\s\S]*?callEditor\('projectTakeoffSave'\)/);

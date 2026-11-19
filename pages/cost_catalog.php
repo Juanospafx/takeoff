@@ -33,9 +33,9 @@ $readOnly = !$canWrite;
     <link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
     <link href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@300;400;500;600;700;800&display=swap" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
-    <link rel="stylesheet" href="../assets/global_tools.css?v=<?= time() ?>">
+    <link rel="stylesheet" href="../assets/global_tools.css?v=<?= filemtime(__DIR__ . '/../assets/global_tools.css') ?>">
     <link rel="stylesheet" href="../assets/design_system.css?v=<?= filemtime(__DIR__ . '/../assets/design_system.css') ?>">
-    <link rel="stylesheet" href="../assets/sso_readonly.css?v=<?= time() ?>">
+    <link rel="stylesheet" href="../assets/sso_readonly.css?v=<?= filemtime(__DIR__ . '/../assets/sso_readonly.css') ?>">
     <script>
         (function () {
             try {
@@ -55,7 +55,7 @@ $readOnly = !$canWrite;
             }
         })();
     </script>
-    <link rel="stylesheet" href="../assets/cost_catalog.css?v=<?= time() ?>">
+    <link rel="stylesheet" href="../assets/cost_catalog.css?v=<?= filemtime(__DIR__ . '/../assets/cost_catalog.css') ?>">
 </head>
 <body>
 <?php include __DIR__ . '/../views/global_tools_header.php'; ?>
@@ -95,16 +95,16 @@ $readOnly = !$canWrite;
                     <i class="fas fa-book-medical"></i> Add Catalog
                 </button>
                 <?php endif; ?>
-                <div class="cc-header-menu-wrap" style="position: relative; display: inline-block;">
-                    <button class="bb-control-btn cc-btn-head" id="ccMoreActionsBtn" type="button" title="More options (Excel Import / Export / Templates)" aria-label="More options" aria-expanded="false" style="padding: 0 10px;">
+                <div class="cc-header-menu-wrap">
+                    <button class="bb-control-btn cc-btn-head cc-header-more-trigger" id="ccMoreActionsBtn" type="button" title="More options (Excel Import / Export / Templates)" aria-label="More options" aria-expanded="false">
                         <i class="fas fa-ellipsis-vertical"></i>
                     </button>
-                    <div class="cc-row-item-floating-menu" id="ccHeaderMoreMenu" hidden style="position: absolute; right: 0; top: calc(100% + 4px); z-index: 1000; min-width: 200px; box-shadow: 0 4px 16px rgba(0,0,0,0.15);">
+                    <div class="cc-row-item-floating-menu cc-header-more-menu" id="ccHeaderMoreMenu" hidden>
                         <button type="button" id="ccMenuExportCatalog">Export Master Catalog</button>
                         <?php if ($canWrite): ?>
                         <button type="button" id="ccMenuImportCatalog">Import Master Catalog</button>
                         <?php endif; ?>
-                        <div class="cc-menu-divider" style="height: 1px; background: var(--border-soft); margin: 4px 0;"></div>
+                        <div class="cc-menu-divider"></div>
                         <button type="button" id="ccMenuDownloadMasterTemplate">Download Master Template</button>
                     </div>
                 </div>
@@ -113,7 +113,7 @@ $readOnly = !$canWrite;
     </div>
 
     <!-- Alert banner -->
-    <div id="ccError" class="cc-error-alert" style="display:none;" role="alert"></div>
+    <div id="ccError" class="cc-error-alert" role="alert"></div>
 
     <!-- Page Body: Sidebar + Main Content Table fixed to page height -->
     <div class="cc-page-body">
@@ -443,7 +443,7 @@ $readOnly = !$canWrite;
                             <span class="pd-field-caret"><i class="fas fa-chevron-down"></i></span>
                         </div>
                     </div>
-                    <div class="col-type" style="flex: 1.8;">
+                    <div class="col-type cc-item-type-column">
                         <label for="ccItemMeasurementType">Measurement</label>
                         <div class="pro-create-control-box">
                             <select id="ccItemMeasurementType">
@@ -480,7 +480,7 @@ $readOnly = !$canWrite;
                                 <span class="pcd-caret"></span>
                             </button>
                             <div class="pro-custom-dropdown-menu pcd-color-menu" id="ccItemColorMenu"></div>
-                            <input type="color" id="ccItemColor" value="#2563eb" style="position:absolute;opacity:0;pointer-events:none;width:0;height:0;">
+                            <input type="color" id="ccItemColor" value="#2563eb" class="cc-hidden-color-input">
                         </div>
                     </div>
                 </div>
@@ -557,13 +557,13 @@ $readOnly = !$canWrite;
                         <table class="cc-mini-table">
                             <thead>
                                 <tr>
-                                    <th style="width: 34px; text-align: center;" aria-label="Reorder"><i class="fas fa-grip-vertical" style="opacity: 0.5;"></i></th>
-                                    <th style="width: 90px; text-align: right;">Quantity</th>
+                                    <th class="cc-col-reorder" aria-label="Reorder"><i class="fas fa-grip-vertical cc-muted-grip"></i></th>
+                                    <th class="cc-col-quantity">Quantity</th>
                                     <th>Item Name</th>
-                                    <th style="width: 60px; text-align: center;">UoM</th>
-                                    <th style="width: 90px; text-align: right;">Unit Cost</th>
-                                    <th style="width: 95px; text-align: right;">Labor Time</th>
-                                    <th style="width: 50px; text-align: center;"><span>Actions</span></th>
+                                    <th class="cc-col-uom">UoM</th>
+                                    <th class="cc-col-unit-cost">Unit Cost</th>
+                                    <th class="cc-col-labor">Labor Time</th>
+                                    <th class="cc-col-actions"><span>Actions</span></th>
                                 </tr>
                             </thead>
                             <tbody id="ccAssemblyPartsBody"></tbody>
@@ -656,7 +656,7 @@ $readOnly = !$canWrite;
                 <div class="cc-field full cc-attachment-field">
                     <label>Product Spec Sheet or Image <span class="cc-optional">PDF, PNG, JPG, WEBP · max 10 MB</span></label>
                     <div class="cc-dropzone" id="ccItemDropzone">
-                        <input id="ccItemPdf" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" style="display:none;" aria-describedby="ccItemPdfFeedback">
+                        <input id="ccItemPdf" class="cc-hidden-file-input" type="file" accept="application/pdf,image/png,image/jpeg,image/webp" aria-describedby="ccItemPdfFeedback">
                         <div class="cc-dropzone-content" id="ccDropzonePlaceholder">
                             <div class="cc-dropzone-icon-group">
                                 <span class="cc-drop-icon pdf" title="PDF Spec Sheet"><i class="fas fa-file-pdf"></i></span>
@@ -676,7 +676,7 @@ $readOnly = !$canWrite;
                         <div class="cc-attached-card" id="ccItemPdfCurrent" hidden>
                             <div class="cc-attached-preview" id="ccAttachedPreviewBox">
                                 <i class="fas fa-file-pdf" id="ccAttachedFileIcon"></i>
-                                <img id="ccAttachedImgThumb" alt="Product image preview" style="display:none;">
+                                <img id="ccAttachedImgThumb" class="cc-hidden-preview" alt="Product image preview">
                             </div>
                             <div class="cc-attached-info">
                                 <strong class="cc-attached-name" id="ccItemPdfName">spec-sheet.pdf</strong>
@@ -693,7 +693,7 @@ $readOnly = !$canWrite;
                         </div>
                         <div class="cc-attached-card" id="ccItemLegacyAttachment" hidden>
                             <div class="cc-attached-preview">
-                                <i class="fas fa-file-lines" style="color: #64748b;"></i>
+                                <i class="fas fa-file-lines cc-attachment-file-icon"></i>
                             </div>
                             <div class="cc-attached-info">
                                 <strong class="cc-attached-name">Legacy Attachment</strong>
@@ -864,7 +864,7 @@ $readOnly = !$canWrite;
                 </button>
             </div>
             <div class="pd-modal-body cc-modal-body">
-                <p id="ccPasteModalSubtitle" style="font-size: 13px; color: var(--text-muted); margin-bottom: 12px;">Select destination catalog and group to paste the copied items.</p>
+                <p id="ccPasteModalSubtitle" class="cc-paste-modal-subtitle">Select destination catalog and group to paste the copied items.</p>
                 <div class="cc-field full">
                     <label for="ccPasteCatalog">Destination Catalog <span class="req">*</span></label>
                     <select id="ccPasteCatalog" required></select>
@@ -886,11 +886,11 @@ $readOnly = !$canWrite;
 <?php endif; ?>
 
 <!-- Modal: Unified Master Excel Import / Export -->
-<div class="cc-modal-backdrop pd-modal-backdrop" id="ccIoModal" style="display:none;" role="dialog" aria-modal="true" aria-labelledby="ccIoModalTitle">
-    <div class="cc-modal pd-modal" style="max-width: 540px;">
+<div class="cc-modal-backdrop pd-modal-backdrop cc-io-modal-backdrop" id="ccIoModal" role="dialog" aria-modal="true" aria-labelledby="ccIoModalTitle">
+    <div class="cc-modal pd-modal cc-io-modal">
         <div class="pd-modal-head cc-modal-head">
-            <h3 id="ccIoModalTitle" style="display: flex; align-items: center; gap: 8px;">
-                <i class="fas fa-file-excel" style="color: #10b981;"></i>
+            <h3 id="ccIoModalTitle" class="cc-io-modal-title">
+                <i class="fas fa-file-excel cc-excel-icon"></i>
                 <span id="ccIoModalHeading">Master Catalog Excel (Parts & Assemblies)</span>
             </h3>
             <button class="pd-modal-head-close" type="button" id="ccCloseIoModal" aria-label="Close">
@@ -899,19 +899,19 @@ $readOnly = !$canWrite;
         </div>
         <div class="pd-modal-body cc-modal-body">
             <!-- Mode Tabs (Export / Import) -->
-            <div style="display: flex; gap: 8px; margin-bottom: 16px; border-bottom: 1px solid var(--border-soft); padding-bottom: 10px;">
-                <button type="button" class="bb-control-btn is-active" id="ccIoTabExport" style="flex: 1; justify-content: center; font-weight: 700;">
+            <div class="cc-io-tabs">
+                <button type="button" class="bb-control-btn is-active cc-io-tab" id="ccIoTabExport">
                     <i class="fas fa-file-export"></i> Export Master Excel
                 </button>
                 <?php if ($canWrite): ?>
-                <button type="button" class="bb-control-btn" id="ccIoTabImport" style="flex: 1; justify-content: center; font-weight: 700;">
+                <button type="button" class="bb-control-btn cc-io-tab" id="ccIoTabImport">
                     <i class="fas fa-file-import"></i> Import Master Excel
                 </button>
                 <?php endif; ?>
             </div>
 
-            <div class="cc-inline-error" id="ccIoModalError" role="alert" style="display:none; margin-bottom: 12px; padding: 10px 14px; background: rgba(239, 68, 68, 0.1); border: 1px solid rgba(239, 68, 68, 0.25); border-radius: 6px; color: #dc2626; font-size: 12.5px;"></div>
-            <div class="cc-inline-success" id="ccIoModalSuccess" style="display:none; margin-bottom: 12px; padding: 10px 14px; background: rgba(16, 185, 129, 0.1); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 6px; color: #059669; font-size: 12.5px;"></div>
+            <div class="cc-inline-error cc-io-feedback" id="ccIoModalError" role="alert"></div>
+            <div class="cc-inline-success cc-io-feedback" id="ccIoModalSuccess"></div>
 
             <!-- Target Catalog & Group Selector -->
             <div class="cc-field full">
@@ -936,53 +936,53 @@ $readOnly = !$canWrite;
             <div id="ccIoExportSection">
                 <div class="cc-field full">
                     <label>Export Format</label>
-                    <div class="bb-studio-mode-stack" style="display: flex; flex-direction: column; gap: 9px; margin-top: 6px;">
-                        <div class="bb-mode-card bb-studio-card active" style="cursor: default; border-color: #10b981; box-shadow: 0 4px 14px rgba(16, 185, 129, 0.12);">
+                    <div class="bb-studio-mode-stack cc-io-mode-stack">
+                        <div class="bb-mode-card bb-studio-card active cc-io-mode-card">
                             <div class="bb-mode-card-header">
-                                <div class="bb-mode-icon-wrap" style="background: rgba(16, 185, 129, 0.15); color: #10b981;">
+                                <div class="bb-mode-icon-wrap cc-io-mode-icon">
                                     <i class="fas fa-layer-group"></i>
                                 </div>
-                                <span class="bb-mode-badge" style="background: rgba(16, 185, 129, 0.18); color: #059669; border: 1px solid rgba(16, 185, 129, 0.3);">
+                                <span class="bb-mode-badge cc-io-mode-badge">
                                     Synchronized Master
                                 </span>
                             </div>
-                            <div class="bb-mode-title" style="font-size: 14px;">Master Excel Workbook (Parts &amp; Assemblies)</div>
+                            <div class="bb-mode-title cc-io-mode-title">Master Excel Workbook (Parts &amp; Assemblies)</div>
                             <p class="bb-mode-desc">Exports a unified <code>.xlsx</code> workbook with two synchronized tabs: <strong>'Parts'</strong> (all catalog items, materials, conduit, wire, labor) and <strong>'Assemblies'</strong> (all assemblies with nested component items, quantities, and ratios).</p>
                         </div>
                     </div>
                 </div>
 
-                <div style="margin-top: 12px; padding: 12px; background: rgba(16, 185, 129, 0.07); border: 1px solid rgba(16, 185, 129, 0.22); border-radius: 6px; font-size: 12px; color: var(--text-muted); line-height: 1.45;">
-                    <i class="fas fa-circle-check" style="color: #10b981; margin-right: 5px;"></i>
+                <div class="cc-io-export-note">
+                    <i class="fas fa-circle-check cc-io-note-icon"></i>
                     Both sheets export together so that unit costs, labor times, and assembly component links remain 100% consistent.
                 </div>
             </div>
 
             <?php if ($canWrite): ?>
             <!-- IMPORT TAB CONTENT -->
-            <div id="ccIoImportSection" style="display:none;">
+            <div id="ccIoImportSection" class="cc-io-import-section">
                 <div class="cc-field full">
                     <label for="ccIoFileInput">Upload Master Excel File (.xlsx) <span class="req">*</span></label>
-                    <input type="file" id="ccIoFileInput" accept=".xlsx" style="font-size: 12.5px; padding: 12px; background: var(--bg-input); border: 1px dashed var(--border); border-radius: 8px; width: 100%; cursor: pointer;">
+                    <input type="file" id="ccIoFileInput" class="cc-io-file-input" accept=".xlsx">
                 </div>
 
-                <div style="margin-top: 10px; padding: 12px 14px; background: var(--bg-input); border: 1px solid var(--border-soft); border-radius: 8px; font-size: 12px; color: var(--text-muted); line-height: 1.45;">
-                    <div style="display: flex; gap: 8px; align-items: flex-start;">
-                        <i class="fas fa-bolt" style="color: #f59e0b; margin-top: 2px;"></i>
+                <div class="cc-io-import-note">
+                    <div class="cc-io-import-note-row">
+                        <i class="fas fa-bolt cc-io-import-note-icon"></i>
                         <div>
-                            <strong style="color: var(--text-main);">Two-Pass Atomic Loading:</strong><br>
+                            <strong class="cc-io-import-note-title">Two-Pass Atomic Loading:</strong><br>
                             1. Reads and updates all catalog items from the <code>Parts</code> sheet.<br>
                             2. Immediately resolves and links each component in the <code>Assemblies</code> sheet, automatically calculating costs and labor times with zero missing items.
                         </div>
                     </div>
                 </div>
 
-                <div style="margin-top: 14px; padding: 12px 14px; background: rgba(16, 185, 129, 0.08); border: 1px solid rgba(16, 185, 129, 0.25); border-radius: 8px; display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
-                    <div style="font-size: 12px;">
-                        <strong style="color: var(--text-main);"><i class="fas fa-file-excel" style="color: #10b981; margin-right: 5px;"></i> Need the blank template?</strong><br>
-                        <span style="color: var(--text-muted);">Download the official Master Template with both sheets ('Parts' and 'Assemblies') and format guides.</span>
+                <div class="cc-io-template-callout">
+                    <div class="cc-io-template-copy">
+                        <strong class="cc-io-template-title"><i class="fas fa-file-excel cc-io-note-icon"></i> Need the blank template?</strong><br>
+                        <span class="cc-io-template-description">Download the official Master Template with both sheets ('Parts' and 'Assemblies') and format guides.</span>
                     </div>
-                    <a href="../api/catalog_io.php?action=template&type=both" target="_blank" class="bb-btn-procore-primary" style="padding: 7px 14px; font-size: 12px; text-decoration: none; white-space: nowrap; background: #10b981; border-color: #059669; font-weight: 600;">
+                    <a href="../api/catalog_io.php?action=template&type=both" target="_blank" class="bb-btn-procore-primary cc-io-template-download">
                         <i class="fas fa-file-arrow-down"></i> Download Master Template
                     </a>
                 </div>
@@ -1004,10 +1004,10 @@ $readOnly = !$canWrite;
 <!-- Floating Context Menu for Table Items (Portal) -->
 <div class="cc-row-item-floating-menu" id="ccRowItemFloatingMenu" hidden></div>
 
-<script src="../assets/global_tools.js?v=<?= time() ?>"></script>
+<script src="../assets/global_tools.js?v=<?= filemtime(__DIR__ . '/../assets/global_tools.js') ?>"></script>
 <script src="../assets/catalog_item_contract.js"></script>
 <script src="../assets/assembly_expansion_service.js"></script>
-<script src="../assets/cost_catalog.js?v=<?= time() ?>"></script>
-<script src="../assets/catalog_admin_service.js?v=catalog-phase6-20260827-1"></script>
+<script src="../assets/cost_catalog.js?v=<?= filemtime(__DIR__ . '/../assets/cost_catalog.js') ?>"></script>
+<script src="../assets/catalog_admin_service.js?v=<?= filemtime(__DIR__ . '/../assets/catalog_admin_service.js') ?>"></script>
 </body>
 </html>

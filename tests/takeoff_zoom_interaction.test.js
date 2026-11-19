@@ -6,6 +6,7 @@ const path = require('node:path');
 const editor = fs.readFileSync(path.join(__dirname, '..', 'pages', 'editor.php'), 'utf8');
 const takeoff = fs.readFileSync(path.join(__dirname, '..', 'assets', 'editor', 'takeoff.js'), 'utf8');
 const project = fs.readFileSync(path.join(__dirname, '..', 'assets', 'project_takeoff.js'), 'utf8');
+const viewerController = fs.readFileSync(path.join(__dirname, '..', 'assets', 'takeoff_viewer_controller.js'), 'utf8');
 
 function bodyAfter(source, marker, endMarker) {
     const start = source.indexOf(marker);
@@ -47,7 +48,7 @@ test('the parent mirrors editor zoom into controls without feeding it back to th
 });
 
 test('buttons and slider remain command paths into the editor', () => {
-    const commands = bodyAfter(project, 'function runViewerCommand', 'function showPrepared');
+    const commands = bodyAfter(viewerController, 'function runViewerCommand', 'function showPrepared');
     assert.match(commands, /zoom-out[\s\S]*setZoom\(currentZoomPercent\(\)\s*-\s*25\)/);
     assert.match(commands, /zoom-in[\s\S]*setZoom\(currentZoomPercent\(\)\s*\+\s*25\)/);
     assert.match(project, /takeoffZoomSlider[\s\S]*addEventListener\('input',\s*event\s*=>\s*setZoom\(event\.target\.value\)\)/);

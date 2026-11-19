@@ -6,6 +6,7 @@ const root = path.resolve(__dirname, '..');
 const css = fs.readFileSync(path.join(root, 'assets/global_tools.css'), 'utf8');
 const globalTools = fs.readFileSync(path.join(root, 'assets/global_tools.js'), 'utf8');
 const takeoff = fs.readFileSync(path.join(root, 'assets/project_takeoff.js'), 'utf8');
+const scaleController = fs.readFileSync(path.join(root, 'assets/takeoff_scale_controller.js'), 'utf8');
 
 assert.match(css, /UNIFIED PRO CUSTOM DROPDOWN \/ SELECT SYSTEM/,
     'the shared custom-select system from the accepted source commit must exist');
@@ -24,7 +25,7 @@ assert.match(css, /body\.theme-dark \.pcd-select-item\.is-selected[\s\S]*?color:
 
 assert.match(globalTools, /function initCustomSelects\(root = document\)[\s\S]*?selects\.forEach\(enhanceSelect\)/,
     'the existing select enhancer must remain enabled');
-assert.match(takeoff, /function openScalePanel\(mode\)[\s\S]*?if \(!requireWrite\(\)\) return false;/,
+assert.match(scaleController, /function openScalePanel\(mode\)[\s\S]*?if \(!requireWrite\(\)\) return false;/,
     'Drawing Scale must preserve the existing write guard');
 
 console.log('Takeoff Drawing Scale modal contract: PASS');

@@ -39,6 +39,11 @@
 
     const $ = (id) => document.getElementById(id);
     const slug = (value) => String(value || '').toLowerCase().replace(/[^a-z0-9]+/g, '-');
+    const overviewDialogs = window.ProjectOverviewDialogs.create({
+        getElement: $,
+        escapeHtml,
+        showToast
+    });
 
     function markDirty() {
         if (!isDirty) {
@@ -4011,26 +4016,7 @@
         return allDocumentRows().find(row => String(row.id) === String(id));
     }
 
-    let currentRenameCallback = null;
-
-    function openRenameModal({ title = 'Rename', label = 'Name', currentName = '', onSave }) {
-        const modal = $('pdDocRenameModal');
-        const titleEl = $('docRenameModalTitle');
-        const labelEl = $('docRenameInputLabel');
-        const input = $('modalDocRenameInput');
-        if (!modal || !input) return;
-
-        if (titleEl) titleEl.innerHTML = `<i class="fas fa-pen" style="color: var(--primary);"></i> ${escapeHtml(title)}`;
-        if (labelEl) labelEl.textContent = label;
-        input.value = currentName;
-        currentRenameCallback = onSave;
-
-        modal.classList.add('open');
-        setTimeout(() => {
-            input.focus();
-            input.select();
-        }, 50);
-    }
+    function openRenameModal(options) { return overviewDialogs.openRenameModal(options); }
     window.openRenameModal = openRenameModal;
 
     function renameDocumentWithModal(doc, trigger = null) {
@@ -4138,75 +4124,10 @@
         });
     }
 
-    function showConfirmDialog({
-        title = 'Confirm Action',
-        message = 'Are you sure you want to proceed?',
-        confirmText = 'Delete',
-        cancelText = 'Cancel',
-        type = 'error',
-        badge = 'CONFIRMATION',
-        icon = 'fas fa-trash',
-        primaryDanger = true
-    }) {
-        return new Promise((resolve) => {
-            if (window.TakeoffAnnouncement && typeof window.TakeoffAnnouncement.show === 'function') {
-                let resolved = false;
-                window.TakeoffAnnouncement.show({
-                    force: true,
-                    type: type,
-                    title: title,
-                    badge: badge,
-                    icon: icon,
-                    message: message,
-                    primaryText: confirmText,
-                    primaryDanger: primaryDanger,
-                    cancelText: cancelText,
-                    showDontShow: false,
-                    onPrimary: () => {
-                        if (!resolved) {
-                            resolved = true;
-                            resolve(true);
-                        }
-                    },
-                    onCancel: () => {
-                        if (!resolved) {
-                            resolved = true;
-                            resolve(false);
-                        }
-                    }
-                });
-                return;
-            }
-            resolve(window.confirm(message));
-        });
-    }
+    function showConfirmDialog(options) { return overviewDialogs.showConfirmDialog(options); }
     window.showConfirmDialog = showConfirmDialog;
 
-    function showAlertDialog({
-        title = 'Notice',
-        message = '',
-        buttonText = 'Got It',
-        type = 'warning',
-        badge = 'NOTICE',
-        icon = 'fas fa-circle-exclamation'
-    }) {
-        if (window.TakeoffAnnouncement && typeof window.TakeoffAnnouncement.show === 'function') {
-            window.TakeoffAnnouncement.show({
-                force: true,
-                type: type,
-                title: title,
-                badge: badge,
-                icon: icon,
-                message: message,
-                primaryText: buttonText,
-                cancelText: null,
-                secondaryText: null,
-                showDontShow: false
-            });
-            return;
-        }
-        showToast(message);
-    }
+    function showAlertDialog(options) { return overviewDialogs.showAlertDialog(options); }
 
     async function handleSidebarMenuAction(action, id, btn) {
         if (action === 'view-doc') {
@@ -5412,27 +5333,7 @@
             toggleFloatingMenu('documentsViewMenu', event.currentTarget);
         });
 
-        $('modalSaveDocRenameBtn')?.addEventListener('click', () => {
-            const input = $('modalDocRenameInput');
-            const val = input ? input.value.trim() : '';
-            if (!val) {
-                showToast('Please enter a valid name.');
-                return;
-            }
-            $('pdDocRenameModal')?.classList.remove('open');
-            if (typeof currentRenameCallback === 'function') {
-                const cb = currentRenameCallback;
-                currentRenameCallback = null;
-                cb(val);
-            }
-        });
-
-        $('modalDocRenameInput')?.addEventListener('keydown', (e) => {
-            if (e.key === 'Enter') {
-                e.preventDefault();
-                $('modalSaveDocRenameBtn')?.click();
-            }
-        });
+        overviewDialogs.bindRenameForm();
 
         document.querySelectorAll('[data-doc-folder-action]').forEach(button => {
             button.addEventListener('click', () => {

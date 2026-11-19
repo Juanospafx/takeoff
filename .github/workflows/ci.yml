@@ -29,7 +29,27 @@ jobs:
           php tests/excel_runtime_smoke.test.php
           node tests/excel_template_regression_contract.test.js
           node tests/project_creation_contract.test.js
+          node tests/asset_cache_keys.test.js
+          node tests/portal_styles_extraction.test.js
+          node tests/cost_catalog_incremental_render.test.js
+          node tests/estimating_incremental_render.test.js
+          node tests/project_overview_dialogs.test.js
+          node --check assets/editor/theme_bridge.js
+          node --check assets/editor/authorization.js
+          node --check assets/project_overview_dialogs.js
+          node --check assets/project_estimating.js
+          node --check assets/cost_catalog.js
+          node --check assets/takeoff_layer_modal.js
+          node --check assets/takeoff_catalog_browser.js
+          node --check assets/takeoff_viewer_controller.js
+          node --check assets/takeoff_scale_controller.js
+          node tests/takeoff_catalog_browser_controller.test.js
+          node tests/takeoff_layer_modal_controller.test.js
+          node tests/takeoff_viewer_scale_controller.test.js
           node tests/takeoff_layer_title_first_commit.test.js
+          node tests/takeoff_modal_source_fidelity.test.js
+          node tests/takeoff_editable_properties.test.js
+          node tests/takeoff_linear_scale_requirement.test.js
 
       - name: PHP syntax check
         run: |
@@ -47,3 +67,5 @@ jobs:
           set -e
           php tests/sso_client_contract.test.php
           php tests/sso_composer_pipeline_contract.test.php
+          php tests/sso_rbac_editor_ui.test.php
+          php tests/sso_rbac_project_dashboard_ui.test.php

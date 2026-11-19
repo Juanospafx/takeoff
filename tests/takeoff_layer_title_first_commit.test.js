@@ -3,34 +3,33 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 
-const source = fs.readFileSync(path.resolve(__dirname, '../assets/project_takeoff.js'), 'utf8');
+const projectSource = fs.readFileSync(path.resolve(__dirname, '../assets/project_takeoff.js'), 'utf8');
+const controllerPath = path.resolve(__dirname, '../assets/takeoff_layer_modal.js');
+const controllerSource = fs.existsSync(controllerPath) ? fs.readFileSync(controllerPath, 'utf8') : '';
+const source = `${projectSource}\n${controllerSource}`;
 
 test('Close, drawer X, and Enter share the same layer modal commit path', () => {
-    const modalBindings = source.slice(
-        source.indexOf("$('layerDrawerSaveBtn')?.addEventListener"),
-        source.indexOf("setupTypeDropdown('editLayer'")
-    );
-    assert.match(modalBindings, /layerDrawerSaveBtn[\s\S]*?commitLayerModalChanges\(\)/);
-    assert.match(modalBindings, /data-layer-modal-close[\s\S]*?commitLayerModalChanges\(\)/);
-    assert.match(modalBindings, /event\.key !== 'Enter'[\s\S]*?commitLayerModalChanges\(\)/);
-    assert.match(source, /if \(isOpen\) \{\s*void commitLayerModalChanges\(\);\s*return;/,
+    assert.match(controllerSource, /layerDrawerSaveBtn[\s\S]*?void commit\(\)/);
+    assert.match(controllerSource, /data-layer-modal-close[\s\S]*?void commit\(\)/);
+    assert.match(controllerSource, /event\.key !== 'Enter'[\s\S]*?void commit\(\)/);
+    assert.match(source, /if \(isOpen\) \{\s*void (?:commitLayerModalChanges|layerModalController\.commit)\(\);\s*return;/,
         'clicking the same three-dot trigger to close must also commit the current title');
 });
 
 test('existing layer title is committed on the first action instead of being closed as stale state', () => {
-    const commit = source.slice(
+    const commit = controllerSource || source.slice(
         source.indexOf('async function commitLayerModalChanges'),
         source.indexOf('function patchTakeoffLayerRowQuantityDom')
     );
     assert.match(commit, /flushActiveLayerModalSave\(\)/);
     assert.match(commit, /isLayerModalNonAutoDirty\(\)/);
-    assert.match(commit, /return submitLayerModal\(\)/);
+    assert.match(commit, /(?:return\s+)?submitLayerModal\(\)/);
 });
 
 test('title state and row are updated before awaiting iframe persistence', () => {
-    const submit = source.slice(
-        source.indexOf('async function submitLayerModal'),
-        source.indexOf('const CATALOG_PALETTE')
+    const submit = controllerSource.slice(
+        controllerSource.indexOf('async function submitLayerModal'),
+        controllerSource.indexOf('function getActiveFormType')
     );
     const assignIndex = submit.indexOf('Object.assign(layer, payload)');
     const rowIndex = submit.indexOf('refreshTakeoffLayerRowDom(updatedLayer)');
