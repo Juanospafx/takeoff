@@ -29,6 +29,7 @@ jobs:
           php tests/excel_runtime_smoke.test.php
           node tests/excel_template_regression_contract.test.js
           node tests/project_creation_contract.test.js
+          node tests/takeoff_layer_title_first_commit.test.js
 
       - name: PHP syntax check
         run: |

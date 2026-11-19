@@ -3580,7 +3580,7 @@
                 const isOpen = modal && !modal.hidden && workspace?.classList.contains('has-layer-drawer') && takeoffState.editingLayerId === layerId;
                 closeGroupContextMenu();
                 if (isOpen) {
-                    closeLayerModal();
+                    void commitLayerModalChanges();
                     return;
                 }
                 const layer = findLayer(layerId);
@@ -3839,17 +3839,11 @@
             </div>
         </div>`;
         $('layerDrawerSaveBtn')?.addEventListener('click', () => {
-            if (takeoffState.editingLayerId) {
-                flushActiveLayerModalSave();
-                if (!isLayerModalNonAutoDirty()) {
-                    return closeLayerModal();
-                }
-            }
-            return submitLayerModal();
+            void commitLayerModalChanges();
         });
 
         modal.querySelectorAll('[data-layer-modal-close]').forEach(btn => btn.addEventListener('click', () => {
-            closeLayerModal();
+            void commitLayerModalChanges();
         }));
 
         modal.querySelectorAll('[data-layer-tab]').forEach(tabBtn => {
@@ -3903,7 +3897,7 @@
             if (target.id === 'layerTagInput' && event.shiftKey) return;
             if (modal.querySelector('.pro-custom-dropdown.is-open')) return;
             event.preventDefault();
-            submitLayerModal();
+            void commitLayerModalChanges();
         });
 
         setupTypeDropdown('editLayer', $('layerTypeInput'));
@@ -4675,6 +4669,17 @@
             curr.depth !== layerModalNonAutoBaseline.depth ||
             Boolean(curr.hasNewCatalogPickerItem)
         );
+    }
+
+    async function commitLayerModalChanges() {
+        if (takeoffState.editingLayerId) {
+            flushActiveLayerModalSave();
+            if (!isLayerModalNonAutoDirty()) {
+                closeLayerModal();
+                return true;
+            }
+        }
+        return submitLayerModal();
     }
 
     function patchTakeoffLayerRowQuantityDom(layer) {
@@ -5544,6 +5549,7 @@
             const catalogChanged = Boolean(takeoffState.pendingCatalogItem && takeoffState.pendingCatalogItem._fromCatalogPicker === true);
             const formulaChanged = typeFamilyChanged || subtypeChanged || multChanged || dropChanged || spacingChanged || uomChanged;
             const metadataOnly = Boolean(editingLayerId && !typeFamilyChanged && !subtypeChanged && !visualChanged && !formulaChanged);
+            const needsEstimatingSync = Boolean(!editingLayerId || typeFamilyChanged || formulaChanged || catalogChanged || nameChanged || diffChanged);
 
             if (editingLayerId) {
                 const layer = findLayer(editingLayerId);
@@ -5589,6 +5595,8 @@
                 if (typeFamilyChanged || takeoffState.activeLayerId === editingLayerId) {
                     setActiveTakeoffLayer(editingLayerId, shouldReactivateTool);
                 }
+                const updatedLayer = findLayer(editingLayerId);
+                if (updatedLayer) refreshTakeoffLayerRowDom(updatedLayer);
             } else {
                 const group = findGroup(takeoffState.pendingLayerGroupId);
                 const layer = {
@@ -5617,6 +5625,12 @@
                     syncTakeoffFromCanvasSnapshot(liveSnap, { suppressEstimatingSync: !typeFamilyChanged, immediateEstimatingSync: typeFamilyChanged });
                 }
             }
+            // Commit the parent workspace immediately. Waiting for the iframe
+            // request before this point made the first Close/Enter appear to
+            // retain the previous title and allowed another close to win the race.
+            saveTakeoffState(needsEstimatingSync
+                ? { debounceEstimatingSync: !typeFamilyChanged && !catalogChanged }
+                : { skipEstimatingSync: true });
             // Cancel any pending live debounce since Save commits durably now.
             if (layerModalLiveBackendTimer) {
                 clearTimeout(layerModalLiveBackendTimer);
@@ -5633,10 +5647,6 @@
                 console.warn('Takeoff editor background save notification warning:', editorErr);
             }
             closeLayerModal();
-            const needsEstimatingSync = Boolean(!editingLayerId || typeFamilyChanged || formulaChanged || catalogChanged || nameChanged || diffChanged);
-            saveTakeoffState(needsEstimatingSync
-                ? { debounceEstimatingSync: !typeFamilyChanged && !catalogChanged }
-                : { skipEstimatingSync: true });
             const savedLayer = findLayer(savedLayerId);
             if (editingLayerId && savedLayer && !catalogChanged && !typeFamilyChanged && !tagChanged) {
                 refreshTakeoffLayerRowDom(savedLayer);
@@ -5645,9 +5655,11 @@
             }
             window.dispatchEvent(new CustomEvent('takeoff:layer-visuals-updated', { detail: { projectId: String(window.ProjectState?.projectId || '') } }));
             window.dispatchEvent(new CustomEvent('takeoff:layer-properties-updated', { detail: { layerId: savedLayerId, difficulty: payload.difficulty, multiplier: payload.multiplier } }));
+            return true;
         } catch (error) {
             console.warn('Takeoff layer save failed', error);
             showPrepared('Unable to save Takeoff item changes. Please try again.');
+            return false;
         } finally {
             const drawerSaveBtn = $('layerDrawerSaveBtn');
             if (drawerSaveBtn) {
