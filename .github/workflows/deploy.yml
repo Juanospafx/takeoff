@@ -159,18 +159,15 @@ jobs:
             > "deploy_artifact/$diagnostic_file"
           test "$(grep -c "$token_hash" "deploy_artifact/$diagnostic_file")" -eq 1
 
-      # Security Note:
-      # Port 21 (plain FTP) is retained due to lack of FTPS evidence from the hosting provider.
-      # Plain FTP transmits credentials and code unencrypted over the network.
-      # Migration to FTPS (port 990 / 21 with explicit TLS) or SFTP is recommended as soon as
-      # provider configuration is confirmed. Do not attempt network connection checks during CI/build.
-      - name: Deploy to FTP server
+      - name: Deploy to FTPS server
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
           server: ${{ secrets.FTP_SERVER }}
           username: ${{ secrets.FTP_USERNAME }}
           password: ${{ secrets.FTP_PASSWORD }}
           port: 21
+          protocol: ftps
+          security: strict
           local-dir: ./deploy_artifact/
           server-dir: ./
           dangerous-clean-slate: false

@@ -48,6 +48,8 @@ $deploy = (string)file_get_contents($root . '/.github/workflows/deploy.yml');
 security_assert(str_contains($deploy, 'php-version: "8.3.36"'), 'Deployment workflow matches the PHP 8.3.36 production baseline');
 security_assert(str_contains($deploy, "--exclude 'scratch'"), 'Deployment artifact excludes scratch tooling');
 security_assert(str_contains($deploy, '.php_runtime_supported == true'), 'Production diagnostic rejects an outdated or incomplete PHP runtime');
+security_assert(str_contains($deploy, 'protocol: ftps'), 'Deployment encrypts FTP credentials and payloads with FTPS');
+security_assert(str_contains($deploy, 'security: strict'), 'Deployment validates the FTPS certificate strictly');
 
 $htaccess = (string)file_get_contents($root . '/.htaccess');
 security_assert(str_contains($htaccess, 'api/download.php?scope=uploads'), 'Uploaded files route through authenticated download');
