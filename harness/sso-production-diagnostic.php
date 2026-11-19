@@ -31,7 +31,7 @@ if (
 $result = [
     'ok' => true,
     'php_version' => PHP_VERSION,
-    'php_runtime_supported' => PHP_VERSION_ID >= 80427
+    'php_runtime_supported' => PHP_VERSION_ID >= 80336
         && extension_loaded('openssl')
         && extension_loaded('pdo_mysql'),
     'config_loaded' => false,

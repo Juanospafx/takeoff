@@ -42,10 +42,10 @@ security_assert(!str_contains($schema, 'admin123'), 'Unified schema contains no 
 security_assert(str_contains($schema, '`active` TINYINT(1) NOT NULL DEFAULT 1'), 'Unified users schema includes active state');
 
 $composer = json_decode((string)file_get_contents($root . '/composer.json'), true, 512, JSON_THROW_ON_ERROR);
-security_assert(($composer['require']['php'] ?? '') === '>=8.4.27 <8.5', 'Composer requires patched PHP 8.4.27 or newer in the 8.4 line');
+security_assert(($composer['require']['php'] ?? '') === '>=8.3.36 <8.5', 'Composer requires the patched PHP 8.3.36 production baseline or newer');
 
 $deploy = (string)file_get_contents($root . '/.github/workflows/deploy.yml');
-security_assert(str_contains($deploy, 'php-version: "8.4.27"'), 'Deployment workflow installs PHP 8.4.27');
+security_assert(str_contains($deploy, 'php-version: "8.3.36"'), 'Deployment workflow matches the PHP 8.3.36 production baseline');
 security_assert(str_contains($deploy, "--exclude 'scratch'"), 'Deployment artifact excludes scratch tooling');
 security_assert(str_contains($deploy, '.php_runtime_supported == true'), 'Production diagnostic rejects an outdated or incomplete PHP runtime');
 
