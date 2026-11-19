@@ -28,12 +28,24 @@ if (
     diagnosticResponse(401, ['ok' => false]);
 }
 
+$excelExtensions = [
+    'ctype', 'dom', 'fileinfo', 'filter', 'gd', 'iconv', 'libxml',
+    'mbstring', 'simplexml', 'xml', 'xmlreader', 'xmlwriter', 'zip', 'zlib',
+];
+$missingExcelExtensions = array_values(array_filter(
+    $excelExtensions,
+    static fn(string $extension): bool => !extension_loaded($extension)
+));
+
 $result = [
     'ok' => true,
     'php_version' => PHP_VERSION,
     'php_runtime_supported' => PHP_VERSION_ID >= 80336
         && extension_loaded('openssl')
         && extension_loaded('pdo_mysql'),
+    'excel_runtime_supported' => $missingExcelExtensions === [],
+    'excel_missing_extensions' => $missingExcelExtensions,
+    'excel_export_template' => is_readable(__DIR__ . '/core/resources/Project Estimate Export_Template.xlsx'),
     'config_loaded' => false,
     'oauth_client_accepted' => false,
     'oauth_classification' => 'not_checked',
@@ -49,6 +61,9 @@ $result = [
 try {
     if (!$result['php_runtime_supported']) {
         throw new RuntimeException('Unsupported PHP runtime.');
+    }
+    if (!$result['excel_runtime_supported'] || !$result['excel_export_template']) {
+        throw new RuntimeException('Excel runtime prerequisites are unavailable.');
     }
     $root = __DIR__;
     require_once $root . '/vendor/autoload.php';

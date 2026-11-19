@@ -336,24 +336,41 @@ try {
                 'source_bid_id' => (int)$bid['id'],
                 'source_bid_total_amount' => (float)$bid['total_amount'],
                 'create_mode' => $mode,
-                'template_snapshot_note' => $templateId ? 'Template selected for future estimate/takeoff/proposal snapshot copy.' : null,
+                'template_snapshot_note' => $templateId ? 'Template workspace copied when the project was created.' : null,
             ];
-            $stmt = $pdo->prepare(
-                "INSERT INTO projects (project_template_id, estimator_id, name, description, status, client_name, bid_due_at, metadata_json)
-                 VALUES (?, ?, ?, ?, 'draft', ?, ?, ?)"
-            );
-            $stmt->execute([
-                $templateId,
-                bid_board_int($bid['estimator_id'] ?? 0) ?: null,
-                $projectName,
-                'Created from bid: ' . $bid['name'],
-                $bid['requester_company'] ?: null,
-                $bid['due_at'] ?: null,
-                json_encode($metadata, JSON_UNESCAPED_SLASHES),
-            ]);
-            $projectId = (int)$pdo->lastInsertId();
-            $stmt = $pdo->prepare("UPDATE bids SET project_id = ?, project_name_snapshot = ? WHERE id = ?");
-            $stmt->execute([$projectId, $projectName, $id]);
+            $ownsCreateTransaction = !$pdo->inTransaction();
+            if ($ownsCreateTransaction) {
+                $pdo->beginTransaction();
+            }
+            try {
+                $stmt = $pdo->prepare(
+                    "INSERT INTO projects (project_template_id, estimator_id, name, description, status, client_name, bid_due_at, metadata_json)
+                     VALUES (?, ?, ?, ?, 'draft', ?, ?, ?)"
+                );
+                $stmt->execute([
+                    $templateId,
+                    bid_board_int($bid['estimator_id'] ?? 0) ?: null,
+                    $projectName,
+                    'Created from bid: ' . $bid['name'],
+                    $bid['requester_company'] ?: null,
+                    $bid['due_at'] ?: null,
+                    json_encode($metadata, JSON_UNESCAPED_SLASHES),
+                ]);
+                $projectId = (int)$pdo->lastInsertId();
+                if ($templateId !== null) {
+                    ProjectTemplateService::instantiateTemplateIntoProject($pdo, $templateId, $projectId, $projectName);
+                }
+                $stmt = $pdo->prepare("UPDATE bids SET project_id = ?, project_name_snapshot = ? WHERE id = ?");
+                $stmt->execute([$projectId, $projectName, $id]);
+                if ($ownsCreateTransaction && $pdo->inTransaction()) {
+                    $pdo->commit();
+                }
+            } catch (Throwable $e) {
+                if ($ownsCreateTransaction && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
+            }
             bid_board_json(['status' => 'success', 'id' => $projectId, 'data' => bid_board_payload($pdo)]);
 
         case 'delete':

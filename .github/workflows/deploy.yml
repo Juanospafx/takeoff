@@ -21,6 +21,7 @@ jobs:
         with:
           php-version: "8.3.36"
           tools: composer:v2
+          extensions: ctype, dom, fileinfo, filter, gd, iconv, libxml, mbstring, simplexml, xml, xmlreader, xmlwriter, zip, zlib
 
       - name: Install optimized production dependencies
         run: composer install --no-dev --prefer-dist --no-interaction --optimize-autoloader
@@ -84,6 +85,12 @@ jobs:
             --exclude 'coverage' \
             --exclude "$ARTIFACT_DIR"
 
+          # Excel export needs one workbook template at runtime. Keep it under
+          # core/ so Apache's source-directory deny rule prevents direct download.
+          mkdir -p "$ARTIFACT_DIR/core/resources"
+          cp "templates/Project Estimate Export_Template.xlsx" \
+            "$ARTIFACT_DIR/core/resources/Project Estimate Export_Template.xlsx"
+
           # Verify critical runtime paths are present in artifact including vendor
           test -d "$ARTIFACT_DIR/api"
           test -d "$ARTIFACT_DIR/core"
@@ -91,6 +98,7 @@ jobs:
           test -d "$ARTIFACT_DIR/assets"
           test -d "$ARTIFACT_DIR/vendor"
           test -f "$ARTIFACT_DIR/bin/dispatch-won-project-outbox.php"
+          test -f "$ARTIFACT_DIR/core/resources/Project Estimate Export_Template.xlsx"
 
           # Verify excluded items are strictly absent from artifact
           test ! -d "$ARTIFACT_DIR/tests"
@@ -179,5 +187,5 @@ jobs:
             --request POST \
             --header "X-Takeoff-Diagnostic-Token: $TAKEOFF_DIAGNOSTIC_TOKEN" \
             "https://takeoff.brightronix.net/sso-production-diagnostic-${GITHUB_RUN_ID}.php")"
-          printf '%s' "$response" | jq -c '{ok,php_version,php_runtime_supported,config_loaded,oauth_client_accepted,oauth_classification,database_connected,users_table,users_active_column,users_timestamps,links_table,links_active_column,cleanup}'
-          printf '%s' "$response" | jq -e '.ok == true and .php_runtime_supported == true and .cleanup == true' >/dev/null
+          printf '%s' "$response" | jq -c '{ok,php_version,php_runtime_supported,excel_runtime_supported,excel_missing_extensions,excel_export_template,config_loaded,oauth_client_accepted,oauth_classification,database_connected,users_table,users_active_column,users_timestamps,links_table,links_active_column,cleanup}'
+          printf '%s' "$response" | jq -e '.ok == true and .php_runtime_supported == true and .excel_runtime_supported == true and .excel_export_template == true and .cleanup == true' >/dev/null

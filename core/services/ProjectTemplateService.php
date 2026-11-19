@@ -62,7 +62,7 @@ class ProjectTemplateService
         return $cols;
     }
 
-    public static function defaultEstimateSettings(PDO $pdo = null): array
+    public static function defaultEstimateSettings(?PDO $pdo = null): array
     {
         $laborCost = 36.0;
         $laborMargin = 34.6;
@@ -569,6 +569,11 @@ class ProjectTemplateService
                     $oldEstId = (int) $est['id'];
                     unset($est['id'], $est['created_at'], $est['updated_at'], $est['deleted_at']);
                     $est['project_id'] = $newId;
+                    foreach (['estimate_number', 'estimating_id', 'takeoff_id', 'bid_id'] as $detachedColumn) {
+                        if (array_key_exists($detachedColumn, $est)) {
+                            $est[$detachedColumn] = null;
+                        }
+                    }
                     if ($resetQuantities) {
                         foreach (['subtotal_cost', 'markup_total', 'tax_total', 'total_cost', 'labor_hours_total'] as $zc) {
                             if (array_key_exists($zc, $est))
@@ -679,6 +684,11 @@ class ProjectTemplateService
                     $oldTkId = (int) $tk['id'];
                     unset($tk['id'], $tk['created_at'], $tk['updated_at'], $tk['deleted_at']);
                     $tk['project_id'] = $newId;
+                    if (isset($tk['estimate_id'])) {
+                        $tk['estimate_id'] = isset($estimateMap[(int) $tk['estimate_id']])
+                            ? $estimateMap[(int) $tk['estimate_id']]
+                            : null;
+                    }
                     if ($includeDocuments) {
                         if (isset($tk['drawing_id']) && $tk['drawing_id'] !== null) {
                             if (isset($fileMap[(int) $tk['drawing_id']]))
@@ -886,7 +896,11 @@ class ProjectTemplateService
                 $itemOrderBy = !empty($itemCols['sort_order']) ? 'ORDER BY sort_order ASC, id ASC' : 'ORDER BY id ASC';
                 $stmt = $pdo->prepare("SELECT * FROM estimate_items WHERE estimate_id IN ($inClause) AND deleted_at IS NULL {$itemOrderBy}");
                 $stmt->execute($estIds);
+                $itemIdMap = [];
+                $pendingParentLinks = [];
                 foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $ei) {
+                    $oldItemId = (int) $ei['id'];
+                    $oldParentId = isset($ei['parent_estimate_item_id']) ? (int) $ei['parent_estimate_item_id'] : 0;
                     unset($ei['id'], $ei['created_at'], $ei['updated_at'], $ei['deleted_at']);
                     if (array_key_exists('project_id', $ei))
                         $ei['project_id'] = $newId;
@@ -898,6 +912,12 @@ class ProjectTemplateService
                     } else {
                         $ei['takeoff_layer_id'] = null;
                     }
+                    if (array_key_exists('takeoff_measurement_id', $ei)) {
+                        $ei['takeoff_measurement_id'] = null;
+                    }
+                    if (array_key_exists('parent_estimate_item_id', $ei)) {
+                        $ei['parent_estimate_item_id'] = null;
+                    }
                     if ($resetQuantities) {
                         foreach (['quantity', 'material_cost', 'labor_cost', 'equipment_cost', 'subcontractor_cost', 'labor_hours', 'subtotal_cost', 'total_cost'] as $col) {
                             if (array_key_exists($col, $ei))
@@ -906,6 +926,19 @@ class ProjectTemplateService
                     }
                     $cols = array_keys($ei);
                     $pdo->prepare("INSERT INTO estimate_items (" . implode(', ', $cols) . ") VALUES (" . implode(', ', array_fill(0, count($cols), '?')) . ")")->execute(array_values($ei));
+                    $newItemId = (int) $pdo->lastInsertId();
+                    $itemIdMap[$oldItemId] = $newItemId;
+                    if ($oldParentId > 0) {
+                        $pendingParentLinks[$newItemId] = $oldParentId;
+                    }
+                }
+                if (isset($itemCols['parent_estimate_item_id']) && $pendingParentLinks !== []) {
+                    $parentUpdate = $pdo->prepare('UPDATE estimate_items SET parent_estimate_item_id = ? WHERE id = ?');
+                    foreach ($pendingParentLinks as $newItemId => $oldParentId) {
+                        if (isset($itemIdMap[$oldParentId])) {
+                            $parentUpdate->execute([$itemIdMap[$oldParentId], $newItemId]);
+                        }
+                    }
                 }
             }
 
@@ -919,7 +952,8 @@ class ProjectTemplateService
         } catch (Throwable $e) {
             if (!$inTransaction && $pdo->inTransaction())
                 $pdo->rollBack();
-            error_log('Project template deep clone warning');
+            error_log('Project template deep clone failed');
+            throw new RuntimeException('Unable to clone the selected project template.', 0, $e);
         }
     }
 
@@ -1157,12 +1191,27 @@ class ProjectTemplateService
     public static function instantiateTemplateIntoProject(PDO $pdo, int $templateId, int $newProjectId, string $projectName = ''): bool
     {
         [$sourcePid,] = self::resolveTemplateSource($pdo, $templateId);
-        if ($sourcePid <= 0 || $sourcePid === $newProjectId)
-            return false;
+        if ($sourcePid <= 0 || $sourcePid === $newProjectId) {
+            throw new RuntimeException('Selected template does not have a valid workspace source.');
+        }
+
+        $sourceEstimateStmt = $pdo->prepare('SELECT COUNT(*) FROM estimates WHERE project_id = ? AND deleted_at IS NULL');
+        $sourceEstimateStmt->execute([$sourcePid]);
+        $sourceEstimateCount = (int) $sourceEstimateStmt->fetchColumn();
+        if ($sourceEstimateCount <= 0) {
+            throw new RuntimeException('Selected template does not contain an estimate to copy.');
+        }
+
         self::deepCloneProjectWorkspace($pdo, $sourcePid, $newProjectId, [
             'includeDocuments' => false,
             'resetQuantities' => true,
         ]);
+
+        $targetEstimateStmt = $pdo->prepare('SELECT COUNT(*) FROM estimates WHERE project_id = ? AND deleted_at IS NULL');
+        $targetEstimateStmt->execute([$newProjectId]);
+        if ((int) $targetEstimateStmt->fetchColumn() < $sourceEstimateCount) {
+            throw new RuntimeException('The selected template workspace was not copied completely.');
+        }
         if ($projectName !== '') {
             $pdo->prepare("UPDATE estimates SET name = ? WHERE project_id = ? AND deleted_at IS NULL")->execute([$projectName . ' Estimate', $newProjectId]);
         }

@@ -9,6 +9,10 @@ use PhpOffice\PhpSpreadsheet\Writer\Xlsx;
 require_once __DIR__ . '/../../vendor/autoload.php';
 require_once __DIR__ . '/ProjectTemplateService.php';
 
+final class ExcelRuntimeException extends RuntimeException
+{
+}
+
 /**
  * Unified Excel Import / Export service for Estimating & Project Templates:
  * 1. Matches Excel rows against live Cost Catalog items & assemblies (exact + safe electrical fuzzy matching)
@@ -18,6 +22,36 @@ require_once __DIR__ . '/ProjectTemplateService.php';
  */
 class ProjectEstimateExcelService
 {
+    private const REQUIRED_EXTENSIONS = [
+        'ctype', 'dom', 'fileinfo', 'filter', 'gd', 'iconv', 'libxml',
+        'mbstring', 'simplexml', 'xml', 'xmlreader', 'xmlwriter', 'zip', 'zlib',
+    ];
+
+    public static function assertRuntimeReady(): void
+    {
+        $missing = array_values(array_filter(
+            self::REQUIRED_EXTENSIONS,
+            static fn(string $extension): bool => !extension_loaded($extension)
+        ));
+        if ($missing !== []) {
+            throw new ExcelRuntimeException('Required Excel server extensions are unavailable.');
+        }
+    }
+
+    private static function exportTemplatePath(): string
+    {
+        $candidates = [
+            __DIR__ . '/../resources/Project Estimate Export_Template.xlsx',
+            __DIR__ . '/../../templates/Project Estimate Export_Template.xlsx',
+        ];
+        foreach ($candidates as $candidate) {
+            if (is_file($candidate) && is_readable($candidate)) {
+                return $candidate;
+            }
+        }
+        throw new ExcelRuntimeException('The Excel export template is unavailable.');
+    }
+
     public static function cleanNorm(?string $text): string
     {
         if ($text === null) return '';
@@ -459,6 +493,7 @@ class ProjectEstimateExcelService
      */
     public static function importTemplateWorkbook(PDO $pdo, string $filePath, ?string $templateName = null): array
     {
+        self::assertRuntimeReady();
         if (!is_file($filePath)) {
             throw new RuntimeException("Template file not found: {$filePath}");
         }
@@ -746,10 +781,8 @@ class ProjectEstimateExcelService
         ?string $clientEstimateId = null,
         ?array $livePayload = null
     ): array {
-        $templatePath = __DIR__ . '/../../templates/Project Estimate Export_Template.xlsx';
-        if (!is_file($templatePath)) {
-            throw new RuntimeException('Export template file is missing: templates/Project Estimate Export_Template.xlsx');
-        }
+        self::assertRuntimeReady();
+        $templatePath = self::exportTemplatePath();
 
         $projStmt = $pdo->prepare("SELECT * FROM projects WHERE id = ? AND deleted_at IS NULL LIMIT 1");
         $projStmt->execute([$projectId]);
@@ -1127,6 +1160,7 @@ class ProjectEstimateExcelService
 
     private static function parseExportedEstimateWorkbook(PDO $pdo, string $filePath): array
     {
+        self::assertRuntimeReady();
         if (!is_file($filePath)) {
             throw new RuntimeException('Uploaded Excel file could not be read.');
         }

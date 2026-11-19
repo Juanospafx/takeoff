@@ -18,12 +18,14 @@ try {
     $assert(str_contains($source, "'code' => 'intentional-invalid-diagnostic-code'"), 'OAuth check must never consume a real authorization code.');
     $assert(str_contains($source, "'oauth_client_accepted'"), 'OAuth credential result must be safely classified.');
     $assert(str_contains($source, "'links_table'"), 'Federated links table must be checked.');
+    $assert(str_contains($source, "'excel_runtime_supported'"), 'Excel runtime extensions must be checked.');
+    $assert(str_contains($source, "'excel_export_template'"), 'Private Excel export template must be checked.');
     $assert(str_contains($source, 'unlink(__FILE__)'), 'Diagnostic endpoint must remove itself.');
     $assert(!str_contains($source, 'echo $config->getClientSecret()'), 'Client secret must never be returned.');
     $assert(str_contains($workflow, 'Prepare one-shot SSO production diagnostic'), 'Workflow must prepare the one-shot diagnostic after build.');
     $assert(str_contains($workflow, 'Run one-shot SSO production diagnostic'), 'Workflow must invoke the diagnostic after FTP deployment.');
     $assert(str_contains($workflow, 'X-Takeoff-Diagnostic-Token'), 'Workflow must authenticate the diagnostic request.');
-    echo "ALL SSO PRODUCTION DIAGNOSTIC CONTRACT TESTS PASSED (10/10 assertions).\n";
+    echo "ALL SSO PRODUCTION DIAGNOSTIC CONTRACT TESTS PASSED (12/12 assertions).\n";
 } catch (Throwable $error) {
     fwrite(STDERR, 'TEST ERROR: ' . $error->getMessage() . "\n");
     exit(1);

@@ -16,12 +16,19 @@ jobs:
         with:
           php-version: "8.3.36"
           tools: composer:v2
+          extensions: ctype, dom, fileinfo, filter, gd, iconv, libxml, mbstring, simplexml, xml, xmlreader, xmlwriter, zip, zlib
 
       - name: Composer validate
         run: composer validate --strict
 
       - name: Install dependencies from lock
         run: composer install --prefer-dist --no-interaction
+
+      - name: Excel and template regression tests
+        run: |
+          php tests/excel_runtime_smoke.test.php
+          node tests/excel_template_regression_contract.test.js
+          node tests/project_creation_contract.test.js
 
       - name: PHP syntax check
         run: |

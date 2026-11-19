@@ -663,7 +663,15 @@ try {
                 return in_array($key, $existingCols, true);
             }, ARRAY_FILTER_USE_KEY);
 
-            if ($id > 0) {
+            $templateCreateTransaction = $isCreate
+                && !empty($filteredData['project_template_id'])
+                && !$pdo->inTransaction();
+            if ($templateCreateTransaction) {
+                $pdo->beginTransaction();
+            }
+
+            try {
+                if ($id > 0) {
                 if (array_key_exists('metadata_json', $filteredData)) {
                     $existingMetaStmt = $pdo->prepare("SELECT metadata_json FROM projects WHERE id = ? LIMIT 1");
                     $existingMetaStmt->execute([$id]);
@@ -685,22 +693,31 @@ try {
                 $stmt = $pdo->prepare("UPDATE projects SET $set WHERE id = ?");
                 $stmt->execute(array_merge(array_values($filteredData), [$id]));
                 ProjectTemplateService::syncPrimaryEstimateMetadata($pdo, $id, false);
-            } else {
+                } else {
                 $columns = array_keys($filteredData);
                 $stmt = $pdo->prepare("INSERT INTO projects (" . implode(', ', $columns) . ") VALUES (" . implode(', ', array_fill(0, count($columns), '?')) . ")");
                 $stmt->execute(array_values($filteredData));
                 $id = (int)$pdo->lastInsertId();
-            }
+                }
 
-            if ($isCreate && !empty($filteredData['project_template_id'])) {
-                ProjectTemplateService::instantiateTemplateIntoProject(
-                    $pdo,
-                    (int)$filteredData['project_template_id'],
-                    $id,
-                    (string)$filteredData['name']
-                );
+                if ($isCreate && !empty($filteredData['project_template_id'])) {
+                    ProjectTemplateService::instantiateTemplateIntoProject(
+                        $pdo,
+                        (int)$filteredData['project_template_id'],
+                        $id,
+                        (string)$filteredData['name']
+                    );
+                }
+                ProjectTemplateService::syncTemplateStatusForProject($pdo, $id);
+                if ($templateCreateTransaction && $pdo->inTransaction()) {
+                    $pdo->commit();
+                }
+            } catch (Throwable $e) {
+                if ($templateCreateTransaction && $pdo->inTransaction()) {
+                    $pdo->rollBack();
+                }
+                throw $e;
             }
-            ProjectTemplateService::syncTemplateStatusForProject($pdo, $id);
 
             $payload = project_payload($pdo, $id);
             if (empty($payload['project'])) project_json(['status' => 'error', 'msg' => 'Project could not be loaded after saving'], 500);

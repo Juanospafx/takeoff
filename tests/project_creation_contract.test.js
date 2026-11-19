@@ -127,6 +127,7 @@ function extractCreateProjectDraft(source) {
         'PROJECT_CREATION_TIMEOUT_MS',
         'postProjectAction',
         'showError',
+        'saveActiveStage',
         'document',
         'window',
         'localStorage',
@@ -217,6 +218,7 @@ function createHarness({ postProjectAction, customTimeoutMs } = {}) {
         PROJECT_CREATION_TIMEOUT_MS,
         postProjectAction,
         mockShowError,
+        () => {},
         mockDocument,
         mockWindow,
         mockLocalStorage
@@ -260,7 +262,7 @@ test('Behavioral: successful project creation navigates to project_dashboard.php
     assert.equal(capturedPayload.signal, undefined, 'signal must not be serialized in payload data');
     assert.ok(capturedOptions?.signal, 'options must contain AbortController signal');
 
-    assert.equal(harness.mockLocation.href, 'project_dashboard.php?id=99&tab=overview');
+    assert.equal(harness.mockLocation.href, 'project_dashboard.php?id=99&tab=overview&stage=To%20Do');
     assert.equal(harness.mockLocalStorage.getItem('takeoff.projectDraft'), null, 'Draft must be cleared on success');
 });
 
@@ -281,7 +283,7 @@ test('Behavioral: successful project creation navigates even if localStorage thr
 
     await harness.run();
 
-    assert.equal(harness.mockLocation.href, 'project_dashboard.php?id=101&tab=overview', 'Must still navigate even if localStorage throws');
+    assert.equal(harness.mockLocation.href, 'project_dashboard.php?id=101&tab=overview&stage=To%20Do', 'Must still navigate even if localStorage throws');
     assert.equal(harness.errorEl.hidden, true, 'Error banner must remain hidden on success');
 });
 

@@ -127,6 +127,12 @@ try {
     }
 
     excel_json_error('Unsupported action.', 404);
+} catch (ExcelRuntimeException $e) {
+    error_log('ProjectEstimateExcelService runtime prerequisite failed');
+    excel_json_error($e->getMessage(), 503);
+} catch (\PhpOffice\PhpSpreadsheet\Reader\Exception $e) {
+    error_log('ProjectEstimateExcelService rejected an unreadable workbook');
+    excel_json_error('The uploaded Excel workbook could not be read.', 422);
 } catch (Throwable $e) {
     error_log('ProjectEstimateExcelService error: ' . $e->getMessage());
     excel_json_error('Excel operation failed.', 500);
