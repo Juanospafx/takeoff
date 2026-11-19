@@ -19,7 +19,7 @@ jobs:
       - name: Setup PHP
         uses: shivammathur/setup-php@v2
         with:
-          php-version: "8.2"
+          php-version: "8.4.27"
           tools: composer:v2
 
       - name: Install optimized production dependencies
@@ -63,6 +63,9 @@ jobs:
             --exclude 'docs' \
             --exclude '/templates/' \
             --exclude 'harness' \
+            --exclude 'scratch' \
+            --exclude '.claude' \
+            --exclude '.agents' \
             --exclude '/db/' \
             --exclude '/migrations/' \
             --exclude '/migration/' \
@@ -92,6 +95,8 @@ jobs:
           # Verify excluded items are strictly absent from artifact
           test ! -d "$ARTIFACT_DIR/tests"
           test ! -d "$ARTIFACT_DIR/docs"
+          test ! -d "$ARTIFACT_DIR/scratch"
+          test ! -d "$ARTIFACT_DIR/.claude"
           test ! -d "$ARTIFACT_DIR/templates"
           test ! -d "$ARTIFACT_DIR/db"
           test ! -d "$ARTIFACT_DIR/migrations"
@@ -177,5 +182,5 @@ jobs:
             --request POST \
             --header "X-Takeoff-Diagnostic-Token: $TAKEOFF_DIAGNOSTIC_TOKEN" \
             "https://takeoff.brightronix.net/sso-production-diagnostic-${GITHUB_RUN_ID}.php")"
-          printf '%s' "$response" | jq -c '{ok,config_loaded,oauth_client_accepted,oauth_classification,database_connected,users_table,users_active_column,users_timestamps,links_table,links_active_column,cleanup}'
-          printf '%s' "$response" | jq -e '.cleanup == true' >/dev/null
+          printf '%s' "$response" | jq -c '{ok,php_version,php_runtime_supported,config_loaded,oauth_client_accepted,oauth_classification,database_connected,users_table,users_active_column,users_timestamps,links_table,links_active_column,cleanup}'
+          printf '%s' "$response" | jq -e '.ok == true and .php_runtime_supported == true and .cleanup == true' >/dev/null

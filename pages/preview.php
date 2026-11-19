@@ -1,6 +1,8 @@
 <?php
 // preview.php - Preview Profesional V8.2 (UI Update: Header & Floating Controls Position)
 require_once __DIR__ . '/../core/auth/session.php';
+$authRedirect = takeoff_require_page_auth($_SESSION ?? null);
+if ($authRedirect !== null) return;
 require_once __DIR__ . '/../core/db/connection.php';
 
 // 1. NORMALIZAR ROL

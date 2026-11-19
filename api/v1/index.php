@@ -4,7 +4,6 @@ declare(strict_types=1);
 require_once __DIR__ . '/helpers.php';
 require_once __DIR__ . '/../../core/auth/session.php';
 
-$config = require __DIR__ . '/config.php';
 $routes = require __DIR__ . '/routes.php';
 
 $method = get_request_method();

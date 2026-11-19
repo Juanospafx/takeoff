@@ -20,7 +20,6 @@ test('legacy navigation no longer exposes the duplicate Takeoff landing', () => 
     'pages/company_settings.php',
     'pages/estimate_module.php',
     'pages/project_module.php',
-    'admin/fix_password.php',
   ];
 
   files.forEach((file) => {

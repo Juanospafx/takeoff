@@ -9,6 +9,8 @@ header('Expires: 0');
 require_once __DIR__ . '/../core/db/connection.php';
 require_once __DIR__ . '/../core/files/upload_storage.php';
 require_once __DIR__ . '/../core/auth/session.php';
+$authRedirect = takeoff_require_page_auth($_SESSION ?? null);
+if ($authRedirect !== null) return;
 
 $authUser = SessionGuard::getAuthenticatedUser($_SESSION ?? null);
 $authRole = $authUser['role'] ?? SessionGuard::ROLE_VIEWER;

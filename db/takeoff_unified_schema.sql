@@ -22,11 +22,13 @@ CREATE TABLE IF NOT EXISTS `users` (
     `username` VARCHAR(191) NOT NULL,
     `password` VARCHAR(255) NOT NULL,
     `role` VARCHAR(50) NOT NULL DEFAULT 'viewer',
+    `active` TINYINT(1) NOT NULL DEFAULT 1,
     `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
     `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
     PRIMARY KEY (`id`),
     UNIQUE KEY `uq_users_username` (`username`),
-    KEY `idx_users_role` (`role`)
+    KEY `idx_users_role` (`role`),
+    KEY `idx_users_active_role` (`active`, `role`)
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
 -- ==============================================================================
@@ -1043,10 +1045,8 @@ CREATE TABLE IF NOT EXISTS `company_setting_users` (
 -- 10. BASELINE SEED DATA
 -- ==============================================================================
 
--- Default Administrator (Username: admin | Password: admin123)
-INSERT INTO `users` (`id`, `username`, `password`, `role`)
-VALUES (1, 'admin', '$2y$10$yX9N96DbKBxbc64DtP7NbObuko/SdMGuOAh3MyyMe6sbTVj1tQ/3u', 'admin')
-ON DUPLICATE KEY UPDATE `role` = 'admin';
+-- Administrators are provisioned through the approved SSO identity flow.
+-- No shared or predictable local administrator credential is seeded.
 
 -- Canonical Bid Statuses
 INSERT INTO `bid_statuses` (`code`, `name`, `sort_order`, `is_terminal`) VALUES

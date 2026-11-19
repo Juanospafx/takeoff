@@ -1,6 +1,8 @@
 <?php
 // pages/projects.php - Gesti??n de Proyectos V2.5 (Enlazado con Nueva Creaci??n y Layout Mejorado)
 require_once __DIR__ . '/../core/auth/session.php';
+$authRedirect = takeoff_require_page_auth($_SESSION ?? null);
+if ($authRedirect !== null) return;
 require_once __DIR__ . '/../core/db/connection.php';
 require_once __DIR__ . '/../core/time.php';
 require_once __DIR__ . '/../funciones/projects.php'; 

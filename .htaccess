@@ -27,6 +27,14 @@
 
 <IfModule mod_rewrite.c>
 
+    # Prevent direct access to source, diagnostics, test data and local tooling.
+    RewriteRule ^(?:core|config|db|docs|tests|bin|scratch|contracts|\.claude|\.agents)(?:/|$) - [F,L,NC]
+    RewriteRule (?:^|/)(?:\.env(?:\..*)?|composer\.(?:json|lock)|.*\.(?:sql|bak|ini|log))$ - [F,L,NC]
+
+    # Uploaded documents are delivered only after the session guard succeeds.
+    RewriteRule ^uploads/(.+)$ api/download.php?scope=uploads&path=$1 [QSA,L,NE]
+    RewriteRule ^api/uploads/(.+)$ api/download.php?scope=api_uploads&path=$1 [QSA,L,NE]
+
     # Root domain: open the PDF/uploads Takeoff entry point.
     RewriteCond %{REQUEST_URI} ^/$
     RewriteRule ^$ /pages/takeoff.php [L]
@@ -35,8 +43,8 @@
     RewriteRule ^pages/?$ /pages/takeoff.php [L]
     RewriteRule ^pages/index\.php$ /pages/takeoff.php [L]
 
-    # Keep existing PHP pages, APIs, assets and uploads reachable.
-    RewriteCond %{REQUEST_URI} ^/(pages|api|assets|uploads|views|core|funciones|docs)/ [NC]
+    # Keep public application entry points and static assets reachable.
+    RewriteCond %{REQUEST_URI} ^/(pages|api|assets|views|funciones|admin)/ [NC]
     RewriteRule .* - [L]
 
     # Serve real files and directories normally.

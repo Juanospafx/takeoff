@@ -1,11 +1,14 @@
 <?php
 // pages/project_create.php
 require_once __DIR__ . '/../core/auth/session.php';
+$authRedirect = takeoff_require_page_auth($_SESSION ?? null);
+if ($authRedirect !== null) return;
 require_once __DIR__ . '/../core/db/connection.php';
 
 // Solo administradores
-if ($_SESSION['role'] !== 'admin') {
-    header("Location: index.php");
+if (!SessionGuard::isAdmin($_SESSION ?? null)) {
+    http_response_code(403);
+    echo 'Forbidden';
     exit;
 }
 

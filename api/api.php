@@ -54,6 +54,11 @@ function cleanName($name) {
     return clean_filename($name);
 }
 
+function api_internal_error(Throwable $e, string $publicMessage = 'Unable to process the request.'): array {
+    error_log('api.php: ' . get_class($e) . ': ' . $e->getMessage());
+    return ['status' => 'error', 'msg' => $publicMessage];
+}
+
 function db_has_column(PDO $pdo, string $table, string $column): bool {
     static $cache = [];
     $key = $table . '.' . $column;
@@ -233,7 +238,7 @@ switch($action) {
             echo json_encode(['status'=>'success', 'id'=>$projectId]);
         } catch(Exception $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
-            echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]);
+            echo json_encode(api_internal_error($e));
         }
         break;
 
@@ -251,7 +256,7 @@ switch($action) {
             $stmt->execute([$name, $desc, $status, $id]);
             sync_project_to_inventory_from_api($pdo, (int)$id);
             echo json_encode(['status'=>'success']);
-        } catch(Exception $e) { echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]); }
+        } catch(Exception $e) { echo json_encode(api_internal_error($e)); }
         break;
 
     // --- 1.2 ASIGNAR USUARIO A PROYECTO (ADMIN ONLY) ---
@@ -271,7 +276,7 @@ switch($action) {
             $stmtDir->execute([$projectId, $targetUserId]);
 
             echo json_encode(['status'=>'success']);
-        } catch(Exception $e) { echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]); }
+        } catch(Exception $e) { echo json_encode(api_internal_error($e)); }
         break;
 
     // --- 1.1.1 ACTUALIZAR INFO DE PROYECTO (ADMIN ONLY) ---
@@ -308,7 +313,7 @@ switch($action) {
             $stmt->execute($params);
             sync_project_to_inventory_from_api($pdo, $id);
             echo json_encode(['status'=>'success']);
-        } catch(Exception $e) { echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]); }
+        } catch(Exception $e) { echo json_encode(api_internal_error($e)); }
         break;
 
     // --- 1.1.2 AGREGAR CARPETAS A PROYECTO (ADMIN ONLY) ---
@@ -353,7 +358,7 @@ switch($action) {
                 $existing[] = strtolower($name);
             }
             echo json_encode(['status'=>'success']);
-        } catch(Exception $e) { echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]); }
+        } catch(Exception $e) { echo json_encode(api_internal_error($e)); }
         break;
 
     // --- 12.1 MOVER CARPETA (ADMIN ONLY) ---
@@ -410,7 +415,7 @@ switch($action) {
             echo json_encode(['status'=>'success']);
         } catch(Exception $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
-            echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]);
+            echo json_encode(api_internal_error($e));
         }
         break;
 
@@ -462,7 +467,7 @@ switch($action) {
             echo json_encode(['status'=>'success']);
         } catch(Exception $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
-            echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]);
+            echo json_encode(api_internal_error($e));
         }
         break;
 
@@ -490,7 +495,7 @@ switch($action) {
             $stmt = $pdo->prepare("INSERT INTO folders (project_id, name) VALUES (?, ?)");
             $stmt->execute([$projectId, $name]);
             echo json_encode(['status'=>'success']);
-        } catch(Exception $e) { echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]); }
+        } catch(Exception $e) { echo json_encode(api_internal_error($e)); }
         break;
 
     // --- 3. SUBIR ARCHIVO CON VERSIONADO (ADMIN ONLY + VALIDACIONES) ---
@@ -877,7 +882,7 @@ switch($action) {
 
         } catch (Exception $e) {
             http_response_code(500);
-            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+            echo json_encode(api_internal_error($e, 'Unable to save the report.'));
         }
         break;    
 
@@ -892,7 +897,7 @@ switch($action) {
             $stmt->execute([$reportId]);
             echo json_encode(['status'=>'success']);
         } catch(Exception $e) {
-            echo json_encode(['status'=>'error', 'msg'=>$e->getMessage()]);
+            echo json_encode(api_internal_error($e));
         }
         break;
 
@@ -905,7 +910,7 @@ switch($action) {
             $projects = $stmt->fetchAll(PDO::FETCH_ASSOC);
             echo json_encode(['status' => 'success', 'data' => $projects]);
         } catch (Exception $e) {
-            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+            echo json_encode(api_internal_error($e));
         }
         break;
 
@@ -918,7 +923,7 @@ switch($action) {
             $folders = $stmt->fetchAll(PDO::FETCH_ASSOC);
             echo json_encode(['status' => 'success', 'data' => $folders]);
         } catch (Exception $e) {
-            echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+            echo json_encode(api_internal_error($e));
         }
         break;
 
@@ -937,7 +942,7 @@ switch($action) {
                 $stmt->execute([$targetProj, $targetFolder, $id]);
                 echo json_encode(['status' => 'success']);
             } catch (Exception $e) {
-                echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+                echo json_encode(api_internal_error($e));
             }
         } else {
             echo json_encode(['status' => 'error', 'msg' => 'Invalid type']);

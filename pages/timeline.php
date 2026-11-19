@@ -1,6 +1,8 @@
 <?php
 // timeline.php - Historial Global V1.6 (Breadcrumbs + Estructura Fixed)
 require_once __DIR__ . '/../core/auth/session.php';
+$authRedirect = takeoff_require_page_auth($_SESSION ?? null);
+if ($authRedirect !== null) return;
 require_once __DIR__ . '/../core/db/connection.php';
 require_once __DIR__ . '/../core/time.php'; 
 

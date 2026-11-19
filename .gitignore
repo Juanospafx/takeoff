@@ -35,6 +35,9 @@ coverage/
 deploy_artifact/
 deploy_artifact*/
 harness/scratch/
+scratch/edge_profile/
+scratch/__pycache__/
+*.pyc
 # Database dumps and backups (protects dumps without hiding legitimate migrations)
 *.dump
 *.sql.bak

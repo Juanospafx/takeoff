@@ -366,5 +366,6 @@ try {
             bid_board_json(['status' => 'error', 'msg' => 'Invalid action'], 404);
     }
 } catch (Throwable $e) {
-    bid_board_json(['status' => 'error', 'msg' => $e->getMessage()], 500);
+    error_log('bid_board.php: ' . $e->getMessage());
+    bid_board_json(['status' => 'error', 'msg' => 'Unable to process the bid board request.'], 500);
 }

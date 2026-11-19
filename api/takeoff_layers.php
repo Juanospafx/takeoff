@@ -646,5 +646,6 @@ try {
 
     tl_json(array('status' => 'error', 'msg' => 'Unknown action'), 404);
 } catch (Throwable $e) {
-    tl_json(array('status' => 'error', 'msg' => $e->getMessage()), 500);
+    error_log('takeoff_layers.php: ' . $e->getMessage());
+    tl_json(array('status' => 'error', 'msg' => 'Unable to process the layer request.'), 500);
 }

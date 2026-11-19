@@ -30,6 +30,10 @@ if (
 
 $result = [
     'ok' => true,
+    'php_version' => PHP_VERSION,
+    'php_runtime_supported' => PHP_VERSION_ID >= 80427
+        && extension_loaded('openssl')
+        && extension_loaded('pdo_mysql'),
     'config_loaded' => false,
     'oauth_client_accepted' => false,
     'oauth_classification' => 'not_checked',
@@ -43,6 +47,9 @@ $result = [
 ];
 
 try {
+    if (!$result['php_runtime_supported']) {
+        throw new RuntimeException('Unsupported PHP runtime.');
+    }
     $root = __DIR__;
     require_once $root . '/vendor/autoload.php';
     require_once $root . '/config/SsoConfig.php';

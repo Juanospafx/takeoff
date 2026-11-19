@@ -175,6 +175,6 @@ try {
     if ($pdo->inTransaction()) {
         $pdo->rollBack();
     }
-    // Log del error para debugging (opcional: error_log($e->getMessage()));
-    echo json_encode(['status' => 'error', 'msg' => $e->getMessage()]);
+    error_log('create_project.php: ' . $e->getMessage());
+    echo json_encode(['status' => 'error', 'msg' => 'Unable to create the project.']);
 }

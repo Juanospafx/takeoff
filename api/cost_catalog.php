@@ -473,5 +473,6 @@ try {
     cc_json(['status' => 'error', 'code' => 'revision_conflict',
         'msg' => $e->getMessage(), 'current' => $e->current], 409);
 } catch (Throwable $e) {
-    cc_json(['status' => 'error', 'msg' => $e->getMessage()], 500);
+    error_log('cost_catalog.php: ' . $e->getMessage());
+    cc_json(['status' => 'error', 'msg' => 'Unable to process the catalog request.'], 500);
 }

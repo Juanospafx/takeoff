@@ -1,16 +1,25 @@
 <?php
 // settings.php - Gestión de Usuarios y Seguridad V5.5 (Show Password Buttons)
 require_once __DIR__ . '/../core/auth/session.php';
+
+$authRedirect = takeoff_require_page_auth($_SESSION ?? null);
+if ($authRedirect !== null) return;
+
+$authUser = SessionGuard::getAuthenticatedUser($_SESSION ?? null);
+if ($authUser === null || $authUser['role'] !== SessionGuard::ROLE_ADMIN) {
+    http_response_code(403);
+    exit('Forbidden');
+}
+
 require_once __DIR__ . '/../core/db/connection.php';
 require_once __DIR__ . '/../core/time.php';
 
 // ---------------------------------------------------------
 // 1. DEFINICIÓN DE USUARIO Y ROLES
 // ---------------------------------------------------------
-$userId = $_SESSION['user_id'];
-$userName = $_SESSION['username'];
-$userRoleRaw = $_SESSION['role'] ?? 'viewer'; 
-$userRole = strtolower($userRoleRaw); 
+$userId = (int)$authUser['user_id'];
+$userName = (string)$authUser['username'];
+$userRole = (string)$authUser['role'];
 
 // Definir permisos
 $isAdmin = ($userRole === 'admin');
@@ -18,18 +27,34 @@ $canCreate = $isAdmin;
 $canDelete = $isAdmin; 
 $canUpload = $isAdmin;
 
+if (empty($_SESSION['csrf_token']) || !is_string($_SESSION['csrf_token'])) {
+    $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
+}
+$csrfToken = (string)$_SESSION['csrf_token'];
+$allowedRoles = [SessionGuard::ROLE_ADMIN, SessionGuard::ROLE_VIEWER];
+
 // --- NAVEGACIÓN DE PESTAÑAS ---
 $tab = $_GET['tab'] ?? 'users';
 $tabLabel = ($tab === 'security') ? 'Security' : 'User Management'; // Etiqueta para breadcrumb
 
 // --- LÓGICA BACKEND ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    $submittedCsrf = (string)($_POST['csrf_token'] ?? '');
+    if ($submittedCsrf === '' || !hash_equals($csrfToken, $submittedCsrf)) {
+        http_response_code(403);
+        exit('Invalid CSRF token');
+    }
     
     // 1. Crear Usuario
     if ($_POST['action'] === 'create_user') {
         $u = trim($_POST['username']);
-        $r = $_POST['role']; // Este viene del select (admin, technician, viewer)
-        $p = $_POST['password'];
+        $r = SessionGuard::normalizeRole($_POST['role'] ?? '');
+        $p = (string)($_POST['password'] ?? '');
+
+        if ($u === '' || !in_array($r, $allowedRoles, true) || strlen($p) < 12) {
+            http_response_code(422);
+            exit('Invalid user data');
+        }
         
         $check = $pdo->prepare("SELECT id FROM users WHERE username = ?");
         $check->execute([$u]);
@@ -45,10 +70,15 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     // 2. Editar Usuario (Con opción de cambio de contraseña)
     if ($_POST['action'] === 'edit_user') {
-        $id = $_POST['user_id'];
+        $id = (int)($_POST['user_id'] ?? 0);
         $u = trim($_POST['username']);
-        $r = $_POST['role'];
+        $r = SessionGuard::normalizeRole($_POST['role'] ?? '');
         $newPass = trim($_POST['password'] ?? '');
+
+        if ($id <= 0 || $u === '' || !in_array($r, $allowedRoles, true) || ($newPass !== '' && strlen($newPass) < 12)) {
+            http_response_code(422);
+            exit('Invalid user data');
+        }
 
         if (!empty($newPass)) {
             // Si hay contraseña nueva, actualizamos todo incluido el hash
@@ -67,28 +97,46 @@ if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
 
     // 3. Cambiar Contraseña (Usuario actual)
     if ($_POST['action'] === 'change_password') {
-        $newPass = $_POST['new_password'];
-        $confPass = $_POST['confirm_password'];
+        $currentPass = (string)($_POST['current_password'] ?? '');
+        $newPass = (string)($_POST['new_password'] ?? '');
+        $confPass = (string)($_POST['confirm_password'] ?? '');
+
+        $currentStmt = $pdo->prepare('SELECT password FROM users WHERE id = ? LIMIT 1');
+        $currentStmt->execute([$userId]);
+        $currentHash = (string)$currentStmt->fetchColumn();
         
-        if($newPass === $confPass) {
+        if ($currentHash === '' || !password_verify($currentPass, $currentHash)) {
+            http_response_code(403);
+            exit('Current password is incorrect');
+        }
+        if ($newPass === $confPass && strlen($newPass) >= 12) {
             $hash = password_hash($newPass, PASSWORD_DEFAULT);
             $stmt = $pdo->prepare("UPDATE users SET password=? WHERE id=?");
             $stmt->execute([$hash, $userId]);
             header("Location: settings.php?tab=security&msg=pass_changed");
             exit;
         }
+        http_response_code(422);
+        exit('New password must match and contain at least 12 characters');
     }
-}
 
-// Eliminar Usuario
-if (isset($_GET['delete_id'])) {
-    $id = $_GET['delete_id'];
-    if($id != 1 && $id != $userId) { 
-        $stmt = $pdo->prepare("DELETE FROM users WHERE id=?");
-        $stmt->execute([$id]);
+    if ($_POST['action'] === 'delete_user') {
+        $id = (int)($_POST['user_id'] ?? 0);
+        if ($id > 0 && $id !== $userId) {
+            $adminCount = (int)$pdo->query("SELECT COUNT(*) FROM users WHERE role = 'admin'")->fetchColumn();
+            $targetStmt = $pdo->prepare('SELECT role FROM users WHERE id = ? LIMIT 1');
+            $targetStmt->execute([$id]);
+            $targetRole = (string)$targetStmt->fetchColumn();
+            if ($targetRole === SessionGuard::ROLE_ADMIN && $adminCount <= 1) {
+                http_response_code(409);
+                exit('The last administrator cannot be deleted');
+            }
+            $stmt = $pdo->prepare("DELETE FROM users WHERE id=?");
+            $stmt->execute([$id]);
+        }
+        header("Location: settings.php?tab=users");
+        exit;
     }
-    header("Location: settings.php?tab=users");
-    exit;
 }
 
 // --- CONSULTAS ---
@@ -218,13 +266,16 @@ include __DIR__ . '/../views/header.php';
                             </td>
                             <td class="small text-gray"><?= date('M d, Y', strtotime($u['created_at'])) ?></td>
                             <td class="text-end">
-                                <button class="btn-action me-1" onclick="openEditModal(<?= $u['id'] ?>, '<?= $u['username'] ?>', '<?= $u['role'] ?>')">
+                                <button class="btn-action me-1" onclick='openEditModal(<?= (int)$u['id'] ?>, <?= json_encode((string)$u['username'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>, <?= json_encode((string)$u['role'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>)'>
                                     <i class="fas fa-pen"></i>
                                 </button>
                                 <?php if($u['id'] != 1 && $u['id'] != $userId): ?>
-                                <a href="settings.php?tab=users&delete_id=<?= $u['id'] ?>" class="btn-action delete" onclick="return confirm('Delete this user?');">
-                                    <i class="fas fa-trash"></i>
-                                </a>
+                                <form method="POST" style="display:inline" onsubmit="return confirm('Delete this user?');">
+                                    <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>">
+                                    <input type="hidden" name="action" value="delete_user">
+                                    <input type="hidden" name="user_id" value="<?= (int)$u['id'] ?>">
+                                    <button type="submit" class="btn-action delete"><i class="fas fa-trash"></i></button>
+                                </form>
                                 <?php endif; ?>
                             </td>
                         </tr>
@@ -242,18 +293,23 @@ include __DIR__ . '/../views/header.php';
                         <p class="text-gray small mb-4">Update the password for your current account (<?= htmlspecialchars($userName) ?>).</p>
                         
                         <form method="POST">
+                            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>">
                             <input type="hidden" name="action" value="change_password">
+                            <div class="mb-3">
+                                <label class="form-label">Current Password</label>
+                                <input type="password" name="current_password" class="form-control" required autocomplete="current-password">
+                            </div>
                             <div class="mb-3">
                                 <label class="form-label">New Password</label>
                                 <div class="input-group">
-                                    <input type="password" name="new_password" id="sec_new_pass" class="form-control" required minlength="4">
+                                    <input type="password" name="new_password" id="sec_new_pass" class="form-control" required minlength="12" autocomplete="new-password">
                                     <button class="btn btn-eye-settings" type="button" onclick="togglePassword('sec_new_pass', this)"><i class="fas fa-eye"></i></button>
                                 </div>
                             </div>
                             <div class="mb-4">
                                 <label class="form-label">Confirm Password</label>
                                 <div class="input-group">
-                                    <input type="password" name="confirm_password" id="sec_conf_pass" class="form-control" required minlength="4">
+                                    <input type="password" name="confirm_password" id="sec_conf_pass" class="form-control" required minlength="12" autocomplete="new-password">
                                     <button class="btn btn-eye-settings" type="button" onclick="togglePassword('sec_conf_pass', this)"><i class="fas fa-eye"></i></button>
                                 </div>
                             </div>
@@ -271,6 +327,7 @@ include __DIR__ . '/../views/header.php';
 <div class="modal fade" id="addUserModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <form class="modal-content p-3" method="POST">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>">
             <input type="hidden" name="action" value="create_user">
             <div class="modal-header">
                 <h5 class="modal-title fw-bold">Add New User</h5>
@@ -284,14 +341,13 @@ include __DIR__ . '/../views/header.php';
                 <div class="mb-3">
                     <label class="form-label">Password</label>
                     <div class="input-group">
-                        <input type="password" name="password" id="add_password" class="form-control" required>
+                        <input type="password" name="password" id="add_password" class="form-control" required minlength="12" autocomplete="new-password">
                         <button class="btn btn-eye-settings" type="button" onclick="togglePassword('add_password', this)"><i class="fas fa-eye"></i></button>
                     </div>
                 </div>
                 <div class="mb-3">
                     <label class="form-label">Role</label>
                     <select name="role" class="form-select">
-                        <option value="technician">Technician</option>
                         <option value="admin">Administrator</option>
                         <option value="viewer">Viewer</option>
                     </select>
@@ -307,6 +363,7 @@ include __DIR__ . '/../views/header.php';
 <div class="modal fade" id="editUserModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <form class="modal-content p-3" method="POST">
+            <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($csrfToken, ENT_QUOTES, 'UTF-8') ?>">
             <input type="hidden" name="action" value="edit_user">
             <input type="hidden" name="user_id" id="edit_id">
             
@@ -322,7 +379,6 @@ include __DIR__ . '/../views/header.php';
                 <div class="mb-3">
                     <label class="form-label">Role</label>
                     <select name="role" id="edit_role" class="form-select">
-                        <option value="technician">Technician</option>
                         <option value="admin">Administrator</option>
                         <option value="viewer">Viewer</option>
                     </select>
@@ -330,7 +386,7 @@ include __DIR__ . '/../views/header.php';
                 <div class="mb-3 border-top border-secondary pt-3 mt-3">
                     <label class="form-label text-warning">Reset Password <small>(Optional)</small></label>
                     <div class="input-group">
-                        <input type="password" name="password" id="edit_password" class="form-control" placeholder="Leave empty to keep current password">
+                        <input type="password" name="password" id="edit_password" class="form-control" minlength="12" autocomplete="new-password" placeholder="Leave empty to keep current password">
                         <button class="btn btn-eye-settings" type="button" onclick="togglePassword('edit_password', this)"><i class="fas fa-eye"></i></button>
                     </div>
                     <div class="form-text text-muted small">Only enter a value if you want to change the user's password.</div>

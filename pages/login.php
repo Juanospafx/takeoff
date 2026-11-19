@@ -33,6 +33,7 @@ if (!function_exists('takeoff_redirect')) {
 require_once dirname(__DIR__) . '/config/SsoConfig.php';
 require_once dirname(__DIR__) . '/core/auth/SsoSession.php';
 require_once dirname(__DIR__) . '/core/auth/SsoAuthorization.php';
+require_once dirname(__DIR__) . '/core/auth/LoginRateLimiter.php';
 
 // Configure session cookies with Secure, HttpOnly, and SameSite=Lax
 \Takeoff\Core\Auth\SsoSession::configureCookieParams();
@@ -99,7 +100,16 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
         if ($username === '' || $password === '') {
             $error = 'Por favor ingrese su nombre de usuario y contraseña.';
         } else {
+            $clientAddress = trim((string)($_SERVER['REMOTE_ADDR'] ?? 'unknown'));
             try {
+                if (PHP_SAPI !== 'cli' && \Takeoff\Core\Auth\LoginRateLimiter::isBlocked($clientAddress, $username)) {
+                    $error = 'Demasiados intentos de inicio de sesión. Espere 15 minutos e intente nuevamente.';
+                }
+
+                if ($error !== null) {
+                    throw new \RuntimeException('Login throttled.');
+                }
+
                 // Resolve database connection (injected mock or production connection)
                 $pdo = $GLOBALS['__TAKEOFF_TEST_PDO__'] ?? $GLOBALS['__TAKEOFF_PDO__'] ?? null;
                 if ($pdo === null) {
@@ -123,6 +133,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                 $user = $stmt->fetch(\PDO::FETCH_ASSOC);
 
                 if (!$user || !password_verify($password, (string)$user['password'])) {
+                    if (PHP_SAPI !== 'cli') {
+                        \Takeoff\Core\Auth\LoginRateLimiter::registerFailure($clientAddress, $username);
+                    }
                     $error = 'Nombre de usuario o contraseña incorrectos.';
                 } elseif (array_key_exists('active', $user) && (int)$user['active'] !== 1) {
                     $error = 'La cuenta de usuario se encuentra inactiva.';
@@ -131,6 +144,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                     if (!\Takeoff\Core\Auth\SsoAuthorization::isAllowedRole($localRole)) {
                         $error = 'La cuenta de usuario no tiene un rol válido asignado.';
                     } else {
+                        if (PHP_SAPI !== 'cli') {
+                            \Takeoff\Core\Auth\LoginRateLimiter::clear($clientAddress, $username);
+                        }
                         // Regenerate session ID to prevent session fixation
                         if (isset($GLOBALS['__TAKEOFF_SESSION_REGENERATOR__']) && is_callable($GLOBALS['__TAKEOFF_SESSION_REGENERATOR__'])) {
                             ($GLOBALS['__TAKEOFF_SESSION_REGENERATOR__'])();
@@ -159,7 +175,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
                     }
                 }
             } catch (\Throwable $e) {
-                $error = 'Error de conexión o base de datos. Por favor intente más tarde.';
+                if ($e->getMessage() !== 'Login throttled.') {
+                    $error = 'Error de conexión o base de datos. Por favor intente más tarde.';
+                }
             }
         }
     }

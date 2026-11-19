@@ -215,5 +215,6 @@ try {
             cs_json(['status' => 'error', 'msg' => 'Invalid action'], 404);
     }
 } catch (Throwable $e) {
-    cs_json(['status' => 'error', 'msg' => $e->getMessage()], 500);
+    error_log('company_settings.php: ' . $e->getMessage());
+    cs_json(['status' => 'error', 'msg' => 'Unable to process company settings.'], 500);
 }

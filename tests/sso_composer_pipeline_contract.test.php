@@ -6,7 +6,7 @@ declare(strict_types=1);
  * Task: TASK-0313
  *
  * Acceptance Criteria Covered:
- * 1. composer.json contains only the OAuth2 dependencies actually used and remains compatible with PHP 8.2.
+ * 1. composer.json contains only the OAuth2 dependencies actually used and requires patched PHP 8.4.
  * 2. composer.lock is reproducible and composer validate --strict succeeds without disabling TLS.
  * 3. When SSO is enabled, missing vendor/autoload.php fails closed with a sanitized error and no credential, path or dependency detail disclosure.
  * 4. When SSO is disabled, missing vendor/autoload.php does not break or replace the traditional local login.
@@ -45,9 +45,9 @@ function assertContract(bool $condition, string $description): void
 echo "=== Running Takeoff SSO Composer Pipeline Contract Tests (TASK-0313) ===\n\n";
 
 // -----------------------------------------------------------------------------
-// Criterion 1: composer.json Dependencies and PHP 8.2 Compatibility
+// Criterion 1: composer.json Dependencies and PHP 8.4 Compatibility
 // -----------------------------------------------------------------------------
-echo "1. Testing composer.json OAuth2 dependencies and PHP 8.2 compatibility...\n";
+echo "1. Testing composer.json OAuth2 dependencies and patched PHP 8.4 compatibility...\n";
 
 assertContract(file_exists($composerJsonPath), 'composer.json exists in repository root');
 $composerJsonRaw = file_exists($composerJsonPath) ? (string)file_get_contents($composerJsonPath) : '';
@@ -57,7 +57,7 @@ assertContract(is_array($composerData), 'composer.json is valid, well-formed JSO
 assertContract(($composerData['license'] ?? '') === 'proprietary', 'composer.json declares license as proprietary');
 $require = $composerData['require'] ?? [];
 assertContract(isset($require['php']), 'composer.json requires php');
-assertContract(str_contains($require['php'] ?? '', '8.2'), 'composer.json php requirement is compatible with PHP 8.2 (~8.2.0 or ^8.2)');
+assertContract(($require['php'] ?? '') === '>=8.4.27 <8.5', 'composer.json requires PHP 8.4.27 or newer within the 8.4 line');
 assertContract(isset($require['league/oauth2-client']), 'composer.json requires league/oauth2-client');
 assertContract(str_contains($require['league/oauth2-client'] ?? '', '2.'), 'composer.json uses league/oauth2-client v2.x');
 
@@ -229,7 +229,7 @@ assertContract(str_contains($ciContent, 'composer install'), 'CI runs composer i
 assertContract(str_contains($ciContent, 'php -l'), 'CI runs PHP syntax lint check');
 assertContract(str_contains($ciContent, 'sso_client_contract.test.php'), 'CI executes sso_client_contract.test.php');
 assertContract(str_contains($ciContent, 'sso_composer_pipeline_contract.test.php'), 'CI executes sso_composer_pipeline_contract.test.php');
-assertContract(str_contains($ciContent, 'php-version: "8.2"'), 'CI uses PHP 8.2 environment');
+assertContract(str_contains($ciContent, 'php-version: "8.4.27"'), 'CI uses PHP 8.4.27 environment');
 
 // -----------------------------------------------------------------------------
 // Criterion 6 & 7: Deploy Workflow Contracts (main-only, optimize no-dev, artifact vendor & exclusions)

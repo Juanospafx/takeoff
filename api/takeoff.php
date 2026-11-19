@@ -1516,8 +1516,6 @@ try {
 } catch (Throwable $e) {
     if ($pdo->inTransaction())
         $pdo->rollBack();
-    $message = $e instanceof RuntimeException && str_starts_with($e->getMessage(), 'Takeoff storage schema')
-        ? $e->getMessage()
-        : 'Takeoff storage is temporarily unavailable.';
-    out_json(['status' => 'error', 'code' => 'takeoff_storage_unavailable', 'msg' => $message], 500);
+    error_log('takeoff.php: ' . get_class($e) . ': ' . $e->getMessage());
+    out_json(['status' => 'error', 'code' => 'takeoff_storage_unavailable', 'msg' => 'Takeoff storage is temporarily unavailable.'], 500);
 }

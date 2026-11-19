@@ -1,4 +1,7 @@
 <?php
+require_once __DIR__ . '/../core/auth/session.php';
+$authRedirect = takeoff_require_page_auth($_SESSION ?? null);
+if ($authRedirect !== null) return;
 require_once __DIR__ . '/../views/company_tools_data.php';
 $categories = company_tools_existing_categories();
 ?>

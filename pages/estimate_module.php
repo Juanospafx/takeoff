@@ -1,5 +1,7 @@
 <?php
-// Estimate module foundation. No auth/session dependency.
+require_once __DIR__ . '/../core/auth/session.php';
+$authRedirect = takeoff_require_page_auth($_SESSION ?? null);
+if ($authRedirect !== null) return;
 $projectId = (int)($_GET['project_id'] ?? $_GET['id'] ?? 0);
 ?>
 <!doctype html>

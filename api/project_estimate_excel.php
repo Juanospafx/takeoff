@@ -129,5 +129,5 @@ try {
     excel_json_error('Unsupported action.', 404);
 } catch (Throwable $e) {
     error_log('ProjectEstimateExcelService error: ' . $e->getMessage());
-    excel_json_error($e->getMessage() ?: 'Excel operation failed.', 500);
+    excel_json_error('Excel operation failed.', 500);
 }
