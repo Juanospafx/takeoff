@@ -10,7 +10,10 @@
     }
 
     function fromLayer(layer) {
-        const value = layer?.catalogMetadata || layer?.metadata_json?.catalog_item;
+        let value = layer?.catalogMetadata || layer?.metadata_json?.catalog_item;
+        if (!value && layer?.metadata_json?.catalog_item_ref && typeof global.ProjectState?.catalogItemMetaMap === 'object') {
+            value = global.ProjectState.catalogItemMetaMap[layer.metadata_json.catalog_item_ref] || null;
+        }
         return value && typeof value === 'object' ? clone(value) : null;
     }
 
@@ -21,6 +24,7 @@
         if (metadata) {
             copy.catalogMetadata = clone(metadata);
             copy.metadata_json.catalog_item = clone(metadata);
+            delete copy.metadata_json.catalog_item_ref;
         }
         return copy;
     }
@@ -28,8 +32,15 @@
     function mergeMetadata(existing, incoming, additions = {}) {
         const result = { ...clone(existing || {}), ...clone(additions || {}) };
         const metadata = incoming && typeof incoming === 'object' ? clone(incoming)
-            : (existing?.catalog_item && typeof existing.catalog_item === 'object' ? clone(existing.catalog_item) : null);
-        if (metadata) result.catalog_item = metadata;
+            : (existing?.catalog_item && typeof existing.catalog_item === 'object'
+                ? clone(existing.catalog_item)
+                : (existing?.catalog_item_ref && global.ProjectState?.catalogItemMetaMap?.[existing.catalog_item_ref]
+                    ? clone(global.ProjectState.catalogItemMetaMap[existing.catalog_item_ref])
+                    : null));
+        if (metadata) {
+            result.catalog_item = metadata;
+            delete result.catalog_item_ref;
+        }
         return result;
     }
 

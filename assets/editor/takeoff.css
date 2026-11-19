@@ -154,7 +154,7 @@ body.view-summary .floating-controls {
 .takeoff-icon-btn,
 .takeoff-command {
     border: 1px solid rgba(148, 163, 184, 0.28);
-    background: #111827;
+    background: #242a38;
     color: #e5e7eb;
     border-radius: 6px;
     min-height: 34px;
@@ -162,7 +162,8 @@ body.view-summary .floating-controls {
 }
 
 .takeoff-icon-btn {
-    width: 36px;
+    width: 32px;
+    height: 32px;
     display: inline-flex;
     align-items: center;
     justify-content: center;
@@ -182,8 +183,8 @@ body.view-summary .floating-controls {
 .takeoff-tab.active,
 .takeoff-icon-btn.active,
 .takeoff-command.primary {
-    background: #2563eb;
-    border-color: #2563eb;
+    background: var(--primary, #fb5a3a);
+    border-color: var(--primary, #fb5a3a);
     color: #fff;
 }
 
@@ -353,7 +354,7 @@ body.view-summary .floating-controls {
     text-transform: uppercase;
     font-size: 0.65rem;
     font-weight: 700;
-    background: #111827;
+    background: #1f2633;
 }
 
 .takeoff-hidden {

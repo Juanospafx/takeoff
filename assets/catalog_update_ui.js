@@ -16,8 +16,73 @@
         returnFocus: null,
         restoreSelector: null,
         searchQuery: '',
-        activeFilter: 'all'
+        activeFilter: 'all',
+        collapsedGroups: new Set(),
+        options: {
+            includePricing: true,
+            includeLabor: true,
+            includeEquipment: true,
+            includeAssemblies: true,
+            matchUnlinkedByCodeOrName: true,
+            overwriteOverrides: false
+        }
     };
+
+    const OPTION_CARDS = [
+        {
+            key: 'includePricing',
+            title: 'Material Pricing',
+            desc: 'Update material & sub unit costs from catalog',
+            icon: 'fa-boxes-stacked',
+            badge: 'Rates'
+        },
+        {
+            key: 'includeLabor',
+            title: 'Labor & Rates',
+            desc: 'Sync labor hours per unit & hourly labor rate',
+            icon: 'fa-user-clock',
+            badge: 'Labor'
+        },
+        {
+            key: 'includeEquipment',
+            title: 'Equipment',
+            desc: 'Update equipment rental & unit costs',
+            icon: 'fa-truck-front',
+            badge: 'Equip'
+        },
+        {
+            key: 'includeAssemblies',
+            title: 'Assemblies',
+            desc: 'Sync assembly recipes & component ratios',
+            icon: 'fa-cubes',
+            badge: 'Structure'
+        },
+        {
+            key: 'matchUnlinkedByCodeOrName',
+            title: 'Match All Items',
+            desc: 'Match estimate items by ID, catalog code, or name',
+            icon: 'fa-link',
+            badge: 'Smart Match'
+        },
+        {
+            key: 'overwriteOverrides',
+            title: 'Overwrite Manual',
+            desc: 'Replace manual project price edits with catalog rates',
+            icon: 'fa-pen-to-square',
+            badge: 'Force Price'
+        }
+    ];
+
+    const domainOptions = (extra = {}) => ({
+        includePricing: state.options.includePricing,
+        includeLabor: state.options.includeLabor,
+        includeEquipment: state.options.includeEquipment,
+        includeAssemblies: state.options.includeAssemblies,
+        matchUnlinkedByCodeOrName: state.options.matchUnlinkedByCodeOrName,
+        preserveOverrides: !state.options.overwriteOverrides,
+        forceInPlace: true,
+        ...extra
+    });
 
     const money = value => Number(value || 0).toLocaleString('en-US', {
         style: 'currency', currency: 'USD', minimumFractionDigits: 2
@@ -105,11 +170,12 @@
         state.selected.clear();
         state.searchQuery = '';
         state.activeFilter = 'all';
+        state.collapsedGroups.clear();
         const operation = ++state.operation;
         updateTriggerState();
         render();
         try {
-            const prepared = await global.projectEstimatingPrepareCatalogUpdate();
+            const prepared = await global.projectEstimatingPrepareCatalogUpdate(domainOptions());
             if (operation !== state.operation || !state.open) return;
             state.prepared = prepared;
             applicableChanges(prepared.preview).forEach(change => state.selected.add(String(change.catalogItemId)));
@@ -128,21 +194,29 @@
         }
     }
 
-    function scheduleSelectionPreview() {
+    function scheduleSelectionPreview(opts = {}) {
         clearTimeout(state.refreshTimer);
         state.phase = 'refreshing';
         render();
-        state.refreshTimer = setTimeout(refreshSelectionPreview, 180);
+        state.refreshTimer = setTimeout(() => refreshSelectionPreview(opts), 180);
     }
 
-    async function refreshSelectionPreview() {
+    async function refreshSelectionPreview(opts = {}) {
         const operation = ++state.operation;
-        const selectedCatalogItemIds = [...state.selected];
+        const resetSelection = Boolean(opts.resetSelection);
+        const requestOptions = resetSelection
+            ? domainOptions()
+            : domainOptions({ selectedCatalogItemIds: [...state.selected] });
         try {
-            const prepared = await global.projectEstimatingPrepareCatalogUpdate({ selectedCatalogItemIds });
+            const prepared = await global.projectEstimatingPrepareCatalogUpdate(requestOptions);
             if (operation !== state.operation || !state.open) return;
             state.prepared = prepared;
-            state.phase = 'preview';
+            if (resetSelection) {
+                state.selected.clear();
+                applicableChanges(prepared.preview).forEach(change => state.selected.add(String(change.catalogItemId)));
+            }
+            const hasSelectable = applicableChanges(prepared.preview).length > 0;
+            state.phase = (resetSelection && !hasSelectable) ? 'up-to-date' : 'preview';
             state.errorCode = null;
         } catch (error) {
             if (operation !== state.operation || !state.open) return;
@@ -159,9 +233,9 @@
         state.phase = 'applying';
         render();
         try {
-            const result = await global.projectEstimatingApplyCatalogUpdate(state.prepared, {
+            const result = await global.projectEstimatingApplyCatalogUpdate(state.prepared, domainOptions({
                 selectedCatalogItemIds: [...state.selected]
-            });
+            }));
             state.phase = 'success';
             state.prepared = { ...state.prepared, appliedResult: result };
             state.errorCode = null;
@@ -175,6 +249,34 @@
         render();
     }
 
+    function optionCardsHtml() {
+        return `<section class="est-cu-options-wrap" aria-label="Update options">
+            <div class="est-cu-options-head">
+                <span class="est-cu-options-title"><i class="fas fa-sliders" aria-hidden="true"></i> Update Rules for Active Estimate</span>
+                <span class="est-cu-options-sub">Choose which Cost Catalog fields to apply to this estimate only</span>
+            </div>
+            <div class="est-studio-card-grid est-cu-card-grid">
+                ${OPTION_CARDS.map(card => {
+                    const active = Boolean(state.options[card.key]);
+                    return `<button type="button"
+                        class="bb-mode-card bb-studio-card est-studio-card ${active ? 'active' : ''}"
+                        data-cu-option="${esc(card.key)}"
+                        aria-pressed="${active}"
+                        ${busy() ? 'disabled' : ''}>
+                        <div class="est-studio-card-top">
+                            <span class="bb-mode-icon"><i class="fas ${esc(card.icon)}" aria-hidden="true"></i></span>
+                            <span class="est-studio-card-pill">${active ? 'ON' : 'OFF'}</span>
+                        </div>
+                        <div class="est-studio-card-body">
+                            <strong>${esc(card.title)}</strong>
+                            <span>${esc(card.desc)}</span>
+                        </div>
+                    </button>`;
+                }).join('')}
+            </div>
+        </section>`;
+    }
+
     function close() {
         if (state.phase === 'applying') return;
         clearTimeout(state.refreshTimer);
@@ -183,6 +285,7 @@
         state.phase = 'idle';
         state.searchQuery = '';
         state.activeFilter = 'all';
+        state.collapsedGroups.clear();
         document.body.classList.remove('has-est-cu-open');
         document.documentElement.classList.remove('has-est-cu-open');
         document.querySelector('[data-catalog-update-portal]')?.remove();
@@ -279,7 +382,7 @@
                     <summary>
                         <div class="est-cu-asm-summary-left">
                             <i class="fas fa-cubes" aria-hidden="true"></i>
-                            <span>Assembly Recipe Updated</span>
+                            <span>Assembly definition changed</span>
                         </div>
                         <span class="est-cu-asm-badge">${number(row.componentChanges?.length, 0)} component changes</span>
                     </summary>
@@ -300,12 +403,15 @@
     function overrideHtml(change) {
         const rows = (change.changes || []).filter(row => row.hasOverride);
         if (!rows.length) return '';
-        return `<div class="est-cu-override">
+        const overwriting = rows.some(row => row.willOverwriteOverride) || state.options.overwriteOverrides;
+        return `<div class="est-cu-override ${overwriting ? 'is-overwriting' : ''}">
             <div class="est-cu-override-head">
-                <i class="fas fa-shield-halved" aria-hidden="true"></i>
-                <strong>Project Override Preserved</strong>
+                <i class="fas ${overwriting ? 'fa-pen-to-square' : 'fa-shield-halved'}" aria-hidden="true"></i>
+                <strong>${overwriting ? 'Manual edit will be replaced by Cost Catalog' : 'Project override preserved'}</strong>
             </div>
-            <p class="est-cu-override-desc">Your customized estimate values will be maintained. Catalog updates are referenced below:</p>
+            <p class="est-cu-override-desc">${overwriting
+                ? 'Overwrite Manual is active — Cost Catalog pricing will replace customized project prices for this estimate:'
+                : 'Your customized project prices are protected. Enable "Overwrite Manual" above to assign Cost Catalog rates:'}</p>
             <div class="est-cu-override-list">
                 ${rows.map(row => `
                 <div class="est-cu-override-row">
@@ -314,6 +420,13 @@
                 </div>`).join('')}
             </div>
         </div>`;
+    }
+
+    function matchBadgeHtml(method) {
+        if (!method) return '';
+        const labels = { id: 'ID Match', code: 'Code Match', name: 'Name Match' };
+        const label = labels[String(method).toLowerCase()] || '';
+        return label ? `<span class="est-cu-meta-match"><i class="fas fa-link" aria-hidden="true"></i> ${esc(label)}</span>` : '';
     }
 
     function rowHtml(change, preview, items, impacts) {
@@ -334,7 +447,7 @@
         const impactType = impactAmount > 0.001 ? 'increase' : impactAmount < -0.001 ? 'decrease' : 'neutral';
         const isAssembly = type === 'ASSEMBLY' || (change.changes || []).some(row => row.field === 'assemblyComponents');
         const hasOverride = (change.changes || []).some(row => row.hasOverride);
-        const searchTerms = `${impact.name || item.name || id} ${category} ${type} ${id}`.toLowerCase();
+        const searchTerms = `${impact.name || change.itemName || item.name || id} ${impact.groupName || ''} ${category} ${type} ${id}`.toLowerCase();
 
         return `<article class="est-cu-item ${disabled ? 'disabled' : ''} ${checked ? 'is-selected' : ''}"
             data-catalog-update-item="${esc(id)}"
@@ -344,14 +457,16 @@
             data-search-terms="${esc(searchTerms)}">
             <label class="est-cu-check">
                 <input type="checkbox" data-cu-select="${esc(id)}" ${checked ? 'checked' : ''} ${disabled || busy() ? 'disabled' : ''}>
-                <span class="sr-only">Select ${esc(impact.name || item.name || `catalog item ${id}`)}</span>
+                <span class="sr-only">Select ${esc(impact.name || change.itemName || item.name || `catalog item ${id}`)}</span>
             </label>
             <div class="est-cu-item-main">
                 <div class="est-cu-item-title">
                     <div class="est-cu-item-ident">
-                        <strong class="est-cu-item-name">${esc(impact.name || item.name || `Catalog item ${id}`)}</strong>
+                        <strong class="est-cu-item-name">${esc(impact.name || change.itemName || item.name || `Catalog item ${id}`)}</strong>
                         <div class="est-cu-item-meta">
                             <span class="est-cu-pill-type type-${type.toLowerCase()}">${esc(type)}</span>
+                            ${matchBadgeHtml(change.matchedBy || impact.matchedBy)}
+                            ${impact.groupName ? `<span class="est-cu-meta-group"><i class="fas fa-layer-group" aria-hidden="true"></i> ${esc(impact.groupName)}</span>` : ''}
                             <span class="est-cu-meta-cat"><i class="fas fa-folder" aria-hidden="true"></i> ${esc(category)}</span>
                             <span class="est-cu-meta-rev"><i class="fas fa-clock-rotate-left" aria-hidden="true"></i> Rev ${esc(change.previousRevision ?? '—')} → ${esc(change.currentRevision ?? '—')}</span>
                         </div>
@@ -373,6 +488,7 @@
 
     function strategyHtml(prepared) {
         const strategy = prepared.strategy?.strategy;
+        const estimateLabel = prepared.estimateName || 'Active Estimate';
         if (strategy === 'CREATE_REVISION') {
             return `<section class="est-cu-strategy revision">
                 <div class="est-cu-strategy-icon"><i class="fas fa-code-branch" aria-hidden="true"></i></div>
@@ -385,10 +501,77 @@
         return `<section class="est-cu-strategy">
             <div class="est-cu-strategy-icon"><i class="fas fa-pen-to-square" aria-hidden="true"></i></div>
             <div class="est-cu-strategy-content">
-                <strong>Direct Update to Active Draft</strong>
-                <span>The selected Cost Catalog changes will be applied directly to the active estimate draft.</span>
+                <strong>Direct Update — ${esc(estimateLabel)}</strong>
+                <span>Matched Cost Catalog prices will be assigned only to this active estimate. Other estimates in this project stay unchanged.</span>
             </div>
         </section>`;
+    }
+
+    function resolveItemGroupLookup(preview) {
+        const byItem = new Map();
+        const byCatalog = new Map();
+        const groups = Array.isArray(preview?.projectedEstimate?.groups) ? preview.projectedEstimate.groups : [];
+        groups.forEach((group, gIdx) => {
+            const gName = String(group?.name || '').trim() || 'Estimate Items';
+            const gKey = String(group?.id || gName || `group-${gIdx}`);
+            const info = { key: gKey, name: gName, order: gIdx };
+            const visit = item => {
+                if (!item || typeof item !== 'object') return;
+                if (present(item.id) && !byItem.has(String(item.id))) byItem.set(String(item.id), info);
+                const cid = item.catalogItemId ?? item.catalogSnapshot?.catalogItemId;
+                if (present(cid) && !byCatalog.has(String(cid))) byCatalog.set(String(cid), info);
+                (item.children || []).forEach(visit);
+            };
+            (group?.items || []).forEach(visit);
+        });
+        return { byItem, byCatalog };
+    }
+
+    function groupedChangesHtml(changes, preview, items, impacts) {
+        if (!changes.length) return '';
+        const lookup = resolveItemGroupLookup(preview);
+        const buckets = new Map();
+        changes.forEach(change => {
+            const cid = String(change.catalogItemId ?? '');
+            const impact = impacts.get(cid) || {};
+            let groupInfo = (present(change.estimateItemId) ? lookup.byItem.get(String(change.estimateItemId)) : null)
+                || lookup.byCatalog.get(cid);
+            if (!groupInfo) {
+                const fallbackName = String(impact.groupName || '').trim() || 'Ungrouped Items';
+                groupInfo = { key: `fallback:${fallbackName}`, name: fallbackName, order: 9999 };
+            }
+            if (!buckets.has(groupInfo.key)) {
+                buckets.set(groupInfo.key, { ...groupInfo, changes: [], netDiff: 0, selectedCount: 0 });
+            }
+            const bucket = buckets.get(groupInfo.key);
+            bucket.changes.push(change);
+            if (selectable(change)) {
+                bucket.netDiff += Number(impact.difference || 0);
+                if (state.selected.has(cid)) bucket.selectedCount += 1;
+            }
+        });
+        const sorted = [...buckets.values()].sort((a, b) => a.order - b.order);
+        return sorted.map((bucket, idx) => {
+            const collapsed = state.collapsedGroups.has(bucket.key);
+            const panelId = `est-cu-group-panel-${idx}`;
+            const sign = bucket.netDiff > 0 ? '+' : '';
+            const tone = bucket.netDiff > 0.001 ? 'increase' : bucket.netDiff < -0.001 ? 'decrease' : 'neutral';
+            return `<section class="est-cu-group-section ${collapsed ? 'is-collapsed' : ''}" data-cu-group="${esc(bucket.key)}">
+                <div class="est-cu-group-head">
+                    <button type="button" class="est-cu-group-toggle" data-cu-group-toggle="${esc(bucket.key)}" aria-expanded="${!collapsed}" aria-controls="${panelId}">
+                        <i class="fas ${collapsed ? 'fa-chevron-right' : 'fa-chevron-down'} est-cu-group-chevron" aria-hidden="true"></i>
+                        <i class="fas ${collapsed ? 'fa-folder' : 'fa-folder-open'} est-cu-group-folder" aria-hidden="true"></i>
+                        <strong class="est-cu-group-name">${esc(bucket.name)}</strong>
+                        <span class="est-cu-group-count">${number(bucket.changes.length, 0)} ${bucket.changes.length === 1 ? 'item' : 'items'}</span>
+                        ${bucket.selectedCount > 0 ? `<span class="est-cu-group-sel">${number(bucket.selectedCount, 0)} selected</span>` : ''}
+                    </button>
+                    ${bucket.netDiff !== 0 ? `<span class="est-cu-group-diff ${tone}">${sign}${money(bucket.netDiff)}</span>` : ''}
+                </div>
+                <div class="est-cu-group-items" id="${panelId}" ${collapsed ? 'hidden' : ''}>
+                    ${bucket.changes.map(change => rowHtml(change, preview, items, impacts)).join('')}
+                </div>
+            </section>`;
+        }).join('');
     }
 
     function previewBody(prepared) {
@@ -420,6 +603,7 @@
         });
 
         return `<div class="est-cu-body ${state.phase === 'refreshing' ? 'is-refreshing' : ''}">
+            ${optionCardsHtml()}
             <div class="est-cu-stats">${countPills(preview)}</div>
             ${totals(preview)}
             ${strategyHtml(prepared)}
@@ -470,6 +654,9 @@
                     <span class="est-cu-list-count">Showing <b>${number(changes.length, 0)}</b> of <b>${number(changes.length, 0)}</b> changes · <b>${number(state.selected.size, 0)}</b> selected</span>
                 </div>
                 <div class="est-cu-list-head-actions">
+                    <button type="button" class="est-cu-link-btn" data-cu-toggle-groups title="Expand or collapse all groups">
+                        <i class="fas ${state.collapsedGroups.size ? 'fa-angles-down' : 'fa-angles-up'}" aria-hidden="true"></i> <span>${state.collapsedGroups.size ? 'Expand All' : 'Collapse All'}</span>
+                    </button>
                     <button type="button" class="est-cu-link-btn" data-cu-toggle-filtered title="Toggle selection of visible items">
                         <i class="fas fa-check-double" aria-hidden="true"></i> <span>Toggle Visible</span>
                     </button>
@@ -481,7 +668,7 @@
             </div>
 
             <div class="est-cu-list" role="list">
-                ${changes.map(change => rowHtml(change, preview, items, impacts)).join('') || '<div class="est-cu-empty-list"><i class="fas fa-circle-check"></i><p>No item changes require review.</p></div>'}
+                ${groupedChangesHtml(changes, preview, items, impacts) || '<div class="est-cu-empty-list"><i class="fas fa-circle-check"></i><p>No item changes require review.</p></div>'}
                 <div class="est-cu-empty-search" style="display:none;">
                     <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
                     <h4>No matching changes</h4>
@@ -510,7 +697,12 @@
 
     function modalHtml() {
         if (state.phase === 'checking') return compactState('fa-spinner fa-spin', 'Checking Cost Catalog…', 'Comparing estimate items against latest catalog versions and specifications.');
-        if (state.phase === 'up-to-date') return compactState('fa-circle-check', 'Your estimate is up to date with the Cost Catalog', 'All linked materials, labor rates, and assembly compositions match current catalog definitions.');
+        if (state.phase === 'up-to-date') {
+            return `<div class="est-cu-body est-cu-body-uptodate">
+                ${optionCardsHtml()}
+                ${compactState('fa-circle-check', 'Your estimate is up to date with the Cost Catalog', 'All linked materials, labor rates, and assembly compositions match current catalog definitions (or have protected project overrides).')}
+            </div>`;
+        }
         if (state.phase === 'success') {
             const revision = state.prepared?.appliedResult?.strategy === 'CREATE_REVISION';
             return compactState('fa-circle-check', revision ? 'Estimate revision created successfully' : 'Estimate updated successfully', revision ? 'The new revision is ready and active for review.' : 'Estimate totals and catalog snapshots have been refreshed.');
@@ -581,6 +773,30 @@
             }
         });
 
+        portal.querySelectorAll('.est-cu-group-section').forEach(section => {
+            const sectionItems = section.querySelectorAll('.est-cu-item');
+            const visibleInGroup = [...sectionItems].filter(el => el.style.display !== 'none').length;
+            section.style.display = visibleInGroup > 0 ? '' : 'none';
+            const groupKey = section.dataset.cuGroup || '';
+            const itemsWrap = section.querySelector('.est-cu-group-items');
+            const toggleBtn = section.querySelector('[data-cu-group-toggle]');
+            const chevron = section.querySelector('.est-cu-group-chevron');
+            const folder = section.querySelector('.est-cu-group-folder');
+            const forceExpanded = Boolean(query || filter !== 'all');
+            const collapsed = !forceExpanded && state.collapsedGroups.has(groupKey);
+            section.classList.toggle('is-collapsed', collapsed);
+            if (itemsWrap) itemsWrap.hidden = collapsed;
+            if (toggleBtn) toggleBtn.setAttribute('aria-expanded', String(!collapsed));
+            if (chevron) {
+                chevron.classList.toggle('fa-chevron-right', collapsed);
+                chevron.classList.toggle('fa-chevron-down', !collapsed);
+            }
+            if (folder) {
+                folder.classList.toggle('fa-folder', collapsed);
+                folder.classList.toggle('fa-folder-open', !collapsed);
+            }
+        });
+
         const countLabel = portal.querySelector('.est-cu-list-count');
         if (countLabel) {
             countLabel.innerHTML = `Showing <b>${number(visibleCount, 0)}</b> of <b>${number(items.length, 0)}</b> changes · <b>${number(state.selected.size, 0)}</b> selected`;
@@ -618,24 +834,23 @@
 
         const changesCount = (state.prepared?.preview?.changeSet?.outdatedItems || 0) + (state.prepared?.preview?.changeSet?.unversionedItems || 0);
         const isRevisionStrategy = state.prepared?.strategy?.strategy === 'CREATE_REVISION';
+        const estimateName = state.prepared?.estimateName || '';
 
-        portal.innerHTML = `<section class="est-cu-dialog" role="dialog" aria-modal="true" aria-labelledby="catalogUpdateTitle" aria-describedby="catalogUpdateDescription" aria-busy="${busy()}">
+        portal.innerHTML = `<section class="est-cu-dialog pd-modal" role="dialog" aria-modal="true" aria-labelledby="catalogUpdateTitle" aria-describedby="catalogUpdateDescription" aria-busy="${busy()}">
             <header class="est-cu-header">
                 <div class="est-cu-header-left">
-                    <div class="est-cu-header-icon">
-                        <i class="fas fa-arrows-rotate" aria-hidden="true"></i>
-                    </div>
                     <div class="est-cu-header-text">
                         <div class="est-cu-header-title-row">
-                            <h2 id="catalogUpdateTitle">Update from Cost Catalog</h2>
+                            <h2 id="catalogUpdateTitle" class="est-cu-title"><i class="fas fa-arrows-rotate" aria-hidden="true"></i> Update from Cost Catalog</h2>
+                            ${estimateName ? `<span class="est-cu-badge est-cu-badge-estimate"><i class="fas fa-file-invoice" aria-hidden="true"></i> ${esc(estimateName)}</span>` : ''}
                             ${changesCount > 0 ? `<span class="est-cu-badge est-cu-badge-primary"><i class="fas fa-layer-group" aria-hidden="true"></i> ${number(changesCount, 0)} Changes</span>` : ''}
                             ${isRevisionStrategy ? `<span class="est-cu-badge est-cu-badge-revision"><i class="fas fa-code-branch" aria-hidden="true"></i> Rev ${number(state.prepared.currentEstimateRevision, 0)} → Rev ${number(state.prepared.projectedEstimateRevision, 0)}</span>` : ''}
                         </div>
-                        <p id="catalogUpdateDescription">Review item price, labor, and assembly changes before updating this estimate.</p>
+                        <p id="catalogUpdateDescription">Match estimate items against Cost Catalog prices and apply changes only to this active estimate.</p>
                     </div>
                 </div>
                 <button type="button" class="est-cu-close" data-cu-close aria-label="Close Cost Catalog update" ${state.phase === 'applying' ? 'disabled' : ''}>
-                    <i class="fas fa-xmark" aria-hidden="true"></i>
+                    <i class="fas fa-times" aria-hidden="true"></i>
                 </button>
             </header>
             <main>${modalHtml()}</main>
@@ -668,6 +883,49 @@
         if (event.target.closest('[data-cu-refresh]')) { close(); checkCatalog(); return; }
         if (event.target.closest('[data-cu-apply]')) { applyUpdate(); return; }
 
+        const optionCard = event.target.closest('[data-cu-option]');
+        if (optionCard) {
+            if (busy()) return;
+            const key = optionCard.dataset.cuOption;
+            if (key && Object.prototype.hasOwnProperty.call(state.options, key)) {
+                state.options[key] = !state.options[key];
+                state.restoreSelector = `[data-cu-option="${global.CSS?.escape ? global.CSS.escape(key) : key}"]`;
+                scheduleSelectionPreview({ resetSelection: true });
+            }
+            return;
+        }
+
+        const groupToggle = event.target.closest('[data-cu-group-toggle]');
+        if (groupToggle) {
+            const groupKey = groupToggle.dataset.cuGroupToggle || '';
+            if (groupKey) {
+                if (state.collapsedGroups.has(groupKey)) state.collapsedGroups.delete(groupKey);
+                else state.collapsedGroups.add(groupKey);
+                applyClientFilters(portal);
+                const allBtn = portal.querySelector('[data-cu-toggle-groups]');
+                if (allBtn) {
+                    const anyCollapsed = state.collapsedGroups.size > 0;
+                    allBtn.innerHTML = `<i class="fas ${anyCollapsed ? 'fa-angles-down' : 'fa-angles-up'}" aria-hidden="true"></i> <span>${anyCollapsed ? 'Expand All' : 'Collapse All'}</span>`;
+                }
+            }
+            return;
+        }
+
+        const toggleAllGroupsBtn = event.target.closest('[data-cu-toggle-groups]');
+        if (toggleAllGroupsBtn) {
+            const sections = [...portal.querySelectorAll('.est-cu-group-section')];
+            const shouldCollapse = sections.some(sec => !state.collapsedGroups.has(sec.dataset.cuGroup || ''));
+            state.collapsedGroups.clear();
+            if (shouldCollapse) {
+                sections.forEach(sec => {
+                    if (sec.dataset.cuGroup) state.collapsedGroups.add(sec.dataset.cuGroup);
+                });
+            }
+            applyClientFilters(portal);
+            toggleAllGroupsBtn.innerHTML = `<i class="fas ${shouldCollapse ? 'fa-angles-down' : 'fa-angles-up'}" aria-hidden="true"></i> <span>${shouldCollapse ? 'Expand All' : 'Collapse All'}</span>`;
+            return;
+        }
+
         const filterChip = event.target.closest('[data-cu-filter]');
         if (filterChip) {
             state.activeFilter = filterChip.dataset.cuFilter || 'all';
@@ -687,7 +945,10 @@
         }
 
         if (event.target.closest('[data-cu-toggle-filtered]')) {
-            const visibleItems = [...portal.querySelectorAll('.est-cu-item')].filter(el => el.style.display !== 'none');
+            const visibleItems = [...portal.querySelectorAll('.est-cu-item')].filter(el =>
+                el.style.display !== 'none'
+                && el.closest('.est-cu-group-section')?.style.display !== 'none'
+            );
             const visibleCheckboxes = visibleItems.map(el => el.querySelector('[data-cu-select]')).filter(cb => cb && !cb.disabled);
             const allVisibleChecked = visibleCheckboxes.length > 0 && visibleCheckboxes.every(cb => cb.checked);
 

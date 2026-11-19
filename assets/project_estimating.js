@@ -5,7 +5,7 @@
 
     const Workspace = window.EstimatingWorkspaceService;
     const Calc = window.EstimateCalculationService;
-    const Exporter = window.EstimatingExportService;
+    const getExporter = () => window.EstimatingExportService;
     const Footer = window.ProjectEstimateFooter;
     if (!Workspace || !Calc) {
         root.innerHTML = '<div class="est-fatal">Estimating could not start. Required services are unavailable.</div>';
@@ -20,17 +20,20 @@
     const resolveProjectId = () => {
         const query = new URLSearchParams(window.location.search);
         return [root.dataset.projectId, window.ProjectState?.projectId, window.EstimateProjectId,
-            query.get('project_id'), query.get('projectId'), query.get('id')]
+        query.get('project_id'), query.get('projectId'), query.get('id')]
             .map(Workspace.projectId).find(Boolean) || 0;
     };
 
     const projectId = resolveProjectId();
     const storageKey = `takeoff.estimating.module.${projectId || 'draft'}`;
     const apiUrl = '../api/project_estimating.php';
-    const ui = { search: '', selected: new Set(), saving: false, saveRequested: false, saveTimer: null, pendingDeleteId: null, lastErrorCode: null, loadState: projectId ? 'loading' : 'local',
+    const ui = {
+        search: '', selected: new Set(), saving: false, saveRequested: false, saveTimer: null, pendingDeleteId: null, lastErrorCode: null, loadState: projectId ? 'loading' : 'local',
         message: projectId ? 'Loading estimate' : 'Local draft', collapsed: { notes: true, audit: true }, expandedAssemblies: new Set(), modal: null,
-        notesLibraryModal: null, notesLibrarySearch: '', activeMarkupPopover: null, summaryColWidths: (()=>{ try { return JSON.parse(localStorage.getItem('takeoff.summaryColWidths')||'{}'); } catch(_){ return {}; } })(),
-        catalogTargetGroupId: null, catalogData: null, catalogLoading: false, catalogError: '' };
+        notesLibraryModal: null, notesLibrarySearch: '', activeMarkupPopover: null, summaryColWidths: (() => { try { return JSON.parse(localStorage.getItem('takeoff.summaryColWidths') || '{}'); } catch (_) { return {}; } })(),
+        catalogTargetGroupId: null, catalogData: null, catalogLoading: false, catalogError: '',
+        importFile: null, importMode: 'keep_excel', importName: '', importError: '', importing: false
+    };
     let state = readLocal();
     const dirtyEstimateIds = new Set(state.dirtyEstimateIds || []);
     const takeoffSyncDirtyIds = new Set(state.takeoffSyncDirtyIds || []);
@@ -41,6 +44,38 @@
     const deletingEstimateIds = new Set();
     let dirtyGeneration = 0;
     const pendingTakeoffByEstimate = new Map();
+    let estimatingHasUnsavedCheckpoint = false;
+    let estimatingTableDirty = false;
+    let estimatingLoadingActive = false;
+
+    function isEstimatingTabActive() {
+        const tab = document.getElementById('tab-estimating');
+        return !tab || (!tab.hidden && tab.classList.contains('active'));
+    }
+
+    function setEstimatingLoading(visible, message = 'Loading estimate...') {
+        const main = root.querySelector('.est-main');
+        if (!main) return;
+        let overlay = main.querySelector('#estLoadingOverlay');
+        if (!overlay && visible) {
+            overlay = document.createElement('div');
+            overlay.id = 'estLoadingOverlay';
+            overlay.className = 'est-loading-overlay';
+            overlay.setAttribute('role', 'status');
+            overlay.setAttribute('aria-live', 'polite');
+            overlay.innerHTML = '<div class="est-loading-card"><i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i><span id="estLoadingOverlayText"></span></div>';
+            main.appendChild(overlay);
+        }
+        if (!overlay) return;
+        estimatingLoadingActive = Boolean(visible);
+        if (visible) {
+            const textEl = overlay.querySelector('#estLoadingOverlayText');
+            if (textEl) textEl.textContent = message;
+            overlay.hidden = false;
+        } else {
+            overlay.hidden = true;
+        }
+    }
 
     function restoreDirtyTracking() {
         dirtyEstimateIds.clear();
@@ -55,18 +90,126 @@
 
     root.classList.add('est-v2');
     if (!$('estTableHead')) {
-        root.innerHTML = `<div class="est-main"><aside class="est-table-settings-drawer" id="estTableSettingsDrawer" aria-label="Table Settings" hidden></aside><section class="est-left"><div class="est-toolbar"><div class="bb-search-field-procore cc-search-procore est-search-box"><input id="estSearch" type="search" placeholder="Search estimate items..." autocomplete="off"></div><div class="est-toolbar-actions" style="display: flex; align-items: center; gap: 8px; margin-left: auto;"><button class="est-icon-btn" id="estBtnCreateGroup" type="button" data-est-action="create-group" title="Create Group"><i class="fas fa-folder-plus"></i></button><button class="est-icon-btn" id="estBtnTableSettings" type="button" data-est-action="table-settings" title="Table Settings"><i class="fas fa-sliders"></i></button><button class="est-icon-btn" id="estBtnFullscreen" type="button" data-est-action="fullscreen" title="Full screen"><i class="fas fa-expand"></i></button><div class="est-menu-wrap"><button class="est-icon-btn" id="estBtnMoreOptions" type="button" data-est-action="options" title="Options"><i class="fas fa-ellipsis-vertical"></i></button><div class="est-menu" id="optionsMenu"><button type="button" data-est-action="catalog-update"><i class="fas fa-arrows-rotate"></i> Update from Cost Catalog</button><button type="button" data-est-action="reset-quantities"><i class="fas fa-rotate-left"></i> Reset Quantities</button><button type="button" data-est-action="delete-selected" id="estBtnDeleteSelected" disabled><i class="fas fa-trash"></i> Delete Selected</button><div class="est-menu-divider" style="height: 1px; background: var(--border, #e2e8f0); margin: 4px 0;"></div><button type="button" data-est-option="save"><i class="fas fa-floppy-disk"></i> Save estimate</button><button type="button" data-est-option="copy"><i class="fas fa-copy"></i> Copy estimate</button><button type="button" data-est-option="status"><i class="fas fa-circle-check"></i> Change project status</button><button type="button" data-est-option="import"><i class="fas fa-file-import"></i> Import</button><button type="button" data-est-option="export"><i class="fas fa-file-export"></i> Export</button><button type="button" data-est-option="export-bom"><i class="fas fa-file-excel"></i> Export BOM (Excel)</button><button type="button" data-est-option="delete-estimate" class="danger"><i class="fas fa-trash"></i> Delete estimate</button></div></div><button class="est-icon-btn est-toggle-right-btn" id="estToolbarToggleRight" type="button" data-est-action="toggle-right" title="Hide summary panel"><i class="fas fa-chevron-right"></i></button></div></div><div class="est-table-wrap bb-table-scroll"><table class="est-table bb-table" id="estMainTable"><thead id="estTableHead"></thead><tbody id="estTableBody"></tbody></table></div></section><div class="pro-sidebar-resizer est-sidebar-resizer" id="estSplitResizer" role="separator" aria-orientation="vertical" title="Drag to resize panels"><div class="pro-resizer-handle"></div></div><aside class="est-right"><div class="est-right-scroll"></div><div class="est-total-box"><div id="estimateTotal" class="est-total-value"></div><div class="est-total-label">Estimate Total</div><div id="estimateSqft" class="est-total-sub"></div></div></aside></div><footer class="est-version-bar" id="versionBar"></footer>`;
+        root.innerHTML = `<div class="est-main"><aside class="est-table-settings-drawer" id="estTableSettingsDrawer" aria-label="Table Settings" hidden></aside><section class="est-left"><div class="est-toolbar"><div class="bb-search-field-procore cc-search-procore est-search-box"><input id="estSearch" type="search" placeholder="Search estimate items..." autocomplete="off"></div><div class="est-toolbar-actions" style="display: flex; align-items: center; gap: 8px; margin-left: auto;"><button class="btn-main est-toolbar-btn est-btn-import" id="estBtnImport" type="button" data-est-option="import" title="Import Project Estimate (.xlsx)"><i class="fas fa-file-import"></i> <span>Import</span></button><button class="btn-main est-toolbar-btn est-btn-export" id="estBtnExport" type="button" data-est-option="export" title="Export Estimate"><i class="fas fa-file-export"></i> <span>Export</span></button><button class="est-icon-btn" id="estBtnCreateGroup" type="button" data-est-action="create-group" title="Create Group"><i class="fas fa-folder-plus"></i></button><button class="est-icon-btn" id="estBtnTableSettings" type="button" data-est-action="table-settings" title="Table Settings"><i class="fas fa-sliders"></i></button><button class="est-icon-btn" id="estBtnFullscreen" type="button" data-est-action="fullscreen" title="Full screen"><i class="fas fa-expand"></i></button><div class="est-menu-wrap"><button class="est-icon-btn" id="estBtnMoreOptions" type="button" data-est-action="options" title="Options"><i class="fas fa-ellipsis-vertical"></i></button><div class="est-menu" id="optionsMenu"><button type="button" data-est-action="catalog-update"><i class="fas fa-arrows-rotate"></i> Update from Cost Catalog</button><button type="button" data-est-action="reset-quantities"><i class="fas fa-rotate-left"></i> Reset Quantities</button></div></div><button class="est-icon-btn est-toggle-right-btn" id="estToolbarToggleRight" type="button" data-est-action="toggle-right" title="Hide summary panel"><i class="fas fa-chevron-right"></i></button></div></div><div class="est-table-wrap bb-table-scroll"><table class="est-table bb-table" id="estMainTable"><thead id="estTableHead"></thead><tbody id="estTableBody"></tbody></table></div></section><div class="pro-sidebar-resizer est-sidebar-resizer" id="estSplitResizer" role="separator" aria-orientation="vertical" title="Drag to resize panels"><div class="pro-resizer-handle"></div></div><aside class="est-right"><div class="est-right-scroll"></div><div class="est-total-box"><div id="estimateTotal" class="est-total-value"></div><div class="est-total-label">Estimate Total</div><div id="estimateSqft" class="est-total-sub"></div></div></aside></div><footer class="est-version-bar" id="versionBar"></footer>`;
+    }
+
+    function safeSetLocalStorage(key, value) {
+        try {
+            localStorage.setItem(key, value);
+            return true;
+        } catch (err) {
+            try {
+                const currentProjectStr = String(projectId || 'draft');
+                const evictable = [];
+                for (let i = 0; i < localStorage.length; i++) {
+                    const k = localStorage.key(i);
+                    if (!k || k === key) continue;
+                    if ((k.startsWith('takeoff.estimating.module.') && k !== `takeoff.estimating.module.${currentProjectStr}`)
+                        || (k.startsWith('takeoff_project_groups_') && k !== `takeoff_project_groups_${currentProjectStr}`)) {
+                        evictable.push(k);
+                    }
+                }
+                evictable.forEach(k => { try { localStorage.removeItem(k); } catch (_) { } });
+                localStorage.setItem(key, value);
+                return true;
+            } catch (_) {
+                return false;
+            }
+        }
     }
 
     function readLocal() {
         let raw = null;
-        try { raw = JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch (_) {}
+        try { raw = JSON.parse(localStorage.getItem(storageKey) || 'null'); } catch (_) { }
+        if (!raw && projectId > 0) {
+            const psActiveId = String(window.ProjectState?.activeEstimateId || '');
+            const psSummary = Array.isArray(window.ProjectState?.estimatesSummary) ? window.ProjectState.estimatesSummary : [];
+            const seedItems = window.ProjectState?.estimateItems || [];
+            if (psSummary.length > 0) {
+                raw = {
+                    activeEstimateId: (psActiveId && psActiveId !== 'est_primary') ? psActiveId : psSummary[0].id,
+                    estimates: psSummary.map((row, idx) => ({
+                        id: String(row.id),
+                        dbEstimateId: row.dbEstimateId || null,
+                        name: row.name || (idx === 0 ? 'Primary Estimate' : `Estimate ${idx + 1}`),
+                        isPrimary: Boolean(row.isPrimary || row.is_primary),
+                        is_primary: Boolean(row.isPrimary || row.is_primary),
+                        isActive: Boolean(row.isActive || String(row.id) === psActiveId),
+                        estimateTotal: Number(row.estimateTotal || row.totalSales || 0),
+                        totalSales: Number(row.totalSales || row.estimateTotal || 0),
+                        groups: idx === 0 && seedItems.length ? undefined : []
+                    }))
+                };
+            } else if (psActiveId && psActiveId !== 'est_primary') {
+                raw = {
+                    activeEstimateId: psActiveId,
+                    estimates: [{ id: psActiveId, name: 'Primary Estimate', isPrimary: true, is_primary: true, isActive: true }]
+                };
+            }
+        }
         return Workspace.workspace(raw || {}, projectId, window.ProjectState?.estimateItems || []);
     }
 
     function ensureDefaultMarkups(estimate) {
         if (!estimate) return estimate;
         if (!estimate.settings) estimate.settings = {};
+        const hasVal = v => v !== undefined && v !== null && v !== '' && Number.isFinite(Number(v));
+        if (!hasVal(estimate.settings.globalLaborCost)) estimate.settings.globalLaborCost = 36;
+        if (!hasVal(estimate.settings.globalLaborMargin)) estimate.settings.globalLaborMargin = 34.6;
+        if (!hasVal(estimate.settings.materialMargin)) estimate.settings.materialMargin = 15;
+        if (!hasVal(estimate.settings.equipmentMargin)) estimate.settings.equipmentMargin = 15;
+        if (!hasVal(estimate.settings.laborWaste)) estimate.settings.laborWaste = 0;
+        if (!hasVal(estimate.settings.materialWaste)) estimate.settings.materialWaste = 0;
+        if (!hasVal(estimate.settings.equipmentWaste)) estimate.settings.equipmentWaste = 0;
+        if (!hasVal(estimate.settings.laborDifficulty)) estimate.settings.laborDifficulty = 1;
+        const gCost = Number(estimate.settings.globalLaborCost);
+        const gMargin = Number(estimate.settings.globalLaborMargin);
+        if (!hasVal(estimate.settings.globalLaborSales) || Number(estimate.settings.globalLaborSales) === 110) {
+            estimate.settings.globalLaborSales = gMargin < 100
+                ? Number((gCost / (1 - gMargin / 100)).toFixed(2))
+                : gCost;
+        }
+        if (projectId > 0 && (!estimate.settings._defaultsActivated || !estimate.settings._laborDefaultsActivated)) {
+            const unlockMargins = !estimate.settings._defaultsActivated;
+            const unlockLabor = !estimate.settings._laborDefaultsActivated;
+            const unlockLegacyDefaults = items => {
+                (items || []).forEach(it => {
+                    if (!it || typeof it !== 'object') return;
+                    const manual = it._manualFields || {};
+                    if (unlockMargins) {
+                        if (!manual.materialMargin && it.materialMargin === 0) {
+                            it.materialMargin = null;
+                            if (it.margin === 0) delete it.margin;
+                        }
+                        if (!manual.equipmentMargin && it.equipmentMargin === 0) it.equipmentMargin = null;
+                        if (!manual.laborMargin && it.laborMargin === 0) it.laborMargin = null;
+                        if (!manual.waste && it.waste === 0) it.waste = null;
+                        if (!manual.difficulty && it.difficulty === 1) it.difficulty = null;
+                    }
+                    if (unlockLabor) {
+                        const snapRate = Number(it.catalogSnapshot?.pricing?.laborRate || 0);
+                        if (!manual.laborRate) {
+                            if (Number(it.laborRate) === 0 && !(snapRate > 0)) {
+                                it.laborRate = null;
+                                if (it.overrides && Number(it.overrides.laborRate) === 0) it.overrides.laborRate = null;
+                            } else if (Number(it.laborRate) === 85 && !(snapRate === 85) && gCost !== 85) {
+                                it.laborRate = null;
+                                if (it.overrides && Number(it.overrides.laborRate) === 85) it.overrides.laborRate = null;
+                            }
+                        }
+                        if (String(it.laborUnitType || '').toLowerCase() === 'mins' && !manual.laborUnitType
+                            && (it.catalogSnapshot || it.catalogItemId || it.takeoffLayerId || it.laborHours !== undefined || it.labor_hours !== undefined || it.parentItemId || it.assemblyComponentId)) {
+                            it.laborUnitType = 'hrs';
+                        }
+                    }
+                    if (Array.isArray(it.children) && it.children.length) unlockLegacyDefaults(it.children);
+                    if (Array.isArray(it.assemblyItems) && it.assemblyItems.length) unlockLegacyDefaults(it.assemblyItems);
+                });
+            };
+            (estimate.groups || []).forEach(g => unlockLegacyDefaults(g.items));
+            estimate.settings._defaultsActivated = true;
+            estimate.settings._laborDefaultsActivated = true;
+        }
         if (!estimate.settings._markupsSeeded) {
             if (!Array.isArray(estimate.settings.preTaxMarkups) || estimate.settings.preTaxMarkups.length === 0) {
                 estimate.settings.preTaxMarkups = [
@@ -98,7 +241,7 @@
         return parseFloat(cleaned) || 0;
     }
 
-        function openSquareFootageModal() {
+    function openSquareFootageModal() {
         const currentSqft = resolveSquareFootage();
         document.querySelector('[data-est-sqft-portal]')?.remove();
         const portal = document.createElement('div');
@@ -106,32 +249,32 @@
         portal.dataset.estSqftPortal = 'true';
         portal.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(4px); z-index: 999999;';
         portal.innerHTML = `
-            <div class="pd-modal bb-create-project-modal bb-studio-modal notes-lib-modal" style="width: min(440px, 100%); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true">
-                <div class="bb-studio-modal-header" style="padding: 16px 20px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
+            <div class="pd-modal bb-create-project-modal bb-studio-modal notes-lib-modal" style="width: min(440px, 100%); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true">
+                <div class="pd-modal-head bb-studio-modal-header" style="padding: 16px 20px; display: flex; align-items: center; justify-content: space-between;">
                     <div style="display: flex; align-items: center; gap: 12px;">
-                        <div class="notes-lib-badge" style="width: 36px; height: 36px; border-radius: 8px; background: rgba(37,99,235,0.1); color: #2563eb; display: flex; align-items: center; justify-content: center; font-size: 16px;">
+                        <div class="notes-lib-badge" style="width: 36px; height: 36px; border-radius: 8px; background: rgba(37,99,235,0.12); color: #3b82f6; display: flex; align-items: center; justify-content: center; font-size: 16px;">
                             <i class="fas fa-ruler-combined"></i>
                         </div>
                         <div>
-                            <h3 style="margin: 0; font-size: 15px; font-weight: 600; color: var(--text-main, #0f172a);">Project Square Footage</h3>
-                            <p style="margin: 2px 0 0; font-size: 12px; color: var(--text-muted, #64748b);">Gross area for $/sq ft cost and sales metrics</p>
+                            <h3 style="margin: 0; font-size: 15px; font-weight: 600;">Project Square Footage</h3>
+                            <p class="est-modal-sub" style="margin: 2px 0 0; font-size: 12px;">Gross area for $/sq ft cost and sales metrics</p>
                         </div>
                     </div>
-                    <button type="button" data-close-sqft-modal style="border: none; background: transparent; font-size: 20px; line-height: 1; cursor: pointer; color: var(--text-muted, #94a3b8);">&times;</button>
+                    <button type="button" class="pd-modal-head-close" data-close-sqft-modal style="border: none; background: transparent; font-size: 20px; line-height: 1; cursor: pointer;">&times;</button>
                 </div>
-                <div style="padding: 20px;">
-                    <label style="display: block; font-size: 12px; font-weight: 600; color: var(--text-muted, #475569); margin-bottom: 6px;">Total Gross Area (sq ft)</label>
+                <div class="pd-modal-body" style="padding: 20px;">
+                    <label style="display: block; font-size: 12px; font-weight: 600; margin-bottom: 6px;">Total Gross Area (sq ft)</label>
                     <div style="position: relative; display: flex; align-items: center;">
-                        <input id="estSqftModalInput" type="number" step="any" min="0" value="${currentSqft > 0 ? currentSqft : ''}" placeholder="e.g. 5000" style="width: 100%; height: 42px; border: 1.5px solid var(--border, #cbd5e1); border-radius: 8px; padding: 0 54px 0 12px; font-size: 15px; font-weight: 600; background: var(--bg-surface, #f8fafc); color: var(--text-main, #0f172a); outline: none;">
-                        <span style="position: absolute; right: 12px; font-size: 12px; font-weight: 600; color: #2563eb; background: rgba(37,99,235,0.1); padding: 2px 6px; border-radius: 4px;">sq ft</span>
+                        <input id="estSqftModalInput" class="est-modal-input" type="number" step="any" min="0" value="${currentSqft > 0 ? currentSqft : ''}" placeholder="e.g. 5000" style="width: 100%; height: 42px; border-radius: 8px; padding: 0 54px 0 12px; font-size: 15px; font-weight: 600; outline: none;">
+                        <span style="position: absolute; right: 12px; font-size: 12px; font-weight: 600; color: #3b82f6; background: rgba(37,99,235,0.12); padding: 2px 6px; border-radius: 4px;">sq ft</span>
                     </div>
-                    <div style="margin-top: 10px; font-size: 11.5px; color: var(--text-muted, #64748b);">
+                    <div class="est-modal-sub" style="margin-top: 10px; font-size: 11.5px;">
                         Updating this value recalculates the price per square foot across the entire estimate summary without altering item costs.
                     </div>
                 </div>
-                <div style="padding: 12px 20px; border-top: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: flex-end; gap: 8px; background: var(--bg-surface, #f8fafc);">
-                    <button type="button" class="pd-btn pd-btn-secondary" data-close-sqft-modal style="padding: 7px 14px; font-size: 13px; border-radius: 6px;">Cancel</button>
-                    <button type="button" class="pd-btn pd-btn-primary orange" id="estSaveSqftBtn" style="padding: 7px 16px; font-size: 13px; border-radius: 6px; background: #ea580c; color: #fff; border: none; font-weight: 600; cursor: pointer;">Save Area</button>
+                <div class="pd-modal-foot" style="padding: 12px 20px; display: flex; align-items: center; justify-content: flex-end; gap: 8px;">
+                    <button type="button" class="btn-ghost pd-btn pd-btn-secondary" data-close-sqft-modal style="padding: 7px 14px; font-size: 13px; border-radius: 6px; cursor: pointer;">Cancel</button>
+                    <button type="button" class="btn-main orange pd-btn pd-btn-primary" id="estSaveSqftBtn" style="padding: 7px 16px; font-size: 13px; border-radius: 6px; background: #ea580c; color: #fff; border: none; font-weight: 600; cursor: pointer;">Save Area</button>
                 </div>
             </div>`;
         document.body.appendChild(portal);
@@ -192,14 +335,16 @@
     function isEquipmentItem(item) {
         if (!item) return false;
         return [item.itemType, item.item_type, item.type, item.costCategory, item.cost_category,
-            item.catalogSnapshot?.type, item.catalogMetadata?.type]
+        item.catalogSnapshot?.type, item.catalogMetadata?.type]
             .some(value => String(value || '').toLowerCase().includes('equip'));
     }
     function duplicateAssembly(item) {
         const copyTree = (source, parentItemId = null) => {
-            const copy = Workspace.item({ ...Workspace.clone(source), id: Workspace.uid('item'), parentItemId,
+            const copy = Workspace.item({
+                ...Workspace.clone(source), id: Workspace.uid('item'), parentItemId,
                 takeoffLayerId: null, copiedFromTakeoffLayerId: source.takeoffLayerId || null,
-                quantitySource: 'manual', quantitySyncStatus: 'manual' });
+                quantitySource: 'manual', quantitySyncStatus: 'manual'
+            });
             if (source.catalogSnapshot) copy.catalogSnapshot = Workspace.clone(source.catalogSnapshot);
             if (source.catalogMetadata) copy.catalogMetadata = Workspace.clone(source.catalogMetadata);
             copy.children = (source.children || []).map(child => copyTree(child, copy.id));
@@ -209,6 +354,59 @@
         duplicate.name = `${item.name} Copy`;
         return duplicate;
     }
+    function duplicateEstimatingItem(item) {
+        if (!item) return null;
+        if (isAssemblyItem(item)) return duplicateAssembly(item);
+        return Workspace.item({
+            ...Workspace.clone(item),
+            id: Workspace.uid('item'),
+            takeoffLayerId: null,
+            copiedFromTakeoffLayerId: item.takeoffLayerId || null,
+            quantitySource: 'manual',
+            quantitySyncStatus: 'manual',
+            name: `${item.name} (Copy)`
+        });
+    }
+    function collectEstimatingItemTakeoffKeys(items, estimateId = state.activeEstimateId) {
+        const estId = String(estimateId || state.activeEstimateId || '').trim();
+        const itemIds = new Set();
+        const layerKeys = new Set();
+        const addKey = (val) => {
+            const s = String(val || '').trim();
+            if (!s) return;
+            layerKeys.add(s);
+            if (s.startsWith('takeoff_') && s.length > 8) layerKeys.add(s.slice(8));
+        };
+        (Array.isArray(items) ? items : []).forEach(item => {
+            if (!item || typeof item !== 'object') return;
+            const id = String(item.id || '').trim();
+            if (id) {
+                itemIds.add(id);
+                addKey(id);
+                if (estId) layerKeys.add(`estitem_${estId}_${id}`);
+            }
+            addKey(item.takeoffLayerId);
+            addKey(item.source_layer_key);
+        });
+        return { itemIds: [...itemIds], layerKeys: [...layerKeys] };
+    }
+    function notifyTakeoffDeletedEstimatingItems(removedItems, estimateId = state.activeEstimateId) {
+        const list = Array.isArray(removedItems) ? removedItems.filter(Boolean) : [];
+        if (!list.length) return;
+        const estId = String(estimateId || state.activeEstimateId || '').trim();
+        const { itemIds, layerKeys } = collectEstimatingItemTakeoffKeys(list, estId);
+        if (!itemIds.length && !layerKeys.length) return;
+        window.dispatchEvent(new CustomEvent('takeoff:estimating-items-deleted', {
+            detail: {
+                version: 1,
+                origin: 'estimating',
+                projectId: String(projectId),
+                estimateId: estId,
+                itemIds,
+                layerKeys
+            }
+        }));
+    }
     function markEstimateDirty(estimateId = state.activeEstimateId) {
         const id = String(estimateId || '');
         if (!id) return;
@@ -217,15 +415,82 @@
         state.dirtyEstimateIds = [...dirtyEstimateIds];
         state.takeoffSyncDirtyIds = [...takeoffSyncDirtyIds];
     }
+    function buildEstimateSummaryPayload(est) {
+        if (!est) {
+            return { subtotal: 0, directSales: 0, preTaxMarkup: 0, postTaxMarkup: 0, taxes: 0, total: 0, estimateTotal: 0, laborHours: 0 };
+        }
+        const calc = Calc.calculateSummary(est.groups || [], est.settings || {});
+        const total = Number(calc.estimateTotal || 0);
+        return {
+            subtotal: Number(calc.direct?.totalCost || 0),
+            directSales: Number(calc.direct?.totalSales || 0),
+            preTaxMarkup: Number(calc.preTaxTotal || 0),
+            postTaxMarkup: Number(calc.postTaxTotal || 0),
+            taxes: Number(calc.totalTax || 0),
+            total,
+            estimateTotal: total,
+            laborHours: Number(calc.direct?.adjustedLaborHours || 0)
+        };
+    }
+
+    function syncPrimaryEstimateProjectMeta() {
+        const list = Array.isArray(state?.estimates) ? state.estimates : [];
+        if (!list.length) return null;
+        const metaPrimaryId = String(window.ProjectState?.projectMeta?.primary_estimate_id || '');
+        const primaryEst = list.find(row => Boolean(row.is_primary || row.isPrimary))
+            || list.find(row => metaPrimaryId && String(row.id) === metaPrimaryId)
+            || list[0];
+        if (!primaryEst) return null;
+        const primarySummary = buildEstimateSummaryPayload(primaryEst);
+        primaryEst.is_primary = true;
+        primaryEst.isPrimary = true;
+        primaryEst.estimateSummary = primarySummary;
+        primaryEst.estimateTotal = primarySummary.estimateTotal;
+        primaryEst.totalSales = primarySummary.estimateTotal;
+        primaryEst.grand_total = primarySummary.estimateTotal;
+        primaryEst.total_amount = primarySummary.estimateTotal;
+        if (window.ProjectState) {
+            if (!window.ProjectState.projectMeta) window.ProjectState.projectMeta = {};
+            window.ProjectState.projectMeta.primary_estimate_id = primaryEst.id;
+            window.ProjectState.projectMeta.primary_estimate_total = primarySummary.estimateTotal;
+            window.ProjectState.projectMeta.primary_quote_value = primarySummary.estimateTotal;
+            window.ProjectState.projectMeta.total_sales = primarySummary.estimateTotal;
+            window.ProjectState.projectMeta.estimate_total = primarySummary.estimateTotal;
+            window.ProjectState.projectMeta.primary_estimate_updated_at = state.clientUiUpdatedAt || Workspace.now();
+        }
+        return primaryEst;
+    }
+
     function saveLocal(options = {}) {
         state.groups = current().groups;
+        const curEst = current();
+        if (curEst) {
+            const curSummary = buildEstimateSummaryPayload(curEst);
+            curEst.estimateSummary = curSummary;
+            curEst.estimateTotal = curSummary.estimateTotal;
+            curEst.totalSales = curSummary.estimateTotal;
+            curEst.grand_total = curSummary.estimateTotal;
+            curEst.total_amount = curSummary.estimateTotal;
+        }
+        if (options.targetEstimateId && String(options.targetEstimateId) !== String(curEst?.id || '')) {
+            const targetEst = state.estimates.find(row => String(row.id) === String(options.targetEstimateId));
+            if (targetEst) {
+                const targetSummary = buildEstimateSummaryPayload(targetEst);
+                targetEst.estimateSummary = targetSummary;
+                targetEst.estimateTotal = targetSummary.estimateTotal;
+                targetEst.totalSales = targetSummary.estimateTotal;
+                targetEst.grand_total = targetSummary.estimateTotal;
+                targetEst.total_amount = targetSummary.estimateTotal;
+            }
+        }
+        syncPrimaryEstimateProjectMeta();
         state.dirtyEstimateIds = [...dirtyEstimateIds];
         state.takeoffSyncDirtyIds = [...takeoffSyncDirtyIds];
         state.clientUiUpdatedAt = Workspace.now();
         const stored = Workspace.clone(state);
         if (!stored.pendingProjectCreationSync) delete stored.pendingProjectCreationSync;
-        localStorage.setItem(storageKey, JSON.stringify(stored));
-        if (options.publish !== false) publish();
+        safeSetLocalStorage(storageKey, JSON.stringify(stored));
+        if (options.publish !== false) publish(options);
     }
 
     function applyDeletedEstimateTombstones(workspace, additionalIds = []) {
@@ -245,28 +510,45 @@
         return workspace;
     }
 
-    function publish() {
+    function publish(options = {}) {
         const total = summary();
-        window.dispatchEvent(new CustomEvent('takeoff:estimating-state-updated', { detail: {
-            projectId: String(projectId), activeEstimateId: state.activeEstimateId,
-            estimates: state.estimates.map(row => ({
-                id: row.id,
-                name: row.name,
-                status: row.status,
-                is_primary: Boolean(row.is_primary || row.isPrimary),
-                isPrimary: Boolean(row.is_primary || row.isPrimary),
-                groups: row.groups,
-                settings: row.settings
-            })),
-            summary: { material: total.direct.materialSales, labor: total.direct.laborSales,
-                equipment: total.direct.equipmentSales, preTaxMarkup: total.preTaxTotal,
-                taxes: total.totalTax, total: total.estimateTotal, profit: total.profit }
-        } }));
-        window.dispatchEvent(new CustomEvent('takeoff:estimating-items-updated', { detail: {
-            version: 1, origin: 'estimating', projectId: String(projectId),
-            activeEstimateId: String(state.activeEstimateId), revision: Number(current().revision || 0),
-            groups: Workspace.clone(current().groups)
-        } }));
+        const syncSource = options.syncSource || 'estimating';
+        window.dispatchEvent(new CustomEvent('takeoff:estimating-state-updated', {
+            detail: {
+                projectId: String(projectId), activeEstimateId: state.activeEstimateId,
+                syncSource,
+                estimates: state.estimates.map(row => ({
+                    id: row.id,
+                    name: row.name,
+                    status: row.status,
+                    is_primary: Boolean(row.is_primary || row.isPrimary),
+                    isPrimary: Boolean(row.is_primary || row.isPrimary),
+                    groups: row.groups,
+                    settings: row.settings
+                })),
+                summary: {
+                    material: total.direct.materialSales, labor: total.direct.laborSales,
+                    equipment: total.direct.equipmentSales, preTaxMarkup: total.preTaxTotal,
+                    taxes: total.totalTax, total: total.estimateTotal, profit: total.profit
+                }
+            }
+        }));
+        const currentGroups = current().groups || [];
+        const currentSummaryRow = (window.ProjectState?.estimatesSummary || []).find(
+            row => String(row?.id || '') === String(state.activeEstimateId || '')
+        );
+        const isUnloadedShell = ui.loadState === 'loading'
+            && currentGroups.length === 0
+            && Number(currentSummaryRow?.itemCount || 0) > 0;
+        if (!isUnloadedShell && options.publishItems !== false) {
+            window.dispatchEvent(new CustomEvent('takeoff:estimating-items-updated', {
+                detail: {
+                    version: 1, origin: 'estimating', syncSource, projectId: String(projectId),
+                    activeEstimateId: String(state.activeEstimateId), revision: Number(current().revision || 0),
+                    groups: Workspace.clone(currentGroups)
+                }
+            }));
+        }
         window.dispatchEvent(new CustomEvent('takeoff:estimate-summary-updated', { detail: total }));
     }
 
@@ -274,6 +556,9 @@
         const activeId = String(state.activeEstimateId || '');
         if (action === 'Synchronized items from Takeoff') takeoffSyncDirtyIds.add(activeId);
         else takeoffSyncDirtyIds.delete(activeId);
+        if (action && action !== 'Synchronized items from Takeoff') {
+            estimatingHasUnsavedCheckpoint = true;
+        }
         conflictedEstimateIds.delete(activeId);
         conflictRemoteEstimates.delete(activeId);
         Workspace.touch(state, action);
@@ -283,6 +568,7 @@
     }
 
     function reactiveChanged(target) {
+        estimatingHasUnsavedCheckpoint = true;
         takeoffSyncDirtyIds.delete(String(state.activeEstimateId || ''));
         conflictedEstimateIds.delete(String(state.activeEstimateId || ''));
         conflictRemoteEstimates.delete(String(state.activeEstimateId || ''));
@@ -302,6 +588,16 @@
         return null;
     }
 
+    function resolvedCategorySummaryMargin(catName, settings = {}, total = {}) {
+        const cat = total?.byCategory?.[catName];
+        if (cat && Math.abs(Number(cat.totalSales || 0)) > 0.0001 && Math.abs(Number(cat.totalCost || 0)) > 0.0001) {
+            return Number(cat.marginPercent || 0);
+        }
+        if (catName === 'Labor') return Number(settings.globalLaborMargin ?? 34.6);
+        if (catName === 'Equipment') return Number(settings.equipmentMargin ?? 15);
+        return Number(settings.materialMargin ?? 15);
+    }
+
     function renderLiveSummary() {
         const total = summary();
         const totalElement = $('estimateTotal');
@@ -315,25 +611,28 @@
                 const el = aside.querySelector(`[data-live-summary="${key}"]`);
                 if (el) el.textContent = val;
             };
+            const setSummaryInput = (selector, formatted) => {
+                const el = aside.querySelector(selector);
+                if (el && document.activeElement !== el) {
+                    el.value = formatted;
+                    el.dataset.auditPrevValue = formatted;
+                }
+            };
             const settings = current()?.settings || {};
             const gCost = Number(settings.globalLaborCost ?? 36);
-            const gMargin = Number(settings.globalLaborMargin ?? 34.6);
+            const gMargin = resolvedCategorySummaryMargin('Labor', settings, total);
+            const effMatMargin = resolvedCategorySummaryMargin('Materials', settings, total);
+            const effEqMargin = resolvedCategorySummaryMargin('Equipment', settings, total);
             const gSales = gMargin < 100 ? (gCost / (1 - gMargin / 100)) : gCost;
-            const salesInput = aside.querySelector('[data-summary-rate="globalLaborSales"]');
-            if (salesInput && document.activeElement !== salesInput) {
-                salesInput.value = gSales.toFixed(2);
-                salesInput.dataset.auditPrevValue = salesInput.value;
-            }
-            const laborMarginInput = aside.querySelector('[data-summary-type="Labor"][data-field="margin"]');
-            if (laborMarginInput && document.activeElement !== laborMarginInput) {
-                laborMarginInput.value = gMargin.toFixed(1);
-                laborMarginInput.dataset.auditPrevValue = laborMarginInput.value;
-            }
-            const laborWasteInput = aside.querySelector('[data-summary-type="Labor"][data-field="waste"]');
-            if (laborWasteInput && document.activeElement !== laborWasteInput) {
-                laborWasteInput.value = String(Number(settings.laborWaste ?? 0));
-                laborWasteInput.dataset.auditPrevValue = laborWasteInput.value;
-            }
+            setSummaryInput('[data-summary-rate="globalLaborCost"]', gCost.toFixed(2));
+            setLive('global-labor-sales', gSales.toFixed(2));
+            setSummaryInput('[data-summary-type="Labor"][data-field="margin"]', gMargin.toFixed(1));
+            setSummaryInput('[data-summary-type="Labor"][data-field="difficulty"]', String(Number(settings.laborDifficulty ?? 1)));
+            setSummaryInput('[data-summary-type="Labor"][data-field="waste"]', String(Number(settings.laborWaste ?? 0)));
+            setSummaryInput('[data-summary-type="Materials"][data-field="margin"]', effMatMargin.toFixed(1));
+            setSummaryInput('[data-summary-type="Materials"][data-field="waste"]', String(Number(settings.materialWaste ?? 0)));
+            setSummaryInput('[data-summary-type="Equipment"][data-field="margin"]', effEqMargin.toFixed(1));
+            setSummaryInput('[data-summary-type="Equipment"][data-field="waste"]', String(Number(settings.equipmentWaste ?? 0)));
             setLive('labor-hrs', `${number(byCat.Labor?.adjustedLaborHours || 0, 2)} hrs`);
             setLive('labor-cost', money(byCat.Labor?.totalCost || 0));
             setLive('labor-sales', money(byCat.Labor?.totalSales || 0));
@@ -359,9 +658,8 @@
         if (tableBody && Array.isArray(total?.rows)) {
             const totalSummaryCost = total?.direct?.totalCost || 0;
             const calcById = new Map(total.rows.map(r => [String(r.item.id), r.calc]));
-            total.rows.forEach(({ item: rowItem, calc: rowCalc }) => {
-                const tr = tableBody.querySelector(`tr[data-item-id="${selectorValue(rowItem.id)}"]`);
-                if (!tr) return;
+            const updateRowCells = (tr, rowItem, rowCalc) => {
+                if (!tr || !rowCalc) return;
                 const setCell = (colKey, textVal, colorVal = '') => {
                     const cell = tr.querySelector(`[data-live-item-cell="${colKey}"]`);
                     if (cell) {
@@ -369,8 +667,12 @@
                         if (colorVal) cell.style.color = colorVal;
                     }
                 };
+                const eqRow = isEquipmentItem(rowItem);
+                const unitSalesVal = eqRow && !rowCalc.unitMaterialSales
+                    ? ((rowCalc.equipmentSales || 0) / (rowCalc.equipmentQuantity || rowCalc.baseQuantity || 1))
+                    : (rowCalc.unitMaterialSales || 0);
                 setCell('subtotal_item_cost', number(rowCalc.materialCost || 0, 2));
-                setCell('unit_sales', number(rowCalc.unitMaterialSales || 0, 2));
+                setCell('unit_sales', number(unitSalesVal, 2));
                 setCell('subtotal_item_sales', number(rowCalc.materialSales || 0, 2));
                 const profitVal = rowCalc.profit || 0;
                 setCell('profit', number(profitVal, 2), profitVal >= 0 ? '#10b981' : '#ef4444');
@@ -380,37 +682,54 @@
                 const pct = totalSummaryCost > 0 ? ((rowCalc.totalCost || 0) / totalSummaryCost) * 100 : 0;
                 setCell('total_cost_percent', `${number(pct, 1)}%`);
                 setCell('total_sales', number(rowCalc.totalSales || 0, 2));
+            };
+            total.rows.forEach(({ item: rowItem, calc: rowCalc }) => {
+                const tr = tableBody.querySelector(`tr[data-item-id="${selectorValue(rowItem.id)}"]`);
+                updateRowCells(tr, rowItem, rowCalc);
+                if (Array.isArray(rowCalc?.childRows) && rowCalc.childRows.length) {
+                    rowCalc.childRows.forEach((childEntry, idx) => {
+                        const childSource = findDirectAssemblyChild(rowItem, childEntry.item, idx);
+                        const childKey = `${rowItem.id}:component:${childSource?.id || idx}`;
+                        const childTr = tableBody.querySelector(`tr[data-item-id="${selectorValue(childKey)}"]`);
+                        updateRowCells(childTr, childEntry.item, childEntry.calc);
+                    });
+                }
             });
+            const grpLaborMargin = resolvedCategorySummaryMargin('Labor', current()?.settings || {}, total);
             (current()?.groups || []).forEach(grp => {
                 const subCell = tableBody.querySelector(`[data-live-group-subtotal="${selectorValue(grp.id)}"]`);
-                if (!subCell) return;
-                const grpSum = (grp.items || []).reduce((acc, it) => {
-                    if (it.parentItemId || it.parent_item_id || it.assemblyParentId) return acc;
-                    const c = calcById.get(String(it.id)) || Calc.calculateItem(it, current().settings);
-                    return acc + (c.materialCost || 0);
-                }, 0);
-                subCell.textContent = number(grpSum, 2);
+                if (subCell) {
+                    const grpSum = (grp.items || []).reduce((acc, it) => {
+                        if (it.parentItemId || it.parent_item_id || it.assemblyParentId) return acc;
+                        const c = calcById.get(String(it.id)) || Calc.calculateItem(it, current().settings);
+                        return acc + (c.materialCost || 0);
+                    }, 0);
+                    subCell.textContent = number(grpSum, 2);
+                }
+                const grpLmCell = tableBody.querySelector(`[data-live-group-labor-margin="${selectorValue(grp.id)}"]`);
+                if (grpLmCell) {
+                    grpLmCell.textContent = `${Number(current()?.settings?.globalLaborMargin ?? grpLaborMargin).toFixed(1)}%`;
+                }
             });
         }
         const cur = current();
         if (cur) {
+            cur.estimateSummary = {
+                subtotal: Number(total.direct?.totalCost || 0),
+                directSales: Number(total.direct?.totalSales || 0),
+                preTaxMarkup: Number(total.preTaxTotal || 0),
+                postTaxMarkup: Number(total.postTaxTotal || 0),
+                taxes: Number(total.totalTax || 0),
+                total: Number(total.estimateTotal || 0),
+                estimateTotal: Number(total.estimateTotal || 0),
+                laborHours: Number(total.direct?.adjustedLaborHours || 0)
+            };
             cur.estimateTotal = total.estimateTotal;
             cur.totalSales = total.estimateTotal;
             cur.grand_total = total.estimateTotal;
             cur.total_amount = total.estimateTotal;
         }
-        if (cur && window.ProjectState) {
-            if (!window.ProjectState.projectMeta) window.ProjectState.projectMeta = {};
-            const metaPrimaryId = String(window.ProjectState.projectMeta.primary_estimate_id || '');
-            const isCurPrimary = metaPrimaryId ? String(cur.id) === metaPrimaryId : Boolean(cur.is_primary || cur.isPrimary);
-            if (isCurPrimary) {
-                window.ProjectState.projectMeta.primary_estimate_id = cur.id;
-                window.ProjectState.projectMeta.primary_estimate_total = total.estimateTotal;
-                window.ProjectState.projectMeta.primary_quote_value = total.estimateTotal;
-                window.ProjectState.projectMeta.total_sales = total.estimateTotal;
-                window.ProjectState.projectMeta.estimate_total = total.estimateTotal;
-            }
-        }
+        syncPrimaryEstimateProjectMeta();
         renderFooter();
         renderStatus();
     }
@@ -448,13 +767,13 @@
         }
     }
 
-    function scheduleSave(source = 'manual') {
+    function scheduleSave(source = 'manual', targetEstimateId = null) {
         if (!projectId) return;
-        const activeId = String(state.activeEstimateId || '');
+        const activeId = String(targetEstimateId || state.activeEstimateId || '');
         if (source === 'takeoff') takeoffSyncDirtyIds.add(activeId);
         else takeoffSyncDirtyIds.delete(activeId);
         conflictedEstimateIds.delete(activeId);
-        markEstimateDirty();
+        markEstimateDirty(activeId);
         ui.saveRequested = true;
         clearTimeout(ui.saveTimer);
         ui.loadState = 'pending';
@@ -475,7 +794,7 @@
         return result;
     }
 
-        function showSaveProgressModal(step = 1, message = 'Saving...') {
+    function showSaveProgressModal(step = 1, message = 'Saving...') {
         let portal = document.querySelector('[data-est-save-progress-portal]');
         if (step === 0 || step === 4) {
             if (portal) {
@@ -497,14 +816,14 @@
             portal = document.createElement('div');
             portal.className = 'pd-modal-backdrop open';
             portal.dataset.estSaveProgressPortal = 'true';
-            portal.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(4px); z-index: 9999999;';
+            portal.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, 0.6); backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); z-index: 9999999;';
             portal.innerHTML = `
                 <div class="pd-modal bb-studio-modal" style="width: min(380px, 92vw); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); padding: 24px 20px; text-align: center;" role="dialog" aria-modal="true">
-                    <div class="est-save-spinner" style="margin-bottom: 12px;"><i class="fas fa-circle-notch fa-spin" style="font-size: 30px; color: #2563eb;"></i></div>
+                    <div class="est-save-spinner" style="margin-bottom: 12px;"><i class="fas fa-circle-notch fa-spin" style="font-size: 30px; color: var(--primary, #fb5a3a);"></i></div>
                     <h3 style="margin: 0 0 6px; font-size: 16px; font-weight: 600; color: var(--text-main, #0f172a);">Saving Project</h3>
                     <div id="estSaveProgressStep" style="font-size: 13px; color: var(--text-muted, #64748b); min-height: 20px;">${esc(message)}</div>
-                    <div style="margin-top: 16px; background: rgba(0,0,0,0.08); height: 5px; border-radius: 3px; overflow: hidden;">
-                        <div id="estSaveProgressBar" style="width: ${step === 1 ? '30%' : (step === 2 ? '65%' : '90%')}; height: 100%; background: #2563eb; transition: width 0.35s ease;"></div>
+                    <div style="margin-top: 16px; background: rgba(148,163,184,0.18); height: 5px; border-radius: 3px; overflow: hidden;">
+                        <div id="estSaveProgressBar" style="width: ${step === 1 ? '30%' : (step === 2 ? '65%' : '90%')}; height: 100%; background: var(--primary, #fb5a3a); transition: width 0.35s ease;"></div>
                     </div>
                 </div>`;
             document.body.appendChild(portal);
@@ -553,20 +872,15 @@
         ui.explicitSaveRequested = false;
         if (showModal) showSaveProgressModal(1, 'Saving Estimating workspace...');
         const sentGenerations = new Map(sentIds.map(id => [id, dirtyGenerations.get(id) || 0]));
-        const sent = {
-            schemaVersion: state.schemaVersion,
-            projectId: state.projectId,
-            activeEstimateId: state.activeEstimateId,
-            clientUiUpdatedAt: state.clientUiUpdatedAt,
-            estimates: Workspace.clone(state.estimates.filter(estimate => sentIds.includes(String(estimate.id))))
-        };
+        const savePayload = estimates => buildEstimatePatchPayload(estimates);
+        const sent = savePayload(sentIds);
         try {
-            const savePayload = estimates => ({ action: 'save', mode: 'patch', project_id: projectId,
-                updates: estimates, state: { ...sent, estimates }, summary: summary() });
             let result;
             try {
-                result = await request('save', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(savePayload(sent.estimates)) });
+                result = await request('save', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify(sent)
+                });
             } catch (error) {
                 if (error.status !== 404 || !['estimate_not_found', 'stale_estimate_id'].includes(error.code)) throw error;
                 // Reconcile against the database before retrying. A 404 can mean
@@ -584,9 +898,11 @@
                 const hasNewDraft = recoverable.some(estimate => !remoteByClientId.has(String(estimate.id)));
                 result = await request(hasNewDraft ? 'create' : 'save', {
                     method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify(savePayload(recoverable))
+                    body: JSON.stringify({ ...sent, updates: recoverable, estimates: recoverable, state: { ...sent.state, estimates: recoverable } })
                 });
             }
+            const activeBeforeSaveId = String(state.activeEstimateId || '');
+            const activeBeforeSaveSig = groupsContentSignature(current()?.groups || []);
             const acknowledgedRows = result.updates || result.state?.estimates || result.estimates || [];
             const acknowledgements = new Map(acknowledgedRows.map(estimate => [String(estimate.id), estimate]));
             sentIds.forEach(id => {
@@ -608,9 +924,17 @@
                 }
             });
             Workspace.selectEstimate(state, state.activeEstimateId);
+            syncPrimaryEstimateProjectMeta();
+            if (showModal || ui.explicitSaveRequested) {
+                estimatingHasUnsavedCheckpoint = false;
+                ui.explicitSaveRequested = false;
+            }
             ui.loadState = dirtyEstimateIds.size ? 'pending' : 'saved';
             ui.message = dirtyEstimateIds.size ? 'Unsaved changes' : 'Saved';
-            saveLocal({ publish: !activeEditingElement() });
+            const activeItemsUnchangedOnAck = String(state.activeEstimateId || '') === activeBeforeSaveId
+                && activeBeforeSaveSig === groupsContentSignature(current()?.groups || []);
+            sentIds.forEach(id => window.flushTakeoffDeletedLayersForEstimate?.(id));
+            saveLocal({ publish: !activeEditingElement(), publishItems: !activeItemsUnchangedOnAck });
             if (showModal) {
                 showSaveProgressModal(3, 'Updating Audit & Summaryâ€¦');
                 setTimeout(() => showSaveProgressModal(4, 'Saved!'), 200);
@@ -673,6 +997,7 @@
 
     async function loadServer() {
         if (!projectId) { render(); return; }
+        setEstimatingLoading(true, 'Loading estimate...');
         const requestLocalTimestamp = state.clientUiUpdatedAt;
         const forceMigratedLocal = state.pendingProjectCreationSync === true;
         try {
@@ -692,12 +1017,22 @@
             if (!localHasContent && remoteHasContent) {
                 dirtyEstimateIds.clear();
                 state = remote;
+                try {
+                    const pendingEstId = sessionStorage.getItem(`takeoff.pendingActivateEstimateId.${projectId}`);
+                    if (pendingEstId) {
+                        sessionStorage.removeItem(`takeoff.pendingActivateEstimateId.${projectId}`);
+                        if (state.estimates.some(row => String(row.id) === String(pendingEstId))) {
+                            Workspace.selectEstimate(state, pendingEstId);
+                        }
+                    }
+                } catch (_) { }
                 restoreDirtyTracking();
                 saveLocal();
                 ui.loadState = 'saved';
                 ui.message = 'Loaded from server';
                 render();
                 drainPendingTakeoff();
+                hydrateBrokenAssembliesInCurrentEstimate();
                 return;
             }
             // A newer local timestamp alone does not prove there are unsaved edits:
@@ -737,6 +1072,15 @@
                 saveLocal();
             } else if (Array.isArray(remoteSource.estimates) && remoteSource.estimates.length) {
                 state = remote;
+                try {
+                    const pendingEstId = sessionStorage.getItem(`takeoff.pendingActivateEstimateId.${projectId}`);
+                    if (pendingEstId) {
+                        sessionStorage.removeItem(`takeoff.pendingActivateEstimateId.${projectId}`);
+                        if (state.estimates.some(row => String(row.id) === String(pendingEstId))) {
+                            Workspace.selectEstimate(state, pendingEstId);
+                        }
+                    }
+                } catch (_) { }
                 restoreDirtyTracking();
             }
             ui.loadState = 'saved';
@@ -745,9 +1089,12 @@
         } catch (error) {
             ui.loadState = 'error';
             ui.message = `Offline: ${error.message}`;
+        } finally {
+            setEstimatingLoading(false);
         }
         render();
         drainPendingTakeoff();
+        hydrateBrokenAssembliesInCurrentEstimate();
     }
 
     function groupsContentSignature(groups) {
@@ -768,8 +1115,10 @@
             remote.groups = window.TakeoffEstimatingSyncService.reconcile(remote.groups, takeoffGroups).map(Workspace.group);
         }
         remote.updatedAt = Workspace.now();
-        remote.auditLog.push({ id: Workspace.uid('audit'), at: remote.updatedAt,
-            action: 'Merged Takeoff changes with concurrent server changes' });
+        remote.auditLog.push({
+            id: Workspace.uid('audit'), at: remote.updatedAt,
+            action: 'Merged Takeoff changes with concurrent server changes'
+        });
         remote.auditLog = remote.auditLog.slice(-100);
         return remote;
     }
@@ -780,16 +1129,26 @@
                 .map(Workspace.group);
         }
         const incomingByLayer = new Map();
-        (incomingGroups || []).forEach(group => (group.items || group.layers || []).forEach(item => {
-            const layerId = String(item.takeoffLayerId ?? item.id ?? '');
-            if (layerId) incomingByLayer.set(layerId, { item, group });
-        }));
-        return (existingGroups || []).map((group, groupIndex) => Workspace.group({
-            ...Workspace.clone(group),
-            items: (group.items || []).flatMap(existing => {
+        const incomingGroupById = new Map();
+        const incomingGroupByTakeoffId = new Map();
+        (incomingGroups || []).forEach(group => {
+            if (group?.id) incomingGroupById.set(String(group.id), group);
+            if (group?.takeoffGroupId) incomingGroupByTakeoffId.set(String(group.takeoffGroupId), group);
+            (group.items || group.layers || []).forEach(item => {
+                const layerId = String(item.takeoffLayerId ?? item.id ?? '');
+                if (layerId) incomingByLayer.set(layerId, { item, group });
+            });
+        });
+        return (existingGroups || []).map((group, groupIndex) => {
+            const matchedById = (group?.id && incomingGroupById.get(String(group.id)))
+                || (group?.takeoffGroupId && incomingGroupByTakeoffId.get(String(group.takeoffGroupId)))
+                || null;
+            let matchedIncomingGroup = matchedById;
+            const items = (group.items || []).flatMap(existing => {
                 if (!existing.takeoffLayerId) return [existing];
                 const incoming = incomingByLayer.get(String(existing.takeoffLayerId));
                 if (!incoming) return [];
+                if (!matchedIncomingGroup && incoming.group) matchedIncomingGroup = incoming.group;
                 if (window.TakeoffEstimatingSyncService?.takeoffItem) {
                     return [window.TakeoffEstimatingSyncService.takeoffItem({
                         ...incoming.item, id: existing.takeoffLayerId
@@ -805,8 +1164,19 @@
                     quantityOverride: isOverridden,
                     quantitySyncStatus: isOverridden ? 'overridden' : 'synced'
                 }];
-            })
-        }, groupIndex));
+            });
+            const isTakeoffLinked = Boolean(
+                group.source === 'takeoff'
+                || group.takeoffMirror
+                || group.takeoffGroupId
+                || String(group.id || '').startsWith('takeoff_')
+            );
+            return Workspace.group({
+                ...Workspace.clone(group),
+                name: (isTakeoffLinked && matchedIncomingGroup?.name) ? matchedIncomingGroup.name : group.name,
+                items
+            }, groupIndex);
+        });
     }
 
     function preserveQuantityOverrides(existingGroups, nextGroups) {
@@ -840,8 +1210,57 @@
                     updated.pendingTakeoffQuantity = measured;
                     updated.quantityOverride = true;
                     updated.quantitySyncStatus = 'overridden';
+                    if (match.quantityOverrideSource) updated.quantityOverrideSource = match.quantityOverrideSource;
+                    if (match.origin) updated.origin = match.origin;
                 }
                 return updated;
+            })
+        }));
+    }
+
+    function cloneCopiedChildrenTree(children = [], parentItemId = null) {
+        if (!Array.isArray(children) || !children.length) return [];
+        return children.map(child => {
+            const nextId = Workspace.uid('item');
+            const cloned = Workspace.clone(child || {});
+            delete cloned.dbEstimateItemId;
+            delete cloned.estimateItemId;
+            const nested = Array.isArray(cloned.children) && cloned.children.length ? cloned.children : [];
+            cloned.id = nextId;
+            cloned.parentItemId = parentItemId || null;
+            cloned.children = nested.length ? cloneCopiedChildrenTree(nested, nextId) : [];
+            return cloned;
+        });
+    }
+
+    function inheritCopiedTakeoffAssemblyChildren(existingGroups, nextGroups) {
+        const sourceByLayerId = new Map();
+        (existingGroups || []).forEach(grp => {
+            (grp.items || []).forEach(it => {
+                if (it.takeoffLayerId) sourceByLayerId.set(String(it.takeoffLayerId), it);
+                if (it.id && String(it.id).startsWith('takeoff_')) {
+                    sourceByLayerId.set(String(it.id).slice(8), it);
+                }
+            });
+        });
+        if (!sourceByLayerId.size) return nextGroups;
+        return (nextGroups || []).map(grp => ({
+            ...grp,
+            items: (grp.items || []).map(it => {
+                if (!it.copiedFromTakeoffLayerId) return it;
+                if (Array.isArray(it.children) && it.children.length > 0) return it;
+                const src = sourceByLayerId.get(String(it.copiedFromTakeoffLayerId));
+                if (!src) return it;
+                const srcChildren = getItemChildren(src);
+                if (!srcChildren.length && !isAssemblyItem(src)) return it;
+                return Workspace.item({
+                    ...it,
+                    itemType: 'assembly',
+                    isAssembly: true,
+                    ...(src.catalogItemId && !it.catalogItemId ? { catalogItemId: src.catalogItemId } : {}),
+                    ...(src.catalogSnapshot && !it.catalogSnapshot ? { catalogSnapshot: Workspace.clone(src.catalogSnapshot) } : {}),
+                    children: srcChildren.length ? cloneCopiedChildrenTree(srcChildren, it.id) : []
+                });
             })
         }));
     }
@@ -888,20 +1307,41 @@
             reconciled = groups.map(Workspace.group);
         }
         reconciled = preserveQuantityOverrides(currentEstimate.groups, reconciled);
+        reconciled = inheritCopiedTakeoffAssemblyChildren(currentEstimate.groups, reconciled);
         if (groupsContentSignature(currentEstimate.groups) === groupsContentSignature(reconciled)) return;
         currentEstimate.groups = reconciled;
         currentEstimate.updatedAt = Workspace.now();
-        currentEstimate.auditLog.push({ id: Workspace.uid('audit'), at: currentEstimate.updatedAt,
-            action: 'Synchronized items from Takeoff' });
-        currentEstimate.auditLog = currentEstimate.auditLog.slice(-100);
+        const lastAudit = currentEstimate.auditLog[currentEstimate.auditLog.length - 1];
+        if (lastAudit && lastAudit.action === 'Synchronized items from Takeoff') {
+            lastAudit.at = currentEstimate.updatedAt;
+        } else {
+            currentEstimate.auditLog.push({
+                id: Workspace.uid('audit'), at: currentEstimate.updatedAt,
+                action: 'Synchronized items from Takeoff'
+            });
+            currentEstimate.auditLog = currentEstimate.auditLog.slice(-100);
+        }
         takeoffSyncDirtyIds.add(activeId);
         markEstimateDirty(activeId);
-        saveLocal();
-        scheduleSave('takeoff');
-        render();
+        saveLocal({ syncSource: 'takeoff-sync', targetEstimateId: activeId });
+        scheduleSave('takeoff', activeId);
+        if (!options.backgroundEstimate) {
+            render();
+            if (reconciled.some(g => (g.items || []).some(assemblyNeedsHydration))) {
+                hydrateBrokenAssembliesInCurrentEstimate();
+            }
+        }
     }
 
-    function render() {
+    function render(forceTable = false) {
+        if (!forceTable && !isEstimatingTabActive()) {
+            estimatingTableDirty = true;
+            renderFooter();
+            renderStatus();
+            renderModal();
+            return;
+        }
+        estimatingTableDirty = false;
         renderTable();
         renderDetails();
         renderFooter();
@@ -955,7 +1395,7 @@
                 const parsed = JSON.parse(raw);
                 if (parsed && typeof parsed === 'object') return parsed;
             }
-        } catch (_) {}
+        } catch (_) { }
         return {
             cost_item: 320,
             budget_code: 120,
@@ -985,45 +1425,132 @@
         const widths = getColumnWidths();
         widths[colId] = Math.max(60, Math.round(widthPx));
         try {
-            localStorage.setItem(COLUMNS_WIDTHS_STORAGE_KEY, JSON.stringify(widths));
-        } catch (_) {}
+            const saveCol = safeSetLocalStorage(COLUMNS_WIDTHS_STORAGE_KEY, JSON.stringify(widths));
+            void saveCol;
+        } catch (_) { }
+    }
+
+    function filterValidColumnIds(raw) {
+        if (!Array.isArray(raw) || raw.length === 0) return null;
+        const validIds = new Set(ALL_CONFIG_COLUMNS.map(c => c.id));
+        const filtered = raw.map(String).filter(id => validIds.has(id));
+        return filtered.length > 0 ? filtered : null;
     }
 
     function getVisibleColumns() {
+        const est = current();
+        const fromEst = filterValidColumnIds(est?.settings?.visibleColumns);
+        if (fromEst) return new Set(fromEst);
+        const fromProjectMeta = filterValidColumnIds(window.ProjectState?.projectMeta?.estimatingTableSettings?.visibleColumns);
+        if (fromProjectMeta) return new Set(fromProjectMeta);
+        const perEstKey = est?.id ? `${COLUMNS_STORAGE_KEY}.${est.id}` : '';
         try {
-            const stored = localStorage.getItem(COLUMNS_STORAGE_KEY);
-            if (stored) {
-                const parsed = JSON.parse(stored);
-                if (Array.isArray(parsed) && parsed.length > 0) {
-                    const validIds = new Set(ALL_CONFIG_COLUMNS.map(c => c.id));
-                    const filtered = parsed.filter(id => validIds.has(id));
-                    if (filtered.length > 0) return new Set(filtered);
-                }
+            for (const key of [perEstKey, COLUMNS_STORAGE_KEY, 'takeoff.estimating.columns.default']) {
+                if (!key) continue;
+                const stored = localStorage.getItem(key);
+                if (!stored) continue;
+                const filtered = filterValidColumnIds(JSON.parse(stored));
+                if (filtered) return new Set(filtered);
             }
-        } catch (_) {}
+        } catch (_) { }
         return new Set(DEFAULT_VISIBLE_COLUMNS);
     }
 
     function saveVisibleColumns(colSet, applyAll = false) {
         const list = Array.from(colSet);
-        try {
-            localStorage.setItem(COLUMNS_STORAGE_KEY, JSON.stringify(list));
-            if (applyAll) {
-                localStorage.setItem('takeoff.estimating.columns.default', JSON.stringify(list));
+        const active = current();
+        const prevVisible = Array.from(getVisibleColumns());
+        const currentOrder = (active?.settings?.columnsOrder && Array.isArray(active.settings.columnsOrder))
+            ? [...active.settings.columnsOrder]
+            : null;
+
+        if (applyAll) {
+            (state.estimates || []).forEach(est => {
+                if (!est) return;
+                est.settings = est.settings || {};
+                est.settings.visibleColumns = list.slice();
+                est.settings.tableSettingsApplyAll = true;
+                if (currentOrder) est.settings.columnsOrder = currentOrder.slice();
+                markEstimateDirty(est.id);
+                safeSetLocalStorage(`${COLUMNS_STORAGE_KEY}.${est.id}`, JSON.stringify(list));
+            });
+            safeSetLocalStorage(COLUMNS_STORAGE_KEY, JSON.stringify(list));
+            safeSetLocalStorage('takeoff.estimating.columns.default', JSON.stringify(list));
+            if (window.ProjectState) {
+                window.ProjectState.projectMeta = window.ProjectState.projectMeta || {};
+                window.ProjectState.projectMeta.estimatingTableSettings = {
+                    visibleColumns: list.slice(),
+                    columnsOrder: currentOrder ? currentOrder.slice() : [],
+                    applyAll: true
+                };
             }
-        } catch (_) {}
+            estimatingHasUnsavedCheckpoint = true;
+            saveLocal();
+            scheduleSave('manual');
+            if (projectId > 0) {
+                setTimeout(() => { saveServer().catch(() => {}); }, 0);
+            }
+            return;
+        }
+
+        // Preserve previous column set on sibling estimates that never explicitly stored visibleColumns
+        (state.estimates || []).forEach(est => {
+            if (!est || String(est.id) === String(active?.id || '')) return;
+            est.settings = est.settings || {};
+            if (!filterValidColumnIds(est.settings.visibleColumns)) {
+                est.settings.visibleColumns = prevVisible.slice();
+                safeSetLocalStorage(`${COLUMNS_STORAGE_KEY}.${est.id}`, JSON.stringify(prevVisible));
+                markEstimateDirty(est.id);
+            }
+        });
+        if (active) {
+            active.settings = active.settings || {};
+            active.settings.visibleColumns = list.slice();
+            delete active.settings.tableSettingsApplyAll;
+            markEstimateDirty(active.id);
+            safeSetLocalStorage(`${COLUMNS_STORAGE_KEY}.${active.id}`, JSON.stringify(list));
+        } else {
+            safeSetLocalStorage(COLUMNS_STORAGE_KEY, JSON.stringify(list));
+        }
+        if (window.ProjectState?.projectMeta?.estimatingTableSettings?.applyAll) {
+            window.ProjectState.projectMeta.estimatingTableSettings = {
+                ...window.ProjectState.projectMeta.estimatingTableSettings,
+                applyAll: false
+            };
+        }
+        estimatingHasUnsavedCheckpoint = true;
+        saveLocal();
+        scheduleSave('manual');
+        if (projectId > 0) {
+            setTimeout(() => { saveServer().catch(() => {}); }, 0);
+        }
     }
 
     function getOrderedActiveColumns() {
         const visibleCols = getVisibleColumns();
+        const est = current();
         let order = [];
-        try {
-            const stored = localStorage.getItem(COLUMNS_ORDER_STORAGE_KEY);
-            if (stored) {
-                const parsed = JSON.parse(stored);
-                if (Array.isArray(parsed)) order = parsed;
-            }
-        } catch (_) {}
+        if (Array.isArray(est?.settings?.columnsOrder) && est.settings.columnsOrder.length > 0) {
+            order = est.settings.columnsOrder;
+        } else if (Array.isArray(window.ProjectState?.projectMeta?.estimatingTableSettings?.columnsOrder)
+            && window.ProjectState.projectMeta.estimatingTableSettings.columnsOrder.length > 0) {
+            order = window.ProjectState.projectMeta.estimatingTableSettings.columnsOrder;
+        } else {
+            const perEstOrderKey = est?.id ? `${COLUMNS_ORDER_STORAGE_KEY}.${est.id}` : '';
+            try {
+                for (const key of [perEstOrderKey, COLUMNS_ORDER_STORAGE_KEY]) {
+                    if (!key) continue;
+                    const stored = localStorage.getItem(key);
+                    if (stored) {
+                        const parsed = JSON.parse(stored);
+                        if (Array.isArray(parsed) && parsed.length > 0) {
+                            order = parsed;
+                            break;
+                        }
+                    }
+                }
+            } catch (_) {}
+        }
 
         const colMap = new Map(ALL_CONFIG_COLUMNS.map(c => [c.id, c]));
         const ordered = [];
@@ -1043,9 +1570,30 @@
     }
 
     function saveColumnsOrder(orderedIds) {
-        try {
-            localStorage.setItem(COLUMNS_ORDER_STORAGE_KEY, JSON.stringify(orderedIds));
-        } catch (_) {}
+        const cleanOrder = Array.isArray(orderedIds) ? orderedIds.map(String) : [];
+        const active = current();
+        const applyAllActive = Boolean(active?.settings?.tableSettingsApplyAll || window.ProjectState?.projectMeta?.estimatingTableSettings?.applyAll);
+        if (active) {
+            active.settings = active.settings || {};
+            active.settings.columnsOrder = cleanOrder.slice();
+            safeSetLocalStorage(`${COLUMNS_ORDER_STORAGE_KEY}.${active.id}`, JSON.stringify(cleanOrder));
+            markEstimateDirty(active.id);
+        }
+        if (applyAllActive) {
+            (state.estimates || []).forEach(est => {
+                if (!est) return;
+                est.settings = est.settings || {};
+                est.settings.columnsOrder = cleanOrder.slice();
+                safeSetLocalStorage(`${COLUMNS_ORDER_STORAGE_KEY}.${est.id}`, JSON.stringify(cleanOrder));
+                markEstimateDirty(est.id);
+            });
+            safeSetLocalStorage(COLUMNS_ORDER_STORAGE_KEY, JSON.stringify(cleanOrder));
+            if (window.ProjectState?.projectMeta?.estimatingTableSettings) {
+                window.ProjectState.projectMeta.estimatingTableSettings.columnsOrder = cleanOrder.slice();
+            }
+        }
+        saveLocal();
+        scheduleSave('manual');
     }
 
     function findTakeoffLayer(item) {
@@ -1080,7 +1628,7 @@
                     if (l) return l;
                 }
             }
-        } catch (_) {}
+        } catch (_) { }
         // 5. Check window.ProjectState.takeoffLayers
         if (Array.isArray(window.ProjectState?.takeoffLayers)) {
             const l = window.ProjectState.takeoffLayers.find(x => String(x.id) === String(layerId) || (x.name && x.name === item.name));
@@ -1194,6 +1742,13 @@
         return [];
     }
 
+    const PLACEHOLDER_COMPONENT_NAMES = new Set(['assembly part', 'assembly component', 'cost item', 'item']);
+
+    function isPlaceholderComponentName(name) {
+        const clean = String(name || '').trim().toLowerCase();
+        return !clean || PLACEHOLDER_COMPONENT_NAMES.has(clean);
+    }
+
     function resolveAssemblyComponentName(component, catalogItem = null) {
         const candidates = [
             component?.itemName, component?.item_name,
@@ -1202,80 +1757,297 @@
             component?.catalogSnapshot?.name,
             catalogItem?.itemName, catalogItem?.item_name, catalogItem?.name
         ];
-        const resolved = candidates.find(value => String(value || '').trim());
+        const resolved = candidates.find(value => {
+            const trimmed = String(value || '').trim();
+            return trimmed && !PLACEHOLDER_COMPONENT_NAMES.has(trimmed.toLowerCase());
+        });
         if (resolved) return String(resolved).trim();
         const currentName = String(component?.name || '').trim();
-        const placeholders = new Set(['assembly part', 'assembly component', 'cost item', 'item']);
-        return currentName && !placeholders.has(currentName.toLowerCase())
+        return currentName && !PLACEHOLDER_COMPONENT_NAMES.has(currentName.toLowerCase())
             ? currentName
             : 'Assembly component';
     }
 
-    async function hydrateAssemblyPartsFromCatalog(item, catalogId) {
-        if (typeof fetch !== 'function') return false;
-        if (!item) return;
-        if (getItemChildren(item).length > 0) return;
-        try {
-            // First try CatalogService snapshot
-            if (window.CatalogService?.getSnapshot) {
-                const snapshot = await window.CatalogService.getSnapshot({ enabledForProjectsOnly: false });
-                const items = snapshot?.items || [];
-                const catItem = items.find(it => (catalogId && String(it.id) === String(catalogId)) || (it.name && it.name.trim().toLowerCase() === String(item.name || '').trim().toLowerCase()));
-                if (catItem && Array.isArray(catItem.assemblyComponents) && catItem.assemblyComponents.length > 0) {
+    function assemblyComponentNeedsHydration(child) {
+        if (!child || typeof child !== 'object') return false;
+        if (isPlaceholderComponentName(child.name)) return true;
+        const hasAnyCostOrLabor = Number(child.unitMaterialCost || 0) > 0
+            || Number(child.unitEquipmentCost || 0) > 0
+            || Number(child.unitSubcontractorCost || 0) > 0
+            || Number(child.unitLabor || 0) > 0;
+        return !hasAnyCostOrLabor && Boolean(child.catalogItemId || child.catalog_item_id || child.pricingSnapshot);
+    }
+
+    function repairAssemblyChildrenFromSnapshot(item) {
+        if (!item || !Array.isArray(item.children) || !item.children.length) return false;
+        const snapComps = Array.isArray(item.catalogSnapshot?.assemblyComponents)
+            ? item.catalogSnapshot.assemblyComponents
+            : (Array.isArray(item.catalogMetadata?.assemblyComponents) ? item.catalogMetadata.assemblyComponents : []);
+        let changedAny = false;
+        item.children.forEach((child, idx) => {
+            const snapComp = snapComps.find(sc =>
+                (child.assemblyComponentId && String(sc.id) === String(child.assemblyComponentId))
+                || (child.catalogItemId && String(sc.catalogItemId ?? sc.part_catalog_item_id ?? '') === String(child.catalogItemId))
+            ) || snapComps[idx] || null;
+            const snap = child.pricingSnapshot || snapComp?.pricingSnapshot || {};
+            if (isPlaceholderComponentName(child.name) && snapComp?.name && !isPlaceholderComponentName(snapComp.name)) {
+                child.name = String(snapComp.name).trim();
+                changedAny = true;
+            }
+            if (!child.uom && snapComp?.uom) {
+                child.uom = String(snapComp.uom);
+                changedAny = true;
+            }
+            if (!Number(child.unitMaterialCost || 0) && Number(snap.materialUnitCost || 0) > 0) {
+                child.unitMaterialCost = Number(snap.materialUnitCost);
+                child.unitCost = Number(snap.materialUnitCost);
+                changedAny = true;
+            }
+            if (!Number(child.unitEquipmentCost || 0) && Number(snap.equipmentUnitCost || 0) > 0) {
+                child.unitEquipmentCost = Number(snap.equipmentUnitCost);
+                changedAny = true;
+            }
+            if (!Number(child.unitSubcontractorCost || 0) && Number(snap.subcontractorUnitCost || 0) > 0) {
+                child.unitSubcontractorCost = Number(snap.subcontractorUnitCost);
+                changedAny = true;
+            }
+            if (!Number(child.unitLabor || 0) && Number(snap.laborHoursPerUnit || 0) > 0) {
+                child.unitLabor = Number(snap.laborHoursPerUnit);
+                child.laborUnitType = 'hrs';
+                changedAny = true;
+            }
+            if ((!Number(child.laborRate || 0)) && Number(snap.laborRate || 0) > 0) {
+                child.laborRate = Number(snap.laborRate);
+                changedAny = true;
+            }
+        });
+        return changedAny;
+    }
+
+    function assemblyNeedsHydration(item) {
+        if (!item || !isAssemblyItem(item)) return false;
+        const children = getItemChildren(item);
+        if (children.length === 0) return true;
+        return children.some(assemblyComponentNeedsHydration);
+    }
+
+    async function fetchCatalogHydrationBundle() {
+        if (ui._catalogHydrationCache) return ui._catalogHydrationCache;
+        if (ui._catalogHydrationPromise) return ui._catalogHydrationPromise;
+        ui._catalogHydrationPromise = (async () => {
+            try {
+                if (window.CatalogService?.getSnapshot) {
+                    const snapshot = await window.CatalogService.getSnapshot({ enabledForProjectsOnly: false });
+                    if (snapshot && Array.isArray(snapshot.items) && snapshot.items.length) {
+                        const items = snapshot.items;
+                        const itemsById = new Map(items.map(it => [String(it.id), it]));
+                        ui._catalogHydrationCache = { mode: 'dto', items, itemsById };
+                        return ui._catalogHydrationCache;
+                    }
+                }
+                const res = await fetch('../api/cost_catalog.php?action=snapshot');
+                const data = await res.json();
+                if (data?.status === 'success') {
+                    const items = Array.isArray(data.data?.items) ? data.data.items : [];
+                    const assemblyParts = Array.isArray(data.data?.assemblyParts) ? data.data.assemblyParts : [];
                     const itemsById = new Map(items.map(it => [String(it.id), it]));
+                    ui._catalogHydrationCache = { mode: 'raw', items, assemblyParts, itemsById };
+                    return ui._catalogHydrationCache;
+                }
+            } catch (err) {
+                console.warn('Could not load catalog snapshot for assembly hydration:', err);
+            } finally {
+                ui._catalogHydrationPromise = null;
+            }
+            return null;
+        })();
+        return ui._catalogHydrationPromise;
+    }
+
+    function applyHydratedChildFields(existingChild, resolved) {
+        const next = { ...existingChild };
+        if (isPlaceholderComponentName(next.name) && resolved.name) next.name = resolved.name;
+        if (!next.description && resolved.description) next.description = resolved.description;
+        if ((!next.uom || next.uom === 'ea') && resolved.uom) next.uom = resolved.uom;
+        if (!next.costCode && resolved.costCode) next.costCode = resolved.costCode;
+        if (resolved.itemType && (!next.itemType || next.itemType === 'part')) next.itemType = resolved.itemType;
+        if (resolved.costCategory && (!next.costCategory || next.costCategory === 'Materials' || next.costCategory === 'Other')) {
+            next.costCategory = resolved.costCategory;
+        }
+        if (!Number(next.unitMaterialCost || 0) && Number(resolved.unitMaterialCost || 0) > 0) {
+            next.unitMaterialCost = Number(resolved.unitMaterialCost);
+            next.unitCost = Number(resolved.unitMaterialCost);
+        }
+        if (!Number(next.unitEquipmentCost || 0) && Number(resolved.unitEquipmentCost || 0) > 0) {
+            next.unitEquipmentCost = Number(resolved.unitEquipmentCost);
+        }
+        if (!Number(next.unitSubcontractorCost || 0) && Number(resolved.unitSubcontractorCost || 0) > 0) {
+            next.unitSubcontractorCost = Number(resolved.unitSubcontractorCost);
+        }
+        if (!Number(next.unitLabor || 0) && Number(resolved.unitLabor || 0) > 0) {
+            next.unitLabor = Number(resolved.unitLabor);
+            next.laborUnitType = 'hrs';
+        }
+        if ((!Number(next.laborRate || 0)) && Number(resolved.laborRate || 0) > 0) {
+            next.laborRate = Number(resolved.laborRate);
+        }
+        return next;
+    }
+
+    async function hydrateAssemblyPartsFromCatalog(item, catalogId) {
+        if (!item) return false;
+        const snapshotPatched = repairAssemblyChildrenFromSnapshot(item);
+        const existingChildren = getItemChildren(item);
+        if (existingChildren.length > 0 && !existingChildren.some(assemblyComponentNeedsHydration)) {
+            if (snapshotPatched) saveLocal({ publish: false });
+            return snapshotPatched;
+        }
+        if (typeof fetch !== 'function') return snapshotPatched;
+        try {
+            const bundle = await fetchCatalogHydrationBundle();
+            if (!bundle) return snapshotPatched;
+            const { mode, items, itemsById, assemblyParts = [] } = bundle;
+            const defaultLaborRate = Number(current()?.settings?.globalLaborCost || 36);
+            let hydratedAny = snapshotPatched;
+
+            const buildResolvedFromDto = (partDto, comp = {}) => {
+                const snap = comp.pricingSnapshot || {};
+                const partType = String(partDto?.type || comp.itemType || 'PART').toUpperCase();
+                return {
+                    catalogItemId: partDto?.id ?? comp.catalogItemId,
+                    name: resolveAssemblyComponentName(comp, partDto),
+                    description: partDto?.description || comp.description || '',
+                    uom: partDto?.uom || comp.uom || 'ea',
+                    costCode: partDto?.classification?.costCode || comp.costCode || '',
+                    itemType: partType.toLowerCase(),
+                    costCategory: partType === 'EQUIPMENT' ? 'Equipment' : (partType === 'LABOR' ? 'Labor' : 'Materials'),
+                    quantity: Number(comp.quantity || 1),
+                    unitMaterialCost: Number(partDto?.pricing?.materialUnitCost ?? snap.materialUnitCost ?? 0),
+                    unitEquipmentCost: Number(partDto?.pricing?.equipmentUnitCost ?? snap.equipmentUnitCost ?? 0),
+                    unitSubcontractorCost: Number(partDto?.pricing?.subcontractorUnitCost ?? snap.subcontractorUnitCost ?? 0),
+                    unitLabor: Number(partDto?.pricing?.laborHoursPerUnit ?? snap.laborHoursPerUnit ?? 0),
+                    laborUnitType: 'hrs',
+                    laborRate: (Number(partDto?.pricing?.laborRate || snap.laborRate || 0) > 0)
+                        ? Number(partDto?.pricing?.laborRate || snap.laborRate)
+                        : null,
+                    waste: Number(comp.waste || 0)
+                };
+            };
+
+            if (existingChildren.length > 0) {
+                const targetCatalogId = catalogId || item.catalogItemId || item.catalog_item_id || item.catalogSnapshot?.catalogItemId || item.catalogSnapshot?.id;
+                const catItem = targetCatalogId
+                    ? itemsById.get(String(targetCatalogId))
+                    : items.find(it => it.name && it.name.trim().toLowerCase() === String(item.name || '').trim().toLowerCase());
+                const catComps = Array.isArray(catItem?.assemblyComponents) ? catItem.assemblyComponents : [];
+
+                item.children = existingChildren.map((child, idx) => {
+                    const childCatId = String(child.catalogItemId ?? child.catalog_item_id ?? catComps[idx]?.catalogItemId ?? '');
+                    const partDto = childCatId ? itemsById.get(childCatId) : null;
+                    if (!partDto) return child;
+                    if (mode === 'dto') {
+                        const resolved = buildResolvedFromDto(partDto, catComps[idx] || child);
+                        hydratedAny = true;
+                        return applyHydratedChildFields(child, resolved);
+                    }
+                    const resolved = {
+                        name: resolveAssemblyComponentName(child, partDto),
+                        description: partDto.description || '',
+                        uom: partDto.unit_of_measure || 'ea',
+                        costCode: partDto.cost_code || '',
+                        itemType: String(partDto.item_type || 'part').toLowerCase(),
+                        costCategory: String(partDto.cost_type || 'Materials'),
+                        unitMaterialCost: Number(partDto.material_cost || partDto.unit_cost || 0),
+                        unitEquipmentCost: Number(partDto.equipment_cost || 0),
+                        unitSubcontractorCost: Number(partDto.subcontractor_cost || 0),
+                        unitLabor: Number(partDto.labor_hours || 0),
+                        laborUnitType: 'hrs',
+                        laborRate: Number(partDto.labor_rate || 0) > 0 ? Number(partDto.labor_rate) : null
+                    };
+                    hydratedAny = true;
+                    return applyHydratedChildFields(child, resolved);
+                });
+                if (hydratedAny) saveLocal({ publish: false });
+                return hydratedAny;
+            }
+
+            if (mode === 'dto') {
+                const catItem = items.find(it => (catalogId && String(it.id) === String(catalogId))
+                    || (it.name && it.name.trim().toLowerCase() === String(item.name || '').trim().toLowerCase()));
+                if (catItem && Array.isArray(catItem.assemblyComponents) && catItem.assemblyComponents.length > 0) {
                     item.children = catItem.assemblyComponents.map(comp => {
                         const partDto = itemsById.get(String(comp.catalogItemId));
-                        const snap = comp.pricingSnapshot || {};
+                        const resolved = buildResolvedFromDto(partDto, comp);
                         return {
                             id: Workspace.uid('item'),
-                            catalogItemId: comp.catalogItemId,
-                            name: resolveAssemblyComponentName(comp, partDto),
-                            description: partDto?.description || comp.description || '',
-                            quantity: Number(comp.quantity || 1),
-                            uom: partDto?.uom || comp.uom || 'ea',
-                            unitCost: Number(partDto?.pricing?.materialUnitCost ?? snap.materialUnitCost ?? 0),
-                            unitMaterialCost: Number(partDto?.pricing?.materialUnitCost ?? snap.materialUnitCost ?? 0),
-                            waste: Number(comp.waste || 0),
-                            unitLabor: Number(partDto?.pricing?.laborHoursPerUnit ?? snap.laborHoursPerUnit ?? 0),
-                            laborRate: Number(partDto?.pricing?.laborRate ?? snap.laborRate ?? 0)
+                            catalogItemId: resolved.catalogItemId,
+                            name: resolved.name,
+                            description: resolved.description,
+                            quantity: resolved.quantity,
+                            uom: resolved.uom,
+                            costCode: resolved.costCode,
+                            itemType: resolved.itemType,
+                            costCategory: resolved.costCategory,
+                            unitCost: resolved.unitMaterialCost,
+                            unitMaterialCost: resolved.unitMaterialCost,
+                            unitEquipmentCost: resolved.unitEquipmentCost,
+                            unitSubcontractorCost: resolved.unitSubcontractorCost,
+                            waste: resolved.waste,
+                            unitLabor: resolved.unitLabor,
+                            laborUnitType: 'hrs',
+                            laborRate: resolved.laborRate
                         };
                     });
                     saveLocal({ publish: false });
-                    return;
+                    return true;
                 }
+                return snapshotPatched;
             }
 
-            // Fallback: direct fetch from api/cost_catalog.php?action=snapshot
-            const res = await fetch('../api/cost_catalog.php?action=snapshot');
-            const data = await res.json();
-            if (data?.status === 'success') {
-                const assemblyParts = Array.isArray(data.data?.assemblyParts) ? data.data.assemblyParts : [];
-                const catalogItems = Array.isArray(data.data?.items) ? data.data.items : [];
-                let resolvedCatId = catalogId;
-                if (!resolvedCatId && item.name) {
-                    const matchedItem = catalogItems.find(ci => ci.name && ci.name.trim().toLowerCase() === String(item.name).trim().toLowerCase());
-                    if (matchedItem) resolvedCatId = matchedItem.id;
-                }
-                const matchingParts = assemblyParts.filter(p => String(p.assembly_catalog_item_id) === String(resolvedCatId));
-                if (matchingParts.length > 0) {
-                    const catalogItemsById = new Map(catalogItems.map(catalogItem => [String(catalogItem.id), catalogItem]));
-                    item.children = matchingParts.map(p => ({
-                        id: Workspace.uid('item'),
-                        catalogItemId: p.part_catalog_item_id,
-                        name: resolveAssemblyComponentName(p, catalogItemsById.get(String(p.part_catalog_item_id))),
-                        description: p.child_description || '',
-                        quantity: Number(p.quantity || 1),
-                        uom: p.child_unit_of_measure || 'ea',
-                        unitCost: Number(p.child_unit_cost || p.unit_cost_snapshot || 0),
-                        unitMaterialCost: Number(p.child_unit_cost || p.unit_cost_snapshot || 0),
-                        waste: Number(p.waste_percent || 0),
-                        unitLabor: Number(p.child_labor_hours || p.labor_hours_snapshot || 0)
-                    }));
-                    saveLocal({ publish: false });
-                }
+            let resolvedCatId = catalogId;
+            if (!resolvedCatId && item.name) {
+                const matchedItem = items.find(ci => ci.name && ci.name.trim().toLowerCase() === String(item.name).trim().toLowerCase());
+                if (matchedItem) resolvedCatId = matchedItem.id;
             }
+            const matchingParts = assemblyParts.filter(p => String(p.assembly_catalog_item_id) === String(resolvedCatId));
+            if (matchingParts.length > 0) {
+                item.children = matchingParts.map(p => ({
+                    id: Workspace.uid('item'),
+                    catalogItemId: p.part_catalog_item_id,
+                    name: resolveAssemblyComponentName(p, itemsById.get(String(p.part_catalog_item_id))),
+                    description: p.child_description || '',
+                    quantity: Number(p.quantity || 1),
+                    uom: p.child_unit_of_measure || 'ea',
+                    unitCost: Number(p.child_unit_cost || p.unit_cost_snapshot || 0),
+                    unitMaterialCost: Number(p.child_unit_cost || p.unit_cost_snapshot || 0),
+                    waste: Number(p.waste_percent || 0),
+                    unitLabor: Number(p.child_labor_hours || p.labor_hours_snapshot || 0),
+                    laborUnitType: 'hrs',
+                    laborRate: Number(p.labor_rate || 0) > 0 ? Number(p.labor_rate) : null
+                }));
+                saveLocal({ publish: false });
+                return true;
+            }
+            return snapshotPatched;
         } catch (err) {
             console.warn('Could not hydrate assembly components:', err);
+            return snapshotPatched;
+        }
+    }
+
+    async function hydrateBrokenAssembliesInCurrentEstimate() {
+        const broken = allItems()
+            .map(r => r.item)
+            .filter(it => assemblyNeedsHydration(it));
+        if (!broken.length) return;
+        let updatedAny = false;
+        for (const it of broken) {
+            const catId = it.catalogItemId || it.catalog_item_id || it.catalogSnapshot?.catalogItemId || it.catalogSnapshot?.id || it.catalog_id;
+            if (await hydrateAssemblyPartsFromCatalog(it, catId)) updatedAny = true;
+        }
+        if (updatedAny) {
+            renderTable();
+            renderDetails();
         }
     }
 
@@ -1288,8 +2060,9 @@
         }
         const found = findItem(id);
         const it = found?.item;
-        if (it && getItemChildren(it).length === 0 && typeof fetch === 'function') {
-            const catId = it.catalogItemId || it.catalog_item_id || it.catalogSnapshot?.id || it.catalog_id;
+        if (it && assemblyNeedsHydration(it)) {
+            const catId = it.catalogItemId || it.catalog_item_id || it.catalogSnapshot?.catalogItemId || it.catalogSnapshot?.id || it.catalog_id;
+            repairAssemblyChildrenFromSnapshot(it);
             hydrateAssemblyPartsFromCatalog(it, catId).finally(() => {
                 ui.expandedAssemblies.add(id);
                 renderTable();
@@ -1314,13 +2087,13 @@
                 <div class="est-drawer-section-title">Configure Columns</div>
                 <div class="est-columns-toggle-list">
                     ${ALL_CONFIG_COLUMNS.map(col => `
-                        <div class="est-col-toggle-card">
-                            <label class="est-switch">
+                        <label class="est-col-toggle-card">
+                            <span class="proposal-switch est-switch">
                                 <input type="checkbox" data-col-switch="${col.id}" ${visibleCols.has(col.id) ? 'checked' : ''}>
-                                <span class="est-switch-slider"></span>
-                            </label>
+                                <span class="proposal-slider est-switch-slider"></span>
+                            </span>
                             <span class="est-col-toggle-label">${esc(col.label)}</span>
-                        </div>
+                        </label>
                     `).join('')}
                 </div>
                 <div class="est-apply-all-wrap">
@@ -1331,8 +2104,8 @@
                 </div>
             </div>
             <div class="est-drawer-footer">
-                <button type="button" class="est-drawer-cancel-btn" data-drawer-cancel>Cancel</button>
-                <button type="button" class="est-drawer-save-btn" data-drawer-save>Save Changes</button>
+                <button type="button" class="btn-ghost est-drawer-cancel-btn" data-drawer-cancel>Cancel</button>
+                <button type="button" class="btn-main est-drawer-save-btn" data-drawer-save>Save Changes</button>
             </div>
         `;
     }
@@ -1392,7 +2165,7 @@
         });
     }
 
-        function handleActionPopoverClick(event) {
+    function handleActionPopoverClick(event) {
         const target = event.target;
         const popGroupAction = target.closest('[data-popover-group-action]');
         if (popGroupAction) {
@@ -1409,6 +2182,7 @@
                         item.quantityOverride = false;
                         item.pendingTakeoffQuantity = null;
                         item.quantitySyncStatus = item.takeoffLayerId ? 'synced' : 'manual';
+                        delete item.quantityOverrideSource;
                     });
                     changed(`Reset quantities for group "${grp.name}"`);
                 }
@@ -1422,10 +2196,9 @@
                     const copy = Workspace.clone(grp);
                     copy.id = Workspace.uid('group');
                     copy.name = `${grp.name} (Copy)`;
-                    copy.items = (grp.items || []).map(it => {
-                        const itemCopy = Workspace.clone(it);
-                        itemCopy.id = Workspace.uid('item');
-                        return itemCopy;
+                    copy.items = (grp.items || []).map(it => duplicateEstimatingItem(it)).map(it => {
+                        if (it && it.name.endsWith(' (Copy)')) it.name = it.name.slice(0, -7);
+                        return it;
                     });
                     const idx = current().groups.indexOf(grp);
                     current().groups.splice(idx + 1, 0, copy);
@@ -1435,7 +2208,10 @@
                 exportEstimate('bom-excel');
             } else if (act === 'delete-group') {
                 if (confirm('Delete this group and its items?')) {
+                    const targetGroup = current().groups.find(row => String(row.id) === String(grpId));
+                    const removedItems = targetGroup?.items || [];
                     current().groups = current().groups.filter(row => String(row.id) !== String(grpId));
+                    notifyTakeoffDeletedEstimatingItems(removedItems);
                     changed('Deleted group');
                 }
             }
@@ -1451,18 +2227,11 @@
             if (act === 'edit-item') {
                 openProjectItemEditModal(found.item, found.group);
             } else if (act === 'copy-item') {
-                if (isAssemblyItem(found.item)) {
-                    const index = found.group.items.indexOf(found.item);
-                    const duplicate = duplicateAssembly(found.item);
+                const index = found.group.items.indexOf(found.item);
+                const duplicate = duplicateEstimatingItem(found.item);
+                if (duplicate) {
                     found.group.items.splice(index + 1, 0, duplicate);
-                    changed(`Duplicated ${found.item.name}`);
-                } else {
-                    const index = found.group.items.indexOf(found.item);
-                    const duplicate = Workspace.clone(found.item);
-                    duplicate.id = Workspace.uid('item');
-                    duplicate.name = `${found.item.name} (Copy)`;
-                    found.group.items.splice(index + 1, 0, duplicate);
-                    changed(`Copied ${found.item.name}`);
+                    changed(isAssemblyItem(found.item) ? `Duplicated ${found.item.name}` : `Copied ${found.item.name}`);
                 }
             } else if (act === 'replace-item') {
                 ui.catalogTargetGroupId = found.group.id;
@@ -1478,15 +2247,18 @@
                 found.item.quantityOverride = false;
                 found.item.pendingTakeoffQuantity = null;
                 found.item.quantitySyncStatus = found.item.takeoffLayerId ? 'synced' : 'manual';
+                delete found.item.quantityOverrideSource;
                 changed(`Reset quantity for "${found.item.name}" (${formatAuditVal(prevQty, 'qty', found.item.uom)} -> ${formatAuditVal(nextQty, 'qty', found.item.uom)})`);
             } else if (act === 'reset-budget-code') {
                 found.item.costCode = '16-1...';
                 found.item.budgetCode = '16-1...';
                 changed(`Reset budget code for "${found.item.name}"`);
             } else if (act === 'delete-item') {
+                const removedItem = found.item;
                 found.group.items = found.group.items.filter(row => String(row.id) !== String(itId));
                 ui.expandedAssemblies.delete(String(itId));
-                changed(`Deleted ${found.item.name}`);
+                notifyTakeoffDeletedEstimatingItems([removedItem]);
+                changed(`Deleted ${removedItem.name}`);
             }
             return true;
         }
@@ -1601,7 +2373,7 @@
 
             try {
                 resizer.setPointerCapture(e.pointerId);
-            } catch (_) {}
+            } catch (_) { }
 
             table.classList.add('is-resizing-col');
 
@@ -1636,7 +2408,7 @@
                     resizer.classList.remove('est-col-resizing', 'is-dragging');
                     try {
                         if (upEvent?.pointerId) resizer.releasePointerCapture(upEvent.pointerId);
-                    } catch (_) {}
+                    } catch (_) { }
                     resizingCol = null;
                 }
                 document.body.style.cursor = '';
@@ -1654,11 +2426,24 @@
         let draggedColId = null;
         let dragOverRaf = null;
         let lastDragTh = null;
+        let draggedRowItemId = null;
+        let lastDragRow = null;
 
         table.addEventListener('dragstart', e => {
             if (resizingCol || e.target.closest('.est-col-resizer') || document.body.style.cursor === 'col-resize') {
                 e.preventDefault();
                 return false;
+            }
+            const grip = e.target.closest('.est-row-grip');
+            if (grip) {
+                const row = grip.closest('tr.est-item-row');
+                if (!row) { e.preventDefault(); return false; }
+                draggedRowItemId = row.dataset.itemId;
+                e.dataTransfer.setData('text/plain', draggedRowItemId);
+                e.dataTransfer.setData('application/x-est-item', draggedRowItemId);
+                e.dataTransfer.effectAllowed = 'move';
+                row.classList.add('est-row-dragging');
+                return;
             }
             const th = e.target.closest('.est-th-draggable');
             if (!th || th.classList.contains('col-cost-item')) {
@@ -1672,6 +2457,35 @@
         });
 
         table.addEventListener('dragover', e => {
+            if (draggedRowItemId) {
+                const itemRow = e.target.closest('tr.est-item-row');
+                const groupRow = e.target.closest('tr.est-group-row');
+                if (itemRow && itemRow.dataset.itemId !== draggedRowItemId) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    const rect = itemRow.getBoundingClientRect();
+                    const isTop = e.clientY < rect.top + rect.height / 2;
+                    if (lastDragRow && lastDragRow !== itemRow) {
+                        lastDragRow.classList.remove('est-row-drag-over-top', 'est-row-drag-over-bottom', 'est-group-drag-over');
+                    }
+                    lastDragRow = itemRow;
+                    itemRow.classList.toggle('est-row-drag-over-top', isTop);
+                    itemRow.classList.toggle('est-row-drag-over-bottom', !isTop);
+                    return;
+                }
+                if (groupRow) {
+                    e.preventDefault();
+                    e.dataTransfer.dropEffect = 'move';
+                    if (lastDragRow && lastDragRow !== groupRow) {
+                        lastDragRow.classList.remove('est-row-drag-over-top', 'est-row-drag-over-bottom', 'est-group-drag-over');
+                    }
+                    lastDragRow = groupRow;
+                    groupRow.classList.add('est-group-drag-over');
+                    return;
+                }
+                return;
+            }
+
             const th = e.target.closest('.est-th-draggable');
             if (!th || !draggedColId || th.dataset.colId === draggedColId) return;
             e.preventDefault();
@@ -1702,6 +2516,14 @@
         });
 
         table.addEventListener('dragleave', e => {
+            if (draggedRowItemId) {
+                const row = e.target.closest('tr.est-item-row, tr.est-group-row');
+                if (row && e.relatedTarget && !row.contains(e.relatedTarget)) {
+                    row.classList.remove('est-row-drag-over-top', 'est-row-drag-over-bottom', 'est-group-drag-over');
+                    if (lastDragRow === row) lastDragRow = null;
+                }
+                return;
+            }
             const th = e.target.closest('.est-th-draggable');
             if (th && e.relatedTarget && !th.contains(e.relatedTarget)) {
                 th.classList.remove('est-th-drag-over-left', 'est-th-drag-over-right');
@@ -1710,6 +2532,25 @@
         });
 
         table.addEventListener('drop', e => {
+            if (draggedRowItemId) {
+                e.preventDefault();
+                const itemRow = e.target.closest('tr.est-item-row');
+                const groupRow = e.target.closest('tr.est-group-row');
+                if (itemRow && itemRow.dataset.itemId !== draggedRowItemId) {
+                    const rect = itemRow.getBoundingClientRect();
+                    const isBefore = e.clientY < rect.top + rect.height / 2;
+                    moveEstimatingItem(draggedRowItemId, itemRow.dataset.itemId, null, isBefore);
+                } else if (groupRow) {
+                    moveEstimatingItem(draggedRowItemId, null, groupRow.dataset.groupId, false);
+                }
+                table.querySelectorAll('.est-row-dragging, .est-row-drag-over-top, .est-row-drag-over-bottom, .est-group-drag-over').forEach(el => {
+                    el.classList.remove('est-row-dragging', 'est-row-drag-over-top', 'est-row-drag-over-bottom', 'est-group-drag-over');
+                });
+                draggedRowItemId = null;
+                lastDragRow = null;
+                return;
+            }
+
             const th = e.target.closest('.est-th-draggable');
             if (!th || !draggedColId || th.dataset.colId === draggedColId) return;
             e.preventDefault();
@@ -1736,9 +2577,11 @@
         table.addEventListener('dragend', () => {
             draggedColId = null;
             lastDragTh = null;
+            draggedRowItemId = null;
+            lastDragRow = null;
             if (dragOverRaf) { cancelAnimationFrame(dragOverRaf); dragOverRaf = null; }
-            table.querySelectorAll('.est-th-draggable').forEach(th => {
-                th.classList.remove('est-th-dragging', 'est-th-drag-over-left', 'est-th-drag-over-right');
+            table.querySelectorAll('.est-th-draggable, .est-row-dragging, .est-row-drag-over-top, .est-row-drag-over-bottom, .est-group-drag-over').forEach(el => {
+                el.classList.remove('est-th-dragging', 'est-th-drag-over-left', 'est-th-drag-over-right', 'est-row-dragging', 'est-row-drag-over-top', 'est-row-drag-over-bottom', 'est-group-drag-over');
             });
         });
     }
@@ -1773,15 +2616,15 @@
                 <div class="est-col-resizer" data-resizer-col="cost_item"></div>
             </th>
             ${activeColumns.map(col => {
-                const colWidth = widths[col.id] || parseInt(col.minWidth, 10) || 110;
-                return `<th class="est-th-draggable ${col.align === 'right' ? 'text-right' : (col.align === 'center' ? 'text-center' : '')}"
+            const colWidth = widths[col.id] || parseInt(col.minWidth, 10) || 110;
+            return `<th class="est-th-draggable ${col.align === 'right' ? 'text-right' : (col.align === 'center' ? 'text-center' : '')}"
                             data-col-id="${esc(col.id)}"
                             draggable="true"
                             style="width: ${colWidth}px; min-width: ${col.minWidth};">
                     <span class="est-th-label">${esc(col.label)}</span>
                     <div class="est-col-resizer" data-resizer-col="${esc(col.id)}"></div>
                 </th>`;
-            }).join('')}
+        }).join('')}
             <th class="col-actions-sticky"></th>
         </tr>`;
 
@@ -1821,22 +2664,22 @@
                     </div>
                 </td>
                 ${activeColumns.map(col => {
-                    if (col.id === 'budget_code') {
-                        const bCode = group.costCode || '16-1...';
-                        return `<td><span class="est-budget-code-pill">${esc(bCode)} <span class="est-budget-code-clear">âœ•</span></span></td>`;
-                    }
-                    if (col.id === 'quantity') {
-                        return `<td class="text-right"><span style="color: #2563eb; font-size: 12px; font-weight: 600;">${visible.length} x</span></td>`;
-                    }
-                    if (col.id === 'subtotal_item_cost') {
-                        return `<td class="text-right est-money" style="font-weight: 700;" data-live-group-subtotal="${esc(group.id)}">${number(groupSubtotalCost, 2)}</td>`;
-                    }
-                    if (col.id === 'labor_margin') {
-                        const gMargin = Number(current()?.settings?.globalLaborMargin ?? 34.6);
-                        return `<td class="text-right" style="color: #64748b; font-size: 11.5px; font-weight: 500;">${gMargin.toFixed(1)}%</td>`;
-                    }
-                    return `<td></td>`;
-                }).join('')}
+                if (col.id === 'budget_code') {
+                    const bCode = group.costCode || '16-1...';
+                    return `<td><span class="est-budget-code-pill">${esc(bCode)} <span class="est-budget-code-clear">âœ•</span></span></td>`;
+                }
+                if (col.id === 'quantity') {
+                    return `<td class="text-right"><span style="color: #2563eb; font-size: 12px; font-weight: 600;">${visible.length} x</span></td>`;
+                }
+                if (col.id === 'subtotal_item_cost') {
+                    return `<td class="text-right est-money" style="font-weight: 700;" data-live-group-subtotal="${esc(group.id)}">${number(groupSubtotalCost, 2)}</td>`;
+                }
+                if (col.id === 'labor_margin') {
+                    const gMargin = Number(current()?.settings?.globalLaborMargin ?? 34.6);
+                    return `<td class="text-right" data-live-group-labor-margin="${esc(group.id)}" style="color: #64748b; font-size: 11.5px; font-weight: 500;">${gMargin.toFixed(1)}%</td>`;
+                }
+                return `<td></td>`;
+            }).join('')}
                 <td class="col-actions-sticky">
                     <div class="est-sticky-actions-cell">
                         <button type="button" class="est-action-icon-btn est-btn-add" data-add-item="${esc(group.id)}" title="Create Item"><i class="fas fa-plus"></i></button>
@@ -1889,9 +2732,297 @@
 
         const deleteButton = root.querySelector('[data-est-action="delete-selected"]');
         if (deleteButton) deleteButton.disabled = ui.selected.size === 0;
+        syncEstimatingSubheadInfo();
 
         attachTableResizeAndDragOnce();
     }
+
+    function closeEstimatingSubheadMovePopover() {
+        document.getElementById('estimatingSubheadMovePopover')?.remove();
+        document.getElementById('estimatingSubheadCopyPopover')?.remove();
+    }
+
+    function selectedEstimatingSubheadRows() {
+        return allItems().filter(({ item }) =>
+            !item.parentItemId && !item.parent_item_id && !item.assemblyParentId
+            && (ui.selected.has(item.id) || ui.selected.has(String(item.id)))
+        );
+    }
+
+    function collectDescendantIds(groupItems, rootIds) {
+        const ids = new Set(rootIds.map(String));
+        let added = true;
+        while (added) {
+            added = false;
+            (groupItems || []).forEach(it => {
+                const pid = it.parentItemId ?? it.parent_item_id ?? it.assemblyParentId;
+                if (pid !== null && pid !== undefined && ids.has(String(pid)) && !ids.has(String(it.id))) {
+                    ids.add(String(it.id));
+                    added = true;
+                }
+            });
+        }
+        return ids;
+    }
+
+    async function confirmEstimatingSubheadAction(options = {}) {
+        if (typeof window.showConfirmDialog === 'function') {
+            return await window.showConfirmDialog(options);
+        }
+        return window.confirm(options.message || 'Are you sure you want to proceed?');
+    }
+
+    async function deleteSelectedEstimatingItems() {
+        const selectedRows = selectedEstimatingSubheadRows();
+        const selectedCount = selectedRows.length;
+        if (!selectedCount) return;
+        closeEstimatingSubheadMovePopover();
+        const confirmed = await confirmEstimatingSubheadAction({
+            title: selectedCount === 1 ? 'Delete Selected Item' : 'Delete Selected Items',
+            message: `Delete ${selectedCount} selected item${selectedCount === 1 ? '' : 's'} from this estimate?`,
+            confirmText: 'Delete',
+            cancelText: 'Cancel',
+            type: 'error',
+            badge: 'CONFIRM DELETE',
+            icon: 'fas fa-trash',
+            primaryDanger: true
+        });
+        if (!confirmed) return;
+
+        const rootIds = selectedRows.map(({ item }) => item.id);
+        const removedItems = [];
+        current().groups.forEach(group => {
+            const removeIds = collectDescendantIds(group.items || [], rootIds);
+            group.items = (group.items || []).filter(item => {
+                if (removeIds.has(String(item.id)) || ui.selected.has(item.id) || ui.selected.has(String(item.id))) {
+                    ui.expandedAssemblies.delete(String(item.id));
+                    removedItems.push(item);
+                    return false;
+                }
+                return true;
+            });
+        });
+        ui.selected.clear();
+        notifyTakeoffDeletedEstimatingItems(removedItems);
+        changed('Deleted selected items');
+    }
+
+    async function copySelectedEstimatingItemsToGroup(targetGroupId) {
+        const groups = current().groups || [];
+        const targetGroup = groups.find(g => String(g.id) === String(targetGroupId));
+        if (!targetGroup) return;
+        const selectedRows = selectedEstimatingSubheadRows();
+        if (!selectedRows.length) return;
+        closeEstimatingSubheadMovePopover();
+
+        const count = selectedRows.length;
+        const targetName = targetGroup.name || 'Untitled Group';
+        const confirmed = await confirmEstimatingSubheadAction({
+            title: count === 1 ? 'Copy Item to Group' : 'Copy Items to Group',
+            message: `Copy ${count} selected item${count === 1 ? '' : 's'} to "${targetName}"?`,
+            confirmText: 'Copy',
+            cancelText: 'Cancel',
+            type: 'info',
+            badge: 'COPY ITEMS',
+            icon: 'fas fa-copy',
+            primaryDanger: false
+        });
+        if (!confirmed) return;
+
+        const assignGroupMeta = (node, grp) => {
+            node.groupId = grp.id;
+            node.groupName = grp.name;
+            if (Array.isArray(node.children)) {
+                node.children.forEach(child => assignGroupMeta(child, grp));
+            }
+            return node;
+        };
+
+        let copied = 0;
+        targetGroup.items = targetGroup.items || [];
+        selectedRows.forEach(({ item }) => {
+            const copy = duplicateEstimatingItem(item);
+            if (!copy) return;
+            assignGroupMeta(copy, targetGroup);
+            const srcIdx = targetGroup.items.indexOf(item);
+            if (srcIdx >= 0) targetGroup.items.splice(srcIdx + 1, 0, copy);
+            else targetGroup.items.push(copy);
+            copied += 1;
+        });
+        if (copied > 0) {
+            targetGroup.expanded = true;
+            changed(`Copied ${copied} item${copied === 1 ? '' : 's'} to "${targetName}"`);
+        }
+    }
+
+    async function moveSelectedEstimatingItemsToGroup(targetGroupId) {
+        const groups = current().groups || [];
+        const targetGroup = groups.find(g => String(g.id) === String(targetGroupId));
+        if (!targetGroup) return;
+        const selectedRows = selectedEstimatingSubheadRows();
+        if (!selectedRows.length) return;
+        closeEstimatingSubheadMovePopover();
+
+        const count = selectedRows.length;
+        const targetName = targetGroup.name || 'Untitled Group';
+        const confirmed = await confirmEstimatingSubheadAction({
+            title: count === 1 ? 'Move Item to Group' : 'Move Items to Group',
+            message: `Move ${count} selected item${count === 1 ? '' : 's'} to "${targetName}"?`,
+            confirmText: 'Move',
+            cancelText: 'Cancel',
+            type: 'warning',
+            badge: 'MOVE ITEMS',
+            icon: 'fas fa-folder-tree',
+            primaryDanger: false
+        });
+        if (!confirmed) return;
+
+        const rootIds = selectedRows.map(({ item }) => item.id);
+        const moving = [];
+        groups.forEach(group => {
+            const moveIds = collectDescendantIds(group.items || [], rootIds);
+            group.items = (group.items || []).filter(item => {
+                if (moveIds.has(String(item.id)) || ui.selected.has(item.id) || ui.selected.has(String(item.id))) {
+                    moving.push(item);
+                    return false;
+                }
+                return true;
+            });
+        });
+        if (!moving.length) return;
+        targetGroup.items = targetGroup.items || [];
+        moving.forEach(item => {
+            item.groupId = targetGroup.id;
+            item.groupName = targetGroup.name;
+            targetGroup.items.push(item);
+        });
+        targetGroup.expanded = true;
+        changed(`Moved ${count} item${count === 1 ? '' : 's'} to "${targetName}"`);
+    }
+
+    function openEstimatingSubheadGroupPopover(anchorBtn, mode = 'move') {
+        const isCopy = mode === 'copy';
+        const popId = isCopy ? 'estimatingSubheadCopyPopover' : 'estimatingSubheadMovePopover';
+        const existing = document.getElementById(popId);
+        if (existing) {
+            existing.remove();
+            return;
+        }
+        closeEstimatingSubheadMovePopover();
+        const groups = current().groups || [];
+        if (!groups.length) return;
+        const pop = document.createElement('div');
+        pop.id = popId;
+        pop.className = 'est-subhead-move-popover';
+        pop.innerHTML = `
+            <div class="est-subhead-move-popover-head">${isCopy ? 'Copy selected to group:' : 'Move selected to group:'}</div>
+            ${groups.map(grp => `
+                <button type="button" data-est-target-group="${esc(grp.id)}">
+                    <i class="fas ${isCopy ? 'fa-copy' : 'fa-folder'}"></i>
+                    <span>${esc(grp.name || 'Untitled Group')}</span>
+                </button>
+            `).join('')}
+        `;
+        document.body.appendChild(pop);
+        const rect = anchorBtn.getBoundingClientRect();
+        const popRect = pop.getBoundingClientRect();
+        let left = rect.left;
+        let top = rect.bottom + 4;
+        if (left + popRect.width > window.innerWidth - 12) {
+            left = Math.max(12, window.innerWidth - popRect.width - 12);
+        }
+        if (top + popRect.height > window.innerHeight - 12) {
+            top = Math.max(12, rect.top - popRect.height - 4);
+        }
+        pop.style.left = `${Math.round(left)}px`;
+        pop.style.top = `${Math.round(top)}px`;
+        pop.querySelectorAll('[data-est-target-group]').forEach(btn => {
+            btn.addEventListener('click', event => {
+                event.stopPropagation();
+                const targetGroupId = btn.dataset.estTargetGroup;
+                if (isCopy) copySelectedEstimatingItemsToGroup(targetGroupId);
+                else moveSelectedEstimatingItemsToGroup(targetGroupId);
+            });
+        });
+    }
+
+    function bindEstimatingSubheadActions() {
+        const info = document.getElementById('estimatingSubheadItemInfo');
+        if (!info || info.dataset.bound === '1') return;
+        info.dataset.bound = '1';
+        info.addEventListener('click', event => {
+            const btn = event.target.closest('[data-est-subhead-action]');
+            if (!btn) return;
+            event.stopPropagation();
+            const act = btn.dataset.estSubheadAction;
+            if (act === 'copy') return openEstimatingSubheadGroupPopover(btn, 'copy');
+            if (act === 'move') return openEstimatingSubheadGroupPopover(btn, 'move');
+            if (act === 'delete') return deleteSelectedEstimatingItems();
+        });
+    }
+
+    function syncEstimatingSubheadInfo() {
+        const info = document.getElementById('estimatingSubheadItemInfo');
+        if (!info) return;
+        bindEstimatingSubheadActions();
+        const isEstTab = document.body?.classList.contains('is-estimating-tab')
+            || document.querySelector('.project-subhead-wrapper')?.classList.contains('is-estimating-tab')
+            || window.ProjectState?.activeTab === 'estimating';
+        if (!isEstTab) {
+            info.classList.remove('is-visible');
+            info.style.display = 'none';
+            info.setAttribute('aria-hidden', 'true');
+            closeEstimatingSubheadMovePopover();
+            return;
+        }
+        const selectedRows = allItems().filter(({ item }) =>
+            !item.parentItemId && !item.parent_item_id && !item.assemblyParentId
+            && (ui.selected.has(item.id) || ui.selected.has(String(item.id)))
+        );
+        if (!selectedRows.length) {
+            info.classList.remove('is-visible');
+            info.style.display = 'none';
+            info.setAttribute('aria-hidden', 'true');
+            closeEstimatingSubheadMovePopover();
+            return;
+        }
+        const dot = document.getElementById('estimatingSubheadItemDot');
+        const nameEl = document.getElementById('estimatingSubheadItemName');
+        const metaEl = document.getElementById('estimatingSubheadItemMeta');
+        const count = selectedRows.length;
+        const settings = current().settings;
+        const totalSales = selectedRows.reduce((sum, { item }) => {
+            const calc = Calc.calculateItem(item, settings);
+            return sum + Number(calc?.totalSales ?? 0);
+        }, 0);
+
+        if (dot) {
+            const shapeHtml = count === 1 ? getItemLayerShapeSvg(selectedRows[0].item, 13) : '';
+            dot.style.background = 'transparent';
+            dot.style.boxShadow = 'none';
+            dot.innerHTML = shapeHtml || '<i class="fas fa-list-check" style="color: #fb5a3a; font-size: 11.5px;"></i>';
+        }
+        if (nameEl) {
+            nameEl.textContent = count === 1
+                ? (selectedRows[0].item.name || '1 item selected')
+                : `${count} items selected`;
+            nameEl.title = selectedRows.map(({ item }) => item.name || 'Item').join(', ');
+        }
+        if (metaEl) {
+            if (count === 1) {
+                const singleItem = selectedRows[0].item;
+                const calc = Calc.calculateItem(singleItem, settings);
+                const qty = calc?.baseQuantity ?? singleItem.quantity ?? 0;
+                metaEl.textContent = `${number(qty, 2)} ${singleItem.uom || 'ea'} · ${money(totalSales)}`;
+            } else {
+                metaEl.textContent = money(totalSales);
+            }
+        }
+        info.classList.add('is-visible');
+        info.style.display = 'inline-flex';
+        info.setAttribute('aria-hidden', 'false');
+    }
+    window.syncEstimatingSubheadInfo = syncEstimatingSubheadInfo;
 
     function itemMatchesQuery(item, query) {
         const ownMatch = `${item.name || ''} ${item.description || ''} ${item.costCode || ''} ${item.catalogNumber || ''}`.toLowerCase().includes(query);
@@ -1961,6 +3092,7 @@
         return `<tr class="est-item-row ${assembly ? 'est-assembly-parent-row' : ''} ${isItemSelected ? 'selected' : ''} ${invalid ? 'est-invalid-row' : ''}" data-item-id="${esc(rowId)}" ${invalid ? 'title="This item has calculation validation errors"' : ''}>
             <td class="col-check">
                 <div class="est-col-check-cell">
+                    <span class="est-row-grip" draggable="true" title="Drag to reorder"><i class="fas fa-grip-vertical"></i></span>
                     <input type="checkbox" data-item-check="${esc(item.id)}" ${isItemSelected ? 'checked' : ''}>
                 </div>
             </td>
@@ -2031,14 +3163,19 @@
             return `<td class="text-right"><span class="est-editable-num-wrap"><span class="est-editable-unit" style="font-size: 11px; color: ${isCostOverridden ? '#ea580c' : '#2563eb'}; margin-right: 1px; font-weight: 600;">$</span><input class="est-cell-input is-editable est-cell-blue-input ${isCostOverridden ? 'is-val-overridden' : ''}" data-item-field="unitMaterialCost" type="number" step="0.01" value="${esc(formattedCost)}" style="width: ${Math.max(4, formattedCost.length)}ch; text-align: right;"></span></td>`;
         }
         if (colId === 'waste') {
-            const waste = item.waste ?? 0;
+            const equipment = isEquipmentItem(item);
+            const fallbackWaste = Number(equipment ? (current().settings.equipmentWaste ?? 0) : (current().settings.materialWaste ?? 0));
+            const waste = (item.waste !== undefined && item.waste !== null && item.waste !== '') ? Number(item.waste) : fallbackWaste;
             const formattedWaste = Number(waste || 0).toFixed(2);
             if (readonly) return `<td class="text-right"><span>${number(waste, 2)}</span></td>`;
             const isWasteOverridden = Boolean(item._manualFields?.waste);
             return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isWasteOverridden ? 'is-val-overridden' : ''}" data-item-field="waste" type="number" step="0.01" value="${esc(formattedWaste)}" style="width: ${Math.max(3, formattedWaste.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isWasteOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">%</span></span></td>`;
         }
         if (colId === 'labor_waste') {
-            const laborWaste = item.laborWaste ?? (item.itemType === 'labor' ? item.waste : 0);
+            const fallbackLaborWaste = Number(current().settings.laborWaste ?? 0);
+            const laborWaste = (item.laborWaste !== undefined && item.laborWaste !== null && item.laborWaste !== '')
+                ? Number(item.laborWaste)
+                : ((item.itemType === 'labor' && item.waste !== undefined && item.waste !== null && item.waste !== '') ? Number(item.waste) : fallbackLaborWaste);
             const formattedLaborWaste = Number(laborWaste || 0).toFixed(2);
             if (readonly) return `<td class="text-right"><span>${number(laborWaste, 2)}</span></td>`;
             const isLaborWasteOverridden = Boolean(item._manualFields?.laborWaste);
@@ -2048,17 +3185,33 @@
             return `<td class="text-right est-money" data-live-item-cell="subtotal_item_cost">${number(calc.materialCost || 0, 2)}</td>`;
         }
         if (colId === 'margin') {
-            const margin = item.materialMargin ?? calc.marginPercent ?? 0;
+            const equipment = isEquipmentItem(item);
+            const fallbackMargin = equipment
+                ? Number(current().settings.equipmentMargin ?? 15)
+                : Number(current().settings.materialMargin ?? 15);
+            const rawMargin = equipment ? item.equipmentMargin : (item.materialMargin ?? item.margin);
+            const hasExplicitMargin = rawMargin !== undefined && rawMargin !== null && rawMargin !== '';
+            const isAssemblyRow = isAssemblyItem(item) && !options.component;
+            const margin = hasExplicitMargin
+                ? Number(rawMargin)
+                : (isAssemblyRow && Number(calc.materialSales || 0) > 0 && Number(calc.materialCost || 0) > 0
+                    ? (((calc.materialSales - calc.materialCost) / calc.materialSales) * 100)
+                    : fallbackMargin);
             const formattedMargin = Number(margin || 0).toFixed(2);
             const invalid = Number(margin) >= 100;
             if (readonly) return `<td class="text-right"><span>${number(margin, 2)}</span></td>`;
-            const isMarginOverridden = Boolean(item._manualFields?.materialMargin);
-            return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isMarginOverridden ? 'is-val-overridden' : ''}" data-item-field="materialMargin" type="number" step="0.01" max="99.99" value="${esc(formattedMargin)}" ${invalid ? 'aria-invalid="true" title="Margin must be below 100%"' : ''} style="width: ${Math.max(3, formattedMargin.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isMarginOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">%</span></span></td>`;
+            const overrideKey = equipment ? 'equipmentMargin' : 'materialMargin';
+            const isMarginOverridden = Boolean(item._manualFields?.[overrideKey]);
+            return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isMarginOverridden ? 'is-val-overridden' : ''}" data-item-field="${overrideKey}" type="number" step="0.01" max="99.99" value="${esc(formattedMargin)}" ${invalid ? 'aria-invalid="true" title="Margin must be below 100%"' : ''} style="width: ${Math.max(3, formattedMargin.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isMarginOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">%</span></span></td>`;
         }
         if (colId === 'labor_margin') {
-            const laborMargin = item.laborMargin !== undefined && item.laborMargin !== null && item.laborMargin !== ''
+            const hasExplicitLaborMargin = item.laborMargin !== undefined && item.laborMargin !== null && item.laborMargin !== '';
+            const isAssemblyRow = isAssemblyItem(item) && !options.component;
+            const laborMargin = hasExplicitLaborMargin
                 ? Number(item.laborMargin)
-                : Number(current().settings.globalLaborMargin ?? 34.6);
+                : (isAssemblyRow && Number(calc.laborSales || 0) > 0 && Number(calc.laborCost || 0) > 0
+                    ? Number(calc.laborMargin ?? current().settings.globalLaborMargin ?? 34.6)
+                    : Number(current().settings.globalLaborMargin ?? 34.6));
             const formattedLaborMargin = laborMargin.toFixed(1);
             const invalid = laborMargin >= 100;
             if (readonly) return `<td class="text-right"><span>${formattedLaborMargin}%</span></td>`;
@@ -2066,7 +3219,11 @@
             return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isLaborMarginOverridden ? 'is-val-overridden' : ''}" data-item-field="laborMargin" type="number" step="0.1" max="99.99" value="${esc(formattedLaborMargin)}" ${invalid ? 'aria-invalid="true" title="Margin must be below 100%"' : ''} style="width: ${Math.max(3, formattedLaborMargin.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isLaborMarginOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">%</span></span></td>`;
         }
         if (colId === 'unit_sales') {
-            return `<td class="text-right est-money" data-live-item-cell="unit_sales">${number(calc.unitMaterialSales || 0, 2)}</td>`;
+            const eqRow = isEquipmentItem(item);
+            const unitSalesVal = eqRow && !calc.unitMaterialSales
+                ? ((calc.equipmentSales || 0) / (calc.equipmentQuantity || calc.baseQuantity || 1))
+                : (calc.unitMaterialSales || 0);
+            return `<td class="text-right est-money" data-live-item-cell="unit_sales">${number(unitSalesVal, 2)}</td>`;
         }
         if (colId === 'subtotal_item_sales') {
             return `<td class="text-right est-money" data-live-item-cell="subtotal_item_sales">${number(calc.materialSales || 0, 2)}</td>`;
@@ -2077,19 +3234,21 @@
         }
         if (colId === 'unit_labor') {
             const ul = item.unitLabor ?? 0;
+            const unitLabel = String(item.laborUnitType || item.laborUnit || 'hrs').toLowerCase().includes('hr') ? 'hrs' : 'mins';
             const formattedUl = Number(ul || 0).toFixed(2);
             if (readonly) return `<td class="text-right"><span>${number(ul, 2)}</span></td>`;
             const isUlOverridden = Boolean(
                 (item.overrides?.laborHoursPerUnit !== null && item.overrides?.laborHoursPerUnit !== undefined)
                 || item._manualFields?.unitLabor
             );
-            return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isUlOverridden ? 'is-val-overridden' : ''}" data-item-field="unitLabor" type="number" step="0.01" value="${esc(formattedUl)}" style="width: ${Math.max(3, formattedUl.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isUlOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">hrs</span></span></td>`;
+            return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isUlOverridden ? 'is-val-overridden' : ''}" data-item-field="unitLabor" type="number" step="0.01" value="${esc(formattedUl)}" style="width: ${Math.max(3, formattedUl.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isUlOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">${unitLabel}</span></span></td>`;
         }
         if (colId === 'difficulty_factor') {
-            const diff = item.difficulty ?? 1;
+            const fallbackDiff = Number(current().settings.laborDifficulty ?? 1);
+            const diff = (item.difficulty !== undefined && item.difficulty !== null && item.difficulty !== '') ? Number(item.difficulty) : fallbackDiff;
             const formattedDiff = Number(diff || 1).toFixed(2);
             if (readonly) return `<td class="text-right"><span>${number(diff, 2)}</span></td>`;
-            const isDiffOverridden = Boolean(item._manualFields?.difficulty || (item.difficulty !== undefined && Math.abs(Number(item.difficulty) - 1.0) > 0.001));
+            const isDiffOverridden = Boolean(item._manualFields?.difficulty);
             return `<td class="text-right"><span class="est-editable-num-wrap"><input class="est-cell-input is-editable est-cell-blue-input ${isDiffOverridden ? 'is-val-overridden' : ''}" data-item-field="difficulty" type="number" step="0.01" value="${esc(formattedDiff)}" style="width: ${Math.max(3, formattedDiff.length)}ch; text-align: right;"><span class="est-editable-unit" style="font-size: 11px; color: ${isDiffOverridden ? '#ea580c' : '#2563eb'}; margin-left: 2px; font-weight: 600;">x</span></span></td>`;
         }
         if (colId === 'total_labor_hrs') {
@@ -2230,14 +3389,14 @@
                 const parsed = JSON.parse(raw);
                 if (Array.isArray(parsed) && parsed.length) return parsed;
             }
-        } catch (_) {}
+        } catch (_) { }
         return [...DEFAULT_EXCLUSIONS];
     }
 
     function saveExclusionPresets(list) {
         try {
-            localStorage.setItem(EXCLUSION_PRESETS_KEY, JSON.stringify(list));
-        } catch (_) {}
+            safeSetLocalStorage(EXCLUSION_PRESETS_KEY, JSON.stringify(list));
+        } catch (_) { }
     }
 
     function addExclusionPreset(text) {
@@ -2265,14 +3424,14 @@
                 const parsed = JSON.parse(raw);
                 if (Array.isArray(parsed) && parsed.length) return parsed;
             }
-        } catch (_) {}
+        } catch (_) { }
         return [...DEFAULT_INCLUSIONS];
     }
 
     function saveInclusionPresets(list) {
         try {
-            localStorage.setItem(INCLUSION_PRESETS_KEY, JSON.stringify(list));
-        } catch (_) {}
+            safeSetLocalStorage(INCLUSION_PRESETS_KEY, JSON.stringify(list));
+        } catch (_) { }
     }
 
     function addInclusionPreset(text) {
@@ -2325,13 +3484,13 @@
     function summaryHtml(total = {}) {
         const settings = current().settings || {};
         const globalLaborCost = Number(settings.globalLaborCost ?? 36);
-        const globalLaborMargin = Number(settings.globalLaborMargin ?? 34.6);
+        const globalLaborMargin = resolvedCategorySummaryMargin('Labor', settings, total);
         const globalLaborSales = globalLaborMargin < 100
             ? (globalLaborCost / (1 - globalLaborMargin / 100))
             : globalLaborCost;
 
-        const materialMargin = Number(settings.materialMargin ?? 15);
-        const equipmentMargin = Number(settings.equipmentMargin ?? 15);
+        const materialMargin = resolvedCategorySummaryMargin('Materials', settings, total);
+        const equipmentMargin = resolvedCategorySummaryMargin('Equipment', settings, total);
         const laborWaste = Number(settings.laborWaste ?? 0);
         const materialWaste = Number(settings.materialWaste ?? 0);
         const equipmentWaste = Number(settings.equipmentWaste ?? 0);
@@ -2356,7 +3515,7 @@
                 <div class="est-summary-rate-line">
                     <span class="est-summary-rate-label">Global labor sales rate</span>
                     <div class="est-summary-rate-val-wrap">
-                        <span class="est-rate-num-col"><span class="est-rate-readonly-val">${globalLaborSales.toFixed(2)}</span></span>
+                        <span class="est-rate-num-col"><span class="est-rate-readonly-val" data-live-summary="global-labor-sales">${globalLaborSales.toFixed(2)}</span></span>
                         <span class="est-rate-unit-col est-rate-unit-readonly">$/hr</span>
                     </div>
                 </div>
@@ -2612,7 +3771,7 @@
             try {
                 const d = new Date(iso);
                 return d.toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' }) + ' • ' +
-                       d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
+                    d.toLocaleTimeString('en-US', { hour: 'numeric', minute: '2-digit' });
             } catch (_) {
                 return String(iso || '');
             }
@@ -2634,13 +3793,13 @@
                 </div>
                 <div class="est-audit-timeline">
                     ${logs.map(row => {
-                        const badge = getBadgeInfo(row.action);
-                        const rawAction = String(row.action || '');
-                        const diffMatch = rawAction.match(/^(.*?)\s*\(([^()]+?)\s*(?:->|→)\s*([^()]+?)\)\s*$/);
-                        const actionHtml = diffMatch
-                            ? `<span>${esc(diffMatch[1])}</span> <span class="est-audit-diff-pill"><span class="est-audit-old-val">${esc(diffMatch[2].trim())}</span><i class="fas fa-arrow-right"></i><span class="est-audit-new-val">${esc(diffMatch[3].trim())}</span></span>`
-                            : esc(rawAction);
-                        return `
+            const badge = getBadgeInfo(row.action);
+            const rawAction = String(row.action || '');
+            const diffMatch = rawAction.match(/^(.*?)\s*\(([^()]+?)\s*(?:->|→)\s*([^()]+?)\)\s*$/);
+            const actionHtml = diffMatch
+                ? `<span>${esc(diffMatch[1])}</span> <span class="est-audit-diff-pill"><span class="est-audit-old-val">${esc(diffMatch[2].trim())}</span><i class="fas fa-arrow-right"></i><span class="est-audit-new-val">${esc(diffMatch[3].trim())}</span></span>`
+                : esc(rawAction);
+            return `
                         <div class="est-audit-item">
                             <div class="est-audit-dot ${badge.cls}">
                                 <i class="fas ${badge.icon}"></i>
@@ -2650,7 +3809,7 @@
                                 <time class="est-audit-time"><i class="far fa-clock"></i> ${esc(formatAuditDate(row.at))}</time>
                             </div>
                         </div>`;
-                    }).join('') || `
+        }).join('') || `
                         <div class="est-audit-empty">
                             <i class="fas fa-clipboard-check"></i>
                             <span>No activity recorded yet for this estimate.</span>
@@ -2681,22 +3840,22 @@
         backdrop.id = 'notesLibraryModalBackdrop';
         backdrop.className = 'pd-modal-backdrop open';
         backdrop.innerHTML = `
-            <div class="bb-create-project-modal bb-studio-modal pd-modal notes-lib-modal" style="width: min(720px, 95vw); max-height: min(84vh, 740px); border-radius: 12px; overflow: hidden; background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); box-shadow: 0 24px 80px rgba(15, 23, 42, 0.35); display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="notesLibModalTitle">
-                <div class="pd-modal-head bb-modal-head" style="padding: 14px 22px; border-bottom: 1px solid var(--border-soft, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff); flex-shrink: 0;">
+            <div class="bb-create-project-modal bb-studio-modal pd-modal notes-lib-modal" style="width: min(720px, 95vw); max-height: min(84vh, 740px); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="notesLibModalTitle">
+                <div class="pd-modal-head bb-modal-head" style="padding: 14px 22px; display: flex; align-items: center; justify-content: space-between; flex-shrink: 0;">
                     <div style="display: flex; align-items: center; gap: 12px;">
-                        <div class="bb-modal-icon-badge" style="width: 36px; height: 36px; border-radius: 8px; background: rgba(37, 99, 235, 0.1); border: 1px solid rgba(37, 99, 235, 0.25); color: #2563eb; display: grid; place-items: center; font-size: 16px; flex: 0 0 36px;">
+                        <div class="bb-modal-icon-badge" style="width: 36px; height: 36px; border-radius: 8px; background: rgba(37, 99, 235, 0.12); border: 1px solid rgba(37, 99, 235, 0.28); color: #3b82f6; display: grid; place-items: center; font-size: 16px; flex: 0 0 36px;">
                             <i class="fas fa-clipboard-list"></i>
                         </div>
                         <div>
-                            <h3 id="notesLibModalTitle" style="margin: 0; font-size: 15px; font-weight: 700; color: var(--text-main, #0f172a); line-height: 1.3;">Notes Library & Presets</h3>
-                            <span style="font-size: 12px; color: var(--text-muted, #64748b);">Manage and insert reusable note templates for inclusions and exclusions</span>
+                            <h3 id="notesLibModalTitle" style="margin: 0; font-size: 15px; font-weight: 700; line-height: 1.3;">Notes Library & Presets</h3>
+                            <span class="est-modal-sub" style="font-size: 12px;">Manage and insert reusable note templates for inclusions and exclusions</span>
                         </div>
                     </div>
-                    <button class="pd-modal-head-close" type="button" data-close-notes-lib aria-label="Close" style="border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--text-muted, #64748b);">&times;</button>
+                    <button class="pd-modal-head-close" type="button" data-close-notes-lib aria-label="Close" style="border: none; background: transparent; font-size: 18px; cursor: pointer;">&times;</button>
                 </div>
                 
                 <!-- Category switch & Search bar (Matching Procore / Bid Board) -->
-                <div class="notes-lib-subhead" style="padding: 12px 22px; background: var(--bg-subtle, #f8fafc); border-bottom: 1px solid var(--border-soft, #e2e8f0); display: flex; flex-direction: column; gap: 10px; flex-shrink: 0;">
+                <div class="notes-lib-subhead" style="padding: 12px 22px; border-bottom: 1px solid var(--est-line-soft, #e2e8f0); display: flex; flex-direction: column; gap: 10px; flex-shrink: 0;">
                     <div style="display: flex; align-items: center; justify-content: space-between; gap: 12px; flex-wrap: wrap;">
                         <div class="bb-filter-pills" style="display: inline-flex; gap: 6px; padding: 3px; background: var(--bg-input, #f1f5f9); border: 1px solid var(--border, #cbd5e1); border-radius: 8px;">
                             <button type="button" class="notes-lib-pill ${!isExcluded ? 'is-active' : ''}" data-notes-lib-tab="included">
@@ -2745,8 +3904,8 @@
                     </div>
                 </div>
 
-                <div class="pd-modal-foot bb-modal-foot" style="padding: 12px 22px; border-top: 1px solid var(--border-soft, #e2e8f0); display: flex; align-items: center; justify-content: flex-end; background: var(--bg-panel, #ffffff); flex-shrink: 0;">
-                    <button type="button" class="btn-ghost" data-close-notes-lib style="height: 32px; padding: 0 16px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; cursor: pointer; font-size: 12px; font-weight: 600; color: var(--text-main, #0f172a);">Close</button>
+                <div class="pd-modal-foot bb-modal-foot" style="padding: 12px 22px; display: flex; align-items: center; justify-content: flex-end; flex-shrink: 0;">
+                    <button type="button" class="btn-ghost" data-close-notes-lib style="height: 32px; padding: 0 16px; border-radius: 6px; cursor: pointer; font-size: 12px; font-weight: 600;">Close</button>
                 </div>
             </div>
         `;
@@ -2889,14 +4048,16 @@
         }
         pop.style.visibility = 'visible';
     }
-function renderFooter() {
+    function renderFooter() {
         const bar = $('versionBar');
         if (!bar) return;
         if (Footer?.render) {
-            bar.innerHTML = Footer.render({ estimates: state.estimates, activeEstimateId: state.activeEstimateId,
+            bar.innerHTML = Footer.render({
+                estimates: state.estimates, activeEstimateId: state.activeEstimateId,
                 selectAttribute: 'data-version', actionAttribute: 'data-estimating-action',
                 menuAttribute: 'data-estimate-menu', itemActionAttribute: 'data-estimate-action',
-                showCompare: false });
+                showCompare: false
+            });
             Footer.bindMenus?.(bar, {
                 menuAttribute: 'data-estimate-menu',
                 itemActionAttribute: 'data-estimate-action',
@@ -2924,75 +4085,75 @@ function renderFooter() {
         portal.className = 'pd-modal-backdrop open';
         portal.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(4px); z-index: 999999;';
         if (ui.modal === 'new') {
-            portal.innerHTML = `<div class="bb-create-project-modal bb-studio-modal pd-modal est-dialog est-copy-modal" style="width: min(480px, 92vw); border-radius: 12px; overflow: hidden; background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); box-shadow: 0 20px 60px rgba(15, 23, 42, 0.28); display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="copyEstimateTitle">
-                <div class="bb-modal-head" style="padding: 12px 18px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
+            portal.innerHTML = `<div class="bb-create-project-modal bb-studio-modal pd-modal est-dialog est-copy-modal" style="width: min(480px, 92vw); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="copyEstimateTitle">
+                <div class="pd-modal-head bb-modal-head" style="padding: 12px 18px; display: flex; align-items: center; justify-content: space-between;">
                     <div style="display: flex; align-items: center; gap: 12px;">
-                        <div class="bb-modal-icon-badge" style="width: 34px; height: 34px; border-radius: 8px; background: #fff7ed; border: 1px solid #fed7aa; color: #fb5a3a; display: grid; place-items: center; font-size: 15px; flex: 0 0 34px;">
+                        <div class="bb-modal-icon-badge est-modal-icon-badge" style="width: 34px; height: 34px; border-radius: 8px; display: grid; place-items: center; font-size: 15px; flex: 0 0 34px;">
                             <i class="fas fa-calculator"></i>
                         </div>
                         <div>
-                            <strong id="copyEstimateTitle" class="bb-modal-heading" style="display: block; font-size: 14.5px; font-weight: 700; color: var(--text-main, #0f172a); line-height: 1.25;">New Estimate Version</strong>
-                            <span class="bb-modal-subheading" style="display: block; font-size: 11.5px; color: var(--text-muted, #64748b); margin-top: 1px;">Create an independent bid estimate version for this project</span>
+                            <strong id="copyEstimateTitle" class="bb-modal-heading" style="display: block; font-size: 14.5px; font-weight: 700; line-height: 1.25;">New Estimate Version</strong>
+                            <span class="bb-modal-subheading est-modal-sub" style="display: block; font-size: 11.5px; margin-top: 1px;">Create an independent bid estimate version for this project</span>
                         </div>
                     </div>
-                    <button class="bb-icon-btn bordered" type="button" data-close-modal aria-label="Close" style="width: 28px; height: 28px; border-radius: 6px; border: 1px solid var(--border, #e2e8f0); background: transparent; cursor: pointer; color: var(--text-muted, #64748b); display: grid; place-items: center; font-size: 13px; transition: all .15s ease;">
+                    <button class="pd-modal-head-close bb-icon-btn bordered" type="button" data-close-modal aria-label="Close" style="width: 28px; height: 28px; border-radius: 6px; display: grid; place-items: center; font-size: 13px; cursor: pointer; transition: all .15s ease;">
                         <i class="fas fa-times"></i>
                     </button>
                 </div>
-                <div class="bb-modal-body" /* class="est-copy-body" */ style="padding: 14px 18px; display: flex; flex-direction: column; gap: 12px; background: var(--bg-panel, #ffffff);">
-                    <div class="bb-form-group" /* class="est-copy-name" */ style="display: flex; flex-direction: column; gap: 4px;">
-                        <label class="bb-form-label" for="copyEstimateName" style="font-size: 11.5px; font-weight: 600; color: var(--text-main, #0f172a); display: flex; align-items: center; gap: 4px;">
+                <div class="pd-modal-body bb-modal-body" style="padding: 14px 18px; display: flex; flex-direction: column; gap: 12px;">
+                    <div class="bb-form-group" style="display: flex; flex-direction: column; gap: 4px;">
+                        <label class="bb-form-label" for="copyEstimateName" style="font-size: 11.5px; font-weight: 600; display: flex; align-items: center; gap: 4px;">
                             <span>Estimate Name</span>
                             <span style="color: #fb5a3a; font-weight: 700;">*</span>
                         </label>
                         <div class="bb-input-icon-wrap" style="position: relative; display: flex; align-items: center;">
-                            <i class="fas fa-file-invoice-dollar" style="position: absolute; left: 11px; color: var(--text-muted, #94a3b8); font-size: 13px; pointer-events: none;"></i>
-                            <input id="copyEstimateName" class="bb-input-control" type="text" value="${esc(current().name)} Copy" autocomplete="off" placeholder="e.g. Base Bid Copy" style="width: 100%; box-sizing: border-box; height: 35px; padding: 6px 10px 6px 33px; border: 1px solid var(--border, #cbd5e1); border-radius: 7px; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a); font-size: 12.5px; outline: none; transition: border-color .15s ease, box-shadow .15s ease;">
+                            <i class="fas fa-file-invoice-dollar" style="position: absolute; left: 11px; opacity: 0.65; font-size: 13px; pointer-events: none;"></i>
+                            <input id="copyEstimateName" class="bb-input-control est-modal-input" type="text" value="${esc(current().name)} Copy" autocomplete="off" placeholder="e.g. Base Bid Copy" style="width: 100%; box-sizing: border-box; height: 35px; padding: 6px 10px 6px 33px; border-radius: 7px; font-size: 12.5px; outline: none; transition: border-color .15s ease, box-shadow .15s ease;">
                         </div>
-                        <div class="bb-input-hint" style="font-size: 10.5px; color: var(--text-muted, #64748b);">Unique name displayed across tabs, client summaries, and proposals.</div>
+                        <div class="bb-input-hint est-modal-sub" style="font-size: 10.5px;">Unique name displayed across tabs, client summaries, and proposals.</div>
                     </div>
 
                     <div class="est-copy-name" style="display:contents"></div><div class="bb-form-group" style="display: flex; flex-direction: column; gap: 6px;">
-                        <label class="bb-form-label" style="font-size: 11.5px; font-weight: 600; color: var(--text-main, #0f172a); display: flex; align-items: center; gap: 5px;">
+                        <label class="bb-form-label" style="font-size: 11.5px; font-weight: 600; display: flex; align-items: center; gap: 5px;">
                             <i class="fas fa-shapes" style="color: #fb5a3a; font-size: 12px;"></i>
                             <span>Starting Configuration</span>
                         </label>
                         <div class="bb-studio-mode-stack" style="display: flex; flex-direction: column; gap: 7px;">
-                            <label class="bb-studio-card" /* class="est-copy-option" */ style="position: relative; border: 1.5px solid var(--border, #cbd5e1); border-radius: 8px; padding: 8px 12px; background: var(--bg-panel, #ffffff); cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all .15s ease;">
+                            <label class="bb-studio-card est-copy-option est-modal-card" style="position: relative; border-radius: 8px; padding: 8px 12px; cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all .15s ease;">
                                 <input type="radio" name="copyEstimateMode" value="all" checked style="margin-top: 2px; accent-color: #fb5a3a; width: 14px; height: 14px;">
                                 <div style="flex: 1;">
                                     <div style="display: flex; align-items: center; gap: 7px;">
-                                        <strong style="font-size: 12.5px; color: var(--text-main, #0f172a);">Copy everything</strong>
-                                        <span style="display: inline-block; font-size: 9.5px; font-weight: 700; color: #fb5a3a; background: #fff7ed; border: 1px solid #fed7aa; padding: 1px 6px; border-radius: 999px;">Recommended</span>
+                                        <strong style="font-size: 12.5px;">Copy everything</strong>
+                                        <span class="est-recommended-pill" style="display: inline-block; font-size: 9.5px; font-weight: 700; padding: 1px 6px; border-radius: 999px;">Recommended</span>
                                     </div>
-                                    <small style="display: block; font-size: 11px; color: var(--text-muted, #64748b); margin-top: 1px; line-height: 1.3;">Start with a complete clone of groups, items, quantities, notes, materials and markups.</small>
+                                    <small class="est-modal-sub" style="display: block; font-size: 11px; margin-top: 1px; line-height: 1.3;">Start with a complete clone of groups, items, quantities, notes, materials and markups.</small>
                                 </div>
                             </label>
-                            <label class="est-copy-option bb-studio-card" style="position: relative; border: 1.5px solid var(--border, #cbd5e1); border-radius: 8px; padding: 8px 12px; background: var(--bg-panel, #ffffff); cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all .15s ease;">
+                            <label class="est-copy-option bb-studio-card est-modal-card" style="position: relative; border-radius: 8px; padding: 8px 12px; cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all .15s ease;">
                                 <input type="radio" name="copyEstimateMode" value="structure" style="margin-top: 2px; accent-color: #fb5a3a; width: 14px; height: 14px;">
                                 <div style="flex: 1;">
-                                    <strong style="display: block; font-size: 12.5px; color: var(--text-main, #0f172a);">Groups only</strong>
-                                    <small style="display: block; font-size: 11px; color: var(--text-muted, #64748b); margin-top: 1px; line-height: 1.3;">Keep the exact group hierarchy; items from Takeoff are not automatically pre-populated.</small>
+                                    <strong style="display: block; font-size: 12.5px;">Groups only</strong>
+                                    <small class="est-modal-sub" style="display: block; font-size: 11px; margin-top: 1px; line-height: 1.3;">Keep the exact group hierarchy; items from Takeoff are not automatically pre-populated.</small>
                                 </div>
                             </label>
-                            <label class="est-copy-option bb-studio-card" style="position: relative; border: 1.5px solid var(--border, #cbd5e1); border-radius: 8px; padding: 8px 12px; background: var(--bg-panel, #ffffff); cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all .15s ease;">
+                            <label class="est-copy-option bb-studio-card est-modal-card" style="position: relative; border-radius: 8px; padding: 8px 12px; cursor: pointer; display: flex; align-items: flex-start; gap: 10px; transition: all .15s ease;">
                                 <input type="radio" name="copyEstimateMode" value="blank" style="margin-top: 2px; accent-color: #fb5a3a; width: 14px; height: 14px;">
                                 <div style="flex: 1;">
-                                    <strong style="display: block; font-size: 12.5px; color: var(--text-main, #0f172a);">Blank estimate</strong>
-                                    <small style="display: block; font-size: 11px; color: var(--text-muted, #64748b); margin-top: 1px; line-height: 1.3;">Start with a fresh empty estimate. Ideal for value engineering alternates or custom bids.</small>
+                                    <strong style="display: block; font-size: 12.5px;">Blank estimate</strong>
+                                    <small class="est-modal-sub" style="display: block; font-size: 11px; margin-top: 1px; line-height: 1.3;">Start with a fresh empty estimate. Ideal for value engineering alternates or custom bids.</small>
                                 </div>
                             </label>
                         </div>
                     </div>
                 </div>
-                <div class="bb-modal-foot" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 18px; border-top: 1px solid var(--border, #e2e8f0); background: var(--bg-subtle, #f8fafc);">
-                    <div class="bb-modal-foot-info" style="display: flex; align-items: center; gap: 6px; font-size: 11px; color: var(--text-muted, #64748b);">
+                <div class="pd-modal-foot bb-modal-foot" style="display: flex; align-items: center; justify-content: space-between; padding: 10px 18px;">
+                    <div class="bb-modal-foot-info est-modal-sub" style="display: flex; align-items: center; gap: 6px; font-size: 11px;">
                         <i class="fas fa-circle-check" style="color: #16a34a; font-size: 13px;"></i>
                         <span>Independent version with separate totals</span>
                     </div>
                     <div class="bb-modal-foot-actions" style="display: flex; align-items: center; gap: 8px;">
-                        <button class="bb-btn-procore-secondary" type="button" data-close-modal style="height: 32px; padding: 0 14px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: var(--bg-panel, #ffffff); color: var(--text-main, #334155); font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s ease;">Cancel</button>
-                        <button class="bb-btn-procore-primary" type="button" data-create-estimate data-est-action="create-estimate-copy" style="height: 32px; padding: 0 16px; border: none; border-radius: 6px; background: var(--tk-primary, #fb5a3a); color: #ffffff; font-size: 12px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(251, 90, 58, 0.3); transition: all .15s ease;">
+                        <button class="btn-ghost bb-btn-procore-secondary" type="button" data-close-modal style="height: 32px; padding: 0 14px; border-radius: 6px; font-size: 12px; font-weight: 600; cursor: pointer; transition: all .15s ease;">Cancel</button>
+                        <button class="btn-main orange bb-btn-procore-primary" type="button" data-create-estimate data-est-action="create-estimate-copy" style="height: 32px; padding: 0 16px; border: none; border-radius: 6px; background: var(--tk-primary, #fb5a3a); color: #ffffff; font-size: 12px; font-weight: 700; cursor: pointer; display: inline-flex; align-items: center; gap: 6px; box-shadow: 0 2px 6px rgba(251, 90, 58, 0.3); transition: all .15s ease;">
                             <i class="fas fa-plus"></i> Create Estimate
                         </button>
                     </div>
@@ -3000,80 +4161,389 @@ function renderFooter() {
             </div>`;
         }
         if (ui.modal === 'export') {
-            portal.innerHTML = `<div class="pd-modal" style="width: min(520px, 100%); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="exportEstimateTitle">
-                <div class="pd-modal-head" style="padding: 14px 18px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
-                    <div>
-                        <h3 id="exportEstimateTitle" style="margin: 0; font-size: 1.05rem; display: flex; align-items: center; gap: 8px;">
-                            <i class="fas fa-file-export" style="color: var(--primary, #fb5a3a);"></i> Export Estimate
-                        </h3>
-                        <span style="font-size: .78rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Download a supplier-ready bill of materials or bill of quantities</span>
+            const exportOptions = [
+                {
+                    value: 'estimate-xlsx',
+                    title: 'Project Estimate (.xlsx)',
+                    desc: 'Full multi-tab workbook (Estimate, BoM Flat & Summary)',
+                    icon: 'fa-file-excel',
+                    badge: 'Template'
+                },
+                {
+                    value: 'bom-excel',
+                    title: 'Bill of Materials (BOM - Excel)',
+                    desc: 'Grouped hierarchical assemblies & components (.xls)',
+                    icon: 'fa-table-list',
+                    badge: 'Excel'
+                },
+                {
+                    value: 'bom-csv',
+                    title: 'Bill of Materials (BOM - CSV)',
+                    desc: 'Hierarchical BOM with group headers & children (.csv)',
+                    icon: 'fa-file-csv',
+                    badge: 'CSV'
+                },
+                {
+                    value: 'normal',
+                    title: 'BOQ Normal (CSV)',
+                    desc: 'Organized by group keeping assemblies as single rows',
+                    icon: 'fa-list-ul',
+                    badge: 'CSV'
+                },
+                {
+                    value: 'flat',
+                    title: 'BOQ Flat (CSV)',
+                    desc: 'Break assemblies into parts consolidated by catalog item',
+                    icon: 'fa-layer-group',
+                    badge: 'CSV'
+                },
+                {
+                    value: 'summary-csv',
+                    title: 'Estimate Summary (CSV)',
+                    desc: 'Group totals for Material, Labor Hours, Equipment & Cost',
+                    icon: 'fa-chart-pie',
+                    badge: 'Summary'
+                }
+            ];
+            portal.innerHTML = `<div class="pd-modal bb-studio-modal est-grid-modal est-export-modal" role="dialog" aria-modal="true" aria-labelledby="exportEstimateTitle">
+                <div class="pd-modal-head est-studio-modal-head">
+                    <div class="est-studio-head-left">
+                        <div class="est-modal-icon-badge is-export">
+                            <i class="fas fa-file-export"></i>
+                        </div>
+                        <div>
+                            <h3 id="exportEstimateTitle">Export Estimate</h3>
+                            <span class="est-modal-sub">Choose a spreadsheet or bill of materials format for this active estimate</span>
+                        </div>
                     </div>
-                    <button class="pd-modal-head-close" type="button" aria-label="Close" data-close-modal style="border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--text-muted, #64748b);">&times;</button>
+                    <button class="pd-modal-head-close" type="button" aria-label="Close" data-close-modal>&times;</button>
                 </div>
-                <div class="pd-modal-body" style="padding: 18px 20px; background: var(--bg-panel, #ffffff);">
-                    <fieldset style="border: 1px solid var(--border-color, #e2e8f0); border-radius: 8px; padding: 12px 14px; margin: 0; display: flex; flex-direction: column; gap: 8px; background: var(--bg-card, #f8fafc);">
-                        <legend style="font-size: .75rem; font-weight: 700; color: var(--text-muted, #64748b); padding: 0 4px; text-transform: uppercase; letter-spacing: 0.05em;">Export format</legend>
-                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
-                            <input type="radio" name="estimateExportMode" value="bom-excel" checked style="margin-top: 3px;">
-                            <span><strong style="display: block; font-size: .83rem;">Bill of Materials (BOM - Excel)</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Summary of all items separated by groups, with hierarchical assemblies and components formatted for Excel (.xls).</small></span>
-                        </label>
-                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
-                            <input type="radio" name="estimateExportMode" value="bom-csv" style="margin-top: 3px;">
-                            <span><strong style="display: block; font-size: .83rem;">Bill of Materials (BOM - CSV)</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Hierarchical BOM with group headers and assembly components as CSV.</small></span>
-                        </label>
-                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
-                            <input type="radio" name="estimateExportMode" value="normal" style="margin-top: 3px;">
-                            <span><strong style="display: block; font-size: .83rem;">BOQ normal (CSV)</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Export the estimate as organized, keeping assemblies as assembly rows.</small></span>
-                        </label>
-                        <label class="est-copy-option" style="display: flex; align-items: flex-start; gap: 10px; cursor: pointer; padding: 8px 10px; border-radius: 6px; border: 1px solid transparent; background: transparent; transition: all 0.15s ease;">
-                            <input type="radio" name="estimateExportMode" value="flat" style="margin-top: 3px;">
-                            <span><strong style="display: block; font-size: .83rem;">BOQ Flat (CSV)</strong><small style="font-size: .75rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Break assemblies into parts and consolidate the total quantity of each catalog item.</small></span>
-                        </label>
-                    </fieldset>
+                <div class="pd-modal-body est-studio-modal-body">
+                    <div class="est-studio-section-label">Select Export Format</div>
+                    <div class="est-studio-card-grid" role="radiogroup" aria-label="Export format">
+                        ${exportOptions.map((opt, idx) => `
+                        <label class="bb-mode-card bb-studio-card est-studio-card ${idx === 0 ? 'active' : ''}" data-est-radio-card>
+                            <input type="radio" name="estimateExportMode" value="${opt.value}" ${idx === 0 ? 'checked' : ''} class="est-sr-radio">
+                            <div class="est-studio-card-top">
+                                <span class="bb-mode-icon"><i class="fas ${opt.icon}"></i></span>
+                                <span class="est-studio-card-pill">${esc(opt.badge)}</span>
+                            </div>
+                            <div class="est-studio-card-body">
+                                <strong>${esc(opt.title)}</strong>
+                                <span>${esc(opt.desc)}</span>
+                            </div>
+                        </label>`).join('')}
+                    </div>
                 </div>
-                <div class="pd-modal-foot" style="display: flex; justify-content: flex-end; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--border, #e2e8f0); background: var(--bg-card, #f8fafc);">
-                    <button type="button" class="btn-ghost" data-close-modal style="padding: 7px 14px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; cursor: pointer;">Cancel</button>
-                    <button type="button" class="btn-main orange" data-download-estimate style="padding: 7px 16px; border: none; border-radius: 6px; background: var(--primary, #fb5a3a); color: #fff; font-weight: 600; cursor: pointer;"><i class="fas fa-download"></i> Export</button>
+                <div class="pd-modal-foot est-studio-modal-foot">
+                    <button type="button" class="btn-ghost" data-close-modal>Cancel</button>
+                    <button type="button" class="btn-main est-btn-export" data-download-estimate><i class="fas fa-download"></i> Export</button>
+                </div>
+            </div>`;
+        }
+        if (ui.modal === 'import') {
+            const importOptions = [
+                {
+                    value: 'keep_excel',
+                    title: 'Workbook Qty & Rates',
+                    desc: 'Keep workbook quantities & rates and link items to Cost Catalog',
+                    icon: 'fa-file-circle-check',
+                    badge: 'Default'
+                },
+                {
+                    value: 'keep_qty_refresh_prices',
+                    title: 'Refresh Catalog Prices',
+                    desc: 'Keep workbook quantities and load latest Cost Catalog pricing',
+                    icon: 'fa-arrows-rotate',
+                    badge: 'Catalog'
+                },
+                {
+                    value: 'zero_qty_keep_prices',
+                    title: 'Zero Qty (Keep Rates)',
+                    desc: 'Import structure & workbook prices with all quantities at 0',
+                    icon: 'fa-eraser',
+                    badge: 'Template'
+                },
+                {
+                    value: 'zero_qty_refresh_prices',
+                    title: 'Zero Qty + Catalog Rates',
+                    desc: 'Start at 0 quantity with live Cost Catalog prices linked',
+                    icon: 'fa-wand-magic-sparkles',
+                    badge: 'Fresh'
+                },
+                {
+                    value: 'standalone_exact',
+                    title: 'Exact Workbook Only',
+                    desc: 'Keep workbook rows and rates verbatim without catalog relink',
+                    icon: 'fa-lock',
+                    badge: 'Standalone'
+                },
+                {
+                    value: 'keep_excel_open_takeoff',
+                    title: 'Import & Open Takeoff',
+                    desc: 'Create new estimate tab and jump to Takeoff canvas to count',
+                    icon: 'fa-compass-drafting',
+                    badge: 'Takeoff'
+                }
+            ];
+            const activeMode = ui.importMode || 'keep_excel';
+            const selectedFile = ui.importFile;
+            portal.innerHTML = `<div class="pd-modal bb-studio-modal est-grid-modal est-import-modal" role="dialog" aria-modal="true" aria-labelledby="importEstimateTitle">
+                <div class="pd-modal-head est-studio-modal-head">
+                    <div class="est-studio-head-left">
+                        <div class="est-modal-icon-badge is-import">
+                            <i class="fas fa-file-import"></i>
+                        </div>
+                        <div>
+                            <h3 id="importEstimateTitle">Import Estimate (.xlsx)</h3>
+                            <span class="est-modal-sub">Create a new Estimate tab inside this project from an exported template workbook</span>
+                        </div>
+                    </div>
+                    <button class="pd-modal-head-close" type="button" aria-label="Close" data-close-modal>&times;</button>
+                </div>
+                <div class="pd-modal-body est-studio-modal-body">
+                    <div class="est-import-top-row">
+                        <div class="est-import-field">
+                            <label for="estImportName">New Estimate Tab Name</label>
+                            <input type="text" id="estImportName" class="est-modal-input" value="${esc(ui.importName || '')}" placeholder="Optional — defaults to workbook estimate name">
+                        </div>
+                        <div class="est-import-field">
+                            <label>Excel Workbook (.xlsx)</label>
+                            <div class="est-import-dropzone ${selectedFile ? 'has-file' : ''}" id="estImportDropzone" tabindex="0" role="button" aria-label="Choose .xlsx file">
+                                <input type="file" id="estImportFileInput" accept=".xlsx,.xlsm" hidden>
+                                <i class="fas ${selectedFile ? 'fa-file-excel' : 'fa-cloud-arrow-up'}"></i>
+                                <div class="est-import-dropzone-text">
+                                    <strong>${selectedFile ? esc(selectedFile.name) : 'Click or drop .xlsx workbook here'}</strong>
+                                    <span>${selectedFile ? `${Math.max(1, Math.round(selectedFile.size / 1024))} KB ready to import` : 'Uses Project Estimate Export_Template.xlsx structure'}</span>
+                                </div>
+                            </div>
+                        </div>
+                    </div>
+                    ${ui.importError ? `<div class="est-import-error" id="estImportError"><i class="fas fa-circle-exclamation"></i> <span>${esc(ui.importError)}</span></div>` : ''}
+                    <div class="est-studio-section-label">Import Behavior</div>
+                    <div class="est-studio-card-grid" role="radiogroup" aria-label="Import behavior">
+                        ${importOptions.map(opt => {
+                const active = activeMode === opt.value;
+                return `
+                        <label class="bb-mode-card bb-studio-card est-studio-card ${active ? 'active' : ''}" data-est-radio-card>
+                            <input type="radio" name="estimateImportMode" value="${opt.value}" ${active ? 'checked' : ''} class="est-sr-radio">
+                            <div class="est-studio-card-top">
+                                <span class="bb-mode-icon"><i class="fas ${opt.icon}"></i></span>
+                                <span class="est-studio-card-pill">${esc(opt.badge)}</span>
+                            </div>
+                            <div class="est-studio-card-body">
+                                <strong>${esc(opt.title)}</strong>
+                                <span>${esc(opt.desc)}</span>
+                            </div>
+                        </label>`;
+            }).join('')}
+                    </div>
+                </div>
+                <div class="pd-modal-foot est-studio-modal-foot">
+                    <button type="button" class="btn-ghost" data-close-modal ${ui.importing ? 'disabled' : ''}>Cancel</button>
+                    <button type="button" class="btn-main est-btn-import" data-import-estimate ${ui.importing ? 'disabled' : ''}>
+                        <i class="fas ${ui.importing ? 'fa-spinner fa-spin' : 'fa-file-import'}"></i> ${ui.importing ? 'Importing…' : 'Import as New Estimate'}
+                    </button>
                 </div>
             </div>`;
         }
         if (ui.modal === 'catalog') {
-            portal.innerHTML = `<div class="pd-modal" style="width: min(580px, 100%); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="estimateCatalogTitle">
-                <div class="pd-modal-head" style="padding: 14px 18px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
+            portal.innerHTML = `<div class="pd-modal" style="width: min(580px, 100%); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="estimateCatalogTitle">
+                <div class="pd-modal-head" style="padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;">
                     <div>
                         <h3 id="estimateCatalogTitle" style="margin: 0; font-size: 1.05rem; display: flex; align-items: center; gap: 8px;">
                             <i class="fas fa-book-open" style="color: var(--primary, #fb5a3a);"></i> Add Cost Catalog Item
                         </h3>
-                        <span style="font-size: .78rem; color: var(--text-muted, #64748b); display: block; margin-top: 2px;">Select an existing catalog item for this estimate group</span>
+                        <span class="est-modal-sub" style="font-size: .78rem; display: block; margin-top: 2px;">Select an existing catalog item for this estimate group</span>
                     </div>
-                    <button class="pd-modal-head-close" type="button" aria-label="Close" data-close-modal style="border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--text-muted, #64748b);">&times;</button>
+                    <button class="pd-modal-head-close" type="button" aria-label="Close" data-close-modal style="border: none; background: transparent; font-size: 18px; cursor: pointer;">&times;</button>
                 </div>
-                <div class="pd-modal-body" style="padding: 16px 20px; display: flex; flex-direction: column; gap: 12px; background: var(--bg-panel, #ffffff);">
-                    <input type="search" data-est-catalog-search placeholder="Search Cost Catalog..." autocomplete="off" style="width: 100%; box-sizing: border-box; height: 36px; padding: 6px 12px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: var(--bg-card, #f8fafc); color: inherit;">
+                <div class="pd-modal-body" style="padding: 16px 20px; display: flex; flex-direction: column; gap: 12px;">
+                    <input type="search" data-est-catalog-search class="est-modal-input" placeholder="Search Cost Catalog..." autocomplete="off" style="width: 100%; box-sizing: border-box; height: 36px; padding: 6px 12px; border-radius: 6px;">
                     <div data-est-catalog-results style="max-height: 320px; overflow-y: auto;">
-                        ${ui.catalogLoading ? '<div class="est-empty" style="padding: 24px; text-align: center; color: var(--text-muted, #64748b);">Loading Cost Catalogâ€¦</div>' : (ui.catalogError ? `<div class="est-empty" style="padding: 24px; text-align: center; color: #ef4444;">${esc(ui.catalogError)}</div>` : renderCatalogChoices(''))}
+                        ${ui.catalogLoading ? '<div class="est-empty est-modal-sub" style="padding: 24px; text-align: center;">Loading Cost Catalog...</div>' : (ui.catalogError ? `<div class="est-empty" style="padding: 24px; text-align: center; color: #ef4444;">${esc(ui.catalogError)}</div>` : renderCatalogChoices(''))}
                     </div>
                 </div>
-                <div class="pd-modal-foot" style="display: flex; justify-content: flex-end; padding: 12px 20px; border-top: 1px solid var(--border, #e2e8f0); background: var(--bg-card, #f8fafc);">
-                    <button type="button" class="btn-ghost" data-close-modal style="padding: 7px 16px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; cursor: pointer;">Cancel</button>
+                <div class="pd-modal-foot" style="display: flex; justify-content: flex-end; padding: 12px 20px;">
+                    <button type="button" class="btn-ghost" data-close-modal style="padding: 7px 16px; border-radius: 6px; cursor: pointer;">Cancel</button>
                 </div>
             </div>`;
         }
         document.body.appendChild(portal);
-        portal.querySelector('input, button')?.focus();
+        portal.addEventListener('change', event => {
+            const card = event.target.closest('[data-est-radio-card]');
+            if (card && event.target.type === 'radio') {
+                const groupName = event.target.name;
+                portal.querySelectorAll(`input[name="${groupName}"]`).forEach(input => {
+                    input.closest('[data-est-radio-card]')?.classList.toggle('active', input.checked);
+                });
+                if (groupName === 'estimateImportMode') {
+                    ui.importMode = event.target.value;
+                }
+            }
+            if (event.target.id === 'estImportFileInput') {
+                const file = event.target.files?.[0] || null;
+                if (file) {
+                    ui.importFile = file;
+                    ui.importError = '';
+                    const nameInput = portal.querySelector('#estImportName');
+                    if (nameInput && !nameInput.value.trim()) {
+                        ui.importName = file.name.replace(/\.(xlsx|xlsm)$/i, '').replace(/[_-]+/g, ' ').trim();
+                    } else if (nameInput) {
+                        ui.importName = nameInput.value;
+                    }
+                    renderModal();
+                }
+            }
+        });
+        portal.addEventListener('input', event => {
+            if (event.target.id === 'estImportName') {
+                ui.importName = event.target.value;
+            }
+        });
+        const dropzone = portal.querySelector('#estImportDropzone');
+        const fileInput = portal.querySelector('#estImportFileInput');
+        if (dropzone && fileInput) {
+            dropzone.addEventListener('click', () => {
+                if (!ui.importing) fileInput.click();
+            });
+            dropzone.addEventListener('keydown', event => {
+                if ((event.key === 'Enter' || event.key === ' ') && !ui.importing) {
+                    event.preventDefault();
+                    fileInput.click();
+                }
+            });
+            dropzone.addEventListener('dragover', event => {
+                event.preventDefault();
+                dropzone.classList.add('is-dragover');
+            });
+            dropzone.addEventListener('dragleave', () => {
+                dropzone.classList.remove('is-dragover');
+            });
+            dropzone.addEventListener('drop', event => {
+                event.preventDefault();
+                dropzone.classList.remove('is-dragover');
+                const file = event.dataTransfer?.files?.[0] || null;
+                if (file) {
+                    ui.importFile = file;
+                    ui.importError = '';
+                    const nameInput = portal.querySelector('#estImportName');
+                    if (nameInput && !nameInput.value.trim()) {
+                        ui.importName = file.name.replace(/\.(xlsx|xlsm)$/i, '').replace(/[_-]+/g, ' ').trim();
+                    } else if (nameInput) {
+                        ui.importName = nameInput.value;
+                    }
+                    renderModal();
+                }
+            });
+        }
+        portal.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' || event.isComposing || event.shiftKey || event.ctrlKey || event.metaKey || event.altKey) return;
+            if (event.target?.tagName === 'TEXTAREA' || event.target?.tagName === 'BUTTON') return;
+            if (ui.modal === 'new') {
+                event.preventDefault();
+                portal.querySelector('[data-create-estimate]')?.click();
+            } else if (ui.modal === 'export') {
+                event.preventDefault();
+                portal.querySelector('[data-download-estimate]')?.click();
+            } else if (ui.modal === 'import') {
+                event.preventDefault();
+                portal.querySelector('[data-import-estimate]')?.click();
+            }
+        });
+        portal.querySelector('input:not([type="file"]):not(.est-sr-radio), button:not([disabled])')?.focus();
+    }
+
+    function moveEstimatingItem(draggedItemId, targetItemId, targetGroupId, isBefore = true) {
+        if (!draggedItemId) return;
+        if (targetItemId && String(draggedItemId) === String(targetItemId)) return;
+
+        let srcGroup = null, srcIndex = -1, draggedItem = null;
+        for (const g of current().groups) {
+            const idx = (g.items || []).findIndex(it => String(it.id) === String(draggedItemId));
+            if (idx !== -1) {
+                srcGroup = g;
+                srcIndex = idx;
+                draggedItem = g.items[idx];
+                break;
+            }
+        }
+        if (!draggedItem || !srcGroup) return;
+
+        if (targetItemId) {
+            let tgtGroup = null, tgtIndex = -1;
+            for (const g of current().groups) {
+                const idx = (g.items || []).findIndex(it => String(it.id) === String(targetItemId));
+                if (idx !== -1) {
+                    tgtGroup = g;
+                    tgtIndex = idx;
+                    break;
+                }
+            }
+            if (!tgtGroup || tgtIndex === -1) return;
+
+            srcGroup.items.splice(srcIndex, 1);
+            if (srcGroup === tgtGroup && srcIndex < tgtIndex) {
+                tgtIndex--;
+            }
+            const insertIdx = isBefore ? tgtIndex : tgtIndex + 1;
+            tgtGroup.items.splice(insertIdx, 0, draggedItem);
+            changed(`Moved ${draggedItem.name || 'item'}`);
+
+            if (draggedItem.takeoffLayerId) {
+                window.dispatchEvent(new CustomEvent('estimating:takeoff-item-moved', {
+                    detail: {
+                        projectId: String(projectId),
+                        estimateId: String(state.activeEstimateId),
+                        layerId: draggedItem.takeoffLayerId,
+                        targetGroupId: tgtGroup.takeoffGroupId || tgtGroup.id
+                    }
+                }));
+            }
+        } else if (targetGroupId) {
+            const tgtGroup = current().groups.find(g => String(g.id) === String(targetGroupId) || String(g.takeoffGroupId) === String(targetGroupId));
+            if (!tgtGroup) return;
+            srcGroup.items.splice(srcIndex, 1);
+            tgtGroup.items.push(draggedItem);
+            changed(`Moved ${draggedItem.name || 'item'} to ${tgtGroup.name}`);
+
+            if (draggedItem.takeoffLayerId) {
+                window.dispatchEvent(new CustomEvent('estimating:takeoff-item-moved', {
+                    detail: {
+                        projectId: String(projectId),
+                        estimateId: String(state.activeEstimateId),
+                        layerId: draggedItem.takeoffLayerId,
+                        targetGroupId: tgtGroup.takeoffGroupId || tgtGroup.id
+                    }
+                }));
+            }
+        }
     }
 
     function createGroup() {
         const group = Workspace.group({ name: `Group ${current().groups.length + 1}`, items: [] }, current().groups.length);
         current().groups.push(group);
-        changed(`Created group â€œ${group.name}â€`);
+        changed(`Created group "${group.name}"`);
+        requestAnimationFrame(() => {
+            const row = document.querySelector(`.est-group-row[data-group-id="${group.id}"]`);
+            if (row) {
+                row.scrollIntoView({ behavior: 'smooth', block: 'nearest' });
+                row.classList.add('group-highlight-pulse');
+                setTimeout(() => row.classList.remove('group-highlight-pulse'), 3600);
+            }
+            const input = document.querySelector(`.est-group-name-input[data-group-name="${group.id}"]`);
+            if (input) {
+                input.focus();
+                input.select();
+            }
+        });
     }
 
     function renderCatalogChoices(query = '') {
         const rows = ui.catalogData?.items || [];
         const normalized = String(query).trim().toLowerCase();
         const visible = rows.filter(item => !normalized || [item.name, item.description, item.supplier.catalogNumber,
-            item.classification.costCode, item.catalog.name, item.category.name].join(' ').toLowerCase().includes(normalized));
+        item.classification.costCode, item.catalog.name, item.category.name].join(' ').toLowerCase().includes(normalized));
         return visible.map(item => `<button type="button" class="est-copy-option" data-est-catalog-item="${esc(item.id)}"><span><strong>${esc(item.name)}</strong><small>${esc(item.catalog.name || '')} Â· ${esc(item.category.name || '')} Â· ${esc(item.uom || 'ea')} Â· ${money(item.pricing.materialUnitCost || item.pricing.equipmentUnitCost || item.pricing.legacyUnitCost || 0)}</small></span></button>`).join('')
             || '<div class="est-empty">No catalog items found.</div>';
     }
@@ -3122,10 +4592,31 @@ function renderFooter() {
         return item;
     }
 
-    async function exportEstimate(mode = 'bom-excel') {
-        if (!Exporter) return;
+    function triggerFileDownload(blobOrUrl, filename, revokeBlob = true) {
+        const anchor = document.createElement('a');
+        const url = revokeBlob ? URL.createObjectURL(blobOrUrl) : String(blobOrUrl);
+        anchor.href = url;
+        anchor.download = filename;
+        anchor.dataset.noNavGuard = '1';
+        anchor.style.display = 'none';
+        document.body.appendChild(anchor);
+        anchor.click();
+        setTimeout(() => {
+            anchor.remove();
+            if (revokeBlob) URL.revokeObjectURL(url);
+        }, 1500);
+        return true;
+    }
+
+    async function exportEstimate(mode = 'estimate-xlsx') {
+        let Exporter = getExporter();
+        if (!Exporter && typeof window.ensureDashboardFeature === 'function') {
+            await window.ensureDashboardFeature('estimating-export');
+            Exporter = getExporter();
+        }
+        if (!Exporter && mode !== 'estimate-xlsx') return false;
         let estimate = Workspace.clone(current());
-        if ((mode === 'flat' || mode === 'bom-excel' || mode === 'bom-csv') && Exporter.needsCatalog(estimate)) {
+        if ((mode === 'estimate-xlsx' || mode === 'flat' || mode === 'bom-excel' || mode === 'bom-csv' || mode === 'summary-csv') && Exporter?.needsCatalog?.(estimate)) {
             try {
                 const catalogSnapshot = await window.CatalogService.getSnapshot({ enabledForProjectsOnly: true });
                 estimate = window.BoqCatalogAdapter.hydrateEstimate(estimate, catalogSnapshot);
@@ -3133,7 +4624,7 @@ function renderFooter() {
                 console.warn('Could not hydrate estimate from catalog snapshot:', error);
                 if (mode === 'flat') {
                     alert(`BOQ Flat could not load the Cost Catalog: ${error.message}`);
-                    return;
+                    return false;
                 }
             }
         }
@@ -3141,41 +4632,71 @@ function renderFooter() {
             const unresolved = Exporter.unresolvedAssemblies(estimate);
             if (unresolved.length) {
                 alert(`BOQ Flat cannot expand these assemblies because they have no Cost Catalog components: ${unresolved.map(item => item.name).join(', ')}`);
-                return;
+                return false;
             }
         }
 
-        const safeName = current().name.replace(/[^a-z0-9_-]+/gi, '_');
+        const cleanFilePart = value => String(value ?? '').trim()
+            .replace(/[^a-z0-9.-]+/gi, '_')
+            .replace(/_+/g, '_')
+            .replace(/^_+|_+$/g, '');
+        const projectNameRaw = window.ProjectState?.projectInfo?.name
+            || document.getElementById('projectHeaderName')?.childNodes?.[0]?.textContent
+            || '';
+        const projectPart = cleanFilePart(projectNameRaw);
+        const estimatePart = cleanFilePart(current().name || '');
+        const safeName = (projectPart && estimatePart)
+            ? `${projectPart}_${estimatePart}`
+            : (projectPart || estimatePart || 'Project_Estimate');
+
+        if (mode === 'estimate-xlsx') {
+            try {
+                const readOnly = document.body?.dataset?.readOnly === 'true';
+                if (readOnly) {
+                    return triggerFileDownload(
+                        `../api/project_estimate_excel.php?action=export_estimate&project_id=${encodeURIComponent(projectId)}&estimate_id=${encodeURIComponent(estimate.id || '')}`,
+                        `${safeName}.xlsx`,
+                        false
+                    );
+                }
+                const resp = await fetch(`../api/project_estimate_excel.php?action=export_estimate&project_id=${encodeURIComponent(projectId)}`, {
+                    method: 'POST',
+                    headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        project_id: projectId,
+                        estimate_id: estimate.id || '',
+                        estimate
+                    })
+                });
+                if (!resp.ok) {
+                    const errJson = await resp.json().catch(() => null);
+                    throw new Error(errJson?.msg || `Export failed (${resp.status})`);
+                }
+                const blob = await resp.blob();
+                return triggerFileDownload(blob, `${safeName}.xlsx`);
+            } catch (err) {
+                alert(err?.message || 'Could not export Estimate Excel.');
+                return false;
+            }
+        }
 
         if (mode === 'bom-excel') {
             const xml = Exporter.excelXml(estimate, current().settings);
-            const blob = new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8' });
-            const anchor = document.createElement('a');
-            anchor.href = URL.createObjectURL(blob);
-            anchor.download = `${safeName}_BOM.xls`;
-            anchor.click();
-            URL.revokeObjectURL(anchor.href);
-            return;
+            return triggerFileDownload(new Blob([xml], { type: 'application/vnd.ms-excel;charset=utf-8' }), `${safeName}_BOM.xls`);
         }
 
         if (mode === 'bom-csv') {
             const rows = Exporter.bomRows(estimate, current().settings);
-            const blob = new Blob([Exporter.bomCsv(rows)], { type: 'text/csv;charset=utf-8' });
-            const anchor = document.createElement('a');
-            anchor.href = URL.createObjectURL(blob);
-            anchor.download = `${safeName}_BOM.csv`;
-            anchor.click();
-            URL.revokeObjectURL(anchor.href);
-            return;
+            return triggerFileDownload(new Blob([Exporter.bomCsv(rows)], { type: 'text/csv;charset=utf-8' }), `${safeName}_BOM.csv`);
+        }
+
+        if (mode === 'summary-csv') {
+            const csvText = Exporter.summaryCsv(estimate, current().settings);
+            return triggerFileDownload(new Blob([csvText], { type: 'text/csv;charset=utf-8' }), `${safeName}_Summary.csv`);
         }
 
         const rows = mode === 'flat' ? Exporter.flatRows(estimate) : Exporter.normalRows(estimate);
-        const blob = new Blob([Exporter.csv(rows)], { type: 'text/csv;charset=utf-8' });
-        const anchor = document.createElement('a');
-        anchor.href = URL.createObjectURL(blob);
-        anchor.download = `${safeName}_${mode === 'flat' ? 'BOQ_Flat' : 'BOQ'}.csv`;
-        anchor.click();
-        URL.revokeObjectURL(anchor.href);
+        return triggerFileDownload(new Blob([Exporter.csv(rows)], { type: 'text/csv;charset=utf-8' }), `${safeName}_${mode === 'flat' ? 'BOQ_Flat' : 'BOQ'}.csv`);
     }
 
     root.addEventListener('input', event => {
@@ -3198,7 +4719,12 @@ function renderFooter() {
             return;
         }
         if (event.target.dataset.summaryRate) {
-            return; // Wait for change/Enter event to recalculate
+            const rateField = event.target.dataset.summaryRate;
+            const val = Workspace.numeric(event.target.value);
+            applySummaryRateSetting(estimate, rateField, val);
+            reactiveChanged(event.target);
+            renderTable();
+            return;
         }
         if (event.target.dataset.summaryType) {
             const type = event.target.dataset.summaryType;
@@ -3282,11 +4808,17 @@ function renderFooter() {
     function applySummaryRateSetting(estimate, field, val) {
         if (!estimate?.settings) return;
         if (field === 'globalLaborCost') {
-            estimate.settings.globalLaborCost = val;
+            const nextCost = Math.max(0, Number(val || 0));
+            const gMargin = Number(estimate.settings.globalLaborMargin ?? 34.6);
+            estimate.settings.globalLaborCost = nextCost;
+            estimate.settings.globalLaborSales = gMargin < 100
+                ? Number((nextCost / (1 - gMargin / 100)).toFixed(2))
+                : nextCost;
             forEachEstimateItem(estimate, it => {
-                it.laborRate = val;
+                it.laborRate = nextCost;
+                if (it._manualFields) delete it._manualFields.laborRate;
                 if (it.catalogSnapshot && window.EstimatingCatalogSnapshotService) {
-                    window.EstimatingCatalogSnapshotService.setCatalogOverride(it, 'laborRate', val);
+                    window.EstimatingCatalogSnapshotService.setCatalogOverride(it, 'laborRate', nextCost);
                 }
             });
         } else if (field === 'globalLaborSales') {
@@ -3298,6 +4830,7 @@ function renderFooter() {
                 estimate.settings.globalLaborMargin = clamped;
                 forEachEstimateItem(estimate, it => {
                     it.laborMargin = clamped;
+                    if (it._manualFields) delete it._manualFields.laborMargin;
                     if (it.itemType === 'labor' || it.type === 'labor') it.margin = clamped;
                 });
             }
@@ -3309,21 +4842,29 @@ function renderFooter() {
         if (field === 'margin') {
             const clamped = Math.min(99.9, Math.max(-999, val));
             if (type === 'Labor') {
+                const gCost = Number(estimate.settings.globalLaborCost ?? 36);
                 estimate.settings.globalLaborMargin = clamped;
+                estimate.settings.globalLaborSales = clamped < 100
+                    ? Number((gCost / (1 - clamped / 100)).toFixed(2))
+                    : gCost;
                 forEachEstimateItem(estimate, it => {
                     it.laborMargin = clamped;
+                    if (it._manualFields) delete it._manualFields.laborMargin;
                     if (it.itemType === 'labor' || it.type === 'labor') it.margin = clamped;
                 });
             } else if (type === 'Materials') {
                 estimate.settings.materialMargin = clamped;
                 forEachEstimateItem(estimate, it => {
+                    if (isEquipmentItem(it)) return;
                     it.materialMargin = clamped;
+                    if (it._manualFields) delete it._manualFields.materialMargin;
                     if (it.itemType === 'material' || it.type === 'material' || (!it.itemType && !it.type)) it.margin = clamped;
                 });
             } else if (type === 'Equipment') {
                 estimate.settings.equipmentMargin = clamped;
                 forEachEstimateItem(estimate, it => {
                     it.equipmentMargin = clamped;
+                    if (it._manualFields) delete it._manualFields.equipmentMargin;
                 });
             }
         } else if (field === 'waste') {
@@ -3331,22 +4872,32 @@ function renderFooter() {
             if (type === 'Materials') {
                 estimate.settings.materialWaste = clamped;
                 forEachEstimateItem(estimate, it => {
+                    if (isEquipmentItem(it)) return;
                     it.waste = clamped;
+                    if (it._manualFields) delete it._manualFields.waste;
                 });
             } else if (type === 'Labor') {
                 estimate.settings.laborWaste = clamped;
                 forEachEstimateItem(estimate, it => {
                     it.laborWaste = clamped;
+                    if (it._manualFields) delete it._manualFields.laborWaste;
                     if (it.itemType === 'labor' || it.type === 'labor') it.waste = clamped;
                 });
             } else if (type === 'Equipment') {
                 estimate.settings.equipmentWaste = clamped;
+                forEachEstimateItem(estimate, it => {
+                    if (isEquipmentItem(it)) {
+                        it.waste = clamped;
+                        if (it._manualFields) delete it._manualFields.waste;
+                    }
+                });
             }
         } else if (field === 'difficulty') {
             const clamped = Math.max(0.1, val);
             estimate.settings.laborDifficulty = clamped;
             forEachEstimateItem(estimate, it => {
                 it.difficulty = clamped;
+                if (it._manualFields) delete it._manualFields.difficulty;
             });
             window.dispatchEvent(new CustomEvent('estimating:global-difficulty-updated', {
                 detail: { difficulty: clamped }
@@ -3383,10 +4934,13 @@ function renderFooter() {
             if (target.dataset.auditPrevValue === undefined) {
                 target.dataset.auditPrevValue = target.value;
             }
+            if (target.dataset.itemField === 'quantity') {
+                target.dataset.estFocusQty = target.value;
+            }
             if (target.matches?.('input.is-editable, input.est-cell-input, input.est-rate-inline-input, input[data-item-field], input[data-summary-rate], input[data-field], input[data-markup-quick-val], input[data-group-name]')) {
                 setTimeout(() => {
                     if (document.activeElement === target) {
-                        try { target.select(); } catch (_) {}
+                        try { target.select(); } catch (_) { }
                     }
                 }, 10);
             }
@@ -3445,8 +4999,12 @@ function renderFooter() {
         if (row && field) {
             const found = findItem(row.dataset.itemId);
             if (!found) return;
-            const equipmentUnitCostEdit = field === 'unitMaterialCost' && isEquipmentItem(found.item);
-            const effectiveField = equipmentUnitCostEdit ? 'unitEquipmentCost' : field;
+            const equipmentRow = isEquipmentItem(found.item);
+            const equipmentUnitCostEdit = field === 'unitMaterialCost' && equipmentRow;
+            const equipmentMarginEdit = field === 'materialMargin' && equipmentRow;
+            const effectiveField = equipmentUnitCostEdit
+                ? 'unitEquipmentCost'
+                : (equipmentMarginEdit ? 'equipmentMargin' : field);
             const prevRaw = getAuditPrevValue(event.target);
             const nextRaw = event.target.value;
             const catalogFields = {
@@ -3460,6 +5018,11 @@ function renderFooter() {
                 window.EstimatingCatalogSnapshotService.setCatalogOverride(found.item,
                     catalogFields[effectiveField], parsedVal);
                 found.item[effectiveField] = parsedVal;
+                if (effectiveField === 'unitLabor') {
+                    found.item.laborUnitType = 'hrs';
+                    const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
+                    if (unitEl) unitEl.textContent = 'hrs';
+                }
                 found.item._manualFields[effectiveField] = true;
                 event.target.classList.add('is-val-overridden');
                 const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
@@ -3469,11 +5032,15 @@ function renderFooter() {
                 const parsedVal = event.target.type === 'number' ? Number(event.target.value) : event.target.value;
                 if (field === 'quantity') {
                     const origQty = Workspace.numeric(found.item.lastSyncedTakeoffQuantity ?? found.item.originalQuantity ?? found.item.takeoffQuantity ?? 0);
+                    const liveLayer = findTakeoffLayer(found.item);
+                    const liveCanvasQty = liveLayer ? Workspace.numeric(liveLayer.quantity || 0) : 0;
+                    const effectiveCanvasQty = Math.max(origQty, liveCanvasQty);
                     const numParsed = Workspace.numeric(parsedVal);
                     if (Math.abs(numParsed - origQty) < 0.0001) {
                         found.item.quantityOverride = false;
                         found.item.quantitySyncStatus = found.item.takeoffLayerId ? 'synced' : 'manual';
                         delete found.item.pendingTakeoffQuantity;
+                        delete found.item.quantityOverrideSource;
                         delete found.item._manualFields.quantity;
                         event.target.classList.remove('is-qty-overridden', 'is-val-overridden');
                         const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
@@ -3489,9 +5056,33 @@ function renderFooter() {
                         found.item.quantitySyncStatus = 'overridden';
                         found.item.pendingTakeoffQuantity = origQty;
                         found.item._manualFields.quantity = true;
+                        found.item.quantityOverrideSource = effectiveCanvasQty > 0 ? 'canvas_overridden' : 'estimating_first';
                         event.target.classList.add('is-qty-overridden', 'is-val-overridden');
                         const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
                         if (unitEl) unitEl.style.color = '#ea580c';
+                        if (!isLiveTypingCommit && effectiveCanvasQty > 0) {
+                            const focusQtyRaw = event.target.dataset.estFocusQty;
+                            const focusQtyNum = focusQtyRaw !== undefined ? Workspace.numeric(focusQtyRaw) : origQty;
+                            if (Math.abs(numParsed - focusQtyNum) >= 0.0001) {
+                                event.target.dataset.estFocusQty = String(numParsed);
+                                if (window.TakeoffAnnouncement && typeof window.TakeoffAnnouncement.show === 'function') {
+                                    const uomLabel = found.item.uom || 'ea';
+                                    window.TakeoffAnnouncement.show({
+                                        id: 'user_alert_canvas_overridden_in_estimating',
+                                        perUser: true,
+                                        force: false,
+                                        type: 'warning',
+                                        badge: 'QUANTITY OVERRIDE',
+                                        icon: 'fas fa-triangle-exclamation',
+                                        title: 'Canvas Value Will Not Be Used',
+                                        message: `You overrode the quantity for "${found.item.name || 'this item'}" manually in Estimating. The quantity counted on the Takeoff canvas (${effectiveCanvasQty} ${uomLabel}) will not be taken into account while this override is active.`,
+                                        primaryText: 'Got It',
+                                        showDontShow: true,
+                                        dontShowLabel: "Don't show this warning again"
+                                    });
+                                }
+                            }
+                        }
                     }
                 } else {
                     found.item._manualFields[effectiveField] = true;
@@ -3505,7 +5096,15 @@ function renderFooter() {
                     }
                 }
                 found.item[effectiveField] = parsedVal;
-                if (!isLiveTypingCommit && event.target.type === 'number' && !isNaN(parsedVal)) event.target.value = parsedVal.toFixed(2);
+                if (effectiveField === 'unitLabor') {
+                    found.item.laborUnitType = 'hrs';
+                    const unitEl = event.target.parentElement?.querySelector('.est-editable-unit');
+                    if (unitEl) unitEl.textContent = 'hrs';
+                }
+                if (effectiveField === 'materialMargin') found.item.margin = parsedVal;
+                if (!isLiveTypingCommit && event.target.type === 'number' && !isNaN(parsedVal)) {
+                    event.target.value = effectiveField === 'laborMargin' ? parsedVal.toFixed(1) : parsedVal.toFixed(2);
+                }
                 if (field === 'quantity' && isAssemblyItem(found.item)) {
                     const newParentQty = Workspace.numeric(parsedVal);
                     const children = getItemChildren(found.item);
@@ -3514,6 +5113,16 @@ function renderFooter() {
                             ? Number(child.factorOverride)
                             : (child.ratio !== undefined && child.ratio !== null ? Number(child.ratio) : Number(child.unitQuantity ?? child.quantity ?? 1));
                         child.ratio = ratio;
+                    });
+                    found.item.children = children;
+                } else if (isAssemblyItem(found.item) && ['materialMargin', 'equipmentMargin', 'laborMargin', 'waste', 'laborWaste', 'difficulty', 'laborRate'].includes(effectiveField)) {
+                    const children = getItemChildren(found.item);
+                    children.forEach(child => {
+                        child[effectiveField] = parsedVal;
+                        if (effectiveField === 'materialMargin') child.margin = parsedVal;
+                        if (effectiveField === 'laborRate' && child.catalogSnapshot && window.EstimatingCatalogSnapshotService) {
+                            window.EstimatingCatalogSnapshotService.setCatalogOverride(child, 'laborRate', parsedVal);
+                        }
                     });
                     found.item.children = children;
                 }
@@ -3537,10 +5146,10 @@ function renderFooter() {
             const newFmt = formatAuditVal(nextRaw, fieldMeta.kind, found.item.uom);
             commitAuditPrevValue(event.target);
             Workspace.touch(state, `Updated ${fieldMeta.label} for "${found.item.name}" (${oldFmt} -> ${newFmt})`);
-            saveLocal({ publish: false });
             scheduleSave();
             renderLiveSummary();
-            if (field === 'quantity' && isAssemblyItem(found.item)) renderTable();
+            saveLocal({ publish: !isLiveTypingCommit && field === 'quantity' });
+            if (!isLiveTypingCommit && isAssemblyItem(found.item) && (field === 'quantity' || ['materialMargin', 'equipmentMargin', 'laborMargin', 'waste', 'laborWaste', 'difficulty', 'laborRate'].includes(effectiveField))) renderTable();
             return;
         }
         if (event.target.matches('[data-item-check]')) {
@@ -3691,22 +5300,22 @@ function renderFooter() {
             portal.className = 'pd-modal-backdrop open';
             portal.dataset.estimateDeleteConfirm = 'true';
             portal.style.cssText = 'position: fixed; inset: 0; display: flex; align-items: center; justify-content: center; padding: 20px; background: rgba(15, 23, 42, 0.65); backdrop-filter: blur(4px); z-index: 999999;';
-            portal.innerHTML = `<div class="pd-modal" style="width: min(460px, 100%); background: var(--bg-panel, #ffffff); border: 1px solid var(--border, #cbd5e1); border-radius: 12px; box-shadow: 0 20px 60px rgba(0, 0, 0, 0.35); overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="deleteEstimateTitle">
-                <div class="pd-modal-head" style="padding: 14px 18px; border-bottom: 1px solid var(--border, #e2e8f0); display: flex; align-items: center; justify-content: space-between; background: var(--bg-panel, #ffffff);">
+            portal.innerHTML = `<div class="pd-modal" style="width: min(460px, 100%); border-radius: 12px; overflow: hidden; display: flex; flex-direction: column;" role="dialog" aria-modal="true" aria-labelledby="deleteEstimateTitle">
+                <div class="pd-modal-head" style="padding: 14px 18px; display: flex; align-items: center; justify-content: space-between;">
                     <div style="display: flex; align-items: center; gap: 8px;">
                         <i class="fas fa-trash-can" style="color: #ef4444; font-size: 1.1rem;"></i>
                         <h3 id="deleteEstimateTitle" style="margin: 0; font-size: 1.05rem; font-weight: 600;">Delete Estimate</h3>
                     </div>
-                    <button class="pd-modal-head-close" type="button" data-delete-cancel aria-label="Close" style="border: none; background: transparent; font-size: 18px; cursor: pointer; color: var(--text-muted, #64748b);">&times;</button>
+                    <button class="pd-modal-head-close" type="button" data-delete-cancel aria-label="Close" style="border: none; background: transparent; font-size: 18px; cursor: pointer;">&times;</button>
                 </div>
-                <div class="pd-modal-body" style="padding: 18px 20px; font-size: .88rem; color: var(--text-main, #334155); line-height: 1.5; background: var(--bg-panel, #ffffff);">
+                <div class="pd-modal-body" style="padding: 18px 20px; font-size: .88rem; line-height: 1.5;">
                     <p style="margin: 0 0 10px;">${esc(message)}</p>
-                    <div style="background: rgba(239, 68, 68, 0.08); border-left: 3px solid #ef4444; padding: 8px 12px; border-radius: 4px; font-size: .8rem; color: #b91c1c;">
+                    <div class="est-danger-callout" style="border-left: 3px solid #ef4444; padding: 8px 12px; border-radius: 4px; font-size: .8rem;">
                         <strong>Warning:</strong> This action is permanent and cannot be undone.
                     </div>
                 </div>
-                <div class="pd-modal-foot" style="display: flex; justify-content: flex-end; gap: 10px; padding: 12px 20px; border-top: 1px solid var(--border, #e2e8f0); background: var(--bg-card, #f8fafc);">
-                    <button type="button" class="btn-ghost" data-delete-cancel style="padding: 7px 14px; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; background: transparent; cursor: pointer;">Cancel</button>
+                <div class="pd-modal-foot" style="display: flex; justify-content: flex-end; gap: 10px; padding: 12px 20px;">
+                    <button type="button" class="btn-ghost" data-delete-cancel style="padding: 7px 14px; border-radius: 6px; cursor: pointer;">Cancel</button>
                     <button type="button" class="btn-main" data-delete-confirm style="padding: 7px 16px; border: none; border-radius: 6px; background: #ef4444; color: #fff; font-weight: 600; cursor: pointer;"><i class="fas fa-trash"></i> Delete Estimate</button>
                 </div>
             </div>`;
@@ -3796,10 +5405,14 @@ function renderFooter() {
 
             let ack = { success: true, state };
             if (projectId) {
-                ack = await request('delete', { method: 'POST', headers: { 'Content-Type': 'application/json' },
-                    body: JSON.stringify({ action: 'delete', project_id: projectId,
+                ack = await request('delete', {
+                    method: 'POST', headers: { 'Content-Type': 'application/json' },
+                    body: JSON.stringify({
+                        action: 'delete', project_id: projectId,
                         estimate_id: requestedDbId, client_estimate_id: requestedId,
-                        delete_original: original }) });
+                        delete_original: original
+                    })
+                });
             }
             const acknowledgedId = String(ack?.deleted?.clientEstimateId || ack?.clientEstimateId || requestedId);
             const localDrafts = state.estimates.filter(row => !Number(row.dbEstimateId || 0)
@@ -3880,20 +5493,19 @@ function renderFooter() {
         if (actionName === 'delete') deleteEstimateAuthoritative(estimateId);
         if (actionName === 'set-primary') {
             state.estimates.forEach(row => {
-                row.is_primary = String(row.id) === String(estimateId);
-                row.isPrimary = row.is_primary;
+                const nextPrimary = String(row.id) === String(estimateId);
+                const wasPrimary = Boolean(row.is_primary || row.isPrimary);
+                row.is_primary = nextPrimary;
+                row.isPrimary = nextPrimary;
+                if (wasPrimary !== nextPrimary || nextPrimary) {
+                    markEstimateDirty(row.id);
+                }
             });
             const targetEst = state.estimates.find(row => String(row.id) === String(estimateId)) || current();
-            const estSummary = Calc.calculateSummary(targetEst.groups, targetEst.settings);
-            const totalSales = estSummary.estimateTotal;
-            if (window.ProjectState) {
-                if (!window.ProjectState.projectMeta) window.ProjectState.projectMeta = {};
-                window.ProjectState.projectMeta.primary_estimate_id = estimateId;
-                window.ProjectState.projectMeta.primary_estimate_total = totalSales;
-                window.ProjectState.projectMeta.primary_quote_value = totalSales;
-            }
+            const primarySummary = buildEstimateSummaryPayload(targetEst);
+            const totalSales = primarySummary.estimateTotal;
+            syncPrimaryEstimateProjectMeta();
             saveLocal();
-            markEstimateDirty(estimateId);
             ui.saveRequested = true;
             clearTimeout(ui.saveTimer);
             ui.saveTimer = setTimeout(saveServer, 0);
@@ -4119,11 +5731,11 @@ function renderFooter() {
                         </thead>
                         <tbody>
                             ${children.map((comp, idx) => {
-                                const compRatio = (comp.factorOverride !== undefined && comp.factorOverride !== null && comp.factorOverride !== '')
-                                    ? comp.factorOverride : (comp.quantity || 1);
-                                const compCost = Number(comp.unitMaterialCost ?? comp.unitCost ?? 0);
-                                const compLabor = Number(comp.unitLabor ?? comp.laborHours ?? 0);
-                                return `<tr data-proj-comp-row="${idx}" style="border-bottom: 1px solid var(--border-soft, #e2e8f0);">
+            const compRatio = (comp.factorOverride !== undefined && comp.factorOverride !== null && comp.factorOverride !== '')
+                ? comp.factorOverride : (comp.quantity || 1);
+            const compCost = Number(comp.unitMaterialCost ?? comp.unitCost ?? 0);
+            const compLabor = Number(comp.unitLabor ?? comp.laborHours ?? 0);
+            return `<tr data-proj-comp-row="${idx}" style="border-bottom: 1px solid var(--border-soft, #e2e8f0);">
                                     <td style="text-align: center; color: var(--text-muted, #94a3b8); padding: 8px 10px;"><i class="fas fa-grip-vertical"></i></td>
                                     <td style="text-align: right; padding: 8px 10px;">
                                         <input type="number" step="0.001" min="0" class="cc-qty-input proj-comp-ratio-input" data-comp-idx="${idx}" data-comp-id="${esc(comp.id || '')}" data-unit-cost="${compCost}" data-labor-hours="${compLabor}" value="${Number(compRatio)}" style="width: 78px; height: 28px; padding: 0 6px; text-align: right; font-weight: 600; border: 1px solid var(--border, #cbd5e1); border-radius: 6px; font-size: 12px; background: var(--bg-panel, #ffffff); color: var(--text-main, #0f172a);">
@@ -4143,7 +5755,7 @@ function renderFooter() {
                                         </button>
                                     </td>
                                 </tr>`;
-                            }).join('')}
+        }).join('')}
                         </tbody>
                     </table>
                 </div>
@@ -4238,6 +5850,18 @@ function renderFooter() {
         const closeModal = () => portal.remove();
         portal.querySelectorAll('[data-close-proj-item-modal]').forEach(b => b.addEventListener('click', closeModal));
         portal.addEventListener('click', e => { if (e.target === portal) closeModal(); });
+        portal.addEventListener('keydown', event => {
+            if (event.key === 'Escape') {
+                event.preventDefault();
+                closeModal();
+                return;
+            }
+            if (event.key === 'Enter' && !event.isComposing && !event.shiftKey && !event.ctrlKey && !event.metaKey && !event.altKey) {
+                if (event.target?.tagName === 'TEXTAREA' || event.target?.tagName === 'BUTTON') return;
+                event.preventDefault();
+                portal.querySelector('#projSaveItemBtn')?.click();
+            }
+        });
 
         portal.querySelectorAll('.proj-comp-ratio-input').forEach(input => {
             input.addEventListener('input', () => {
@@ -4327,6 +5951,7 @@ function renderFooter() {
                 item.unitCost = newUnitCost;
                 item.unitLabor = newLaborHours;
                 item.laborHours = newLaborHours;
+                item.laborUnitType = 'hrs';
                 item.unitEquipmentCost = newEquipCost;
                 item.unitSubcontractorCost = newSubCost;
 
@@ -4348,7 +5973,7 @@ function renderFooter() {
 
     root.addEventListener('click', event => {
         const target = event.target;
-        
+
         const editSqft = target.closest('[data-edit-sqft]');
         if (editSqft) {
             openSquareFootageModal();
@@ -4384,7 +6009,7 @@ function renderFooter() {
             openMarkupPopover(markupMenuBtn.dataset.markupMenuBtn, markupMenuBtn);
             return;
         }
-const estimateMenu = target.closest('[data-estimate-menu]');
+        const estimateMenu = target.closest('[data-estimate-menu]');
         if (estimateMenu) {
             const id = estimateMenu.dataset.estimateMenu;
             const menu = root.querySelector(`[data-estimate-actions-menu="${selectorValue(id)}"]`);
@@ -4508,6 +6133,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                         item.quantityOverride = false;
                         item.pendingTakeoffQuantity = null;
                         item.quantitySyncStatus = item.takeoffLayerId ? 'synced' : 'manual';
+                        delete item.quantityOverrideSource;
                     });
                     changed(`Reset quantities for group "${grp.name}"`);
                 }
@@ -4521,10 +6147,9 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                     const copy = Workspace.clone(grp);
                     copy.id = Workspace.uid('group');
                     copy.name = `${grp.name} (Copy)`;
-                    copy.items = (grp.items || []).map(it => {
-                        const itemCopy = Workspace.clone(it);
-                        itemCopy.id = Workspace.uid('item');
-                        return itemCopy;
+                    copy.items = (grp.items || []).map(it => duplicateEstimatingItem(it)).map(it => {
+                        if (it && it.name.endsWith(' (Copy)')) it.name = it.name.slice(0, -7);
+                        return it;
                     });
                     const idx = current().groups.indexOf(grp);
                     current().groups.splice(idx + 1, 0, copy);
@@ -4534,7 +6159,10 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                 exportEstimate('bom-excel');
             } else if (act === 'delete-group') {
                 if (confirm('Delete this group and its items?')) {
+                    const targetGroup = current().groups.find(row => row.id === grpId);
+                    const removedItems = targetGroup?.items || [];
                     current().groups = current().groups.filter(row => row.id !== grpId);
+                    notifyTakeoffDeletedEstimatingItems(removedItems);
                     changed('Deleted group');
                 }
             }
@@ -4555,18 +6183,11 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                 return;
             } else if (act === 'copy-item') {
                 if (found) {
-                    if (isAssemblyItem(found.item)) {
-                        const index = found.group.items.indexOf(found.item);
-                        const duplicate = duplicateAssembly(found.item);
+                    const index = found.group.items.indexOf(found.item);
+                    const duplicate = duplicateEstimatingItem(found.item);
+                    if (duplicate) {
                         found.group.items.splice(index + 1, 0, duplicate);
-                        changed(`Duplicated ${found.item.name}`);
-                    } else {
-                        const index = found.group.items.indexOf(found.item);
-                        const duplicate = Workspace.clone(found.item);
-                        duplicate.id = Workspace.uid('item');
-                        duplicate.name = `${found.item.name} (Copy)`;
-                        found.group.items.splice(index + 1, 0, duplicate);
-                        changed(`Copied ${found.item.name}`);
+                        changed(isAssemblyItem(found.item) ? `Duplicated ${found.item.name}` : `Copied ${found.item.name}`);
                     }
                 }
             } else if (act === 'reset-quantity') {
@@ -4583,9 +6204,11 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                 }
             } else if (act === 'delete-item') {
                 if (found) {
+                    const removedItem = found.item;
                     found.group.items = found.group.items.filter(row => row.id !== itId);
                     ui.expandedAssemblies.delete(String(itId));
-                    changed(`Deleted ${found.item.name}`);
+                    notifyTakeoffDeletedEstimatingItems([removedItem]);
+                    changed(`Deleted ${removedItem.name}`);
                 }
             }
             // Advanced actions: replace-item, move-item, reset-budget-code
@@ -4596,16 +6219,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         if (action === 'table-settings') toggleTableSettings();
         if (action === 'create-group') createGroup();
         if (action === 'delete-selected') {
-            current().groups.forEach(group => {
-                group.items = group.items.filter(item => {
-                    if (ui.selected.has(item.id) || ui.selected.has(String(item.id))) {
-                        ui.expandedAssemblies.delete(String(item.id));
-                        return false;
-                    }
-                    return true;
-                });
-            });
-            ui.selected.clear(); changed('Deleted selected items');
+            deleteSelectedEstimatingItems();
         }
         if (action === 'reset-quantities') {
             allItems().forEach(({ item }) => {
@@ -4615,11 +6229,15 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                 item.quantityOverride = false;
                 item.pendingTakeoffQuantity = null;
                 item.quantitySyncStatus = item.takeoffLayerId ? 'synced' : 'manual';
+                delete item.quantityOverrideSource;
                 if (item._manualFields) delete item._manualFields.quantity;
             });
             changed('Reset quantities');
         }
-        if (action === 'fullscreen') document.fullscreenElement ? document.exitFullscreen() : root.requestFullscreen?.();
+        if (action === 'fullscreen') {
+            toggleEstimatingFullscreen();
+            return;
+        }
         if (action === 'options') {
             event.stopPropagation();
             const menu = $('optionsMenu');
@@ -4636,14 +6254,15 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         }
         const option = target.closest('[data-est-option]')?.dataset.estOption;
         if (option) closeOptionsMenu();
-        if (option === 'save') { ui.explicitSaveRequested = true; saveServer({ showModal: true }); }
-        if (option === 'copy') { ui.modal = 'new'; renderModal(); }
         if (option === 'export') { ui.modal = 'export'; renderModal(); }
-        if (option === 'export-bom') exportEstimate('bom-excel');
-        if (option === 'delete-estimate') deleteEstimateAuthoritative();
-        if (target.closest('[data-download-estimate]')) {
-            const mode = document.querySelector('[name="estimateExportMode"]:checked')?.value || 'bom-excel';
-            exportEstimate(mode); ui.modal = null; renderModal();
+        if (option === 'import') {
+            ui.importFile = null;
+            ui.importMode = 'keep_excel';
+            ui.importName = '';
+            ui.importError = '';
+            ui.importing = false;
+            ui.modal = 'import';
+            renderModal();
         }
         const collapse = target.closest('[data-collapse-card]')?.dataset.collapseCard;
         if (collapse) { ui.collapsed[collapse] = !ui.collapsed[collapse]; renderDetails(); }
@@ -4677,18 +6296,24 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         const deleteItem = target.closest('[data-delete-item]')?.dataset.deleteItem;
         if (deleteItem) {
             const found = findItem(deleteItem);
-            found.group.items = found.group.items.filter(row => row.id !== deleteItem);
-            ui.expandedAssemblies.delete(String(deleteItem));
-            changed(`Deleted ${found.item.name}`);
+            if (found) {
+                const removedItem = found.item;
+                found.group.items = found.group.items.filter(row => row.id !== deleteItem);
+                ui.expandedAssemblies.delete(String(deleteItem));
+                notifyTakeoffDeletedEstimatingItems([removedItem]);
+                changed(`Deleted ${removedItem.name}`);
+            }
         }
         const duplicateItem = target.closest('[data-duplicate-item]')?.dataset.duplicateItem;
         if (duplicateItem) {
             const found = findItem(duplicateItem);
-            if (isAssemblyItem(found?.item)) {
+            if (found) {
                 const index = found.group.items.indexOf(found.item);
-                const duplicate = duplicateAssembly(found.item);
-                found.group.items.splice(index + 1, 0, duplicate);
-                changed(`Duplicated ${found.item.name}`);
+                const duplicate = duplicateEstimatingItem(found.item);
+                if (duplicate) {
+                    found.group.items.splice(index + 1, 0, duplicate);
+                    changed(isAssemblyItem(found.item) ? `Duplicated ${found.item.name}` : `Copied ${found.item.name}`);
+                }
             }
         }
         const removeComponent = target.closest('[data-remove-assembly-component]');
@@ -4718,7 +6343,13 @@ const estimateMenu = target.closest('[data-estimate-menu]');
             }
         }
         const deleteGroup = target.closest('[data-delete-group]')?.dataset.deleteGroup;
-        if (deleteGroup && confirm('Delete this group and its items?')) { current().groups = current().groups.filter(row => row.id !== deleteGroup); changed('Deleted group'); }
+        if (deleteGroup && confirm('Delete this group and its items?')) {
+            const targetGroup = current().groups.find(row => row.id === deleteGroup);
+            const removedItems = targetGroup?.items || [];
+            current().groups = current().groups.filter(row => row.id !== deleteGroup);
+            notifyTakeoffDeletedEstimatingItems(removedItems);
+            changed('Deleted group');
+        }
         const toggleExclusions = target.closest('[data-toggle-exclusion-presets]');
         if (toggleExclusions) {
             ui.showingExclusionPresets = !ui.showingExclusionPresets;
@@ -4779,10 +6410,25 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         if (target.closest('[data-retry-save]')) saveServer();
     });
 
+    function commitEstimatingGroupRename(inputEl) {
+        if (!inputEl) return false;
+        const groupId = inputEl.dataset.groupName;
+        const group = current().groups.find(row => String(row.id) === String(groupId));
+        if (!group) return false;
+        const nextName = String(inputEl.value || '').trim().replace(/\s+/g, ' ') || 'Untitled Group';
+        if (nextName === String(group.name || '')) {
+            inputEl.value = nextName;
+            return false;
+        }
+        group.name = nextName;
+        (group.items || []).forEach(it => { it.groupName = nextName; });
+        changed('Renamed group');
+        return true;
+    }
+
     root.addEventListener('change', event => {
         if (!event.target.matches('[data-group-name]')) return;
-        const group = current().groups.find(row => row.id === event.target.dataset.groupName);
-        if (group) { group.name = event.target.value.trim() || 'Untitled Group'; changed('Renamed group'); }
+        commitEstimatingGroupRename(event.target);
     });
 
     document.addEventListener('click', async event => {
@@ -4796,6 +6442,9 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         }
         if (!target.closest('#optionsMenu') && !target.closest('[data-est-action="options"]')) {
             closeOptionsMenu();
+        }
+        if (!target.closest('#estimatingSubheadMovePopover') && !target.closest('[data-est-subhead-action="move"]')) {
+            closeEstimatingSubheadMovePopover();
         }
         if (target.closest('[data-close-markup-popover]')) {
             closeMarkupPopovers();
@@ -4836,7 +6485,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         }
         const copyPreset = target.closest('[data-copy-preset]');
         if (copyPreset) {
-            try { navigator.clipboard.writeText(copyPreset.dataset.copyPreset); } catch (_) {}
+            try { navigator.clipboard.writeText(copyPreset.dataset.copyPreset); } catch (_) { }
             const orig = copyPreset.innerHTML;
             copyPreset.innerHTML = '<i class="fas fa-check" style="color: #10b981;"></i>';
             setTimeout(() => { copyPreset.innerHTML = orig; }, 1200);
@@ -4873,28 +6522,160 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         }
         const portal = event.target.closest('[data-estimating-modal-portal]');
         if (!portal) return;
-        if (event.target.closest('[data-close-modal]') || event.target === portal) { ui.modal = null; renderModal(); return; }
+        if (event.target.closest('[data-close-modal]') || event.target === portal) {
+            if (!ui.importing) {
+                ui.modal = null;
+                renderModal();
+            }
+            return;
+        }
+        if (event.target.closest('[data-download-estimate]')) {
+            const downloadButton = event.target.closest('[data-download-estimate]');
+            if (downloadButton.disabled) return;
+            const mode = portal.querySelector('input[name="estimateExportMode"]:checked')?.value || 'estimate-xlsx';
+            downloadButton.disabled = true;
+            try {
+                const exported = await exportEstimate(mode);
+                if (exported !== false) {
+                    ui.modal = null;
+                    renderModal();
+                }
+            } finally {
+                downloadButton.disabled = false;
+            }
+            return;
+        }
+        if (event.target.closest('[data-import-estimate]')) {
+            const importBtn = event.target.closest('[data-import-estimate]');
+            if (importBtn.disabled || ui.importing) return;
+            const mode = portal.querySelector('input[name="estimateImportMode"]:checked')?.value || ui.importMode || 'keep_excel';
+            const customName = (portal.querySelector('#estImportName')?.value || ui.importName || '').trim();
+            if (!ui.importFile) {
+                ui.importError = 'Please select a valid .xlsx workbook exported from a project estimate.';
+                renderModal();
+                return;
+            }
+            if (!projectId) {
+                ui.importError = 'Save or open a persisted project before importing an estimate workbook.';
+                renderModal();
+                return;
+            }
+            ui.importing = true;
+            ui.importError = '';
+            ui.importMode = mode;
+            ui.importName = customName;
+            renderModal();
+            try {
+                const formData = new FormData();
+                formData.append('action', 'import_estimate');
+                formData.append('project_id', String(projectId));
+                formData.append('estimate_name', customName);
+                formData.append('import_mode', mode);
+                formData.append('file', ui.importFile);
+                const resp = await fetch('../api/project_estimate_excel.php?action=import_estimate', {
+                    method: 'POST',
+                    body: formData
+                });
+                const payload = await resp.json().catch(() => null);
+                if (!resp.ok || !payload || payload.status !== 'success' || !payload.estimate) {
+                    throw new Error(payload?.msg || payload?.message || `Import failed (${resp.status})`);
+                }
+                const imported = Workspace.estimate(payload.estimate, projectId, state.estimates.length);
+                state.estimates.forEach(row => { row.isActive = false; });
+                imported.isActive = true;
+                state.estimates.push(imported);
+                state.activeEstimateId = imported.id;
+                Workspace.selectEstimate(state, imported.id);
+                ui.modal = null;
+                ui.importFile = null;
+                ui.importError = '';
+                ui.importing = false;
+                ui.loadState = 'saved';
+                ui.message = `Imported ${imported.name} (${payload.items_count || 0} items)`;
+                saveLocal();
+                render();
+                if (window.ProjectState) {
+                    window.ProjectState.activeEstimateId = String(imported.id);
+                }
+                window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', {
+                    detail: { projectId: String(projectId || ''), estimateId: imported.id, cloned: false, importedFromExcel: true }
+                }));
+                if (mode === 'keep_excel_open_takeoff') {
+                    document.querySelector('[data-pd-tab="takeoff"], [data-tab="takeoff"], .pd-tab-btn[data-tab="takeoff"]')?.click();
+                }
+            } catch (err) {
+                ui.importing = false;
+                ui.importError = err?.message || 'Could not import Excel estimate.';
+                renderModal();
+            }
+            return;
+        }
         if (event.target.closest('[data-create-estimate]')) {
             const createButton = event.target.closest('[data-create-estimate]');
+            if (createButton.disabled) return;
+            const sourceEstimateId = String(current()?.id || '');
             const name = portal.querySelector('#copyEstimateName')?.value;
             const mode = portal.querySelector('input[name="copyEstimateMode"]:checked')?.value || 'blank';
-            Workspace.createEstimate(state, name, mode); ui.modal = null; saveLocal();
+            Workspace.createEstimate(state, name, mode);
+            ui.modal = null;
+            renderModal();
+            saveLocal();
+            const createdEstimate = current();
+            const projTbl = window.ProjectState?.projectMeta?.estimatingTableSettings;
+            if (createdEstimate && projTbl?.applyAll && Array.isArray(projTbl.visibleColumns) && projTbl.visibleColumns.length > 0) {
+                createdEstimate.settings = createdEstimate.settings || {};
+                createdEstimate.settings.visibleColumns = projTbl.visibleColumns.slice();
+                createdEstimate.settings.tableSettingsApplyAll = true;
+                if (Array.isArray(projTbl.columnsOrder) && projTbl.columnsOrder.length > 0) {
+                    createdEstimate.settings.columnsOrder = projTbl.columnsOrder.slice();
+                }
+            }
+            if (mode === 'all' && createdEstimate && typeof window.cloneTakeoffWorkspaceForEstimate === 'function') {
+                const cloneResult = window.cloneTakeoffWorkspaceForEstimate(sourceEstimateId, createdEstimate.id, createdEstimate);
+                if (cloneResult) {
+                    createdEstimate.cloneTakeoffFromEstimateId = cloneResult.sourceEstimateId;
+                    createdEstimate.cloneTakeoffLayerMap = cloneResult.layerIdMap || {};
+                    createdEstimate.cloneTakeoffGroupMap = cloneResult.groupIdMap || {};
+                    createdEstimate.cloneTakeoffItemMap = cloneResult.itemIdMap || {};
+                }
+            }
             markEstimateDirty();
             saveLocal();
             render();
+            if (createdEstimate) {
+                if (window.ProjectState) {
+                    window.ProjectState.activeEstimateId = String(createdEstimate.id);
+                }
+                window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', {
+                    detail: { projectId: String(projectId || ''), estimateId: createdEstimate.id, cloned: false }
+                }));
+            }
             if (projectId) {
                 createButton.disabled = true;
                 ui.loadState = 'saving';
-                ui.message = 'Creating estimate in databaseâ€¦';
+                ui.message = 'Creating estimate in database...';
                 renderStatus();
                 try {
                     await window.projectEstimatingSave();
+                    if (createdEstimate) {
+                        delete createdEstimate.cloneTakeoffFromEstimateId;
+                        delete createdEstimate.cloneTakeoffLayerMap;
+                        delete createdEstimate.cloneTakeoffGroupMap;
+                        delete createdEstimate.cloneTakeoffItemMap;
+                    }
                     ui.message = 'Estimate created';
                     renderStatus();
+                    if (mode === 'all' && createdEstimate) {
+                        window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', {
+                            detail: { projectId: String(projectId || ''), estimateId: createdEstimate.id, cloned: true }
+                        }));
+                    }
                 } catch (error) {
                     ui.loadState = 'error';
                     ui.message = `Estimate was not confirmed by the database: ${error.message}`;
                     renderStatus();
+                } finally {
+                    createButton.disabled = false;
                 }
             }
         }
@@ -4916,6 +6697,12 @@ const estimateMenu = target.closest('[data-estimate-menu]');
     });
 
     root.addEventListener('keydown', event => {
+        if (event.key === 'Enter' && event.target.matches('.est-group-name-input')) {
+            event.preventDefault();
+            const committed = commitEstimatingGroupRename(event.target);
+            if (!committed) event.target.blur();
+            return;
+        }
         if (event.key === 'Enter' && event.target.matches('input[data-item-field], input[data-summary-rate], .est-rate-inline-input')) {
             event.target.blur();
         }
@@ -4950,37 +6737,83 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                 state = Workspace.workspace(stored, projectId);
                 restoreDirtyTracking();
             }
-        } catch (_) {}
+        } catch (_) { }
     }
 
     function selectEstimate(estimateId) {
+        const prevActiveId = String(state.activeEstimateId || '');
         const selected = Workspace.selectEstimate(state, estimateId);
         if (!selected) return;
         // Selecting a tab is local UI state, not an estimate content edit. It
         // must not increment the estimate revision or conflict with another
         // estimator editing that same estimate.
-        ui.selected.clear(); saveLocal(); render(); publish();
+        ui.selected.clear(); syncEstimatingSubheadInfo(); saveLocal(); render(); publish();
+        if (prevActiveId !== String(selected.id)) {
+            window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', {
+                detail: { projectId, estimateId: selected.id, source: 'estimating' }
+            }));
+        }
+    }
+
+    function refreshTableIfActive() {
+        if (!isEstimatingTabActive()) {
+            estimatingTableDirty = true;
+            return;
+        }
+        estimatingTableDirty = false;
+        renderTable();
+    }
+
+    function flushEstimatingTabView() {
+        const hasPendingSync = typeof window.hasPendingTakeoffEstimatingSync === 'function' && window.hasPendingTakeoffEstimatingSync();
+        if (!estimatingTableDirty && !hasPendingSync) {
+            if (allItems().some(r => assemblyNeedsHydration(r.item))) {
+                hydrateBrokenAssembliesInCurrentEstimate();
+            }
+            return;
+        }
+        setEstimatingLoading(true, 'Synchronizing estimate items...');
+        const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : cb => setTimeout(cb, 0);
+        raf(() => setTimeout(() => {
+            try {
+                if (typeof window.flushTakeoffEstimatingSync === 'function') {
+                    window.flushTakeoffEstimatingSync();
+                }
+                render(true);
+                if (allItems().some(r => assemblyNeedsHydration(r.item))) {
+                    hydrateBrokenAssembliesInCurrentEstimate();
+                }
+            } finally {
+                if (ui.loadState !== 'loading') setEstimatingLoading(false);
+            }
+        }, 0));
     }
 
     window.addEventListener('takeoff:estimating-lines-updated', event => {
         if (event.detail?.projectId && String(event.detail.projectId) !== String(projectId)) return;
-        if (event.detail?.activeEstimateId && String(event.detail.activeEstimateId) !== String(state.activeEstimateId)) return;
+        const incomingEstId = String(event.detail?.activeEstimateId || '');
+        const isBackgroundEstimate = Boolean(event.detail?.allowBackgroundEstimate);
+        if (!isBackgroundEstimate && incomingEstId && incomingEstId !== String(state.activeEstimateId)) return;
         if (!(event.detail?.groups || []).length && event.detail?.complete !== true) return;
-        const scopedSnapshot = Boolean(event.detail?.activeEstimateId)
+        const scopedSnapshot = Boolean(incomingEstId)
             && Number(event.detail?.version || 0) >= 2;
-        reconcileGroups(event.detail?.activeEstimateId || state.activeEstimateId,
-            event.detail?.groups || [], { importNewLayers: scopedSnapshot });
+        reconcileGroups(incomingEstId || state.activeEstimateId,
+            event.detail?.groups || [], {
+            importNewLayers: scopedSnapshot,
+            backgroundEstimate: isBackgroundEstimate && incomingEstId !== String(state.activeEstimateId)
+        });
     });
-    window.addEventListener('takeoff:layer-updated', () => renderTable());
-    window.addEventListener('takeoff:layers-updated', () => renderTable());
-    window.addEventListener('takeoff:layer-visuals-updated', () => renderTable());
-    window.addEventListener('takeoff:project-state-updated', () => renderTable());
+    window.addEventListener('takeoff:layer-updated', refreshTableIfActive);
+    window.addEventListener('takeoff:layers-updated', refreshTableIfActive);
+    window.addEventListener('takeoff:layer-visuals-updated', refreshTableIfActive);
+    window.addEventListener('takeoff:project-state-updated', refreshTableIfActive);
     window.addEventListener('takeoff:tab-activated', event => {
-        if (event.detail?.tab === 'estimating') renderTable();
+        if (event.detail?.tab === 'estimating') flushEstimatingTabView();
+        else syncEstimatingSubheadInfo();
     });
     document.addEventListener('click', e => {
         if (e.target.closest('#tabBtnEstimating, [data-tab="estimating"], [href="#tab-estimating"]')) {
-            setTimeout(renderTable, 40);
+            setTimeout(flushEstimatingTabView, 0);
         }
     });
     window.addEventListener('takeoff:estimating-link-requested', event => {
@@ -5013,16 +6846,9 @@ const estimateMenu = target.closest('[data-estimate-menu]');
     });
     window.addEventListener('takeoff:active-estimate-changed', event => {
         if (event.detail?.projectId && String(event.detail.projectId) !== String(projectId)) return;
+        if (event.detail?.source === 'estimating') return;
+        if (String(state.activeEstimateId || '') === String(event.detail?.estimateId || '')) return;
         selectEstimate(event.detail?.estimateId);
-    });
-    window.addEventListener('takeoff:layer-visuals-updated', () => {
-        renderTable();
-    });
-    window.addEventListener('takeoff:layers-updated', () => {
-        renderTable();
-    });
-    window.addEventListener('takeoff:layer-updated', () => {
-        renderTable();
     });
     window.addEventListener('takeoff:layer-properties-updated', event => {
         const detail = event.detail || {};
@@ -5070,16 +6896,78 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         estimate.groups.push(Workspace.group(detail.group));
         changed(`Created Takeoff group ${detail.group.name || ''}`.trim());
     });
+    window.addEventListener('takeoff:estimating-group-rename-requested', event => {
+        const detail = event.detail || {};
+        if (detail.projectId && String(detail.projectId) !== String(projectId)) return;
+        if (detail.estimateId && String(detail.estimateId) !== String(state.activeEstimateId)) return;
+        const nextName = String(detail.name || '').trim().replace(/\s+/g, ' ');
+        if (!nextName) return;
+        const estimate = current();
+        const rawGroupId = String(detail.groupId || '');
+        const rawTakeoffGroupId = String(detail.takeoffGroupId || '');
+        const oldName = String(detail.oldName || '').trim();
+        const group = (estimate.groups || []).find(row =>
+            (rawGroupId && (String(row.id) === rawGroupId || String(row.takeoffGroupId || '') === rawGroupId))
+            || (rawTakeoffGroupId && (String(row.takeoffGroupId || '') === rawTakeoffGroupId
+                || String(row.id) === `takeoff_group_${rawTakeoffGroupId}`
+                || String(row.id) === rawTakeoffGroupId))
+            || (oldName && String(row.name || '').trim() === oldName)
+        );
+        if (!group || group.name === nextName) return;
+        group.name = nextName;
+        (group.items || []).forEach(it => { it.groupName = nextName; });
+        changed(`Renamed group "${nextName}"`);
+    });
+    window.addEventListener('takeoff:estimating-items-reorder-requested', event => {
+        const detail = event.detail || {};
+        if (detail.projectId && String(detail.projectId) !== String(projectId)) return;
+        if (String(detail.estimateId || '') !== String(state.activeEstimateId)) return;
+        const { sourceLayerId, targetLayerId, targetGroupId } = detail;
+        let draggedItem = null;
+        for (const g of current().groups) {
+            const item = (g.items || []).find(it => String(it.takeoffLayerId || it.id) === String(sourceLayerId));
+            if (item) { draggedItem = item; break; }
+        }
+        if (!draggedItem) return;
+        let targetItemId = null;
+        if (targetLayerId) {
+            for (const g of current().groups) {
+                const item = (g.items || []).find(it => String(it.takeoffLayerId || it.id) === String(targetLayerId));
+                if (item) { targetItemId = item.id; break; }
+            }
+        }
+        let tgtGroupId = null;
+        if (targetGroupId) {
+            const grp = current().groups.find(g => String(g.takeoffGroupId || g.id) === String(targetGroupId) || String(g.id) === `takeoff_group_${targetGroupId}`);
+            if (grp) tgtGroupId = grp.id;
+        }
+        moveEstimatingItem(draggedItem.id, targetItemId, tgtGroupId, true);
+    });
+
     window.addEventListener('takeoff:estimating-groups-reorder-requested', event => {
         const detail = event.detail || {};
         if (detail.projectId && String(detail.projectId) !== String(projectId)) return;
         if (String(detail.estimateId || '') !== String(state.activeEstimateId) || !Array.isArray(detail.groupIds)) return;
         const order = new Map(detail.groupIds.map((id, index) => [String(id), index]));
         const estimate = current();
+        let renamedDuringReorder = false;
+        if (Array.isArray(detail.groupNames)) {
+            const nameById = new Map(detail.groupNames.map(entry => [String(entry.id), entry.name]));
+            const nameByTakeoffId = new Map(detail.groupNames.map(entry => [String(entry.takeoffGroupId), entry.name]));
+            estimate.groups.forEach(group => {
+                const candidateName = nameById.get(String(group.id))
+                    || (group.takeoffGroupId ? nameByTakeoffId.get(String(group.takeoffGroupId)) : null);
+                if (candidateName && candidateName !== group.name) {
+                    group.name = candidateName;
+                    (group.items || []).forEach(it => { it.groupName = candidateName; });
+                    renamedDuringReorder = true;
+                }
+            });
+        }
         const before = estimate.groups.map(group => String(group.id)).join('|');
         estimate.groups.sort((a, b) => (order.get(String(a.id)) ?? Number.MAX_SAFE_INTEGER) - (order.get(String(b.id)) ?? Number.MAX_SAFE_INTEGER));
         estimate.groups.forEach((group, index) => { group.sortOrder = index; });
-        if (before === estimate.groups.map(group => String(group.id)).join('|')) return;
+        if (!renamedDuringReorder && before === estimate.groups.map(group => String(group.id)).join('|')) return;
         changed('Reordered Takeoff groups');
     });
     window.addEventListener('takeoff:estimating-action-requested', event => {
@@ -5107,9 +6995,13 @@ const estimateMenu = target.closest('[data-estimate-menu]');
     });
 
     window.projectEstimatingSave = async function () {
-        if (!projectId) return true;
+        if (!projectId) {
+            estimatingHasUnsavedCheckpoint = false;
+            return true;
+        }
         const started = Date.now();
         ui.saveRequested = true;
+        ui.explicitSaveRequested = true;
         while (ui.saving || ui.saveRequested) {
             if (Date.now() - started > 15000) throw new Error('Estimating save timed out.');
             if (ui.saving) {
@@ -5117,18 +7009,24 @@ const estimateMenu = target.closest('[data-estimate-menu]');
                 continue;
             }
             clearTimeout(ui.saveTimer);
-            await saveServer();
+            await saveServer({ showModal: false });
             if (ui.loadState === 'error') {
                 const error = new Error(ui.message);
                 error.code = ui.lastErrorCode || 'save_failed';
                 throw error;
             }
         }
+        estimatingHasUnsavedCheckpoint = false;
+        ui.explicitSaveRequested = false;
         return true;
     };
 
     function catalogDomainOptions(options = {}) {
-        const result = { ...options };
+        const result = {
+            matchUnlinkedByCodeOrName: true,
+            forceInPlace: true,
+            ...options
+        };
         delete result.estimateId;
         return result;
     }
@@ -5145,9 +7043,10 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         const catalog = await Catalog.getSnapshot();
         const domainOptions = catalogDomainOptions(options);
         const prepared = Application.prepareCatalogUpdate(Workspace.clone(estimate), catalog, domainOptions);
-        const strategy = Application.resolveCatalogUpdateStrategy(estimate);
+        const strategy = Application.resolveCatalogUpdateStrategy(estimate, domainOptions);
         return {
             ...prepared,
+            estimateName: estimate.name || 'Active Estimate',
             strategy,
             currentEstimateRevision: Number(estimate.estimateRevision || 1),
             projectedEstimateRevision: Number(estimate.estimateRevision || 1)
@@ -5205,10 +7104,63 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         };
     };
 
-    window.isEstimatingDirty = () => Boolean(ui.saving || ui.saveRequested || dirtyEstimateIds.size);
+    window.isEstimatingDirty = () => Boolean(ui.saving || ui.saveRequested || dirtyEstimateIds.size || estimatingHasUnsavedCheckpoint);
+
+    function buildEstimatePatchPayload(sentIds) {
+        const estimates = Workspace.clone(state.estimates.filter(estimate => sentIds.includes(String(estimate.id)))).map(estimate => {
+            const estSummary = buildEstimateSummaryPayload(estimate);
+            return {
+                ...estimate,
+                is_primary: Boolean(estimate.is_primary || estimate.isPrimary),
+                isPrimary: Boolean(estimate.is_primary || estimate.isPrimary),
+                estimateSummary: estSummary,
+                estimateTotal: estSummary.estimateTotal,
+                totalSales: estSummary.estimateTotal
+            };
+        });
+        return {
+            action: 'save',
+            mode: 'patch',
+            project_id: projectId,
+            updates: estimates,
+            estimates,
+            project_estimating_table_settings: window.ProjectState?.projectMeta?.estimatingTableSettings || null,
+            state: {
+                schemaVersion: state.schemaVersion,
+                projectId: state.projectId,
+                activeEstimateId: state.activeEstimateId,
+                clientUiUpdatedAt: state.clientUiUpdatedAt,
+                estimates
+            },
+            summary: buildEstimateSummaryPayload(current())
+        };
+    }
+
+    function flushDirtyEstimatesKeepalive() {
+        if (!projectId || ui.saving || !dirtyEstimateIds.size || calculationErrors().length) return;
+        const sentIds = [...dirtyEstimateIds].filter(id => !conflictedEstimateIds.has(id)
+            && state.estimates.some(estimate => String(estimate.id) === id));
+        if (!sentIds.length) return;
+        const payload = buildEstimatePatchPayload(sentIds);
+        try {
+            fetch(`${apiUrl}?action=save&project_id=${projectId}`, {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify(payload),
+                keepalive: true
+            });
+        } catch (_) { }
+    }
+
+    window.addEventListener('pagehide', flushDirtyEstimatesKeepalive);
+    document.addEventListener('visibilitychange', () => {
+        if (document.visibilityState === 'hidden') flushDirtyEstimatesKeepalive();
+    });
 
     window.addEventListener('beforeunload', event => {
-        if (!ui.saving && !ui.saveRequested && !dirtyEstimateIds.size) return;
+        const hasPendingBuffer = Boolean(ui.saving || ui.saveRequested || dirtyEstimateIds.size);
+        if (hasPendingBuffer) flushDirtyEstimatesKeepalive();
+        if (!hasPendingBuffer && !estimatingHasUnsavedCheckpoint) return;
         event.preventDefault();
         event.returnValue = '';
     });
@@ -5241,12 +7193,10 @@ const estimateMenu = target.closest('[data-estimate-menu]');
             toolbarBtn.title = willCollapse ? 'Show summary panel' : 'Hide summary panel';
         }
 
-        try {
-            localStorage.setItem('takeoff.estimatingRightCollapsed', willCollapse ? '1' : '0');
-        } catch (_) {}
+        safeSetLocalStorage('takeoff.estimatingRightCollapsed', willCollapse ? '1' : '0');
     }
 
-    
+
     let draggedNoteInfo = null;
     let draggedMarkupInfo = null;
 
@@ -5430,7 +7380,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
             resizer.classList.add('is-dragging');
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
-            try { resizer.setPointerCapture(e.pointerId); } catch (_) {}
+            try { resizer.setPointerCapture(e.pointerId); } catch (_) { }
         });
 
         const onPointerMove = e => {
@@ -5449,9 +7399,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
             document.body.style.cursor = '';
             document.body.style.userSelect = '';
             root.querySelectorAll('[data-summary-col-resizer].is-dragging').forEach(r => r.classList.remove('is-dragging'));
-            try {
-                localStorage.setItem('takeoff.summaryColWidths', JSON.stringify(ui.summaryColWidths || {}));
-            } catch (_) {}
+            safeSetLocalStorage('takeoff.summaryColWidths', JSON.stringify(ui.summaryColWidths || {}));
             activeCol = null;
             activeTh = null;
         };
@@ -5460,7 +7408,7 @@ const estimateMenu = target.closest('[data-estimate-menu]');
         window.addEventListener('pointerup', onPointerUp);
         window.addEventListener('pointercancel', onPointerUp);
     }
-function initEstimatingResizer() {
+    function initEstimatingResizer() {
         const resizer = $('estSplitResizer');
         const estRight = root.querySelector('.est-right');
         const estMain = root.querySelector('.est-main');
@@ -5481,7 +7429,7 @@ function initEstimatingResizer() {
             if (savedCollapsed === '1') {
                 toggleEstimatingRight(true);
             }
-        } catch (_) {}
+        } catch (_) { }
 
         toolbarToggle?.addEventListener('click', e => {
             e.stopPropagation();
@@ -5503,7 +7451,7 @@ function initEstimatingResizer() {
             estMain?.classList.add('is-resizing');
             document.body.style.cursor = 'col-resize';
             document.body.style.userSelect = 'none';
-            try { resizer.setPointerCapture(e.pointerId); } catch (_) {}
+            try { resizer.setPointerCapture(e.pointerId); } catch (_) { }
             e.preventDefault();
         };
 
@@ -5526,12 +7474,10 @@ function initEstimatingResizer() {
             document.body.style.userSelect = '';
             try {
                 if (e?.pointerId) resizer.releasePointerCapture(e.pointerId);
-            } catch (_) {}
+            } catch (_) { }
 
             const finalWidth = parseInt(getComputedStyle(estRight).width, 10) || 420;
-            try {
-                localStorage.setItem('takeoff.estimatingRightWidth', finalWidth);
-            } catch (_) {}
+            safeSetLocalStorage('takeoff.estimatingRightWidth', String(finalWidth));
         };
 
         resizer.addEventListener('pointerdown', onPointerDown);
@@ -5540,7 +7486,80 @@ function initEstimatingResizer() {
         window.addEventListener('pointercancel', stopDragging);
     }
 
-    saveLocal();
+    function showEstCanvasToast(text, type = 'info') {
+        const container = document.fullscreenElement || document.body;
+        document.querySelectorAll('.toast-lite').forEach(el => el.remove());
+        const toast = document.createElement('div');
+        toast.className = 'toast-lite';
+        toast.setAttribute('role', 'status');
+        toast.setAttribute('aria-live', 'polite');
+        toast.style.cssText = 'position:fixed !important; top:16px !important; bottom:auto !important; left:50% !important; right:auto !important; transform:translateX(-50%) !important; z-index:999999 !important; border-radius:9999px !important; padding:4px 14px !important; height:28px !important; font-size:12px !important; display:inline-flex !important; align-items:center !important; gap:7px !important; pointer-events:none !important; white-space:nowrap !important;';
+        const iconClass = type === 'error' ? 'fa-circle-exclamation' : (type === 'success' ? 'fa-circle-check' : 'fa-info-circle');
+        const iconColor = type === 'error' ? '#ef4444' : (type === 'success' ? '#22c55e' : '#38bdf8');
+        toast.innerHTML = `<i class="fas ${iconClass}" style="color:${iconColor}; font-size:12px; margin-right:4px;"></i><span>${esc(text)}</span>`;
+        container.appendChild(toast);
+        setTimeout(() => { try { toast.remove(); } catch (_) {} }, 3400);
+    }
+
+    function syncEstimatingFullscreenUi() {
+        const isNativeFs = Boolean(document.fullscreenElement === root || (document.fullscreenElement && root && document.fullscreenElement.contains(root)));
+        const isFallbackFs = root.classList.contains('est-fullscreen') && !document.fullscreenElement;
+        const isFs = Boolean(isNativeFs || isFallbackFs);
+        root.classList.toggle('is-fullscreen', isFs);
+        document.body.classList.toggle('est-is-fullscreen', isFs);
+        const fsBtn = $('estBtnFullscreen');
+        if (fsBtn) {
+            fsBtn.classList.toggle('is-active', isFs);
+            fsBtn.setAttribute('aria-pressed', isFs ? 'true' : 'false');
+            fsBtn.setAttribute('title', isFs ? 'Exit full screen' : 'Full screen');
+            const icon = fsBtn.querySelector('i');
+            if (icon) icon.className = isFs ? 'fas fa-compress' : 'fas fa-expand';
+        }
+        return isFs;
+    }
+
+    async function toggleEstimatingFullscreen() {
+        const currentlyNative = document.fullscreenElement === root;
+        const currentlyFallback = root.classList.contains('est-fullscreen');
+        if (currentlyNative) {
+            try { await document.exitFullscreen?.(); } catch (_) {}
+            root.classList.remove('est-fullscreen', 'is-fullscreen');
+            document.body.classList.remove('est-is-fullscreen');
+            syncEstimatingFullscreenUi();
+            return;
+        }
+        if (currentlyFallback) {
+            root.classList.remove('est-fullscreen', 'is-fullscreen');
+            document.body.classList.remove('est-is-fullscreen');
+            syncEstimatingFullscreenUi();
+            return;
+        }
+        if (typeof root.requestFullscreen === 'function') {
+            try {
+                await root.requestFullscreen();
+                syncEstimatingFullscreenUi();
+                showEstCanvasToast('Fullscreen active — press the Full screen button again (or Esc) to exit', 'info');
+                return;
+            } catch (_) { }
+        }
+        root.classList.add('est-fullscreen', 'is-fullscreen');
+        document.body.classList.add('est-is-fullscreen');
+        syncEstimatingFullscreenUi();
+        showEstCanvasToast('Fullscreen active — press the Full screen button again to exit', 'info');
+    }
+
+    document.addEventListener('fullscreenchange', () => {
+        const isFs = Boolean(document.fullscreenElement === root);
+        if (!isFs) root.classList.remove('est-fullscreen');
+        syncEstimatingFullscreenUi();
+    });
+
+    const hasInitialGroups = (current()?.groups || []).length > 0;
+    if (!projectId || hasInitialGroups || dirtyEstimateIds.size > 0) {
+        saveLocal();
+    } else {
+        saveLocal({ publish: false });
+    }
     render();
     initEstimatingResizer();
     loadServer();

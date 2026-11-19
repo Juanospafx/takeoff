@@ -66,23 +66,28 @@ if ($filePath !== '') {
     <link href="https://cdn.jsdelivr.net/npm/bootstrap@5.3.0/dist/css/bootstrap.min.css" rel="stylesheet">
     <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
     <link href="https://fonts.googleapis.com/css2?family=Outfit:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <link rel="stylesheet" href="../assets/design_system.css?v=<?= filemtime(__DIR__ . '/../assets/design_system.css') ?>">
     
     <script src="https://cdn.jsdelivr.net/npm/heic2any@0.0.4/dist/heic2any.min.js"></script>
 
     <style>
-        /* --- TEMA MIDNIGHT BLUE (V5.0) --- */
-        :root { 
-            --bg-body: #0b1120;       
-            --bg-panel: #111827;      
-            --bg-header: rgba(11, 17, 32, 0.95);
-            --border: rgba(255,255,255,0.05);        
+        /* --- BRIGHTRONIX PREVIEW DARK CHROME --- */
+        :root,
+        [data-theme="light"],
+        body.theme-light,
+        [data-theme="dark"],
+        body.theme-dark { 
+            --bg-body: #1b212d;       
+            --bg-panel: #242a38;      
+            --bg-header: #242a38;
+            --border: #2f384a;        
             --text-main: #ffffff;     
-            --text-muted: #c5cad1;
-            --primary: #6366f1;        
+            --text-muted: #94a3b8;
+            --primary: #fb5a3a;        
             --accent: #0ea5e9;
             --danger: #ef4444;
             --success: #10b981;
-            --radius-box: 20px;
+            --radius-box: 12px;
             --radius-btn: 50px;
         }
 
@@ -104,7 +109,6 @@ if ($filePath !== '') {
         .app-header {
             grid-column: 1 / -1; background: var(--bg-header); border-bottom: 1px solid var(--border);
             display: flex; align-items: center; justify-content: space-between; padding: 0 20px; z-index: 50;
-            backdrop-filter: blur(10px);
         }
         
         .brand-logo { font-weight: 700; font-size: 1.2rem; color: white; display:flex; align-items: center; gap: 10px; }
@@ -145,11 +149,11 @@ if ($filePath !== '') {
         .history-list { padding: 20px; overflow-y: auto; flex-grow: 1; }
         
         .report-card { 
-            background: #1e293b; border: 1px solid var(--border); border-radius: 15px; 
-            padding: 15px; margin-bottom: 15px; transition: 0.3s ease; 
+            background: #1f2633; border: 1px solid var(--border); border-radius: 10px; 
+            padding: 15px; margin-bottom: 15px; transition: border-color 0.15s ease, transform 0.15s ease; 
             position: relative; overflow: hidden; 
         }
-        .report-card:hover { border-color: var(--accent); transform: scale(1.02); }
+        .report-card:hover { border-color: var(--accent); transform: scale(1.01); }
         .report-role { color: var(--accent); font-size: 0.7rem; text-transform: uppercase; font-weight: 800; }
         .report-desc { color: var(--text-muted); font-size: 0.85rem; margin: 10px 0; line-height: 1.4; font-style: italic; }
         .report-meta { display: flex; justify-content: space-between; align-items: center; border-top: 1px solid rgba(255,255,255,0.05); padding-top: 10px; margin-top: 10px; }
@@ -157,16 +161,16 @@ if ($filePath !== '') {
 
         .btn-del-report {
             background: transparent; border: none; color: var(--text-muted); 
-            font-size: 0.8rem; cursor: pointer; transition: 0.2s;
+            font-size: 0.8rem; cursor: pointer; transition: color 0.15s ease, background-color 0.15s ease;
             display: flex; align-items: center; justify-content: center;
-            width: 25px; height: 25px; border-radius: 50%;
+            width: 28px; height: 28px; border-radius: 6px;
         }
         .btn-del-report:hover { color: var(--danger); background: rgba(239, 68, 68, 0.1); }
         .btn-del-report:disabled { opacity: 0.5; cursor: not-allowed; }
 
         /* CANVAS AREA */
-        .canvas-area { grid-row: 2; grid-column: 2; background: #0f172a; position: relative; overflow: hidden; }
-        #map { width: 100%; height: 100%; background: #0f172a; position: relative; overflow: hidden; }
+        .canvas-area { grid-row: 2; grid-column: 2; background: #1b212d; position: relative; overflow: hidden; }
+        #map { width: 100%; height: 100%; background: #1b212d; position: relative; overflow: hidden; }
         .viewer-content { position: absolute; top: 0; left: 0; transform-origin: 0 0; }
         #pdf-canvas { display: none; }
         #img-view { display: none; max-width: none; max-height: none; }
@@ -179,33 +183,33 @@ if ($filePath !== '') {
             box-shadow: 0 10px 30px rgba(0, 0, 0, 0.5); color: white;
             z-index: 100; pointer-events: auto;
         }
-        .float-btn { background: transparent; border: none; color: white; width: 30px; height: 30px; border-radius: 50%; display: flex; align-items: center; justify-content: center; transition: 0.2s; }
+        .float-btn { background: transparent; border: none; color: white; width: 32px; height: 32px; border-radius: 6px; display: flex; align-items: center; justify-content: center; transition: background-color 0.15s ease; }
         .float-btn:hover { background: rgba(255,255,255,0.1); }
 
         .badge-read { background: rgba(234, 179, 8, 0.1); color: #eab308; border: 1px solid rgba(234, 179, 8, 0.2); font-weight: 700; }
         
         /* BOTÓN DE ACCIÓN (Estilo Editor) */
         .btn-action { 
-            background: var(--primary); color: white; padding: 10px 25px; border-radius: 50px; 
-            font-weight: 600; border: none; display: flex; align-items: center; gap: 10px; transition: 0.3s; white-space: nowrap; text-decoration: none; font-size: 0.9rem;
+            background: var(--primary); color: white; padding: 0 20px; height: 34px; border-radius: 50px; 
+            font-weight: 600; border: none; display: inline-flex; align-items: center; gap: 8px; transition: background-color 0.15s ease, transform 0.15s ease, box-shadow 0.15s ease; white-space: nowrap; text-decoration: none; font-size: 0.85rem;
         }
-        .btn-action:hover { background: #4f46e5; transform: translateY(-2px); box-shadow: 0 5px 15px rgba(99, 102, 241, 0.3); color: white; }
+        .btn-action:hover { background: #e14e32; transform: translateY(-1px); box-shadow: 0 5px 15px rgba(251, 90, 58, 0.28); color: white; }
 
         .btn-close-custom { 
-            width: 40px; height: 40px; border-radius: 50%; border: 1px solid var(--border); 
+            width: 34px; height: 34px; border-radius: 6px; border: 1px solid var(--border); 
             background: transparent; color: var(--danger); display: flex; align-items: center; justify-content: center; 
-            text-decoration: none; transition: 0.2s;
+            text-decoration: none; transition: background-color 0.15s ease, color 0.15s ease, border-color 0.15s ease;
         }
         .btn-close-custom:hover { background: var(--danger); color: white; border-color: var(--danger); }
         
         #toast-container { position: absolute; bottom: 80px; left: 30px; z-index: 1100; pointer-events: none; }
-        .toast-msg { background: var(--bg-panel); border: 1px solid var(--border); padding: 12px 20px; border-radius: 12px; margin-top: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); color: white; display: flex; align-items: center; gap: 10px; animation: slideIn 0.3s; }
+        .toast-msg { background: var(--bg-panel); border: 1px solid var(--border); padding: 12px 20px; border-radius: 12px; margin-top: 10px; box-shadow: 0 10px 30px rgba(0,0,0,0.5); color: white; display: flex; align-items: center; gap: 10px; animation: slideIn 0.25s ease; }
         @keyframes slideIn { from { transform: translateX(-50px); opacity: 0; } to { transform: translateX(0); opacity: 1; } }
 
         /* OVERLAY MÓVIL */
         .sidebar-overlay { 
             display: none; position: fixed; top: 0; left: 0; width: 100%; height: 100%; 
-            background: rgba(0,0,0,0.5); z-index: 900; backdrop-filter: blur(2px); 
+            background: rgba(15, 23, 42, 0.52); z-index: 900; backdrop-filter: blur(5px); -webkit-backdrop-filter: blur(5px); 
         }
         .mobile-bottom-bar { display: none; }
         .mobile-toggle-header { display: none; background: transparent; border: none; color: white; font-size: 1.2rem; }

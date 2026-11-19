@@ -86,8 +86,8 @@ try {
         }
         $original = basename((string)$_FILES['file']['name']);
         $extension = strtolower(pathinfo($original, PATHINFO_EXTENSION));
-        $allowedExtensions = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'dwg', 'dxf', 'doc', 'docx', 'xls', 'xlsx', 'csv', 'txt', 'rtf', 'ppt', 'pptx', 'zip'];
-        if (!$extension || !in_array($extension, $allowedExtensions, true)) takeoff_json_error(415, 'UNSUPPORTED_DOCUMENT', 'Unsupported document format.');
+        $allowedExtensions = ['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'svg'];
+        if (!$extension || !in_array($extension, $allowedExtensions, true)) takeoff_json_error(415, 'UNSUPPORTED_DOCUMENT', 'Only PDF and image files are supported.');
         $targetDir = __DIR__ . '/../uploads/';
         if (!is_dir($targetDir) && !mkdir($targetDir, 0755, true)) throw new RuntimeException('Upload directory is unavailable.');
         $safeName = preg_replace('/[^A-Za-z0-9._-]/', '_', $original);
@@ -110,14 +110,35 @@ try {
         }
         $uploadedBy = $userId;
         $path = 'uploads/' . $storedName;
+        $requestedFolderName = trim((string)($_POST['folder_name'] ?? ''));
+        $resolvedFolderId = null;
+        if ($requestedFolderName !== '') {
+            try {
+                $folderCols = takeoff_table_columns($pdo, 'folders');
+                if (isset($folderCols['id'], $folderCols['project_id'], $folderCols['name'])) {
+                    $findFolder = $pdo->prepare('SELECT id FROM folders WHERE project_id=? AND name=?' . takeoff_active_clause($folderCols) . ' LIMIT 1');
+                    $findFolder->execute([$projectId, $requestedFolderName]);
+                    $foundId = $findFolder->fetchColumn();
+                    if ($foundId) {
+                        $resolvedFolderId = (int)$foundId;
+                    } else {
+                        $insFolder = $pdo->prepare('INSERT INTO folders (project_id, name) VALUES (?, ?)');
+                        $insFolder->execute([$projectId, $requestedFolderName]);
+                        $resolvedFolderId = (int)$pdo->lastInsertId() ?: null;
+                    }
+                }
+            } catch (Throwable $_) {
+                $resolvedFolderId = null;
+            }
+        }
         try {
-            $insert = $pdo->prepare('INSERT INTO files (project_id,folder_id,filename,filepath,file_type,uploaded_by,version_number) VALUES (?,NULL,?,?,?,?,1)');
-            $insert->execute([$projectId, $original, $path, $extension, $uploadedBy]);
+            $insert = $pdo->prepare('INSERT INTO files (project_id,folder_id,filename,filepath,file_type,uploaded_by,version_number) VALUES (?,?,?,?,?,?,1)');
+            $insert->execute([$projectId, $resolvedFolderId, $original, $path, $extension, $uploadedBy]);
         } catch (Throwable $e) {
             @unlink($targetPath);
             throw $e;
         }
-        echo json_encode(['success' => true, 'file' => ['id' => (int)$pdo->lastInsertId(), 'filename' => $original, 'filepath' => $path, 'file_type' => $extension]], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        echo json_encode(['success' => true, 'file' => ['id' => (int)$pdo->lastInsertId(), 'filename' => $original, 'filepath' => $path, 'file_type' => $extension, 'folder_id' => $resolvedFolderId, 'folder_name' => $requestedFolderName ?: null]], JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
         exit;
     }
 

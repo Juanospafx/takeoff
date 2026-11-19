@@ -689,7 +689,44 @@ ${xmlRows.join('')}
 </Workbook>`;
     }
 
-    const service = { normalRows, flatRows, needsCatalog, unresolvedAssemblies, csv, bomRows, bomCsv, excelXml };
+    function summaryCsv(estimate, settings = {}) {
+        const rows = bomRows(estimate, settings);
+        const byGroup = new Map();
+        rows.forEach(row => {
+            if (row.rowType === 'component') return;
+            const gName = text(row.groupName || 'General');
+            if (!byGroup.has(gName)) {
+                byGroup.set(gName, { groupName: gName, itemCount: 0, material: 0, laborHours: 0, laborCost: 0, equipment: 0, totalCost: 0 });
+            }
+            const agg = byGroup.get(gName);
+            agg.itemCount += 1;
+            agg.material += Number(row.totalMaterialCost || 0);
+            agg.laborHours += Number(row.totalLaborHours || 0);
+            agg.laborCost += Number(row.totalLaborCost || 0);
+            agg.equipment += Number(row.totalEquipmentCost || 0);
+            agg.totalCost += Number(row.totalCost || 0);
+        });
+        const escape = val => {
+            const raw = text(val);
+            return /[",\r\n]/.test(raw) ? `"${raw.replace(/"/g, '""')}"` : raw;
+        };
+        const headers = ['Group', 'Line Items', 'Material Cost', 'Labor Hours', 'Labor Cost', 'Equipment Cost', 'Direct Total Cost'];
+        const lines = [headers.map(escape).join(',')];
+        byGroup.forEach(agg => {
+            lines.push([
+                agg.groupName,
+                agg.itemCount,
+                agg.material.toFixed(2),
+                agg.laborHours.toFixed(2),
+                agg.laborCost.toFixed(2),
+                agg.equipment.toFixed(2),
+                agg.totalCost.toFixed(2)
+            ].map(escape).join(','));
+        });
+        return '\uFEFF' + lines.join('\r\n');
+    }
+
+    const service = { normalRows, flatRows, needsCatalog, unresolvedAssemblies, csv, bomRows, bomCsv, summaryCsv, excelXml };
     global.EstimatingExportService = service;
     if (typeof module !== 'undefined') module.exports = service;
 })(typeof window !== 'undefined' ? window : globalThis);

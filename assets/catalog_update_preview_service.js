@@ -11,7 +11,7 @@
 
     const DEFAULT_OPTIONS = Object.freeze({
         preserveOverrides: true, includeAssemblies: true, includePricing: true, includeLabor: true,
-        includeEquipment: true, selectedCatalogItemIds: null
+        includeEquipment: true, matchUnlinkedByCodeOrName: false, selectedCatalogItemIds: null
     });
     const clone = value => value === undefined ? undefined : JSON.parse(JSON.stringify(value));
     const present = value => value !== null && value !== undefined;
@@ -22,6 +22,33 @@
         return { ...DEFAULT_OPTIONS, ...(options || {}) };
     }
 
+    function legacyItemPricing(item) {
+        return {
+            materialUnitCost: numeric(item?.unitMaterialCost ?? item?.unitCost),
+            equipmentUnitCost: numeric(item?.unitEquipmentCost),
+            subcontractorUnitCost: numeric(item?.unitSubcontractorCost),
+            laborHoursPerUnit: numeric(item?.unitLabor),
+            laborRate: numeric(item?.laborRate)
+        };
+    }
+
+    function clearSelectedOverrides(item, policy) {
+        const nextOverrides = clone(item.overrides || Snapshots.emptyOverrides());
+        const nextManual = item._manualFields ? { ...item._manualFields } : null;
+        if (policy.preserveOverrides !== false) {
+            return { overrides: nextOverrides, manualFields: nextManual };
+        }
+        const fieldsToClear = [];
+        if (policy.includePricing) fieldsToClear.push('materialUnitCost', 'subcontractorUnitCost');
+        if (policy.includeEquipment) fieldsToClear.push('equipmentUnitCost');
+        if (policy.includeLabor) fieldsToClear.push('laborHoursPerUnit', 'laborRate');
+        fieldsToClear.forEach(field => {
+            nextOverrides[field] = null;
+            if (nextManual) delete nextManual[field];
+        });
+        return { overrides: nextOverrides, manualFields: nextManual };
+    }
+
     function catalogMap(input) {
         if (input instanceof Map) return new Map([...input.entries()].map(([key, value]) => [String(key), value]));
         const items = Array.isArray(input) ? input : (Array.isArray(input?.items) ? input.items : []);
@@ -30,15 +57,14 @@
 
     function selectedCatalogItem(item, current, options) {
         const previous = item.catalogSnapshot || {};
-        const previousPricing = previous.pricing || {};
+        const previousPricing = previous.pricing || legacyItemPricing(item);
         const currentPricing = current.pricing || {};
         return {
             ...clone(current),
             pricing: {
                 ...clone(currentPricing),
                 materialUnitCost: options.includePricing ? currentPricing.materialUnitCost : previousPricing.materialUnitCost,
-                equipmentUnitCost: options.includePricing && options.includeEquipment
-                    ? currentPricing.equipmentUnitCost : previousPricing.equipmentUnitCost,
+                equipmentUnitCost: options.includeEquipment ? currentPricing.equipmentUnitCost : previousPricing.equipmentUnitCost,
                 subcontractorUnitCost: options.includePricing ? currentPricing.subcontractorUnitCost : previousPricing.subcontractorUnitCost,
                 laborHoursPerUnit: options.includeLabor ? currentPricing.laborHoursPerUnit : previousPricing.laborHoursPerUnit,
                 laborRate: options.includeLabor ? currentPricing.laborRate : previousPricing.laborRate
@@ -115,49 +141,67 @@
     }
 
     function visitItems(estimate, callback) {
-        const visit = (item, parent = null) => {
-            callback(item, parent);
-            (item.children || []).forEach(child => visit(child, item));
+        const visit = (item, parent = null, group = null) => {
+            callback(item, parent, group);
+            (item.children || []).forEach(child => visit(child, item, group));
         };
-        (estimate.groups || []).forEach(group => (group.items || []).forEach(item => visit(item)));
+        (estimate.groups || []).forEach(group => (group.items || []).forEach(item => visit(item, null, group)));
     }
 
     function applyCatalogChangesToClone(estimateClone, changeSet, catalogIndex, options = {}) {
         const projected = clone(estimateClone);
         const index = catalogMap(catalogIndex);
+        const lookup = Detection.buildCatalogLookup ? Detection.buildCatalogLookup(index) : null;
         const policy = normalizeOptions(options);
         const warnings = [];
         const updatedItemIds = [];
         const selectedIds = Array.isArray(policy.selectedCatalogItemIds)
             ? new Set(policy.selectedCatalogItemIds.map(String)) : null;
         visitItems(projected, item => {
-            if (!item.catalogSnapshot) {
+            if (!item.catalogSnapshot && !policy.matchUnlinkedByCodeOrName) {
                 if (present(item.catalogItemId)) warnings.push(`LEGACY_ITEM_NOT_REFRESHABLE:${String(item.id ?? item.catalogItemId)}`);
                 return;
             }
-            const current = index.get(String(item.catalogItemId ?? item.catalogSnapshot.catalogItemId));
-            if (selectedIds && !selectedIds.has(String(item.catalogItemId ?? item.catalogSnapshot.catalogItemId))) return;
+            const resolved = policy.matchUnlinkedByCodeOrName && Detection.resolveCatalogMatch
+                ? Detection.resolveCatalogMatch(item, lookup || index, policy)
+                : { catalogItem: index.get(String(item.catalogItemId ?? item.catalogSnapshot?.catalogItemId)), matchMethod: 'id' };
+            const current = resolved.catalogItem || null;
+            const targetCatalogId = current?.id ?? current?.catalogItemId ?? item.catalogItemId ?? item.catalogSnapshot?.catalogItemId;
+            if (selectedIds && (!present(targetCatalogId) || !selectedIds.has(String(targetCatalogId)))) return;
             if (!current) {
-                warnings.push(`MISSING_CATALOG_ITEM_PRESERVED:${String(item.id ?? item.catalogItemId)}`);
+                if (present(item.catalogItemId) || item.catalogSnapshot) {
+                    warnings.push(`MISSING_CATALOG_ITEM_PRESERVED:${String(item.id ?? item.catalogItemId)}`);
+                }
                 return;
             }
-            const comparison = Detection.compareCatalogItem(item, current);
+            const comparison = Detection.compareCatalogItem(item, current, {
+                matchUnlinkedByCodeOrName: policy.matchUnlinkedByCodeOrName,
+                preserveOverrides: policy.preserveOverrides,
+                matchMethod: resolved.matchMethod
+            });
             if (comparison.status === Detection.STATUS.ERROR) {
-                warnings.push(`CATALOG_COMPARISON_ERROR:${String(item.id ?? item.catalogItemId)}`); return;
+                warnings.push(`CATALOG_COMPARISON_ERROR:${String(item.id ?? targetCatalogId)}`); return;
             }
             if (comparison.status === Detection.STATUS.UNVERSIONED) {
-                warnings.push(`UNVERSIONED_CATALOG_ITEM:${String(item.id ?? item.catalogItemId)}`);
+                warnings.push(`UNVERSIONED_CATALOG_ITEM:${String(item.id ?? targetCatalogId)}`);
             }
             if (comparison.status === Detection.STATUS.CURRENT && !comparison.changes.length) return;
             const previousSnapshot = clone(item.catalogSnapshot);
             if (String(current.type || '').toUpperCase() === 'ASSEMBLY' || item.isAssembly) {
                 reconcileAssemblyChildren(item, previousSnapshot, current, index, policy, warnings);
             }
-            const preservedOverrides = policy.preserveOverrides ? clone(item.overrides || {}) : Snapshots.emptyOverrides();
+            const cleared = clearSelectedOverrides(item, policy);
+            if (cleared.manualFields !== null) item._manualFields = cleared.manualFields;
+            if (!previousSnapshot && current.supplier?.catalogNumber && !item.catalogNumber) {
+                item.catalogNumber = current.supplier.catalogNumber;
+            }
             Snapshots.attachCatalogSnapshot(item, selectedCatalogItem(item, current, policy));
-            item.overrides = preservedOverrides;
+            item.overrides = cleared.overrides;
             Snapshots.refreshEffectiveLegacyFields(item);
-            updatedItemIds.push(String(item.id ?? item.catalogItemId));
+            if (policy.includePricing && !previousSnapshot && present(item.unitMaterialCost)) {
+                item.unitCost = Number(item.unitMaterialCost);
+            }
+            updatedItemIds.push(String(item.id ?? targetCatalogId));
         });
         return { estimate: projected, warnings: [...new Set(warnings)], updatedItemIds, changeSet: clone(changeSet) };
     }
@@ -187,19 +231,32 @@
     function itemImpacts(original, projected, settings, changeSet) {
         const projectedItems = itemMap(projected);
         const changesByCatalog = new Map((changeSet.itemChanges || []).map(change => [String(change.catalogItemId), change]));
+        const changesByEstimateItem = new Map((changeSet.itemChanges || [])
+            .filter(change => present(change.estimateItemId))
+            .map(change => [String(change.estimateItemId), change]));
         const impacts = [];
-        visitItems(original, item => {
+        visitItems(original, (item, _parent, group) => {
             const key = String(item.id ?? item.catalogItemId);
             const afterItem = projectedItems.get(key);
-            if (!afterItem || (!item.catalogSnapshot && !item.catalogItemId)) return;
+            const matchedChange = changesByEstimateItem.get(String(item.id ?? ''))
+                || changesByCatalog.get(String(item.catalogItemId ?? item.catalogSnapshot?.catalogItemId ?? ''));
+            const resolvedCatalogId = item.catalogItemId
+                ?? item.catalogSnapshot?.catalogItemId
+                ?? afterItem?.catalogItemId
+                ?? afterItem?.catalogSnapshot?.catalogItemId
+                ?? matchedChange?.catalogItemId
+                ?? null;
+            if (!afterItem || (!item.catalogSnapshot && !item.catalogItemId && !present(resolvedCatalogId))) return;
             const before = Calculation.calculateItem(item, settings);
             const after = Calculation.calculateItem(afterItem, settings);
             impacts.push({
-                itemId: item.id ?? null, catalogItemId: item.catalogItemId ?? item.catalogSnapshot?.catalogItemId ?? null,
+                itemId: item.id ?? null, catalogItemId: resolvedCatalogId,
+                groupName: group?.name || null,
+                matchedBy: matchedChange?.matchedBy || null,
                 name: item.name || '', before: clone(before), after: clone(after),
                 difference: after.totalSales - before.totalSales,
                 costDifference: after.totalCost - before.totalCost,
-                changes: clone(changesByCatalog.get(String(item.catalogItemId ?? item.catalogSnapshot?.catalogItemId))?.changes || []),
+                changes: clone(matchedChange?.changes || []),
                 overridden: pricingOverridePresent(item)
             });
         });
@@ -224,7 +281,10 @@
         const originalClone = clone(estimate);
         const index = catalogMap(catalogIndex);
         const policy = normalizeOptions(options);
-        const changeSet = Detection.compareEstimate(originalClone, index);
+        const changeSet = Detection.compareEstimate(originalClone, index, {
+            matchUnlinkedByCodeOrName: policy.matchUnlinkedByCodeOrName,
+            preserveOverrides: policy.preserveOverrides
+        });
         const applied = applyCatalogChangesToClone(originalClone, changeSet, index, policy);
         const settings = clone(originalClone.settings || {});
         const currentSummary = Calculation.calculateSummary(originalClone.groups || [], settings);

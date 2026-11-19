@@ -596,26 +596,58 @@
         const groupMenu = document.getElementById('takeoffGroupContextMenu');
         if (groupMenu && isElementVisible(groupMenu) && !shouldKeep(groupMenu)) {
             groupMenu.style.display = 'none';
+            groupMenu.classList.remove('open');
+            delete groupMenu.dataset.activeGroupId;
+            if (groupMenu.__trigger && !shouldKeep(groupMenu.__trigger)) {
+                groupMenu.__trigger.classList.remove('active', 'is-active');
+                groupMenu.__trigger.setAttribute('aria-expanded', 'false');
+            }
+            groupMenu.__trigger = null;
         }
+        document.querySelectorAll('[data-group-menu], [data-subhead-group-action="more"]').forEach(b => {
+            if (!shouldKeep(b) && (!groupMenu || !isElementVisible(groupMenu))) {
+                b.classList.remove('active', 'is-active');
+                b.setAttribute('aria-expanded', 'false');
+            }
+        });
 
         // 2. Takeoff Estimate picker popup
         const estPicker = document.getElementById('takeoffEstimatePickerPopup');
         if (estPicker && !shouldKeep(estPicker)) {
             estPicker.remove();
         }
+        const estMovePopover = document.getElementById('estimatingSubheadMovePopover');
+        if (estMovePopover && !shouldKeep(estMovePopover)) {
+            estMovePopover.remove();
+        }
+        const estCopyPopover = document.getElementById('estimatingSubheadCopyPopover');
+        if (estCopyPopover && !shouldKeep(estCopyPopover)) {
+            estCopyPopover.remove();
+        }
 
         // 3. Project overview item context menu (tasks, notes)
         const pdMenu = document.getElementById('pdItemContextMenu');
         if (pdMenu && isElementVisible(pdMenu) && !shouldKeep(pdMenu)) {
             pdMenu.style.display = 'none';
+            if (pdMenu.__trigger && !shouldKeep(pdMenu.__trigger)) {
+                pdMenu.__trigger.classList.remove('active', 'is-active');
+                pdMenu.__trigger.setAttribute('aria-expanded', 'false');
+            }
+            pdMenu.__trigger = null;
         }
+        document.querySelectorAll('[data-note-menu].is-active, [data-task-menu].is-active, .pd-row-dots-btn[aria-expanded="true"]').forEach(b => {
+            if (!shouldKeep(b) && (!pdMenu || !isElementVisible(pdMenu))) {
+                b.classList.remove('active', 'is-active');
+                b.setAttribute('aria-expanded', 'false');
+            }
+        });
 
-        // 4. Cost catalog row & tree floating menus
+        // 4. Cost catalog row, tree & header floating menus
         const ccRowMenu = document.getElementById('ccRowItemFloatingMenu');
         if (ccRowMenu && isElementVisible(ccRowMenu) && !shouldKeep(ccRowMenu)) {
             ccRowMenu.hidden = true;
-            ccRowMenu.style.display = 'none';
-            document.querySelectorAll('.cc-row-menu-toggle.is-active').forEach(b => {
+            ccRowMenu.style.display = '';
+            document.querySelectorAll('.cc-row-menu-toggle.is-active, [data-item-menu].is-active').forEach(b => {
                 b.classList.remove('is-active');
                 b.setAttribute('aria-expanded', 'false');
             });
@@ -623,20 +655,32 @@
         const ccTreeMenu = document.getElementById('ccTreeMoreMenu') || document.getElementById('ccTreeMoreFloatingMenu');
         if (ccTreeMenu && isElementVisible(ccTreeMenu) && !shouldKeep(ccTreeMenu)) {
             ccTreeMenu.hidden = true;
-            ccTreeMenu.style.display = 'none';
+            ccTreeMenu.style.display = '';
             document.querySelectorAll('.cc-tree-more-btn.is-active').forEach(b => {
                 b.classList.remove('is-active');
                 b.setAttribute('aria-expanded', 'false');
             });
         }
+        const ccHeaderMenu = document.getElementById('ccHeaderMoreMenu');
+        if (ccHeaderMenu && isElementVisible(ccHeaderMenu) && !shouldKeep(ccHeaderMenu)) {
+            ccHeaderMenu.hidden = true;
+            ccHeaderMenu.style.display = '';
+            document.getElementById('ccMoreActionsBtn')?.setAttribute('aria-expanded', 'false');
+        }
 
-        // 5. Bid Board floating row menu & status panel
+        // 5. Bid Board floating row menu, header menu & status panel
         const bbRowMenu = document.getElementById('bbFloatingRowMenu');
         if (bbRowMenu && isElementVisible(bbRowMenu) && !shouldKeep(bbRowMenu)) {
             bbRowMenu.hidden = true;
-            bbRowMenu.style.display = 'none';
+            bbRowMenu.style.display = '';
             bbRowMenu.removeAttribute('data-current-project');
             document.querySelectorAll('.bb-row-menu-toggle.active').forEach(b => b.classList.remove('active'));
+        }
+        const bbHeadMenu = document.getElementById('bbHeadDropdown');
+        if (bbHeadMenu && isElementVisible(bbHeadMenu) && !shouldKeep(bbHeadMenu)) {
+            bbHeadMenu.hidden = true;
+            bbHeadMenu.style.display = '';
+            document.getElementById('bbHeadMoreBtn')?.setAttribute('aria-expanded', 'false');
         }
         document.querySelectorAll('.bb-status-menu-panel.open, [data-status-panel].open').forEach(p => {
             if (!shouldKeep(p)) {
@@ -651,7 +695,7 @@
                 m.hidden = true;
             }
         });
-        document.querySelectorAll('.est-version-menu-toggle[aria-expanded="true"]').forEach(b => {
+        document.querySelectorAll('.est-version-menu-toggle[aria-expanded="true"], [data-estimate-menu][aria-expanded="true"]').forEach(b => {
             if (!shouldKeep(b)) {
                 b.setAttribute('aria-expanded', 'false');
             }
@@ -663,6 +707,20 @@
         });
         document.querySelectorAll('[data-est-pill-toggle][aria-expanded="true"]').forEach(b => {
             if (!shouldKeep(b)) {
+                b.setAttribute('aria-expanded', 'false');
+            }
+        });
+
+        // 6b. Estimating action popover & markup popover
+        const estActionPop = document.getElementById('estActionPopover');
+        if (estActionPop && !estActionPop.hidden && !shouldKeep(estActionPop)) {
+            estActionPop.hidden = true;
+            estActionPop.style.display = '';
+            estActionPop.dataset.activeTriggerKey = '';
+        }
+        document.querySelectorAll('[data-group-menu-btn].is-active, [data-item-menu-btn].is-active, [data-group-menu-btn][aria-expanded="true"], [data-item-menu-btn][aria-expanded="true"]').forEach(b => {
+            if (!shouldKeep(b) && (!estActionPop || estActionPop.hidden)) {
+                b.classList.remove('active', 'is-active');
                 b.setAttribute('aria-expanded', 'false');
             }
         });
@@ -697,7 +755,7 @@
                 }
             }
         });
-        document.querySelectorAll('[data-doc-sidebar-more].active, [data-doc-action="menu"].active, [data-doc-action="sheet-menu"].active, [data-doc-folder-more].active, [data-doc-folder-menu-toggle].active, [data-doc-view-menu-toggle].active, #docSortMenuBtn.active, .doc-tree-item-more.active').forEach(b => {
+        document.querySelectorAll('[data-row-menu].is-active, [data-row-menu][aria-expanded="true"], [data-doc-sidebar-more].active, [data-doc-action="menu"].active, [data-doc-action="sheet-menu"].active, [data-doc-folder-more].active, [data-doc-folder-menu-toggle].active, [data-doc-view-menu-toggle].active, #docSortMenuBtn.active, .doc-tree-item-more.active').forEach(b => {
             if (!shouldKeep(b)) {
                 b.classList.remove('active', 'is-active');
                 b.setAttribute('aria-expanded', 'false');
@@ -721,9 +779,11 @@
         });
 
         // 11. Any other buttons with aria-expanded="true"
-        document.querySelectorAll('[data-takeoff-menu-toggle][aria-expanded="true"]').forEach(b => {
+        document.querySelectorAll('[data-takeoff-menu-toggle]').forEach(b => {
             if (!shouldKeep(b)) {
                 b.setAttribute('aria-expanded', 'false');
+                const menu = document.getElementById(b.dataset.takeoffMenuToggle);
+                if (menu && !shouldKeep(menu)) menu.classList.remove('open');
             }
         });
     }
@@ -740,10 +800,10 @@
         '[data-doc-action="sheet-menu"], [data-doc-folder-menu-toggle], [data-doc-view-menu-toggle], ' +
         '#docSortMenuBtn, [data-doc-sort-toggle], .doc-tree-item-more, ' +
         '.cc-row-menu-toggle, [data-item-menu], .cc-tree-more-btn, [data-tree-more-catalog], ' +
-        '[data-tree-more-group], .bb-row-menu-toggle, [data-row-menu], [data-status-trigger], ' +
-        '[data-estimate-menu], .est-version-menu-toggle, [data-est-pill-toggle], ' +
+        '[data-tree-more-group], #ccMoreActionsBtn, .bb-row-menu-toggle, [data-row-menu], [data-status-trigger], #bbHeadMoreBtn, ' +
+        '[data-estimate-menu], .est-version-menu-toggle, [data-est-pill-toggle], [data-group-menu-btn], [data-item-menu-btn], ' +
         '#takeoffDrawingBtn, #takeoffScaleStatus, #takeoffMoreToolsBtn, [data-viewer-command="layers"], ' +
-        '.pro-row-menu-btn, .pd-row-dots-btn, .pro-custom-dropdown-trigger'
+        '[data-subhead-group-action="more"], [data-est-subhead-action="move"], [data-est-subhead-action="copy"], [data-takeoff-menu-toggle], .pro-actions-btn, .pro-row-menu-btn, .pd-row-dots-btn, .pro-custom-dropdown-trigger'
     );
 
     function handleUniversalCapture(event) {
@@ -769,10 +829,11 @@
 
         // 1. Check if clicking INSIDE any active open menu
         const activePopout = target.closest(
-            '[data-global-menu].open, #takeoffGroupContextMenu, #takeoffEstimatePickerPopup, #pdItemContextMenu, ' +
-            '#ccRowItemFloatingMenu, #ccTreeMoreMenu, #ccTreeMoreFloatingMenu, #bbFloatingRowMenu, ' +
+            '[data-global-menu].open, #takeoffGroupContextMenu, #takeoffEstimatePickerPopup, #estimatingSubheadMovePopover, #estimatingSubheadCopyPopover, #pdItemContextMenu, ' +
+            '#ccRowItemFloatingMenu:not([hidden]), #ccTreeMoreMenu:not([hidden]), #ccTreeMoreFloatingMenu:not([hidden]), #ccHeaderMoreMenu:not([hidden]), ' +
+            '#bbFloatingRowMenu:not([hidden]), #bbHeadDropdown:not([hidden]), ' +
             '.bb-status-menu-panel.open, [data-status-panel].open, ' +
-            '[data-estimate-actions-menu]:not([hidden]), [data-est-pill-menu]:not([hidden]), ' +
+            '[data-estimate-actions-menu]:not([hidden]), [data-est-pill-menu]:not([hidden]), #estActionPopover:not([hidden]), ' +
             '#takeoffMoreToolsPanel:not([hidden]), #takeoffDrawingDropdown.open, #takeoffScalePanel.open, ' +
             '#takeoffViewerLayersPopover.open, .pro-menu.open, .pro-row-menu.open, .takeoff-menu.open, ' +
             '.documents-menu.open, .pro-custom-dropdown.is-open, .dropdown-menu.show, #docSidebarActionMenu, .doc-sidebar-menu'
@@ -802,15 +863,64 @@
                 )
             );
 
-            const isAlreadyActiveToggle = (
-                clickedToggle.classList.contains('is-active') ||
-                clickedToggle.classList.contains('active') ||
-                clickedToggle.getAttribute('aria-expanded') === 'true' ||
-                isDocMenuTrigger ||
-                (clickedToggle.id === 'takeoffDrawingBtn' && document.getElementById('takeoffDrawingDropdown')?.classList.contains('open')) ||
-                (clickedToggle.id === 'takeoffScaleStatus' && document.getElementById('takeoffScalePanel')?.classList.contains('open')) ||
-                (clickedToggle.id === 'takeoffMoreToolsBtn' && !document.getElementById('takeoffMoreToolsPanel')?.hasAttribute('hidden'))
+            const groupMenuEl = document.getElementById('takeoffGroupContextMenu');
+            const isGroupMenuTrigger = Boolean(clickedToggle.matches && clickedToggle.matches('[data-group-menu], [data-subhead-group-action="more"]'));
+            const isLayerMenuTrigger = Boolean(clickedToggle.matches && clickedToggle.matches('[data-layer-menu]'));
+            const isRowMenuTrigger = Boolean(clickedToggle.matches && clickedToggle.matches('[data-row-menu]'));
+            const isOpenGroupMenuForToggle = Boolean(
+                isGroupMenuTrigger &&
+                groupMenuEl &&
+                isElementVisible(groupMenuEl) && (
+                    groupMenuEl.__trigger === clickedToggle ||
+                    (groupMenuEl.dataset.activeGroupId && groupMenuEl.dataset.activeGroupId === String(clickedToggle.dataset.groupMenu || '')) ||
+                    clickedToggle.classList.contains('is-active') ||
+                    clickedToggle.getAttribute('aria-expanded') === 'true'
+                )
             );
+            const rowMenuEl = document.getElementById('takeoffRowMenu');
+            const isOpenTakeoffRowMenuForToggle = Boolean(
+                isRowMenuTrigger &&
+                rowMenuEl &&
+                rowMenuEl.classList.contains('open') && (
+                    rowMenuEl.__trigger === clickedToggle ||
+                    clickedToggle.classList.contains('is-active') ||
+                    clickedToggle.getAttribute('aria-expanded') === 'true'
+                )
+            );
+
+            const pdMenuEl = document.getElementById('pdItemContextMenu');
+            const isOpenPdMenuForToggle = Boolean(
+                pdMenuEl &&
+                isElementVisible(pdMenuEl) &&
+                pdMenuEl.__trigger === clickedToggle
+            );
+
+            // [data-layer-menu] toggles the non-popout Item Details drawer (#takeoffLayerModal)
+            // directly in project_takeoff.js, so let its click handler manage open/close.
+            const isAlreadyActiveToggle = isLayerMenuTrigger
+                ? false
+                : isGroupMenuTrigger
+                    ? isOpenGroupMenuForToggle
+                    : (
+                        clickedToggle.classList.contains('is-active') ||
+                        clickedToggle.classList.contains('active') ||
+                        clickedToggle.getAttribute('aria-expanded') === 'true' ||
+                        isDocMenuTrigger ||
+                        isOpenTakeoffRowMenuForToggle ||
+                        isOpenPdMenuForToggle ||
+                        (clickedToggle.id === 'ccMoreActionsBtn' && document.getElementById('ccHeaderMoreMenu')?.hidden === false) ||
+                        (clickedToggle.id === 'bbHeadMoreBtn' && document.getElementById('bbHeadDropdown')?.hidden === false) ||
+                        (clickedToggle.matches && clickedToggle.matches('[data-group-menu-btn], [data-item-menu-btn]') && document.getElementById('estActionPopover')?.hidden === false && (clickedToggle.classList.contains('is-active') || clickedToggle.getAttribute('aria-expanded') === 'true')) ||
+                        (clickedToggle.id === 'takeoffDrawingBtn' && document.getElementById('takeoffDrawingDropdown')?.classList.contains('open')) ||
+                        (clickedToggle.id === 'takeoffScaleStatus' && document.getElementById('takeoffScalePanel')?.classList.contains('open')) ||
+                        (clickedToggle.id === 'takeoffMoreToolsBtn' && !document.getElementById('takeoffMoreToolsPanel')?.hasAttribute('hidden')) ||
+                        (clickedToggle.matches && clickedToggle.matches('[data-est-subhead-action="move"]') && Boolean(document.getElementById('estimatingSubheadMovePopover'))) ||
+                        (clickedToggle.matches && clickedToggle.matches('[data-est-subhead-action="copy"]') && Boolean(document.getElementById('estimatingSubheadCopyPopover'))) ||
+                        (clickedToggle.matches && clickedToggle.matches('[data-takeoff-menu-toggle]') && (
+                            document.getElementById(clickedToggle.dataset.takeoffMenuToggle)?.classList.contains('open') ||
+                            clickedToggle.getAttribute('aria-expanded') === 'true'
+                        ))
+                    );
 
             if (isAlreadyActiveToggle) {
                 // The user clicked the same toggle that opened the menu, to toggle it off!

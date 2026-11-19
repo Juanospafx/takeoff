@@ -46,9 +46,15 @@
     function catalogFingerprint(index, estimate, options = {}) {
         const selected = Array.isArray(options.selectedCatalogItemIds)
             ? new Set(options.selectedCatalogItemIds.map(String)) : null;
+        const lookup = options.matchUnlinkedByCodeOrName && Detection.buildCatalogLookup
+            ? Detection.buildCatalogLookup(index) : null;
         const ids = new Set();
         const visit = item => {
-            const id = item.catalogItemId ?? item.catalogSnapshot?.catalogItemId;
+            let id = item.catalogItemId ?? item.catalogSnapshot?.catalogItemId;
+            if (options.matchUnlinkedByCodeOrName && Detection.resolveCatalogMatch) {
+                const resolved = Detection.resolveCatalogMatch(item, lookup || index, options);
+                if (resolved?.catalogItem) id = resolved.catalogItem.id ?? resolved.catalogItem.catalogItemId ?? id;
+            }
             if (present(id) && (!selected || selected.has(String(id)))) ids.add(String(id));
             (item.children || []).forEach(visit);
         };
@@ -57,7 +63,7 @@
     }
 
     function optionsFingerprint(options = {}) {
-        return fingerprint({
+        const payload = {
             preserveOverrides: options.preserveOverrides !== false,
             includeAssemblies: options.includeAssemblies !== false,
             includePricing: options.includePricing !== false,
@@ -65,10 +71,16 @@
             includeEquipment: options.includeEquipment !== false,
             selectedCatalogItemIds: Array.isArray(options.selectedCatalogItemIds)
                 ? options.selectedCatalogItemIds.map(String).sort() : null
-        });
+        };
+        if (options.matchUnlinkedByCodeOrName) payload.matchUnlinkedByCodeOrName = true;
+        if (options.forceInPlace) payload.forceInPlace = true;
+        return fingerprint(payload);
     }
 
-    function resolveCatalogUpdateStrategy(estimate) {
+    function resolveCatalogUpdateStrategy(estimate, options = {}) {
+        if (options && options.forceInPlace === true) return {
+            strategy: STRATEGY.UPDATE_IN_PLACE, reason: 'ACTIVE_ESTIMATE_TARGETED', editable: true
+        };
         const status = String(estimate?.status || '').trim().toLowerCase();
         const locked = estimate?.isLocked === true || status === 'locked';
         if (!locked && EDITABLE_STATUSES.has(status)) return {
@@ -165,8 +177,17 @@
             if (!before) return;
             const catalogId = after.catalogItemId ?? after.catalogSnapshot?.catalogItemId;
             if (selected && !selected.has(String(catalogId))) return;
-            if (fingerprint({ revision: before.catalogRevision, snapshot: before.catalogSnapshot })
-                !== fingerprint({ revision: after.catalogRevision, snapshot: after.catalogSnapshot })) {
+            const pricingState = item => ({
+                revision: item.catalogRevision,
+                snapshot: item.catalogSnapshot,
+                overrides: item.overrides,
+                unitMaterialCost: item.unitMaterialCost,
+                unitEquipmentCost: item.unitEquipmentCost,
+                unitSubcontractorCost: item.unitSubcontractorCost,
+                unitLabor: item.unitLabor,
+                laborRate: item.laborRate
+            });
+            if (fingerprint(pricingState(before)) !== fingerprint(pricingState(after))) {
                 refreshed.push(String(id));
             }
         });
@@ -195,7 +216,7 @@
         assertFresh(estimate, index, previewOptions, guard);
 
         const preview = Preview.previewEstimateUpdate(estimate, index, previewOptions);
-        const strategy = resolveCatalogUpdateStrategy(estimate);
+        const strategy = resolveCatalogUpdateStrategy(estimate, previewOptions);
         const applied = clone(preview.projectedEstimate);
         const refreshedAt = typeof options.now === 'function' ? options.now() : new Date().toISOString();
         const updatedItemIds = refreshedItemIds(estimate, applied, previewOptions.selectedCatalogItemIds);

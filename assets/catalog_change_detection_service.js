@@ -29,6 +29,50 @@
         }, {});
     }
     const equal = (left, right) => JSON.stringify(stable(left)) === JSON.stringify(stable(right));
+    const normText = value => String(value ?? '').trim().replace(/\s+/g, ' ').toLowerCase();
+    const normCode = value => String(value ?? '').trim().replace(/[\s\-_]+/g, '').toLowerCase();
+
+    function buildCatalogLookup(input) {
+        const index = catalogMap(input);
+        const byCode = new Map();
+        const byName = new Map();
+        index.forEach(item => {
+            const code = normCode(item?.supplier?.catalogNumber || item?.classification?.costCode || item?.catalogNumber || item?.catalog_number || item?.costCode);
+            if (code && !byCode.has(code)) byCode.set(code, item);
+            const name = normText(item?.name);
+            if (name && !byName.has(name)) byName.set(name, item);
+        });
+        return { byId: index, byCode, byName };
+    }
+
+    function resolveCatalogMatch(item, catalogIndexOrLookup, options = {}) {
+        const lookup = catalogIndexOrLookup?.byId ? catalogIndexOrLookup : buildCatalogLookup(catalogIndexOrLookup);
+        const directId = item?.catalogItemId ?? item?.catalogSnapshot?.catalogItemId;
+        if (present(directId) && lookup.byId.has(String(directId))) {
+            return { catalogItem: lookup.byId.get(String(directId)), matchMethod: 'id' };
+        }
+        if (options.matchUnlinkedByCodeOrName) {
+            const code = normCode(item?.catalogNumber || item?.budgetCode || item?.costCode || item?.catalogSnapshot?.supplier?.catalogNumber);
+            if (code && lookup.byCode.has(code)) {
+                return { catalogItem: lookup.byCode.get(code), matchMethod: 'code' };
+            }
+            const name = normText(item?.name);
+            if (name && lookup.byName.has(name)) {
+                return { catalogItem: lookup.byName.get(name), matchMethod: 'name' };
+            }
+        }
+        return { catalogItem: null, matchMethod: null };
+    }
+
+    function fallbackItemPricing(item) {
+        return {
+            materialUnitCost: Number(item?.unitMaterialCost ?? item?.unitCost ?? 0),
+            equipmentUnitCost: Number(item?.unitEquipmentCost ?? 0),
+            subcontractorUnitCost: Number(item?.unitSubcontractorCost ?? 0),
+            laborHoursPerUnit: Number(item?.unitLabor ?? 0),
+            laborRate: Number(item?.laborRate ?? 0)
+        };
+    }
 
     function revisionComparison(previous, current) {
         if (!present(current) || current === '') return { comparable: false, equal: false, direction: null };
@@ -48,15 +92,17 @@
         return SnapshotService ? SnapshotService.getEffectiveCatalogValue(item, field) : null;
     }
 
-    function pricingChange(item, field, previousValue, currentValue) {
+    function pricingChange(item, field, previousValue, currentValue, options = {}) {
         const hasOverride = Boolean(item?.overrides && present(item.overrides[field]));
+        const overwriteOverrides = options.preserveOverrides === false;
         const before = effectiveValue(item, field, item.catalogSnapshot?.pricing);
-        const after = hasOverride ? Number(item.overrides[field]) : Number(currentValue);
+        const after = (hasOverride && !overwriteOverrides) ? Number(item.overrides[field]) : Number(currentValue);
         return {
             field: `pricing.${field}`, previousValue: clone(previousValue), currentValue: clone(currentValue),
             hasOverride, overrideValue: hasOverride ? Number(item.overrides[field]) : null,
+            willOverwriteOverride: Boolean(hasOverride && overwriteOverrides),
             effectiveValueBefore: before, effectiveValueAfterIfUpdated: after,
-            impact: hasOverride ? IMPACT.OVERRIDDEN_NO_EFFECT : IMPACT.EFFECTIVE_VALUE_CHANGE
+            impact: (hasOverride && !overwriteOverrides) ? IMPACT.OVERRIDDEN_NO_EFFECT : IMPACT.EFFECTIVE_VALUE_CHANGE
         };
     }
 
@@ -89,34 +135,50 @@
         return componentChanges;
     }
 
-    function baseResult(item, current) {
+    function baseResult(item, current, options = {}) {
         return {
-            catalogItemId: item?.catalogItemId ?? item?.catalogSnapshot?.catalogItemId ?? current?.id ?? null,
+            estimateItemId: item?.id ?? null,
+            itemName: item?.name ?? current?.name ?? null,
+            catalogItemId: current?.id ?? item?.catalogItemId ?? item?.catalogSnapshot?.catalogItemId ?? null,
+            matchedBy: options.matchMethod || null,
             previousRevision: item?.catalogRevision ?? item?.catalogSnapshot?.revision ?? null,
             currentRevision: current?.revision ?? null,
             outdated: false, status: STATUS.CURRENT, changes: [], warnings: []
         };
     }
 
-    function compareCatalogItem(item, currentCatalogItem) {
-        const result = baseResult(item, currentCatalogItem);
+    function compareCatalogItem(item, currentCatalogItem, options = {}) {
+        const result = baseResult(item, currentCatalogItem, options);
         if (!item || typeof item !== 'object') return { ...result, status: STATUS.ERROR, warnings: ['INVALID_ESTIMATING_ITEM'] };
-        if (!item.catalogSnapshot) {
+        const canCompareLegacy = Boolean(options.matchUnlinkedByCodeOrName && currentCatalogItem);
+        if (!item.catalogSnapshot && !canCompareLegacy) {
             result.status = STATUS.LEGACY_NO_SNAPSHOT;
             if (currentCatalogItem) result.warnings.push('CURRENT_ITEM_EXISTS_WITHOUT_HISTORICAL_SNAPSHOT');
             return result;
         }
         if (!currentCatalogItem) return { ...result, status: STATUS.MISSING_IN_CATALOG, warnings: ['CATALOG_ITEM_NOT_FOUND'] };
-        if (!sameId(result.catalogItemId, currentCatalogItem.id ?? currentCatalogItem.catalogItemId)) {
+        if (!canCompareLegacy && !sameId(result.catalogItemId, currentCatalogItem.id ?? currentCatalogItem.catalogItemId)) {
             return { ...result, status: STATUS.ERROR, warnings: ['CATALOG_IDENTITY_MISMATCH'] };
         }
 
-        const previous = item.catalogSnapshot;
+        const previous = item.catalogSnapshot || {
+            pricing: fallbackItemPricing(item),
+            type: item.itemType || item.type || null,
+            costCategory: item.costCategory || null,
+            uom: item.uom || null,
+            catalog: null,
+            category: null,
+            assemblyComponents: []
+        };
         const current = currentCatalogItem;
         PRICING_FIELDS.forEach(field => {
             const before = previous.pricing?.[field] ?? 0;
             const after = current.pricing?.[field] ?? 0;
-            if (!equal(before, after)) result.changes.push(pricingChange(item, field, before, after));
+            const overrideDiffers = Boolean(options.preserveOverrides === false && item?.overrides && present(item.overrides[field]) && !equal(Number(item.overrides[field]), Number(after)));
+            if (!equal(before, after) || overrideDiffers) {
+                const baseline = overrideDiffers && before === after ? Number(item.overrides[field]) : before;
+                result.changes.push(pricingChange(item, field, baseline, after, options));
+            }
         });
         ['type', 'costCategory', 'uom'].forEach(field => {
             if (!equal(previous[field] ?? null, current[field] ?? null)) result.changes.push({
@@ -141,6 +203,11 @@
         });
 
         const revision = revisionComparison(result.previousRevision, result.currentRevision);
+        if (!item.catalogSnapshot && canCompareLegacy) {
+            result.outdated = true;
+            result.status = STATUS.OUTDATED;
+            return result;
+        }
         if (!present(result.currentRevision) || result.currentRevision === '') {
             result.status = STATUS.UNVERSIONED;
             result.outdated = result.changes.length > 0;
@@ -167,12 +234,28 @@
         return result;
     }
 
-    function compareEstimate(estimate, catalogIndex) {
+    function compareEstimate(estimate, catalogIndex, options = {}) {
         const index = catalogMap(catalogIndex);
+        const lookup = buildCatalogLookup(index);
         const items = estimateItems(estimate);
-        const linked = items.filter(item => present(item.catalogItemId) || item.catalogSnapshot);
-        const itemChanges = linked.map(item => compareCatalogItem(item,
-            index.get(String(item.catalogItemId ?? item.catalogSnapshot?.catalogItemId)) || null));
+        let itemChanges;
+        let linkedCount = 0;
+        if (options.matchUnlinkedByCodeOrName) {
+            itemChanges = [];
+            items.forEach(item => {
+                const match = resolveCatalogMatch(item, lookup, options);
+                const hasLinkHint = present(item.catalogItemId) || Boolean(item.catalogSnapshot);
+                if (match.catalogItem || hasLinkHint) {
+                    linkedCount += 1;
+                    itemChanges.push(compareCatalogItem(item, match.catalogItem, { ...options, matchMethod: match.matchMethod }));
+                }
+            });
+        } else {
+            const linked = items.filter(item => present(item.catalogItemId) || item.catalogSnapshot);
+            linkedCount = linked.length;
+            itemChanges = linked.map(item => compareCatalogItem(item,
+                index.get(String(item.catalogItemId ?? item.catalogSnapshot?.catalogItemId)) || null, options));
+        }
         const count = status => itemChanges.filter(change => change.status === status).length;
         const changesByType = { pricing: 0, labor: 0, equipment: 0, assemblies: 0, informational: 0 };
         itemChanges.flatMap(change => change.changes).forEach(change => {
@@ -184,7 +267,7 @@
             else changesByType.informational += 1;
         });
         return {
-            totalItems: items.length, linkedItems: linked.length,
+            totalItems: items.length, linkedItems: linkedCount,
             currentItems: count(STATUS.CURRENT), outdatedItems: count(STATUS.OUTDATED),
             missingItems: count(STATUS.MISSING_IN_CATALOG), legacyItems: count(STATUS.LEGACY_NO_SNAPSHOT),
             unversionedItems: count(STATUS.UNVERSIONED), errorItems: count(STATUS.ERROR),
@@ -207,7 +290,7 @@
     }
 
     const api = { STATUS, IMPACT, PRICING_FIELDS, compareCatalogItem, compareEstimate,
-        summarizeChanges, compareAssemblyComponents, revisionComparison };
+        summarizeChanges, compareAssemblyComponents, revisionComparison, buildCatalogLookup, resolveCatalogMatch };
     global.CatalogChangeDetectionService = api;
     if (typeof module !== 'undefined' && module.exports) module.exports = api;
 })(typeof window !== 'undefined' ? window : globalThis);

@@ -1,10 +1,10 @@
 (function () {
     const apiUrl = '../api/project_module.php';
-    const PROJECT_STATUSES = ['Invitations', 'To Do', 'Estimating', 'Bid Submitted', 'Accepted', 'In Progress', 'Complete', 'Estimadores', 'Lost', 'Archived'];
+    const PROJECT_STATUSES = ['Invitations', 'To Do', 'Templates', 'Bid Submitted', 'Accepted', 'In Progress', 'Complete', 'Estimadores', 'Lost', 'Archived'];
     const STATUS_VALUES = {
         'Invitations': 'invitations',
         'To Do': 'to_do',
-        'Estimating': 'estimating',
+        'Templates': 'templates',
         'Bid Submitted': 'bid_submitted',
         'Accepted': 'accepted',
         'In Progress': 'in_progress',
@@ -15,6 +15,8 @@
     };
     const STATUS_LABELS = Object.fromEntries(Object.entries(STATUS_VALUES).map(([label, value]) => [value, label]));
     STATUS_LABELS.draft = 'To Do';
+    STATUS_LABELS.template = 'Templates';
+    STATUS_LABELS.estimating = 'To Do';
     STATUS_LABELS.estimators = 'Estimadores';
 
     let isDirty = false;
@@ -112,35 +114,62 @@
         };
     }
 
-    async function saveProject() {
+    async function saveProject(options = {}) {
+        const opts = (options && typeof options === 'object' && !('target' in options) && !('preventDefault' in options)) ? options : {};
+        const silent = Boolean(opts.silent);
+        const throwOnError = Boolean(opts.throwOnError);
         const payload = collectProjectPayload();
         if (!payload.name.trim()) {
-            if (window.TakeoffAnnouncement) {
+            if (!silent && window.TakeoffAnnouncement) {
                 window.TakeoffAnnouncement.warning({
                     title: 'Estimate Name Required',
                     badge: 'REQUIRED FIELD',
                     content: '<p>Please enter an <strong>Estimate Name</strong> before saving the project.</p>',
                     primaryText: 'Understood'
                 });
-            } else {
+            } else if (!silent) {
                 showToast('Estimate Name is required.');
+            }
+            if (throwOnError) {
+                throw new Error('Estimate Name is required.');
             }
             return;
         }
 
         const saveButton = $('saveProjectBtn');
+        const previousHtml = saveButton?.innerHTML;
         const previousLabel = saveButton?.textContent;
         if (saveButton) {
+            saveButton.style.boxSizing = 'border-box';
+            if (!saveButton.dataset.intrinsicWidth) {
+                const restingWidth = Math.ceil(saveButton.getBoundingClientRect().width || 0);
+                if (restingWidth > 0) {
+                    saveButton.dataset.intrinsicWidth = String(restingWidth);
+                }
+            }
+            if (saveButton.dataset.intrinsicWidth) {
+                saveButton.style.minWidth = `${saveButton.dataset.intrinsicWidth}px`;
+                saveButton.style.justifyContent = 'center';
+            }
             saveButton.disabled = true;
             saveButton.textContent = 'Saving...';
         }
 
         try {
+            if (typeof window.hasPendingTakeoffEstimatingSync === 'function' && window.hasPendingTakeoffEstimatingSync()
+                && typeof window.flushTakeoffEstimatingSync === 'function') {
+                try {
+                    await window.flushTakeoffEstimatingSync();
+                } catch (syncErr) {
+                    console.warn('Takeoff/Estimating sync flush warning:', syncErr);
+                }
+            }
             try {
                 const takeoffFrame = document.getElementById('takeoffFrame');
                 const saveTakeoff = takeoffFrame?.contentWindow?.projectTakeoffSave;
                 if (typeof saveTakeoff === 'function') {
                     await saveTakeoff.call(takeoffFrame.contentWindow);
+                    takeoffFrame?.contentWindow?.clearEditorTakeoffDirtyCheckpoint?.();
                 }
             } catch (takeoffErr) {
                 console.warn('Takeoff iframe save ignored or unavailable:', takeoffErr);
@@ -171,7 +200,7 @@
             window._historyDirtyGuarded = false;
             localStorage.removeItem('takeoff.projectDraft');
 
-            if (window.TakeoffAnnouncement) {
+            if (!silent && window.TakeoffAnnouncement) {
                 window.TakeoffAnnouncement.success({
                     title: 'Project Saved Successfully',
                     badge: 'PROJECT SAVED',
@@ -206,10 +235,14 @@
                     primaryText: 'Dismiss'
                 });
             }
+            if (throwOnError) {
+                throw error;
+            }
         } finally {
             if (saveButton) {
                 saveButton.disabled = false;
-                saveButton.textContent = previousLabel || 'Save Project';
+                if (previousHtml) saveButton.innerHTML = previousHtml;
+                else saveButton.textContent = previousLabel || 'Save Project';
             }
         }
     }
@@ -220,9 +253,13 @@
         for (const doc of pending) {
             const file = sessionFiles.get(String(doc.id));
             try {
+                const isDrawing = doc.category === 'Drawings' || inferCategory({ name: doc.name || file.name }, doc.category) === 'Drawings';
+                const disc = isDrawing ? classifyDrawingDiscipline(doc) : null;
+                const folderName = isDrawing ? `Drawings:${disc || 'general'}` : 'Attachments';
                 const form = new FormData();
                 form.append('project_id', projectId);
-                form.append('file', file, file.name);
+                form.append('folder_name', folderName);
+                form.append('file', file, doc.name || file.name);
                 const response = await fetch('../api/project_document_takeoff.php', {
                     method: 'POST', body: form, headers: { Accept: 'application/json' }
                 });
@@ -230,11 +267,17 @@
                 if (!response.ok || !result?.success || !result.file?.id) {
                     throw new Error(result?.message || `HTTP ${response.status}`);
                 }
+                const storedId = Number(result.file.id);
+                const storedName = doc.name || result.file.filename;
+                if (isDrawing && disc) {
+                    saveDisciplineOverride(`existing-legacy_file-${storedId}`, disc, storedId, storedName);
+                }
                 const stored = {
-                    id: Number(result.file.id), source: 'legacy_file', filename: result.file.filename,
-                    title: result.file.filename, path: `../${result.file.filepath}`,
+                    id: storedId, source: 'legacy_file', filename: storedName,
+                    title: storedName, path: `../${result.file.filepath}`,
                     extension: doc.extension, mime_type: doc.type, uploaded_at: new Date().toISOString(),
-                    pageCount: doc.pageCount || null, page_count: doc.pageCount || null, pages: doc.pages || []
+                    pageCount: doc.pageCount || null, page_count: doc.pageCount || null, pages: doc.pages || [],
+                    folder_name: result.file.folder_name || folderName
                 };
                 window.ProjectState.documents = (window.ProjectState.documents || [])
                     .filter(row => !(row.source === 'local_metadata' && String(row.id) === String(doc.id)));
@@ -282,7 +325,7 @@
     const defaultPhaseConfig = {
         'Invitations': { label: 'Invitations', color: '#b45309' },
         'To Do': { label: 'To Do', color: '#1d5cc9' },
-        'Estimating': { label: 'Estimating', color: '#d97706' },
+        'Templates': { label: 'Templates', color: '#0d9488' },
         'Bid Submitted': { label: 'Bid Submitted', color: '#ea580c' },
         'Accepted': { label: 'Accepted', color: '#059669' },
         'In Progress': { label: 'In Progress', color: '#2563eb' },
@@ -387,15 +430,42 @@
         });
     }
 
+    function syncProjectBidBoardReturnStage(isExplicitChange = false) {
+        const label = statusLabel();
+        const code = currentStatus || normalizeStatus(label);
+        try {
+            localStorage.setItem('takeoff.bidBoardStage', label);
+            sessionStorage.setItem('takeoff.bidBoardStage', label);
+            if (isExplicitChange) {
+                sessionStorage.setItem('takeoff.bidBoardStageOverride', JSON.stringify({
+                    stage: label,
+                    code,
+                    projectId: Number(window.ProjectState?.projectId || 0),
+                    at: Date.now()
+                }));
+            }
+        } catch (e) { }
+        try {
+            const brandLink = document.getElementById('btHeaderBrandLink');
+            if (brandLink) {
+                brandLink.setAttribute('href', `bid_board.php?status=${encodeURIComponent(code)}`);
+            }
+            if (window.history && typeof window.history.replaceState === 'function') {
+                const url = new URL(window.location.href);
+                if (url.searchParams.has('stage') || isExplicitChange) {
+                    url.searchParams.set('stage', code);
+                    window.history.replaceState(null, '', url.toString());
+                }
+            }
+        } catch (e) { }
+    }
+
     function changeProjectStatus(status) {
         currentStatus = normalizeStatus(status);
         if (window.ProjectState?.projectInfo) {
             window.ProjectState.projectInfo.status = currentStatus;
         }
-        try {
-            localStorage.setItem('takeoff.bidBoardStage', statusLabel());
-            sessionStorage.setItem('takeoff.bidBoardStage', statusLabel());
-        } catch (e) { }
+        syncProjectBidBoardReturnStage(true);
         renderStatusDropdown();
         $('projectStatusMenu')?.classList.remove('open');
 
@@ -442,6 +512,181 @@
     }
 
     let savedCustomers = [];
+    let editingDirectoryCustomerId = null;
+    let customerModalView = 'form';
+
+    function setEditingDirectoryCustomer(customer = null) {
+        const banner = $('pdCustomerEditBanner');
+        const bannerName = $('pdCustomerEditBannerName');
+        const saveBtn = $('saveCustomerBtn');
+        if (customer && Number(customer.id) > 0) {
+            editingDirectoryCustomerId = Number(customer.id);
+            if (banner) banner.hidden = false;
+            if (bannerName) bannerName.textContent = customer.company || 'Customer';
+            if (saveBtn) saveBtn.innerHTML = '<i class="fas fa-floppy-disk"></i> Update Directory';
+        } else {
+            editingDirectoryCustomerId = null;
+            if (banner) banner.hidden = true;
+            if (bannerName) bannerName.textContent = '';
+            if (saveBtn) saveBtn.innerHTML = '<i class="fas fa-bookmark"></i> Save to Directory';
+        }
+    }
+
+    function setCustomerModalView(view = 'form') {
+        customerModalView = view === 'directory' ? 'directory' : 'form';
+        const isDir = customerModalView === 'directory';
+        const formView = $('pdCustomerFormView');
+        const dirView = $('pdCustomerDirectoryView');
+        const formFoot = $('pdCustomerFormFoot');
+        const dirFoot = $('pdCustomerDirectoryFoot');
+        const titleEl = $('customerModalTitle');
+        const toggleBtn = $('openCustomerDirectoryBtn');
+
+        if (formView) formView.hidden = isDir;
+        if (formFoot) formFoot.hidden = isDir;
+        if (dirView) dirView.hidden = !isDir;
+        if (dirFoot) dirFoot.hidden = !isDir;
+        if (titleEl) {
+            titleEl.innerHTML = isDir
+                ? '<i class="fas fa-address-book" style="color: var(--primary);"></i> Customer Directory'
+                : '<i class="far fa-id-badge" style="color: var(--primary);"></i> Customer Information';
+        }
+        if (toggleBtn) {
+            toggleBtn.classList.toggle('is-active', isDir);
+            toggleBtn.innerHTML = isDir
+                ? '<i class="fas fa-arrow-left"></i> <span>Form</span>'
+                : '<i class="fas fa-address-book"></i> <span>Directory</span>';
+        }
+        if (isDir) {
+            renderCustomerDirectory();
+            setTimeout(() => $('poCustomerDirectorySearch')?.focus(), 40);
+        }
+    }
+
+    function renderCustomerDirectory() {
+        const listEl = $('poCustomerDirectoryList');
+        const countEl = $('poCustomerDirectoryCount');
+        if (!listEl) return;
+        const query = ($('poCustomerDirectorySearch')?.value || '').trim().toLowerCase();
+        const canMutateDir = window.TakeoffAuth
+            ? window.TakeoffAuth.canWrite === true
+            : !document.body?.dataset?.readOnly;
+
+        const filtered = savedCustomers
+            .map((customer, index) => ({ customer, index }))
+            .filter(({ customer }) => {
+                if (!query) return true;
+                const haystack = [
+                    customer.company,
+                    customer.contact_name,
+                    customer.phone,
+                    customer.email,
+                    customer.address
+                ].filter(Boolean).join(' ').toLowerCase();
+                return haystack.includes(query);
+            });
+
+        if (countEl) {
+            countEl.textContent = `${filtered.length} customer${filtered.length === 1 ? '' : 's'}`;
+        }
+
+        if (!filtered.length) {
+            listEl.innerHTML = savedCustomers.length
+                ? '<div class="pd-customer-dir-empty">No customers match your search.</div>'
+                : '<div class="pd-customer-dir-empty">No saved customers in directory yet.</div>';
+            return;
+        }
+
+        listEl.innerHTML = filtered.map(({ customer, index }) => {
+            const dbId = Number(customer.id || 0);
+            const hasDbId = dbId > 0;
+            const company = escapeHtml(customer.company || 'Unnamed Customer');
+            const badge = hasDbId
+                ? '<span class="pd-customer-dir-badge">Saved</span>'
+                : '<span class="pd-customer-dir-badge is-project">Project</span>';
+            const metaParts = [];
+            if (customer.contact_name) metaParts.push(`<span><i class="far fa-user"></i> ${escapeHtml(customer.contact_name)}</span>`);
+            if (customer.phone) metaParts.push(`<span><i class="fas fa-phone"></i> ${escapeHtml(customer.phone)}</span>`);
+            if (customer.email) metaParts.push(`<span><i class="far fa-envelope"></i> ${escapeHtml(customer.email)}</span>`);
+            if (customer.address) metaParts.push(`<span><i class="fas fa-location-dot"></i> ${escapeHtml(customer.address)}</span>`);
+            const metaHtml = metaParts.length
+                ? metaParts.join('')
+                : '<span>No contact details stored</span>';
+
+            return `
+                <div class="pd-customer-dir-card" data-dir-row="${index}">
+                    <div class="pd-customer-dir-info">
+                        <div class="pd-customer-dir-title-row">
+                            <span class="pd-customer-dir-company">${company}</span>
+                            ${badge}
+                        </div>
+                        <div class="pd-customer-dir-meta">${metaHtml}</div>
+                    </div>
+                    <div class="pd-customer-dir-actions">
+                        <button type="button" class="pd-customer-dir-btn" data-dir-use="${index}" title="Use this customer for the project">
+                            <i class="fas fa-check"></i> Select
+                        </button>
+                        ${canMutateDir ? `
+                            <button type="button" class="pd-customer-dir-btn" data-dir-edit="${index}" title="${hasDbId ? 'Edit directory customer' : 'Edit & save to directory'}">
+                                <i class="fas fa-pen"></i>
+                            </button>
+                            ${hasDbId ? `
+                                <button type="button" class="pd-customer-dir-btn is-danger" data-dir-delete="${dbId}" title="Delete from customer directory">
+                                    <i class="fas fa-trash-can"></i>
+                                </button>
+                            ` : ''}
+                        ` : ''}
+                    </div>
+                </div>
+            `;
+        }).join('');
+    }
+
+    async function deleteDirectoryCustomer(customerId) {
+        const targetId = Number(customerId || 0);
+        if (targetId <= 0) return;
+        const target = savedCustomers.find(c => Number(c.id || 0) === targetId);
+        const safeCompany = escapeHtml(target?.company || `Customer #${targetId}`);
+        const confirmed = typeof window.showConfirmDialog === 'function'
+            ? await window.showConfirmDialog({
+                title: 'Delete Customer',
+                message: `Are you sure you want to remove <strong>"${safeCompany}"</strong> from the Customer Directory? Existing projects will keep their copied customer fields.`,
+                confirmText: 'Delete Customer',
+                cancelText: 'Cancel',
+                type: 'error',
+                badge: 'DELETE',
+                icon: 'fas fa-trash',
+                primaryDanger: true
+            })
+            : window.confirm(`Delete "${target?.company || targetId}" from directory?`);
+        if (!confirmed) return;
+
+        try {
+            const res = await fetch('../api/customers.php?action=delete', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ id: targetId })
+            });
+            const data = await res.json();
+            if (data?.status === 'success') {
+                if (Array.isArray(data.customers)) {
+                    savedCustomers = data.customers;
+                } else {
+                    savedCustomers = savedCustomers.filter(c => Number(c.id || 0) !== targetId);
+                }
+                if (editingDirectoryCustomerId === targetId) {
+                    setEditingDirectoryCustomer(null);
+                }
+                populateCustomerSelector();
+                renderCustomerDirectory();
+                showToast(`Customer "${target?.company || targetId}" removed from directory.`);
+            } else {
+                showToast(data?.msg || 'Failed to delete customer.');
+            }
+        } catch (e) {
+            showToast('Error deleting customer from directory.');
+        }
+    }
 
     async function loadCustomersDirectory() {
         const selector = $('poCustomerSelector');
@@ -452,6 +697,7 @@
             if (data?.status === 'success' && Array.isArray(data.data)) {
                 savedCustomers = data.data;
                 populateCustomerSelector();
+                if (customerModalView === 'directory') renderCustomerDirectory();
             }
         } catch (e) {
             console.warn('Could not load customers directory:', e);
@@ -470,7 +716,7 @@
             }).join('');
     }
 
-    function selectCustomerByIndex(index) {
+    function selectCustomerByIndex(index, { editDirectory = false } = {}) {
         const c = savedCustomers[index];
         if (!c) return;
         if ($('poCustomerCompany')) $('poCustomerCompany').value = c.company || '';
@@ -478,13 +724,22 @@
         if ($('poCustomerPhone')) $('poCustomerPhone').value = c.phone || '';
         if ($('poCustomerEmail')) $('poCustomerEmail').value = c.email || '';
         if ($('poCustomerAddress')) $('poCustomerAddress').value = c.address || '';
+        if (editDirectory) {
+            setEditingDirectoryCustomer(Number(c.id || 0) > 0 ? c : null);
+        } else {
+            setEditingDirectoryCustomer(null);
+        }
         syncCustomerDisplayCard();
         markDirty();
         renderProjectHeaderMeta();
-        showToast(`Customer "${c.company}" selected.`);
+        populateCustomerSelector(c.company || '');
+        if (!editDirectory) {
+            showToast(`Customer "${c.company}" selected.`);
+        }
     }
 
     function clearCustomerFields() {
+        setEditingDirectoryCustomer(null);
         if ($('poCustomerCompany')) $('poCustomerCompany').value = '';
         if ($('poPrimaryContact')) $('poPrimaryContact').value = '';
         if ($('poCustomerPhone')) $('poCustomerPhone').value = '';
@@ -503,7 +758,9 @@
             $('poCustomerCompany')?.focus();
             return;
         }
+        const wasEditing = editingDirectoryCustomerId > 0;
         const payload = {
+            id: wasEditing ? editingDirectoryCustomerId : null,
             company,
             contact_name: $('poPrimaryContact')?.value?.trim() || '',
             phone: $('poCustomerPhone')?.value?.trim() || '',
@@ -523,12 +780,14 @@
                 if (Array.isArray(data.customers)) {
                     savedCustomers = data.customers;
                 } else if (data.data) {
-                    const existingIdx = savedCustomers.findIndex(c => c.company.toLowerCase() === company.toLowerCase());
+                    const existingIdx = savedCustomers.findIndex(c => Number(c.id || 0) === Number(data.data.id || -1) || c.company.toLowerCase() === company.toLowerCase());
                     if (existingIdx >= 0) savedCustomers[existingIdx] = data.data;
                     else savedCustomers.push(data.data);
                 }
-                populateCustomerSelector(company);
-                showToast(`Customer "${company}" saved to directory!`);
+                setEditingDirectoryCustomer(null);
+                populateCustomerSelector(data.data?.company || company);
+                if (customerModalView === 'directory') renderCustomerDirectory();
+                showToast(wasEditing ? `Customer "${company}" updated in directory!` : `Customer "${company}" saved to directory!`);
             } else {
                 showToast(data?.msg || 'Failed to save customer.');
             }
@@ -913,6 +1172,9 @@
         const rect = button.getBoundingClientRect();
         const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
 
+        menu.__trigger = button;
+        button.classList.add('is-active');
+        button.setAttribute('aria-expanded', 'true');
         menu.style.display = 'flex';
         menu.style.position = 'fixed';
         menu.style.zIndex = '99999';
@@ -946,7 +1208,14 @@
 
     function closeItemContextMenu() {
         const menu = $('pdItemContextMenu');
-        if (menu) menu.style.display = 'none';
+        if (menu) {
+            menu.style.display = 'none';
+            if (menu.__trigger) {
+                menu.__trigger.classList.remove('active', 'is-active');
+                menu.__trigger.setAttribute('aria-expanded', 'false');
+            }
+            menu.__trigger = null;
+        }
         contextMenuTarget = null;
     }
 
@@ -988,6 +1257,7 @@
         const prefixes = [
             'takeoff.projectDocuments',
             'takeoff.projectDocumentFolders',
+            'takeoff.docDisciplines',
             'takeoff.quantification',
             'takeoff.estimating.columns',
             'takeoff.proposal.settings',
@@ -1081,8 +1351,12 @@
     }
 
     function inferCategory(file, forcedCategory = null) {
-        if (forcedCategory) return forcedCategory;
-        const ext = String(file.name.split('.').pop() || '').toLowerCase();
+        if (forcedCategory) {
+            const norm = String(forcedCategory).trim();
+            if (norm === 'Drawings' || norm.startsWith('Drawings:')) return 'Drawings';
+            if (norm === 'Attachments') return 'Attachments';
+        }
+        const ext = String((file?.name || '').split('.').pop() || '').toLowerCase();
         return ['pdf', 'dwg', 'dxf'].includes(ext) ? 'Drawings' : 'Attachments';
     }
 
@@ -1097,89 +1371,674 @@
         return String(id || '').replace(/[^a-zA-Z0-9_-]/g, '_');
     }
 
-    async function loadPdfDocument(doc) {
-        if (!window.pdfjsLib) return null;
-        if (pdfDocumentCache.has(doc.id)) return pdfDocumentCache.get(doc.id);
-        try {
-            let pdf = null;
-            const file = sessionFiles.get(String(doc.id));
-            if (file) {
-                const arrayBuffer = await file.arrayBuffer();
-                pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
-            } else if (doc.path) {
-                pdf = await window.pdfjsLib.getDocument(doc.path).promise;
-            }
-            if (pdf) {
-                pdfDocumentCache.set(doc.id, pdf);
-                return pdf;
-            }
-        } catch (e) {
-            console.warn('PDF load failed for doc', doc.id, e);
+    window.__SharedPdfDocCache = window.__SharedPdfDocCache || new Map();
+    window.__SharedPdfThumbCache = window.__SharedPdfThumbCache || new Map();
+    const sharedPdfDocCache = window.__SharedPdfDocCache;
+    const sharedPdfThumbCache = window.__SharedPdfThumbCache;
+    const imageThumbnailUrlCache = new Map();
+    const imageThumbnailPromises = new Map();
+    const MAX_SHARED_THUMB_URLS = 240;
+    const THUMB_TARGET_WIDTH = 320;
+    const THUMB_JPEG_QUALITY = 0.85;
+    const pdfLoadingPromises = new Map();
+    let activePriorityThumbRenders = 0;
+    let documentsNeedsRenderOnTabEnter = false;
+
+    function isDocumentsTabActive() {
+        if (document.hidden) return false;
+        if (window.ProjectState?.activeTab) {
+            return window.ProjectState.activeTab === 'documents';
         }
+        const tabPanel = document.getElementById('tab-documents');
+        if (tabPanel) {
+            return tabPanel.classList.contains('active') && !tabPanel.hidden;
+        }
+        return document.body.classList.contains('is-documents-tab');
+    }
+
+    function getDocCacheKeys(doc) {
+        if (!doc) return [];
+        const keys = [String(doc.id)];
+        if (doc.backendId) keys.push(String(doc.backendId));
+        if (doc.path) keys.push(String(doc.path));
+        return keys;
+    }
+
+    function getPersistentThumbKey(doc, pageNumber = 1) {
+        if (!doc) return '';
+        const p = Number(pageNumber) || 1;
+        const base = doc.path || (doc.backendId ? `backend:${doc.backendId}` : `doc:${doc.id}`);
+        return `${base}:p${p}:w${THUMB_TARGET_WIDTH}`;
+    }
+
+    function getCachedSheetThumbUrl(doc, pageNumber = 1) {
+        if (!doc) return null;
+        const p = Number(pageNumber) || 1;
+        for (const k of getDocCacheKeys(doc)) {
+            const key = `${k}:${p}`;
+            if (sharedPdfThumbCache.has(key)) return sharedPdfThumbCache.get(key);
+        }
+        const legacyKey = `${doc.id}_p${p}`;
+        if (sharedPdfThumbCache.has(legacyKey)) return sharedPdfThumbCache.get(legacyKey);
         return null;
+    }
+
+    function storeCachedSheetThumbUrl(doc, pageNumber, dataUrl) {
+        if (!doc || !dataUrl) return;
+        const p = Number(pageNumber) || 1;
+        const keys = getDocCacheKeys(doc).map(k => `${k}:${p}`);
+        keys.push(`${doc.id}_p${p}`);
+        keys.forEach(key => {
+            if (sharedPdfThumbCache.has(key)) sharedPdfThumbCache.delete(key);
+            sharedPdfThumbCache.set(key, dataUrl);
+        });
+        while (sharedPdfThumbCache.size > MAX_SHARED_THUMB_URLS) {
+            const oldest = sharedPdfThumbCache.keys().next().value;
+            sharedPdfThumbCache.delete(oldest);
+        }
+    }
+
+    // IndexedDB persistent cache for rendered blueprint thumbnails (instant reload without re-rendering PDF)
+    let thumbIdbPromise = null;
+    function openThumbIdb() {
+        if (thumbIdbPromise) return thumbIdbPromise;
+        if (typeof indexedDB === 'undefined') return Promise.resolve(null);
+        thumbIdbPromise = new Promise((resolve) => {
+            try {
+                const req = indexedDB.open('takeoff_pdf_thumbs_v2', 1);
+                req.onupgradeneeded = () => {
+                    const db = req.result;
+                    if (!db.objectStoreNames.contains('thumbs')) {
+                        db.createObjectStore('thumbs');
+                    }
+                };
+                req.onsuccess = () => resolve(req.result);
+                req.onerror = () => resolve(null);
+            } catch (_) {
+                resolve(null);
+            }
+        });
+        return thumbIdbPromise;
+    }
+
+    async function getPersistedThumbBlobUrl(doc, pageNumber = 1) {
+        const key = getPersistentThumbKey(doc, pageNumber);
+        if (!key) return null;
+        const db = await openThumbIdb();
+        if (!db) return null;
+        return new Promise((resolve) => {
+            try {
+                const tx = db.transaction('thumbs', 'readonly');
+                const store = tx.objectStore('thumbs');
+                const req = store.get(key);
+                req.onsuccess = () => {
+                    const val = req.result;
+                    if (val instanceof Blob) {
+                        const blobUrl = URL.createObjectURL(val);
+                        storeCachedSheetThumbUrl(doc, pageNumber, blobUrl);
+                        resolve(blobUrl);
+                    } else if (typeof val === 'string' && val.startsWith('data:image/')) {
+                        storeCachedSheetThumbUrl(doc, pageNumber, val);
+                        resolve(val);
+                    } else {
+                        resolve(null);
+                    }
+                };
+                req.onerror = () => resolve(null);
+            } catch (_) {
+                resolve(null);
+            }
+        });
+    }
+
+    async function savePersistedThumbBlob(doc, pageNumber, blobOrDataUrl) {
+        const key = getPersistentThumbKey(doc, pageNumber);
+        if (!key || !blobOrDataUrl) return;
+        const db = await openThumbIdb();
+        if (!db) return;
+        try {
+            const tx = db.transaction('thumbs', 'readwrite');
+            tx.objectStore('thumbs').put(blobOrDataUrl, key);
+        } catch (_) {}
+    }
+
+    // Dedicated Background Web Worker for PDF Thumbnail Rasterization & Page Count (OffscreenCanvas)
+    let pdfThumbWorker = null;
+    let pdfThumbWorkerUnsupported = false;
+    let pdfWorkerReqSeq = 0;
+    const pdfWorkerPending = new Map();
+
+    function getPdfThumbWorker() {
+        if (pdfThumbWorkerUnsupported) return null;
+        if (pdfThumbWorker) return pdfThumbWorker;
+        if (typeof Worker === 'undefined' || typeof OffscreenCanvas === 'undefined') {
+            pdfThumbWorkerUnsupported = true;
+            return null;
+        }
+        try {
+            const workerCode = `
+                self.window = self;
+                function makeOffscreenCanvas(w, h) {
+                    const c = new OffscreenCanvas(Math.max(1, w || 1), Math.max(1, h || 1));
+                    if (!c.style) c.style = {};
+                    c.remove = function() {};
+                    c.getAttribute = function() { return null; };
+                    c.setAttribute = function() {};
+                    return c;
+                }
+                self.document = {
+                    createElement: function(tag) {
+                        if (String(tag).toLowerCase() === 'canvas') return makeOffscreenCanvas(1, 1);
+                        return { style: {}, setAttribute: function(){}, getAttribute: function(){ return null; }, appendChild: function(){} };
+                    },
+                    createElementNS: function(ns, tag) {
+                        if (String(tag).toLowerCase() === 'canvas') return makeOffscreenCanvas(1, 1);
+                        return { style: {}, setAttribute: function(){}, getAttribute: function(){ return null; } };
+                    },
+                    head: { appendChild: function(){} },
+                    body: { appendChild: function(){} },
+                    documentElement: { style: {} },
+                    currentScript: null
+                };
+
+                class WorkerOffscreenCanvasFactory {
+                    create(width, height) {
+                        const canvas = makeOffscreenCanvas(width, height);
+                        const context = canvas.getContext('2d', { alpha: false });
+                        return { canvas, context };
+                    }
+                    reset(canvasAndContext, width, height) {
+                        if (!canvasAndContext || !canvasAndContext.canvas) return;
+                        canvasAndContext.canvas.width = Math.max(1, width);
+                        canvasAndContext.canvas.height = Math.max(1, height);
+                    }
+                    destroy(canvasAndContext) {
+                        if (!canvasAndContext || !canvasAndContext.canvas) return;
+                        canvasAndContext.canvas.width = 0;
+                        canvasAndContext.canvas.height = 0;
+                        canvasAndContext.canvas = null;
+                        canvasAndContext.context = null;
+                    }
+                }
+
+                let pdfjsReady = false;
+                try {
+                    importScripts(
+                        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js',
+                        'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js'
+                    );
+                    if (self.pdfjsLib) {
+                        self.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+                        pdfjsReady = true;
+                    }
+                } catch (err) {
+                    pdfjsReady = false;
+                }
+
+                const pdfCache = new Map();
+                const pdfLoading = new Map();
+                const canvasFactory = new WorkerOffscreenCanvasFactory();
+                let isPaused = false;
+                let minValidToken = 0;
+                const jobQueue = [];
+                let isProcessing = false;
+
+                async function getWorkerPdf(docKey, url, buffer) {
+                    if (pdfCache.has(docKey)) return pdfCache.get(docKey);
+                    if (pdfLoading.has(docKey)) return pdfLoading.get(docKey);
+                    const p = (async () => {
+                        try {
+                            const params = buffer
+                                ? { data: new Uint8Array(buffer), disableAutoFetch: true, disableStream: false, isEvalSupported: false, canvasFactory }
+                                : { url, rangeChunkSize: 262144, disableAutoFetch: true, disableStream: false, isEvalSupported: false, canvasFactory };
+                            const pdf = await self.pdfjsLib.getDocument(params).promise;
+                            pdfCache.set(docKey, pdf);
+                            while (pdfCache.size > 6) {
+                                const oldestKey = pdfCache.keys().next().value;
+                                const oldPdf = pdfCache.get(oldestKey);
+                                pdfCache.delete(oldestKey);
+                                if (oldPdf && typeof oldPdf.cleanup === 'function') {
+                                    try { oldPdf.cleanup(); } catch (_) {}
+                                }
+                            }
+                            return pdf;
+                        } finally {
+                            pdfLoading.delete(docKey);
+                        }
+                    })();
+                    pdfLoading.set(docKey, p);
+                    return p;
+                }
+
+                async function processNextJob() {
+                    if (isProcessing || !jobQueue.length) return;
+                    isProcessing = true;
+                    while (jobQueue.length > 0) {
+                        const job = jobQueue.shift();
+                        if (!job) continue;
+                        const isTakeoffJob = job.scope === 'takeoff';
+                        if (!isTakeoffJob && isPaused) {
+                            self.postMessage({ reqId: job.reqId, ok: false, cancelled: true });
+                            continue;
+                        }
+                        if (!isTakeoffJob && job.token && job.token < minValidToken) {
+                            self.postMessage({ reqId: job.reqId, ok: false, cancelled: true });
+                            continue;
+                        }
+                        if (!pdfjsReady) {
+                            self.postMessage({ reqId: job.reqId, ok: false, unsupported: true });
+                            continue;
+                        }
+                        try {
+                            const pdf = await getWorkerPdf(job.docKey, job.url, job.buffer);
+                            if (!isTakeoffJob && (isPaused || (job.token && job.token < minValidToken))) {
+                                self.postMessage({ reqId: job.reqId, ok: false, cancelled: true });
+                                continue;
+                            }
+                            if (job.type === 'pageCount') {
+                                self.postMessage({ reqId: job.reqId, ok: true, numPages: pdf ? pdf.numPages : 0 });
+                                continue;
+                            }
+                            if (job.type === 'renderThumb') {
+                                const page = await pdf.getPage(job.pageNumber || 1);
+                                if (!isTakeoffJob && (isPaused || (job.token && job.token < minValidToken))) {
+                                    try { page.cleanup(); } catch (_) {}
+                                    self.postMessage({ reqId: job.reqId, ok: false, cancelled: true });
+                                    continue;
+                                }
+                                const unscaled = page.getViewport({ scale: 1.0 });
+                                const targetWidth = job.targetWidth || 320;
+                                const scale = Math.min(0.45, Math.max(0.15, targetWidth / (unscaled.width || 1000)));
+                                const viewport = page.getViewport({ scale });
+                                const w = Math.max(1, Math.round(viewport.width));
+                                const h = Math.max(1, Math.round(viewport.height));
+                                const offscreen = makeOffscreenCanvas(w, h);
+                                const ctx = offscreen.getContext('2d', { alpha: false });
+                                ctx.fillStyle = '#ffffff';
+                                ctx.fillRect(0, 0, w, h);
+                                await page.render({ canvasContext: ctx, viewport, canvasFactory }).promise;
+                                try { page.cleanup(); } catch (_) {}
+                                const blob = await offscreen.convertToBlob({ type: 'image/jpeg', quality: job.quality || 0.85 });
+                                self.postMessage({
+                                    reqId: job.reqId,
+                                    ok: true,
+                                    blob,
+                                    numPages: pdf.numPages
+                                });
+                            }
+                        } catch (err) {
+                            self.postMessage({ reqId: job.reqId, ok: false, error: String(err && err.message || err) });
+                        }
+                        await new Promise(r => setTimeout(r, 15));
+                    }
+                    isProcessing = false;
+                }
+
+                self.onmessage = function(e) {
+                    const msg = e.data || {};
+                    if (msg.type === 'pause') {
+                        isPaused = true;
+                        if (typeof msg.token === 'number') minValidToken = msg.token;
+                        for (let i = jobQueue.length - 1; i >= 0; i--) {
+                            if (jobQueue[i].scope !== 'takeoff') {
+                                const dropped = jobQueue.splice(i, 1)[0];
+                                if (dropped && dropped.reqId) {
+                                    self.postMessage({ reqId: dropped.reqId, ok: false, cancelled: true });
+                                }
+                            }
+                        }
+                        return;
+                    }
+                    if (msg.type === 'clearTakeoff') {
+                        for (let i = jobQueue.length - 1; i >= 0; i--) {
+                            if (jobQueue[i].scope === 'takeoff') {
+                                const dropped = jobQueue.splice(i, 1)[0];
+                                if (dropped && dropped.reqId) {
+                                    self.postMessage({ reqId: dropped.reqId, ok: false, cancelled: true });
+                                }
+                            }
+                        }
+                        return;
+                    }
+                    if (msg.type === 'resume') {
+                        isPaused = false;
+                        processNextJob();
+                        return;
+                    }
+                    if (msg.type === 'clearToken') {
+                        if (typeof msg.token === 'number') minValidToken = msg.token;
+                        for (let i = jobQueue.length - 1; i >= 0; i--) {
+                            if (jobQueue[i].scope !== 'takeoff' && jobQueue[i].token && jobQueue[i].token < minValidToken) {
+                                const dropped = jobQueue.splice(i, 1)[0];
+                                if (dropped && dropped.reqId) {
+                                    self.postMessage({ reqId: dropped.reqId, ok: false, cancelled: true });
+                                }
+                            }
+                        }
+                        return;
+                    }
+                    if (msg.type === 'renderThumb') {
+                        if (msg.scope === 'takeoff') {
+                            // Replace any queued takeoff preview render so only the latest hovered sheet renders
+                            for (let i = jobQueue.length - 1; i >= 0; i--) {
+                                if (jobQueue[i].scope === 'takeoff' && jobQueue[i].type === 'renderThumb') {
+                                    const dropped = jobQueue.splice(i, 1)[0];
+                                    if (dropped && dropped.reqId) {
+                                        self.postMessage({ reqId: dropped.reqId, ok: false, cancelled: true });
+                                    }
+                                }
+                            }
+                            jobQueue.unshift(msg);
+                            processNextJob();
+                            return;
+                        }
+                        // Prioritize visible thumbnail renders at the front of the queue before background pageCount jobs
+                        let insertIdx = jobQueue.findIndex(j => j.type === 'pageCount');
+                        if (insertIdx === -1) jobQueue.push(msg);
+                        else jobQueue.splice(insertIdx, 0, msg);
+                        processNextJob();
+                        return;
+                    }
+                    if (msg.type === 'pageCount') {
+                        jobQueue.push(msg);
+                        processNextJob();
+                        return;
+                    }
+                };
+            `;
+            const blob = new Blob([workerCode], { type: 'application/javascript' });
+            const workerUrl = URL.createObjectURL(blob);
+            pdfThumbWorker = new Worker(workerUrl);
+            pdfThumbWorker.onmessage = (e) => {
+                const data = e.data || {};
+                if (!data.reqId || !pdfWorkerPending.has(data.reqId)) return;
+                const { resolve } = pdfWorkerPending.get(data.reqId);
+                pdfWorkerPending.delete(data.reqId);
+                if (data.unsupported) {
+                    pdfThumbWorkerUnsupported = true;
+                }
+                resolve(data);
+            };
+            pdfThumbWorker.onerror = () => {
+                pdfThumbWorkerUnsupported = true;
+                pdfWorkerPending.forEach(({ resolve }) => resolve({ ok: false, unsupported: true }));
+                pdfWorkerPending.clear();
+            };
+            return pdfThumbWorker;
+        } catch (_) {
+            pdfThumbWorkerUnsupported = true;
+            return null;
+        }
+    }
+
+    async function callPdfThumbWorker(payload) {
+        const worker = getPdfThumbWorker();
+        if (!worker) return { ok: false, unsupported: true };
+        const reqId = ++pdfWorkerReqSeq;
+        return new Promise((resolve) => {
+            pdfWorkerPending.set(reqId, { resolve });
+            worker.postMessage({ ...payload, reqId });
+        });
+    }
+
+    async function buildWorkerDocPayload(doc) {
+        const rawPath = doc.path || doc.fileUrl || '';
+        const docKey = String(doc.backendId || rawPath || doc.id);
+        let absUrl = '';
+        let buffer = null;
+        const file = sessionFiles.get(String(doc.id));
+        if (file) {
+            buffer = await file.arrayBuffer();
+        } else if (rawPath) {
+            try {
+                absUrl = new URL(rawPath, window.location.href).href;
+            } catch (_) {
+                absUrl = rawPath;
+            }
+        }
+        return { docKey, url: absUrl, buffer };
+    }
+
+    window.__TakeoffThumbService = {
+        getCachedThumbUrl(doc, pageNumber = 1) {
+            if (!doc) return null;
+            return getCachedSheetThumbUrl({ id: doc.id, backendId: doc.id, path: doc.fileUrl || doc.path }, pageNumber);
+        },
+        async getPersistedThumbUrl(doc, pageNumber = 1) {
+            if (!doc) return null;
+            return getPersistedThumbBlobUrl({ id: doc.id, backendId: doc.id, path: doc.fileUrl || doc.path }, pageNumber);
+        },
+        async renderPreviewThumb(doc, pageNumber = 1) {
+            if (!doc || pdfThumbWorkerUnsupported) return null;
+            const normDoc = { id: doc.id, backendId: doc.id, path: doc.fileUrl || doc.path };
+            const workerDoc = await buildWorkerDocPayload(normDoc);
+            if (!workerDoc.url && !workerDoc.buffer) return null;
+            const res = await callPdfThumbWorker({
+                type: 'renderThumb',
+                scope: 'takeoff',
+                docKey: workerDoc.docKey,
+                url: workerDoc.url,
+                buffer: workerDoc.buffer,
+                pageNumber: Number(pageNumber) || 1,
+                targetWidth: THUMB_TARGET_WIDTH,
+                quality: THUMB_JPEG_QUALITY
+            });
+            if (res && res.ok && res.blob) {
+                const blobUrl = URL.createObjectURL(res.blob);
+                storeCachedSheetThumbUrl(normDoc, pageNumber, blobUrl);
+                savePersistedThumbBlob(normDoc, pageNumber, res.blob);
+                return { url: blobUrl, numPages: res.numPages };
+            }
+            return null;
+        },
+        async getPageCount(doc) {
+            if (!doc || pdfThumbWorkerUnsupported) return 0;
+            const normDoc = { id: doc.id, backendId: doc.id, path: doc.fileUrl || doc.path };
+            const workerDoc = await buildWorkerDocPayload(normDoc);
+            if (!workerDoc.url && !workerDoc.buffer) return 0;
+            const res = await callPdfThumbWorker({
+                type: 'pageCount',
+                scope: 'takeoff',
+                docKey: workerDoc.docKey,
+                url: workerDoc.url,
+                buffer: workerDoc.buffer
+            });
+            return (res && res.ok && res.numPages > 0) ? Number(res.numPages) : 0;
+        },
+        cancelTakeoffJobs() {
+            if (pdfThumbWorker) {
+                try { pdfThumbWorker.postMessage({ type: 'clearTakeoff' }); } catch (_) {}
+            }
+        }
+    };
+
+    function waitForIdleSlice(timeoutMs = 180) {
+        return new Promise((resolve) => {
+            if (typeof window.requestIdleCallback === 'function') {
+                window.requestIdleCallback(() => resolve(), { timeout: timeoutMs });
+            } else {
+                setTimeout(resolve, 32);
+            }
+        });
+    }
+
+    async function loadPdfDocument(doc) {
+        if (!window.pdfjsLib || !doc) return null;
+        const docKey = String(doc.id);
+        if (pdfDocumentCache.has(doc.id)) return pdfDocumentCache.get(doc.id);
+        if (pdfDocumentCache.has(docKey)) return pdfDocumentCache.get(docKey);
+        for (const k of getDocCacheKeys(doc)) {
+            if (sharedPdfDocCache.has(k)) {
+                const cached = sharedPdfDocCache.get(k);
+                pdfDocumentCache.set(doc.id, cached);
+                pdfDocumentCache.set(docKey, cached);
+                return cached;
+            }
+        }
+        if (pdfLoadingPromises.has(docKey)) return pdfLoadingPromises.get(docKey);
+
+        const loadPromise = (async () => {
+            try {
+                let pdf = null;
+                const file = sessionFiles.get(docKey);
+                if (file) {
+                    const arrayBuffer = await file.arrayBuffer();
+                    pdf = await window.pdfjsLib.getDocument({
+                        data: new Uint8Array(arrayBuffer),
+                        disableAutoFetch: true,
+                        disableStream: false
+                    }).promise;
+                } else if (doc.path) {
+                    pdf = await window.pdfjsLib.getDocument({
+                        url: doc.path,
+                        rangeChunkSize: 262144,
+                        disableAutoFetch: true,
+                        disableStream: false
+                    }).promise;
+                }
+                if (pdf) {
+                    pdfDocumentCache.set(doc.id, pdf);
+                    pdfDocumentCache.set(docKey, pdf);
+                    getDocCacheKeys(doc).forEach(k => sharedPdfDocCache.set(k, pdf));
+                    return pdf;
+                }
+            } catch (e) {
+                console.warn('PDF load failed for doc', doc.id, e);
+            } finally {
+                pdfLoadingPromises.delete(docKey);
+            }
+            return null;
+        })();
+
+        pdfLoadingPromises.set(docKey, loadPromise);
+        return loadPromise;
     }
 
     const pdfThumbnailDataCache = new Map();
     let currentThumbnailObserver = null;
+    let sheetRenderToken = 0;
+    let documentsContentRenderSeq = 0;
 
     function cleanupThumbnailObserver() {
+        sheetRenderToken++;
         if (currentThumbnailObserver) {
             currentThumbnailObserver.disconnect();
             currentThumbnailObserver = null;
         }
+        if (pdfThumbWorker) {
+            try {
+                pdfThumbWorker.postMessage({ type: 'clearToken', token: sheetRenderToken });
+            } catch (_) {}
+        }
     }
+
+    function pauseDocumentsBackgroundWork() {
+        cleanupThumbnailObserver();
+        if (pdfThumbWorker) {
+            try {
+                pdfThumbWorker.postMessage({ type: 'pause', token: sheetRenderToken });
+            } catch (_) {}
+        }
+    }
+
+    window.onDocumentsTabVisibilityChange = function (isActive) {
+        if (!isActive) {
+            pauseDocumentsBackgroundWork();
+            return;
+        }
+        if (pdfThumbWorker) {
+            try {
+                pdfThumbWorker.postMessage({ type: 'resume' });
+            } catch (_) {}
+        }
+        if (documentsNeedsRenderOnTabEnter) {
+            documentsNeedsRenderOnTabEnter = false;
+            renderDocumentsPage();
+            return;
+        }
+        // Resume page counts and any visible sheet/attachment thumbnails when returning to Documents tab
+        const drawings = drawingDocuments();
+        drawings.forEach(doc => {
+            if (doc.extension === 'pdf' && (!doc.pageCount || doc.pageCount <= 0)) {
+                enqueuePdfPageCount(doc);
+            }
+        });
+        processPdfPageCountQueue();
+        if (selectedDocumentsFolder.startsWith('document:')) {
+            const docId = selectedDocumentsFolder.replace('document:', '');
+            const doc = allDocumentRows().find(r => r.id === docId);
+            if (doc && Array.isArray(doc.pages) && doc.pages.length) {
+                renderSheetThumbnails(doc, doc.pages);
+            }
+        } else if (selectedDocumentsFolder === 'attachments') {
+            renderAttachmentThumbnails(sortedDocuments(filteredDocuments(attachmentDocuments())));
+        }
+    };
+
+    document.addEventListener('visibilitychange', () => {
+        if (document.hidden) {
+            pauseDocumentsBackgroundWork();
+        } else if (isDocumentsTabActive()) {
+            window.onDocumentsTabVisibilityChange?.(true);
+        }
+    });
 
     async function renderSheetThumbnails(doc, sheets) {
         cleanupThumbnailObserver();
-        if (!doc) return;
-
-        let pdfInstance = null;
-        const loadPdfOnce = async () => {
-            if (!pdfInstance) {
-                pdfInstance = await loadPdfDocument(doc);
-            }
-            return pdfInstance;
-        };
+        if (!doc || !isDocumentsTabActive()) return;
+        const token = sheetRenderToken;
 
         const renderQueue = [];
+        const queuedSheetIds = new Set();
         let isRendering = false;
 
         const processQueue = async () => {
+            if (token !== sheetRenderToken || !isDocumentsTabActive()) return;
             if (isRendering || !renderQueue.length) return;
             isRendering = true;
+            activePriorityThumbRenders++;
             const item = renderQueue.shift();
             try {
-                const pdf = await loadPdfOnce();
-                if (pdf) {
-                    await renderSingleSheetThumbnail(pdf, doc, item.sheet);
-                }
+                await renderSingleSheetThumbnail(null, doc, item.sheet, token);
             } catch (err) {
                 console.warn('Thumbnail render error:', err);
             } finally {
+                activePriorityThumbRenders = Math.max(0, activePriorityThumbRenders - 1);
                 isRendering = false;
-                if (renderQueue.length) {
-                    requestAnimationFrame(processQueue);
+                if (token === sheetRenderToken && isDocumentsTabActive() && renderQueue.length) {
+                    setTimeout(processQueue, 24);
                 }
             }
+        };
+
+        const enqueueSheet = (sheet) => {
+            if (!sheet || queuedSheetIds.has(sheet.id) || !isDocumentsTabActive()) return;
+            const cId = cleanId(sheet.id);
+            const cachedUrl = getCachedSheetThumbUrl(doc, sheet.pageNumber || 1);
+            if (cachedUrl) {
+                applySheetThumbDataUrlToDom(cId, cachedUrl, sheet.name);
+                return;
+            }
+            queuedSheetIds.add(sheet.id);
+            renderQueue.push({ sheet });
+            processQueue();
         };
 
         if (window.IntersectionObserver) {
             currentThumbnailObserver = new IntersectionObserver((entries, obs) => {
+                if (token !== sheetRenderToken || !isDocumentsTabActive()) return;
                 entries.forEach(entry => {
                     if (entry.isIntersecting) {
                         const row = entry.target;
                         obs.unobserve(row);
                         const sheetId = row.dataset.docSheetId;
                         const sheet = sheets.find(s => s.id === sheetId);
-                        if (sheet) {
-                            renderQueue.push({ sheet });
-                            processQueue();
-                        }
+                        if (sheet) enqueueSheet(sheet);
                     }
                 });
             }, {
                 root: document.getElementById('documentsList'),
-                rootMargin: '120px 0px 120px 0px',
+                rootMargin: '140px 0px 140px 0px',
                 threshold: 0.01
             });
 
@@ -1187,103 +2046,277 @@
                 currentThumbnailObserver.observe(row);
             });
         } else {
-            // Fallback for browsers without IntersectionObserver: render first 8 sheets
-            const pdf = await loadPdfOnce();
-            if (pdf) {
-                for (const sheet of sheets.slice(0, 8)) {
-                    await renderSingleSheetThumbnail(pdf, doc, sheet);
-                }
+            for (const sheet of sheets.slice(0, 6)) {
+                if (token !== sheetRenderToken || !isDocumentsTabActive()) break;
+                enqueueSheet(sheet);
             }
         }
     }
 
-    async function renderSingleSheetThumbnail(pdf, doc, sheet) {
-        const cId = cleanId(sheet.id);
+    function applySheetThumbDataUrlToDom(cId, dataUrl, altText) {
         const canvas = document.getElementById(`canvas-${cId}`);
         const bpFallback = document.getElementById(`bp-${cId}`);
-        if (!canvas) return;
+        let imgEl = document.getElementById(`img-${cId}`);
+        if (!imgEl && canvas && canvas.parentNode) {
+            imgEl = document.createElement('img');
+            imgEl.id = `img-${cId}`;
+            imgEl.className = 'doc-sheet-canvas';
+            imgEl.loading = 'lazy';
+            imgEl.decoding = 'async';
+            imgEl.alt = altText || '';
+            canvas.parentNode.insertBefore(imgEl, canvas);
+        }
+        if (imgEl) {
+            imgEl.src = dataUrl;
+            imgEl.style.display = 'block';
+        }
+        if (canvas) canvas.style.display = 'none';
+        if (bpFallback) bpFallback.style.display = 'none';
+    }
 
-        const cacheKey = `${doc.id}_p${sheet.pageNumber || 1}`;
-        if (pdfThumbnailDataCache.has(cacheKey)) {
-            const cachedImg = pdfThumbnailDataCache.get(cacheKey);
-            const ctx = canvas.getContext('2d');
-            canvas.width = cachedImg.width;
-            canvas.height = cachedImg.height;
-            ctx.drawImage(cachedImg, 0, 0);
-            canvas.style.display = 'block';
-            if (bpFallback) bpFallback.style.display = 'none';
+    async function renderSingleSheetThumbnail(pdf, doc, sheet, token = sheetRenderToken) {
+        if (token !== sheetRenderToken || !isDocumentsTabActive()) return;
+        const cId = cleanId(sheet.id);
+        const pageNum = sheet.pageNumber || 1;
+
+        // 1. Check in-memory cache (0ms)
+        const cachedUrl = getCachedSheetThumbUrl(doc, pageNum);
+        if (cachedUrl) {
+            applySheetThumbDataUrlToDom(cId, cachedUrl, sheet.name);
             return;
         }
 
+        // 2. Check IndexedDB persistent cache (~1ms, zero PDF parsing/rendering)
+        const persistedUrl = await getPersistedThumbBlobUrl(doc, pageNum);
+        if (token !== sheetRenderToken || !isDocumentsTabActive()) return;
+        if (persistedUrl) {
+            applySheetThumbDataUrlToDom(cId, persistedUrl, sheet.name);
+            return;
+        }
+
+        const canvas = document.getElementById(`canvas-${cId}`);
+        const bpFallback = document.getElementById(`bp-${cId}`);
+        if (!canvas && !bpFallback) return;
+
+        const bpIcon = bpFallback?.querySelector('i');
+        if (bpIcon) bpIcon.className = 'fas fa-circle-notch fa-spin doc-thumb-spinner';
+
+        // 3. Render in Dedicated Background Web Worker (OffscreenCanvas) so main UI thread never lags
+        if (!pdfThumbWorkerUnsupported) {
+            try {
+                const workerDoc = await buildWorkerDocPayload(doc);
+                if (token !== sheetRenderToken || !isDocumentsTabActive()) return;
+                if (workerDoc.url || workerDoc.buffer) {
+                    const res = await callPdfThumbWorker({
+                        type: 'renderThumb',
+                        token,
+                        docKey: workerDoc.docKey,
+                        url: workerDoc.url,
+                        buffer: workerDoc.buffer,
+                        pageNumber: pageNum,
+                        targetWidth: THUMB_TARGET_WIDTH,
+                        quality: THUMB_JPEG_QUALITY
+                    });
+                    if (token !== sheetRenderToken || !isDocumentsTabActive() || res.cancelled) {
+                        if (bpIcon) bpIcon.className = 'fas fa-drafting-compass';
+                        return;
+                    }
+                    if (res.ok && res.blob) {
+                        const blobUrl = URL.createObjectURL(res.blob);
+                        storeCachedSheetThumbUrl(doc, pageNum, blobUrl);
+                        savePersistedThumbBlob(doc, pageNum, res.blob);
+                        applySheetThumbDataUrlToDom(cId, blobUrl, sheet.name);
+                        return;
+                    }
+                }
+            } catch (_) {}
+        }
+
+        // 4. Fallback for older browsers without OffscreenCanvas Worker: low-priority idle slice + async toBlob
         try {
-            const pageNum = sheet.pageNumber || 1;
-            const page = await pdf.getPage(pageNum);
+            await waitForIdleSlice(220);
+            if (token !== sheetRenderToken || !isDocumentsTabActive()) return;
+            const activePdf = pdf || await loadPdfDocument(doc);
+            if (!activePdf || token !== sheetRenderToken || !isDocumentsTabActive()) return;
+            const page = await activePdf.getPage(pageNum);
+            if (token !== sheetRenderToken || !isDocumentsTabActive()) {
+                try { page.cleanup(); } catch (_) {}
+                return;
+            }
             const unscaled = page.getViewport({ scale: 1.0 });
-            // Optimal lightweight thumbnail scale (~160px width)
-            const targetWidth = 160;
-            const scale = Math.min(0.32, Math.max(0.12, targetWidth / (unscaled.width || 1000)));
+            const scale = Math.min(0.42, Math.max(0.15, THUMB_TARGET_WIDTH / (unscaled.width || 1000)));
             const viewport = page.getViewport({ scale });
 
-            canvas.width = Math.round(viewport.width);
-            canvas.height = Math.round(viewport.height);
-            const ctx = canvas.getContext('2d');
-            await page.render({ canvasContext: ctx, viewport }).promise;
-
-            canvas.style.display = 'block';
-            if (bpFallback) bpFallback.style.display = 'none';
-
-            if (window.createImageBitmap) {
-                createImageBitmap(canvas).then(bitmap => {
-                    pdfThumbnailDataCache.set(cacheKey, bitmap);
-                }).catch(() => { });
+            if (!canvas) return;
+            canvas.width = Math.max(1, Math.round(viewport.width));
+            canvas.height = Math.max(1, Math.round(viewport.height));
+            const ctx = canvas.getContext('2d', { alpha: false });
+            ctx.fillStyle = '#ffffff';
+            ctx.fillRect(0, 0, canvas.width, canvas.height);
+            await waitForIdleSlice(180);
+            if (token !== sheetRenderToken || !isDocumentsTabActive()) {
+                try { page.cleanup(); } catch (_) {}
+                return;
             }
+            await page.render({ canvasContext: ctx, viewport }).promise;
+            try { page.cleanup(); } catch (_) {}
+            if (token !== sheetRenderToken || !isDocumentsTabActive()) return;
+
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', THUMB_JPEG_QUALITY));
+            if (blob) {
+                const blobUrl = URL.createObjectURL(blob);
+                storeCachedSheetThumbUrl(doc, pageNum, blobUrl);
+                savePersistedThumbBlob(doc, pageNum, blob);
+                applySheetThumbDataUrlToDom(cId, blobUrl, sheet.name);
+            }
+            await new Promise(r => setTimeout(r, 60));
         } catch (err) {
+            if (bpIcon) bpIcon.className = 'fas fa-drafting-compass';
             console.warn('Could not render thumbnail for page', sheet.pageNumber, err);
         }
     }
 
+    async function ensureImageThumbnailUrl(doc) {
+        if (!doc) return '';
+        const docKey = String(doc.id);
+        if (imageThumbnailUrlCache.has(docKey)) return imageThumbnailUrlCache.get(docKey);
+        if (imageThumbnailPromises.has(docKey)) return imageThumbnailPromises.get(docKey);
+
+        const rawUrl = doc.path || sessionFileUrls.get(docKey) || '';
+        if (!rawUrl || doc.extension === 'svg') return rawUrl;
+
+        const promise = new Promise((resolve) => {
+            const img = new Image();
+            img.decoding = 'async';
+            img.onload = () => {
+                try {
+                    const maxW = 280;
+                    const maxH = 200;
+                    const w = img.naturalWidth || img.width || maxW;
+                    const h = img.naturalHeight || img.height || maxH;
+                    if (w <= maxW && h <= maxH) {
+                        imageThumbnailUrlCache.set(docKey, rawUrl);
+                        resolve(rawUrl);
+                        return;
+                    }
+                    const ratio = Math.min(maxW / w, maxH / h);
+                    const cw = Math.max(1, Math.round(w * ratio));
+                    const ch = Math.max(1, Math.round(h * ratio));
+                    const canvas = document.createElement('canvas');
+                    canvas.width = cw;
+                    canvas.height = ch;
+                    const ctx = canvas.getContext('2d');
+                    ctx.drawImage(img, 0, 0, cw, ch);
+                    canvas.toBlob((blob) => {
+                        if (blob) {
+                            const thumbUrl = URL.createObjectURL(blob);
+                            imageThumbnailUrlCache.set(docKey, thumbUrl);
+                            resolve(thumbUrl);
+                        } else {
+                            imageThumbnailUrlCache.set(docKey, rawUrl);
+                            resolve(rawUrl);
+                        }
+                    }, 'image/webp', 0.82);
+                } catch (_) {
+                    imageThumbnailUrlCache.set(docKey, rawUrl);
+                    resolve(rawUrl);
+                } finally {
+                    imageThumbnailPromises.delete(docKey);
+                }
+            };
+            img.onerror = () => {
+                imageThumbnailPromises.delete(docKey);
+                resolve(rawUrl);
+            };
+            img.src = rawUrl;
+        });
+
+        imageThumbnailPromises.set(docKey, promise);
+        return promise;
+    }
+
     async function renderAttachmentThumbnails(docs) {
-        if (!window.pdfjsLib) return;
+        if (!isDocumentsTabActive()) return;
+        const token = sheetRenderToken;
+        const imageDocs = docs.filter(d => ['jpg', 'jpeg', 'png', 'webp', 'gif'].includes(d.extension));
+        for (const doc of imageDocs) {
+            if (token !== sheetRenderToken || !isDocumentsTabActive()) break;
+            const docKey = String(doc.id);
+            if (imageThumbnailUrlCache.has(docKey)) continue;
+            ensureImageThumbnailUrl(doc).then(thumbUrl => {
+                if (token !== sheetRenderToken || !isDocumentsTabActive() || !thumbUrl) return;
+                const cId = cleanId(doc.id);
+                const imgEl = document.getElementById(`att-img-${cId}`);
+                if (imgEl && imgEl.src !== thumbUrl) {
+                    imgEl.src = thumbUrl;
+                }
+            });
+            await new Promise(r => setTimeout(r, 12));
+        }
+
         const pdfDocs = docs.filter(d => d.extension === 'pdf');
         for (const doc of pdfDocs) {
-            const cId = cleanId(doc.id);
-            const canvas = document.getElementById(`canvas-${cId}`);
-            const bpFallback = document.getElementById(`bp-${cId}`);
-            if (!canvas) continue;
+            if (token !== sheetRenderToken || !isDocumentsTabActive()) break;
+            await renderSingleSheetThumbnail(null, doc, { id: doc.id, pageNumber: 1, name: doc.name }, token);
+        }
+    }
 
-            const cacheKey = `${doc.id}_p1`;
-            if (pdfThumbnailDataCache.has(cacheKey)) {
-                const cachedImg = pdfThumbnailDataCache.get(cacheKey);
-                const ctx = canvas.getContext('2d');
-                canvas.width = cachedImg.width;
-                canvas.height = cachedImg.height;
-                ctx.drawImage(cachedImg, 0, 0);
-                canvas.style.display = 'block';
-                if (bpFallback) bpFallback.style.display = 'none';
-                continue;
+    function buildSheetPagesList(doc, count) {
+        const total = Math.max(1, Number(count) || 1);
+        const baseTitle = (doc.name || 'Plan').replace(/\.pdf$/i, '');
+        const generated = [];
+        for (let p = 1; p <= total; p++) {
+            generated.push({
+                id: `${doc.id}-p${p}`,
+                pageNumber: p,
+                name: `Sheet ${p}`,
+                title: `${baseTitle} - Page ${p}`
+            });
+        }
+        return generated;
+    }
+
+    function applyResolvedPdfPageCount(doc, count) {
+        if (!doc || !count || count <= 0) return;
+        doc.pageCount = count;
+        if (!doc.pages || !doc.pages.length) {
+            doc.pages = buildSheetPagesList(doc, count);
+        }
+
+        const localDoc = localDocuments.find(d => String(d.id) === String(doc.id));
+        if (localDoc) {
+            localDoc.pageCount = count;
+            localDoc.pages = doc.pages;
+            persistLocalDocuments();
+            syncDocumentsToProjectState();
+        }
+
+        if (window.ProjectState?.documents) {
+            const psDoc = window.ProjectState.documents.find(d => String(d.id) === String(doc.id) || (doc.backendId && String(d.id) === String(doc.backendId)));
+            if (psDoc) {
+                psDoc.pageCount = count;
+                psDoc.page_count = count;
+                psDoc.pages = doc.pages;
             }
+        }
 
-            try {
-                const pdf = await loadPdfDocument(doc);
-                if (!pdf) continue;
-                const page = await pdf.getPage(1);
-                const unscaled = page.getViewport({ scale: 1.0 });
-                const scale = Math.min(0.32, Math.max(0.12, 160 / (unscaled.width || 1000)));
-                const viewport = page.getViewport({ scale });
-                canvas.width = Math.round(viewport.width);
-                canvas.height = Math.round(viewport.height);
-                const ctx = canvas.getContext('2d');
-                await page.render({ canvasContext: ctx, viewport }).promise;
-                canvas.style.display = 'block';
-                if (bpFallback) bpFallback.style.display = 'none';
-
-                if (window.createImageBitmap) {
-                    createImageBitmap(canvas).then(bitmap => {
-                        pdfThumbnailDataCache.set(cacheKey, bitmap);
-                    }).catch(() => { });
+        const itemEl = document.querySelector(`[data-drag-doc-id="${doc.id}"]`);
+        if (itemEl) {
+            let badgeEl = itemEl.querySelector('.doc-tree-item-badge');
+            if (badgeEl) {
+                badgeEl.textContent = String(count);
+            } else {
+                badgeEl = document.createElement('span');
+                badgeEl.className = 'doc-tree-item-badge';
+                badgeEl.textContent = String(count);
+                const spacerEl = itemEl.querySelector('.doc-tree-badge-spacer');
+                const actionsWrap = itemEl.querySelector('.doc-tree-row-actions');
+                const moreBtn = itemEl.querySelector('.doc-tree-item-more');
+                if (spacerEl && spacerEl.parentNode) {
+                    spacerEl.parentNode.replaceChild(badgeEl, spacerEl);
+                } else if (actionsWrap && moreBtn) {
+                    actionsWrap.insertBefore(badgeEl, moreBtn);
                 }
-            } catch (err) {
-                console.warn('Could not render attachment preview:', err);
             }
         }
     }
@@ -1293,99 +2326,102 @@
         if (Array.isArray(doc.pages) && doc.pages.length) {
             return doc.pages;
         }
+        if (doc.extension === 'pdf' && doc.pageCount && Number(doc.pageCount) > 0) {
+            const generated = buildSheetPagesList(doc, Number(doc.pageCount));
+            doc.pages = generated;
+            return generated;
+        }
         if (doc.extension === 'pdf') {
+            // Try background worker first so opening a document doesn't parse the PDF on the main thread
+            if (!pdfThumbWorkerUnsupported) {
+                try {
+                    const workerDoc = await buildWorkerDocPayload(doc);
+                    if (workerDoc.url || workerDoc.buffer) {
+                        const res = await callPdfThumbWorker({
+                            type: 'pageCount',
+                            token: sheetRenderToken,
+                            docKey: workerDoc.docKey,
+                            url: workerDoc.url,
+                            buffer: workerDoc.buffer
+                        });
+                        if (res.ok && res.numPages > 0) {
+                            applyResolvedPdfPageCount(doc, res.numPages);
+                            return doc.pages;
+                        }
+                    }
+                } catch (_) {}
+            }
             const pdf = await loadPdfDocument(doc);
             if (pdf && pdf.numPages) {
-                const generated = [];
-                for (let p = 1; p <= pdf.numPages; p++) {
-                    generated.push({
-                        id: `${doc.id}-p${p}`,
-                        pageNumber: p,
-                        name: `Sheet ${p}`,
-                        title: `${(doc.name || 'Plan').replace(/\.pdf$/i, '')} - Page ${p}`
-                    });
-                }
-                doc.pages = generated;
-                doc.pageCount = pdf.numPages;
-
-                const local = localDocuments.find(d => String(d.id) === String(doc.id));
-                if (local) {
-                    local.pages = generated;
-                    local.pageCount = pdf.numPages;
-                    persistLocalDocuments();
-                    syncDocumentsToProjectState();
-                }
-                if (window.ProjectState?.documents) {
-                    const psDoc = window.ProjectState.documents.find(d => String(d.id) === String(doc.id) || (doc.backendId && String(d.id) === String(doc.backendId)));
-                    if (psDoc) {
-                        psDoc.pages = generated;
-                        psDoc.page_count = pdf.numPages;
-                        psDoc.pageCount = pdf.numPages;
-                    }
-                }
-                return generated;
+                applyResolvedPdfPageCount(doc, pdf.numPages);
+                return doc.pages;
             }
         }
-        const count = Number(doc.pageCount || 1);
-        const fallbackPages = [];
-        for (let p = 1; p <= count; p++) {
-            fallbackPages.push({
-                id: `${doc.id}-p${p}`,
-                pageNumber: p,
-                name: `Sheet ${p}`,
-                title: `Page ${p}`
-            });
+        return buildSheetPagesList(doc, Number(doc.pageCount || 1));
+    }
+
+    const pdfPageCountQueue = [];
+    const pdfPageCountQueuedIds = new Set();
+    let isProcessingPageCountQueue = false;
+
+    function enqueuePdfPageCount(doc) {
+        if (!isDocumentsTabActive()) return;
+        if (!doc || doc.extension !== 'pdf' || (doc.pageCount && doc.pageCount > 0)) return;
+        const docKey = String(doc.id);
+        if (pdfPageCountQueuedIds.has(docKey)) return;
+        pdfPageCountQueuedIds.add(docKey);
+        pdfPageCountQueue.push(doc);
+        processPdfPageCountQueue();
+    }
+
+    async function processPdfPageCountQueue() {
+        if (isProcessingPageCountQueue || !pdfPageCountQueue.length || !isDocumentsTabActive()) return;
+        isProcessingPageCountQueue = true;
+        while (pdfPageCountQueue.length > 0 && isDocumentsTabActive()) {
+            while (activePriorityThumbRenders > 0 && isDocumentsTabActive()) {
+                await new Promise(r => setTimeout(r, 150));
+            }
+            if (!isDocumentsTabActive()) break;
+            const nextDoc = pdfPageCountQueue.shift();
+            if (!nextDoc) continue;
+            try {
+                if (!nextDoc.pageCount || nextDoc.pageCount <= 0) {
+                    await ensurePdfPageCount(nextDoc);
+                }
+            } finally {
+                pdfPageCountQueuedIds.delete(String(nextDoc.id));
+            }
+            await new Promise(r => setTimeout(r, 60));
         }
-        return fallbackPages;
+        isProcessingPageCountQueue = false;
     }
 
     async function ensurePdfPageCount(doc) {
+        if (!isDocumentsTabActive()) return null;
         if (!doc || doc.extension !== 'pdf' || (doc.pageCount && doc.pageCount > 0)) return doc.pageCount;
         try {
+            if (!pdfThumbWorkerUnsupported) {
+                const workerDoc = await buildWorkerDocPayload(doc);
+                if (!isDocumentsTabActive()) return null;
+                if (workerDoc.url || workerDoc.buffer) {
+                    const res = await callPdfThumbWorker({
+                        type: 'pageCount',
+                        token: sheetRenderToken,
+                        docKey: workerDoc.docKey,
+                        url: workerDoc.url,
+                        buffer: workerDoc.buffer
+                    });
+                    if (res.ok && res.numPages > 0) {
+                        applyResolvedPdfPageCount(doc, res.numPages);
+                        return res.numPages;
+                    }
+                }
+            }
+            if (!isDocumentsTabActive()) return null;
             const pdf = await loadPdfDocument(doc);
             if (pdf && pdf.numPages) {
-                const count = pdf.numPages;
-                doc.pageCount = count;
-                if (!doc.pages || !doc.pages.length) {
-                    doc.pages = Array.from({ length: count }, (_, i) => ({
-                        id: `${doc.id}-p${i + 1}`,
-                        pageNumber: i + 1,
-                        name: `Sheet ${i + 1}`,
-                        title: `${(doc.name || 'Plan').replace(/\.pdf$/i, '')} - Page ${i + 1}`
-                    }));
-                }
-
-                const localDoc = localDocuments.find(d => String(d.id) === String(doc.id));
-                if (localDoc) {
-                    localDoc.pageCount = count;
-                    localDoc.pages = doc.pages;
-                    persistLocalDocuments();
-                    syncDocumentsToProjectState();
-                }
-
-                if (window.ProjectState?.documents) {
-                    const psDoc = window.ProjectState.documents.find(d => String(d.id) === String(doc.id) || (doc.backendId && String(d.id) === String(doc.backendId)));
-                    if (psDoc) {
-                        psDoc.pageCount = count;
-                        psDoc.page_count = count;
-                        psDoc.pages = doc.pages;
-                    }
-                }
-
-                const itemEl = document.querySelector(`[data-drag-doc-id="${doc.id}"]`);
-                if (itemEl) {
-                    let badgeEl = itemEl.querySelector('.doc-tree-item-badge');
-                    if (badgeEl) {
-                        badgeEl.textContent = String(count);
-                    } else {
-                        badgeEl = document.createElement('span');
-                        badgeEl.className = 'doc-tree-item-badge';
-                        badgeEl.textContent = String(count);
-                        const moreBtn = itemEl.querySelector('.doc-tree-item-more');
-                        itemEl.insertBefore(badgeEl, moreBtn);
-                    }
-                }
-                return count;
+                applyResolvedPdfPageCount(doc, pdf.numPages);
+                return pdf.numPages;
             }
         } catch (e) {
             console.warn('ensurePdfPageCount failed for', doc.id, e);
@@ -1395,41 +2431,116 @@
 
     const MAX_DOCUMENT_BYTES = 10737418240;
     const MAX_PDF_PREVIEW_BYTES = 67108864;
+    const ALLOWED_DOCUMENT_EXTENSIONS = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'svg']);
+    const DOCUMENT_ACCEPT_FILTER = '.pdf,image/*,application/pdf,image/png,image/jpeg,image/jpg,image/webp,image/gif,image/bmp,image/tiff';
+    const UPLOAD_MODAL_HOLD_MS = 2000;
     let isAddingFiles = false;
+    const selectedDocumentCheckboxIds = new Set();
+    const collapsedDisciplines = new Set();
+    let isDrawingsRootCollapsed = false;
 
-    function ensureDocumentUploadProgress() {
-        let host = document.querySelector('.multi-upload-progress');
-        if (host) return host;
-        host = document.createElement('div');
-        host.className = 'multi-upload-progress';
-        host.style.cssText = 'position:fixed;right:24px;bottom:24px;z-index:10000;width:min(420px,calc(100vw - 48px));padding:16px;border:1px solid rgba(148,163,184,.3);border-radius:12px;background:#111827;color:#fff;box-shadow:0 14px 40px rgba(0,0,0,.35)';
-        host.setAttribute('aria-live', 'polite');
-        const label = document.createElement('div');
-        label.className = 'multi-upload-progress-label';
-        label.style.cssText = 'overflow:hidden;font-weight:600;text-overflow:ellipsis;white-space:nowrap';
-        const count = document.createElement('div');
-        count.className = 'multi-upload-progress-count';
-        count.style.cssText = 'margin:5px 0;color:#cbd5e1;font-size:12px';
-        const track = document.createElement('div');
-        track.className = 'multi-upload-progress-track';
-        track.style.cssText = 'height:8px;overflow:hidden;border-radius:999px;background:#334155';
-        const bar = document.createElement('div');
-        bar.className = 'multi-upload-progress-bar';
-        bar.style.cssText = 'width:0;height:100%;background:#3b82f6;transition:width .15s ease';
-        const results = document.createElement('div');
-        results.className = 'multi-upload-progress-results';
-        results.style.cssText = 'max-height:140px;margin-top:8px;overflow:auto;font-size:12px';
-        track.appendChild(bar);
-        host.append(label, count, track, results);
-        (document.querySelector('.documents-page') || document.body).appendChild(host);
-        return host;
+    function isSupportedDocumentFile(file) {
+        if (!file) return false;
+        const name = String(file.name || '').trim();
+        const ext = name.includes('.') ? String(name.split('.').pop() || '').toLowerCase() : '';
+        const mime = String(file.type || '').toLowerCase();
+        if (!ALLOWED_DOCUMENT_EXTENSIONS.has(ext)) return false;
+        if (mime && mime !== 'application/pdf' && mime !== 'application/x-pdf' && !mime.startsWith('image/') && mime !== 'application/octet-stream') {
+            return false;
+        }
+        return true;
     }
 
-    function uploadDocumentFile(file, projectId, onProgress) {
+    function stripDuplicateUploadPrefix(name) {
+        return String(name || '').trim().replace(/^#\d+_/, '');
+    }
+
+    function resolveDuplicateDocumentName(rawName, batchAssignedNames = []) {
+        const cleanRaw = String(rawName || 'Document').trim() || 'Document';
+        const baseName = stripDuplicateUploadPrefix(cleanRaw) || cleanRaw;
+        const baseLower = baseName.toLowerCase();
+
+        const existingNames = [];
+        for (const doc of allDocumentRows()) {
+            if (doc.name) existingNames.push(String(doc.name).trim());
+            if (doc.filename && doc.filename !== doc.name) existingNames.push(String(doc.filename).trim());
+        }
+        for (const assigned of batchAssignedNames) {
+            if (assigned) existingNames.push(String(assigned).trim());
+        }
+
+        const existingLowerSet = new Set(existingNames.map(n => n.toLowerCase()));
+        let matchingUploadCount = 0;
+        for (const existing of existingNames) {
+            if (stripDuplicateUploadPrefix(existing).toLowerCase() === baseLower) {
+                matchingUploadCount++;
+            }
+        }
+
+        if (matchingUploadCount === 0 && !existingLowerSet.has(cleanRaw.toLowerCase())) {
+            return cleanRaw;
+        }
+
+        let nextNumber = Math.max(2, matchingUploadCount + 1);
+        let candidate = `#${nextNumber}_${baseName}`;
+        while (existingLowerSet.has(candidate.toLowerCase())) {
+            nextNumber++;
+            candidate = `#${nextNumber}_${baseName}`;
+        }
+        return candidate;
+    }
+
+    function ensureDocumentUploadModal() {
+        let modal = document.getElementById('pdDocumentUploadModal');
+        if (modal) return modal;
+
+        modal = document.createElement('div');
+        modal.id = 'pdDocumentUploadModal';
+        modal.className = 'pd-modal-backdrop doc-upload-modal-backdrop';
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-labelledby', 'docUploadModalTitle');
+        modal.setAttribute('aria-live', 'polite');
+        modal.innerHTML = `
+            <div class="pd-modal doc-upload-modal" style="width: min(480px, calc(100vw - 32px)); max-width: 480px;">
+                <div class="pd-modal-head">
+                    <h3 id="docUploadModalTitle" style="min-width: 0; overflow: hidden;">
+                        <i class="fas fa-cloud-arrow-up doc-upload-modal-icon" id="docUploadModalIcon" style="color: var(--primary); flex-shrink: 0;"></i>
+                        <span id="docUploadModalHeading" style="overflow: hidden; text-overflow: ellipsis; white-space: nowrap;">Uploading Documents...</span>
+                    </h3>
+                    <span class="doc-upload-modal-counter" id="docUploadModalCounter">0 / 0</span>
+                </div>
+                <div class="pd-modal-body doc-upload-modal-body" style="grid-template-columns: minmax(0, 1fr); gap: 14px;">
+                    <div class="doc-upload-current-card">
+                        <div class="doc-upload-file-row">
+                            <div class="doc-upload-file-meta">
+                                <i class="far fa-file-pdf doc-upload-file-icon" id="docUploadFileIcon"></i>
+                                <span class="doc-upload-file-name" id="docUploadFileName" title="Preparing upload...">Preparing upload...</span>
+                            </div>
+                            <span class="doc-upload-file-percent" id="docUploadFilePercent">0%</span>
+                        </div>
+                        <div class="doc-upload-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100" aria-valuenow="0" id="docUploadProgressTrack">
+                            <div class="doc-upload-progress-bar" id="docUploadProgressBar" style="width: 0%;"></div>
+                        </div>
+                        <div class="doc-upload-status-line">
+                            <span class="doc-upload-status-text" id="docUploadStatusText">Uploading file...</span>
+                        </div>
+                    </div>
+                    <div class="doc-upload-file-list" id="docUploadFileList" style="display: none;"></div>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+        return modal;
+    }
+
+    function uploadDocumentFile(file, projectId, onProgress, targetFilename = null, folderName = null) {
         return new Promise((resolve, reject) => {
+            const finalName = targetFilename || file.name;
             const form = new FormData();
             form.append('project_id', projectId);
-            form.append('file', file, file.name);
+            if (folderName) form.append('folder_name', folderName);
+            form.append('file', file, finalName);
             const xhr = new XMLHttpRequest();
             xhr.open('POST', '../api/project_document_takeoff.php');
             xhr.setRequestHeader('Accept', 'application/json');
@@ -1454,95 +2565,211 @@
 
         try {
             const incoming = [];
-            const seenKeys = new Set();
+            const unsupportedFiles = [];
             for (const file of rawIncoming) {
-                const key = `${file.name}_${file.size}_${file.lastModified || 0}`;
-                if (!seenKeys.has(key)) {
-                    seenKeys.add(key);
+                if (isSupportedDocumentFile(file)) {
                     incoming.push(file);
+                } else {
+                    unsupportedFiles.push(file);
                 }
             }
-            if (!incoming.length) return;
+
+            if (unsupportedFiles.length && !incoming.length) {
+                const rejectedList = unsupportedFiles.map(f => f.name).join(', ');
+                showAlertDialog({
+                    title: 'Unsupported File Format',
+                    message: `The system cannot process the following file(s): ${rejectedList}. Only PDF and image files (PDF, PNG, JPG, JPEG, WEBP, GIF, BMP, TIFF) can be uploaded.`,
+                    buttonText: 'Understood',
+                    type: 'error',
+                    badge: 'UNSUPPORTED FILE',
+                    icon: 'fas fa-file-circle-xmark'
+                });
+                return;
+            }
+
+            const batchAssignedNames = [];
+            const uploadEntries = incoming.map(file => {
+                const resolvedName = resolveDuplicateDocumentName(file.name, batchAssignedNames);
+                batchAssignedNames.push(resolvedName);
+                return { file, resolvedName };
+            });
 
             const projectId = Number(window.ProjectState?.projectId || 0);
-            const progress = ensureDocumentUploadProgress();
-            const progressLabel = progress.querySelector('.multi-upload-progress-label');
-            const progressCount = progress.querySelector('.multi-upload-progress-count');
-            const progressBar = progress.querySelector('.multi-upload-progress-bar');
-            const progressResults = progress.querySelector('.multi-upload-progress-results');
+            const modal = ensureDocumentUploadModal();
+            const modalHeading = modal.querySelector('#docUploadModalHeading');
+            const modalIcon = modal.querySelector('#docUploadModalIcon');
+            const modalCounter = modal.querySelector('#docUploadModalCounter');
+            const fileIcon = modal.querySelector('#docUploadFileIcon');
+            const progressLabel = modal.querySelector('#docUploadFileName');
+            const progressPercent = modal.querySelector('#docUploadFilePercent');
+            const progressTrack = modal.querySelector('#docUploadProgressTrack');
+            const progressBar = modal.querySelector('#docUploadProgressBar');
+            const statusText = modal.querySelector('#docUploadStatusText');
+            const fileListEl = modal.querySelector('#docUploadFileList');
+
+            const setModalProgress = (pct, statusMsg = null) => {
+                const clamped = Math.max(0, Math.min(100, Math.round(pct)));
+                if (progressPercent) progressPercent.textContent = `${clamped}%`;
+                if (progressBar) progressBar.style.width = `${clamped}%`;
+                if (progressTrack) progressTrack.setAttribute('aria-valuenow', String(clamped));
+                if (statusMsg !== null && statusText) {
+                    statusText.textContent = statusMsg;
+                    statusText.title = statusMsg;
+                }
+            };
+
+            if (modalHeading) modalHeading.textContent = uploadEntries.length > 1 ? 'Uploading Documents...' : 'Uploading Document...';
+            if (modalIcon) {
+                modalIcon.className = 'fas fa-cloud-arrow-up doc-upload-modal-icon';
+                modalIcon.style.color = 'var(--primary)';
+            }
+            if (fileListEl) {
+                if (uploadEntries.length > 1) {
+                    fileListEl.style.display = 'flex';
+                    fileListEl.innerHTML = uploadEntries.map((entry, idx) => {
+                        const isPdf = String(entry.resolvedName.split('.').pop() || '').toLowerCase() === 'pdf';
+                        return `
+                            <div class="doc-upload-list-item" data-upload-idx="${idx}">
+                                <i class="far ${isPdf ? 'fa-file-pdf' : 'fa-file-image'} doc-upload-list-icon" style="color: ${isPdf ? '#ef4444' : '#3b82f6'}; flex-shrink: 0;"></i>
+                                <span class="doc-upload-list-name" title="${escapeHtml(entry.resolvedName)}">${escapeHtml(entry.resolvedName)}</span>
+                                <span class="doc-upload-list-status" data-upload-status="${idx}">Pending</span>
+                            </div>
+                        `;
+                    }).join('');
+                } else {
+                    fileListEl.style.display = 'none';
+                    fileListEl.innerHTML = '';
+                }
+            }
+
+            setModalProgress(0, 'Preparing file upload...');
+            modal.classList.add('open');
+
+            // Ensure initial 0% state renders before starting upload work
+            await new Promise(resolve => requestAnimationFrame(() => requestAnimationFrame(resolve)));
+
             const errors = [];
             let completed = 0;
             let succeeded = 0;
             let firstAddedId = null;
-            progress.classList.add('is-active');
-            progressResults.replaceChildren();
+            const activeDisciplineGroup = (typeof selectedDocumentsFolder === 'string' && selectedDocumentsFolder.startsWith('discipline:'))
+                ? selectedDocumentsFolder.replace('discipline:', '')
+                : null;
+            const effectiveCategory = category || (activeDisciplineGroup ? 'Drawings' : null);
 
-            for (let index = 0; index < incoming.length; index++) {
-                const file = incoming[index];
-                progressLabel.textContent = file.name;
-                progressCount.textContent = `${completed} / ${incoming.length} · 0%`;
+            for (let index = 0; index < uploadEntries.length; index++) {
+                const { file, resolvedName } = uploadEntries[index];
+                const ext = String(resolvedName.split('.').pop() || '').toLowerCase();
+                const isPdf = ext === 'pdf';
+                const itemStatusEl = fileListEl?.querySelector(`[data-upload-status="${index}"]`);
+                const itemRowEl = fileListEl?.querySelector(`[data-upload-idx="${index}"]`);
+
+                if (progressLabel) {
+                    progressLabel.textContent = resolvedName;
+                    progressLabel.title = resolvedName;
+                }
+                if (modalCounter) modalCounter.textContent = `${index + 1} / ${uploadEntries.length}`;
+                if (fileIcon) {
+                    fileIcon.className = `far ${isPdf ? 'fa-file-pdf' : 'fa-file-image'} doc-upload-file-icon`;
+                    fileIcon.style.color = isPdf ? '#ef4444' : '#3b82f6';
+                }
+                if (itemRowEl) itemRowEl.classList.add('is-active');
+                if (itemStatusEl) itemStatusEl.textContent = '0%';
+                setModalProgress(0, `Uploading ${resolvedName}...`);
+
                 if (file.size > MAX_DOCUMENT_BYTES) {
-                    errors.push({ filename: file.name, message: 'File exceeds the 10 GB limit.' });
+                    errors.push({ filename: resolvedName, message: 'File exceeds the 10 GB limit.' });
+                    if (itemRowEl) {
+                        itemRowEl.classList.remove('is-active');
+                        itemRowEl.classList.add('is-error');
+                    }
+                    if (itemStatusEl) itemStatusEl.textContent = 'Failed';
                     completed++;
                     continue;
                 }
 
                 const id = String(Date.now() + index + Math.random().toString(16).slice(2));
-                const ext = String(file.name.split('.').pop() || '').toLowerCase();
-                const inferredCategory = inferCategory(file, category);
-                const folderId = selectedDocumentsFolder.startsWith('custom:') ? selectedDocumentsFolder.replace('custom:', '') : '';
+                const inferredCategory = activeDisciplineGroup ? 'Drawings' : inferCategory({ name: resolvedName }, effectiveCategory);
+                const resolvedDiscipline = inferredCategory === 'Drawings'
+                    ? (activeDisciplineGroup || classifyDrawingDiscipline({ name: resolvedName, filename: resolvedName }))
+                    : null;
+                const targetFolderName = inferredCategory === 'Drawings'
+                    ? `Drawings:${resolvedDiscipline || 'general'}`
+                    : 'Attachments';
+                const folderId = '';
                 let pageCount = null;
                 let pages = [];
 
-                if (ext === 'pdf' && file.size <= MAX_PDF_PREVIEW_BYTES && window.pdfjsLib) {
-                    try {
-                        const arrayBuffer = await file.arrayBuffer();
-                        const pdf = await window.pdfjsLib.getDocument({ data: new Uint8Array(arrayBuffer) }).promise;
-                        pdfDocumentCache.set(id, pdf);
-                        pageCount = pdf.numPages;
-                        pages = Array.from({ length: pageCount }, (_, pageIndex) => ({
-                            id: `${id}-p${pageIndex + 1}`,
-                            pageNumber: pageIndex + 1,
-                            name: `Sheet ${pageIndex + 1}`,
-                            title: `${file.name.replace(/\.pdf$/i, '')} - Page ${pageIndex + 1}`
-                        }));
-                    } catch (error) {
-                        console.warn('Could not extract PDF page count:', error);
-                    }
-                }
+                // PDF page counts and thumbnails are resolved asynchronously in the background Web Worker
+                // (capped by MAX_PDF_PREVIEW_BYTES) after upload completes so main-thread UI never freezes.
 
                 if (!projectId) {
+                    setModalProgress(60, `Processing ${resolvedName}...`);
+                    if (itemStatusEl) itemStatusEl.textContent = '60%';
+                    await new Promise(r => setTimeout(r, 120));
                     sessionFiles.set(id, file);
                     sessionFileUrls.set(id, URL.createObjectURL(file));
                     localDocuments.push({
-                        id, name: file.name, filename: file.name, category: inferredCategory, folderId,
+                        id, name: resolvedName, filename: resolvedName, category: inferredCategory, folderId,
                         size: file.size, uploadedAt: new Date().toLocaleString(),
                         uploadedBy: $('poEstimator')?.value || 'Juan Estevez', type: file.type || '',
                         extension: ext, source: 'local', pageCount, pages, order: Date.now() + index
                     });
+                    if (inferredCategory === 'Drawings' && resolvedDiscipline) {
+                        saveDisciplineOverride(id, resolvedDiscipline, null, resolvedName);
+                        collapsedDisciplines.delete(resolvedDiscipline);
+                    }
                     firstAddedId = firstAddedId || id;
                     succeeded++;
                     completed++;
-                    progressBar.style.width = `${Math.round((completed / incoming.length) * 100)}%`;
+                    setModalProgress(100, `Uploaded ${resolvedName}`);
+                    if (itemRowEl) {
+                        itemRowEl.classList.remove('is-active');
+                        itemRowEl.classList.add('is-done');
+                    }
+                    if (itemStatusEl) itemStatusEl.innerHTML = '<i class="fas fa-check" style="color:#10b981;"></i> 100%';
                     continue;
                 }
 
                 try {
                     const stored = await uploadDocumentFile(file, projectId, percent => {
-                        progressCount.textContent = `${completed} / ${incoming.length} · ${percent}%`;
-                        progressBar.style.width = `${Math.round(((completed + percent / 100) / incoming.length) * 100)}%`;
-                    });
+                        const filePct = Math.max(0, Math.min(100, Math.round(percent)));
+                        setModalProgress(filePct, `Uploading ${resolvedName}... (${completed + 1} of ${uploadEntries.length})`);
+                        if (itemStatusEl) itemStatusEl.textContent = `${filePct}%`;
+                    }, resolvedName, targetFolderName);
                     const storedId = Number(stored.id);
+                    const finalStoredName = resolvedName || stored.filename || file.name;
+                    const docStateId = `existing-legacy_file-${storedId}`;
                     window.ProjectState.documents.push({
-                        id: storedId, source: 'legacy_file', filename: stored.filename || file.name,
-                        title: stored.filename || file.name, path: `../${stored.filepath}`,
+                        id: storedId, source: 'legacy_file', filename: finalStoredName,
+                        title: finalStoredName, path: `../${stored.filepath}`,
                         extension: stored.file_type || ext, mime_type: file.type || '',
-                        uploaded_at: new Date().toISOString(), pageCount, page_count: pageCount, pages
+                        uploaded_at: new Date().toISOString(), pageCount, page_count: pageCount, pages,
+                        folder_name: stored.folder_name || targetFolderName
                     });
-                    firstAddedId = firstAddedId || `existing-legacy_file-${storedId}`;
+                    if (!window._pendingTakeoffDrawingId && storedId > 0) {
+                        window._pendingTakeoffDrawingId = storedId;
+                    }
+                    window._pendingTakeoffSync = true;
+                    if (inferredCategory === 'Drawings' && resolvedDiscipline) {
+                        saveDisciplineOverride(docStateId, resolvedDiscipline, storedId, finalStoredName);
+                        collapsedDisciplines.delete(resolvedDiscipline);
+                    }
+                    firstAddedId = firstAddedId || docStateId;
                     succeeded++;
+                    setModalProgress(100, `Uploaded ${resolvedName}`);
+                    if (itemRowEl) {
+                        itemRowEl.classList.remove('is-active');
+                        itemRowEl.classList.add('is-done');
+                    }
+                    if (itemStatusEl) itemStatusEl.innerHTML = '<i class="fas fa-check" style="color:#10b981;"></i> 100%';
                 } catch (error) {
-                    errors.push({ filename: file.name, message: error.message || 'Upload failed.' });
+                    errors.push({ filename: resolvedName, message: error.message || 'Upload failed.' });
+                    if (itemRowEl) {
+                        itemRowEl.classList.remove('is-active');
+                        itemRowEl.classList.add('is-error');
+                    }
+                    if (itemStatusEl) itemStatusEl.textContent = 'Failed';
                 }
                 completed++;
             }
@@ -1550,22 +2777,54 @@
             if (firstAddedId) selectedDocumentsId = firstAddedId;
             persistLocalDocuments();
             syncDocumentsToProjectState();
-            renderDocumentsPage();
-            progressBar.style.width = '100%';
-            progressLabel.textContent = errors.length ? `${succeeded} uploaded, ${errors.length} failed` : `${succeeded} uploaded`;
-            progressCount.textContent = `${completed} / ${incoming.length}`;
-            for (const error of errors) {
-                const row = document.createElement('div');
-                row.className = 'multi-upload-progress-error';
-                row.style.color = '#fca5a5';
-                row.textContent = `${error.filename}: ${error.message}`;
-                progressResults.appendChild(row);
+
+            setModalProgress(100, errors.length ? `${succeeded} uploaded, ${errors.length} failed` : `${succeeded} document${succeeded === 1 ? '' : 's'} uploaded & synced with Takeoff (100%)`);
+            if (modalHeading) {
+                modalHeading.textContent = errors.length ? 'Upload Finished with Issues' : 'Upload Complete';
             }
-            showToast(errors.length ? `${succeeded} uploaded; ${errors.length} failed.` : `${succeeded} file${succeeded === 1 ? '' : 's'} added.`);
+            if (modalIcon && !errors.length) {
+                modalIcon.className = 'fas fa-circle-check doc-upload-modal-icon';
+                modalIcon.style.color = '#10b981';
+            }
+            if (modalCounter) {
+                modalCounter.textContent = `${completed} / ${uploadEntries.length}`;
+            }
+
+            // Hold the modal at 100% for 2 seconds before disappearing so fast uploads don't flash
+            await new Promise(resolve => setTimeout(resolve, UPLOAD_MODAL_HOLD_MS));
+            modal.classList.remove('open');
+
+            // Render Documents list after modal closes so upload animation & Takeoff sync never compete in parallel
+            renderDocumentsPage();
+            const isTakeoffTabActive = document.getElementById('tab-takeoff')?.classList.contains('active');
+            if (isTakeoffTabActive) {
+                window.projectTakeoffRefreshDrawings?.(window._pendingTakeoffDrawingId || null);
+                window._pendingTakeoffDrawingId = null;
+                window._pendingTakeoffSync = false;
+            }
+
+            if (unsupportedFiles.length || errors.length) {
+                const messages = [];
+                if (unsupportedFiles.length) {
+                    messages.push(`Unsupported file(s) blocked: ${unsupportedFiles.map(f => f.name).join(', ')}. Only PDF and image files are allowed.`);
+                }
+                if (errors.length) {
+                    messages.push(...errors.map(e => `${e.filename}: ${e.message}`));
+                }
+                showAlertDialog({
+                    title: unsupportedFiles.length ? 'Unsupported File Format' : 'Upload Error',
+                    message: messages.join(' '),
+                    buttonText: 'Understood',
+                    type: 'error',
+                    badge: 'UPLOAD ALERT',
+                    icon: 'fas fa-circle-exclamation'
+                });
+            }
         } finally {
             isAddingFiles = false;
         }
     }
+    window.uploadProjectDocumentsWithModal = addFiles;
 
     function existingDocumentRows() {
         return (window.ProjectState?.documents || [])
@@ -1581,12 +2840,26 @@
                         title: `Page ${i + 1}`
                     }));
                 }
+                const docId = `existing-${doc.source}-${doc.id}`;
+                const docName = doc.source === 'project_document' ? (doc.title || doc.filename || 'Document') : (doc.filename || doc.title || 'Document');
+                const overrides = loadDisciplineOverrides();
+                const nameKey = `name:${String(docName).trim().toLowerCase()}`;
+                const backendKey = `backend:${doc.id}`;
+                const folderNameStr = String(doc.folder_name || '').trim();
+                const hasDisciplineOverride = Boolean(
+                    folderNameStr === 'Drawings' ||
+                    folderNameStr.startsWith('Drawings:') ||
+                    (overrides[docId] && DRAWING_DISCIPLINES.some(d => d.key === overrides[docId])) ||
+                    (overrides[backendKey] && DRAWING_DISCIPLINES.some(d => d.key === overrides[backendKey])) ||
+                    (overrides[nameKey] && DRAWING_DISCIPLINES.some(d => d.key === overrides[nameKey]))
+                );
                 return {
-                    id: `existing-${doc.source}-${doc.id}`,
+                    id: docId,
                     backendId: doc.id,
-                    name: doc.source === 'project_document' ? (doc.title || doc.filename || 'Document') : (doc.filename || doc.title || 'Document'),
+                    name: docName,
                     filename: doc.filename || doc.title || 'Document',
-                    category: inferCategory({ name: doc.filename || doc.title || '' }, null),
+                    folderName: folderNameStr,
+                    category: hasDisciplineOverride ? 'Drawings' : inferCategory({ name: doc.filename || doc.title || '' }, doc.folder_name || null),
                     size: '',
                     uploadedAt: doc.uploaded_at || '',
                     uploadedBy: 'System',
@@ -1638,6 +2911,358 @@
         window.ProjectState.documents = [...backendOnly, ...localRows];
     }
 
+    const DRAWING_DISCIPLINES = [
+        {
+            key: 'architectural',
+            label: 'Architectural',
+            color: '#2563eb',
+            bgLight: 'rgba(37, 99, 235, 0.1)',
+            borderLight: 'rgba(37, 99, 235, 0.26)',
+            textLight: '#1d4ed8',
+            bgDark: 'rgba(59, 130, 246, 0.16)',
+            borderDark: 'rgba(96, 165, 250, 0.35)',
+            prefixRegex: /^(?:#\d+_)?(?:a[-_.\s]?\d|arq[-_.\s]?|arch[-_.\s]?)/i,
+            keywordRegex: /\b(?:arch|architectural|arquitect|arquitectura|floor\s*plan|planta\s*arquitect|elevat|elevacion|fachada|ceiling|rcp|reflected|section|seccion|door|window|finish|acabado|partition|interior)\b/i
+        },
+        {
+            key: 'electrical',
+            label: 'Electrical',
+            color: '#f59e0b',
+            bgLight: 'rgba(245, 158, 11, 0.12)',
+            borderLight: 'rgba(245, 158, 11, 0.3)',
+            textLight: '#b45309',
+            bgDark: 'rgba(245, 158, 11, 0.16)',
+            borderDark: 'rgba(251, 191, 36, 0.35)',
+            prefixRegex: /^(?:#\d+_)?(?:e[-_.\s]?\d|el[-_.\s]?\d|elec[-_.\s]?)/i,
+            keywordRegex: /\b(?:elec|electrical|electrico|electrica|iluminacion|lighting|power|potencia|panel\s*schedule|tablero|single\s*line|unifilar|low\s*voltage|fire\s*alarm|telecom|data)\b/i
+        },
+        {
+            key: 'plumbing',
+            label: 'Pluvial / Plumbing',
+            color: '#06b6d4',
+            bgLight: 'rgba(6, 182, 212, 0.11)',
+            borderLight: 'rgba(6, 182, 212, 0.28)',
+            textLight: '#0e7490',
+            bgDark: 'rgba(6, 182, 212, 0.16)',
+            borderDark: 'rgba(34, 211, 238, 0.35)',
+            prefixRegex: /^(?:#\d+_)?(?:p[-_.\s]?\d|pl[-_.\s]?\d|plu[-_.\s]?|san[-_.\s]?|fp[-_.\s]?\d)/i,
+            keywordRegex: /\b(?:pluvial|plubial|plumb|plumbing|plomeria|fontaneria|sanitario|sanitary|storm\s*drain|drenaje|agua\s*potable|hidrosanitario|hidraulic|piping|riser|fire\s*protection|sprinkler)\b/i
+        },
+        {
+            key: 'structural',
+            label: 'Structural',
+            color: '#8b5cf6',
+            bgLight: 'rgba(139, 92, 246, 0.11)',
+            borderLight: 'rgba(139, 92, 246, 0.28)',
+            textLight: '#6d28d9',
+            bgDark: 'rgba(139, 92, 246, 0.17)',
+            borderDark: 'rgba(167, 139, 250, 0.35)',
+            prefixRegex: /^(?:#\d+_)?(?:s[-_.\s]?\d|st[-_.\s]?\d|est[-_.\s]?|str[-_.\s]?)/i,
+            keywordRegex: /\b(?:struct|structural|estruct|estructura|estructural|foundation|cimentacion|footing|zapata|framing|beam|column|viga|columna|slab|losa|rebar|acero|concrete)\b/i
+        },
+        {
+            key: 'civil',
+            label: 'Civil',
+            color: '#10b981',
+            bgLight: 'rgba(16, 185, 129, 0.11)',
+            borderLight: 'rgba(16, 185, 129, 0.28)',
+            textLight: '#047857',
+            bgDark: 'rgba(16, 185, 129, 0.16)',
+            borderDark: 'rgba(52, 211, 153, 0.35)',
+            prefixRegex: /^(?:#\d+_)?(?:c[-_.\s]?\d|cv[-_.\s]?\d|civ[-_.\s]?)/i,
+            keywordRegex: /\b(?:civil|site\s*plan|grading|nivelacion|topograf|survey|paving|pavimento|utility|utilities|erosion|swppp|earthwork|terraceria|roadway|parking)\b/i
+        },
+        {
+            key: 'mechanical',
+            label: 'Mechanical',
+            color: '#f97316',
+            bgLight: 'rgba(249, 115, 22, 0.11)',
+            borderLight: 'rgba(249, 115, 22, 0.28)',
+            textLight: '#c2410c',
+            bgDark: 'rgba(249, 115, 22, 0.16)',
+            borderDark: 'rgba(251, 146, 60, 0.35)',
+            prefixRegex: /^(?:#\d+_)?(?:m[-_.\s]?\d|mh[-_.\s]?\d|mec[-_.\s]?|hvac[-_.\s]?)/i,
+            keywordRegex: /\b(?:mech|mechanical|mecanico|mecanica|hvac|duct|ducto|climatizacion|ventilacion|aire\s*acondicionado|chiller|boiler)\b/i
+        },
+        {
+            key: 'general',
+            label: 'General',
+            color: '#64748b',
+            bgLight: 'rgba(100, 116, 139, 0.12)',
+            borderLight: 'rgba(100, 116, 139, 0.28)',
+            textLight: '#334155',
+            bgDark: 'rgba(148, 163, 184, 0.16)',
+            borderDark: 'rgba(148, 163, 184, 0.32)',
+            prefixRegex: /^(?:#\d+_)?(?:g[-_.\s]?\d|gn[-_.\s]?\d|t[-_.\s]?\d)/i,
+            keywordRegex: /\b(?:general|cover|portada|title\s*sheet|index|indice|legend|simbologia|notes)\b/i
+        }
+    ];
+
+    function renderDisciplinePill(discOrKey, extraClass = '') {
+        const disc = typeof discOrKey === 'string' ? getDisciplineMeta(discOrKey) : (discOrKey || getDisciplineMeta('general'));
+        return `<span class="bb-status-pill-wrap doc-discipline-pill disc-${escapeHtml(disc.key)} ${extraClass}" style="--disc-color: ${disc.color}; --disc-bg-light: ${disc.bgLight}; --disc-border-light: ${disc.borderLight}; --disc-text-light: ${disc.textLight}; --disc-bg-dark: ${disc.bgDark}; --disc-border-dark: ${disc.borderDark};" title="${escapeHtml(disc.label)}">
+            <span class="bb-status-dot" style="background-color: ${disc.color};"></span>
+            <span class="bb-status-pill-label">${escapeHtml(disc.label)}</span>
+        </span>`;
+    }
+
+    function disciplineStorageKey() {
+        const id = Number(window.ProjectState?.projectId || 0);
+        return `takeoff.docDisciplines.${id || 'draft'}`;
+    }
+
+    function loadDisciplineOverrides() {
+        try {
+            const raw = localStorage.getItem(disciplineStorageKey());
+            const parsed = raw ? JSON.parse(raw) : {};
+            return parsed && typeof parsed === 'object' ? parsed : {};
+        } catch (e) {
+            return {};
+        }
+    }
+
+    function saveDisciplineOverride(docId, disciplineKey, backendId = null, docName = null) {
+        try {
+            const map = loadDisciplineOverrides();
+            map[String(docId)] = disciplineKey;
+            let resolvedBackendId = backendId;
+            let resolvedName = docName;
+            if (!resolvedBackendId || !resolvedName) {
+                const doc = (window.ProjectState?.documents || []).find(d => `existing-${d.source}-${d.id}` === String(docId) || String(d.id) === String(docId));
+                if (doc) {
+                    if (!resolvedBackendId) resolvedBackendId = doc.id;
+                    if (!resolvedName) resolvedName = doc.filename || doc.title;
+                }
+            }
+            if (resolvedBackendId) {
+                map[`backend:${resolvedBackendId}`] = disciplineKey;
+            }
+            if (resolvedName) {
+                map[`name:${String(resolvedName).trim().toLowerCase()}`] = disciplineKey;
+            }
+            localStorage.setItem(disciplineStorageKey(), JSON.stringify(map));
+        } catch (e) { }
+    }
+
+    function classifyDrawingDiscipline(doc) {
+        if (!doc) return 'general';
+        const overrides = loadDisciplineOverrides();
+        const folderDisc = String(doc.folderName || doc.folder_name || '').startsWith('Drawings:')
+            ? String(doc.folderName || doc.folder_name).split(':')[1]
+            : null;
+        const nameKey = `name:${String(doc.name || doc.filename || '').trim().toLowerCase()}`;
+        const backendKey = doc.backendId ? `backend:${doc.backendId}` : null;
+        const candidates = [
+            overrides[String(doc.id)],
+            backendKey ? overrides[backendKey] : null,
+            folderDisc,
+            overrides[nameKey]
+        ];
+        for (const candidate of candidates) {
+            if (candidate && DRAWING_DISCIPLINES.some(d => d.key === candidate)) {
+                return candidate;
+            }
+        }
+        const rawTitle = stripDuplicateUploadPrefix(doc.name || doc.filename || '');
+        const cleanTitle = rawTitle.replace(/\.[a-z0-9]+$/i, '').trim();
+
+        for (const disc of DRAWING_DISCIPLINES) {
+            if (disc.key === 'general') continue;
+            if (disc.prefixRegex && disc.prefixRegex.test(cleanTitle)) {
+                return disc.key;
+            }
+        }
+        for (const disc of DRAWING_DISCIPLINES) {
+            if (disc.key === 'general') continue;
+            if (disc.keywordRegex && disc.keywordRegex.test(cleanTitle)) {
+                return disc.key;
+            }
+        }
+        return 'general';
+    }
+
+    function getDisciplineMeta(key) {
+        return DRAWING_DISCIPLINES.find(d => d.key === key) || DRAWING_DISCIPLINES[DRAWING_DISCIPLINES.length - 1];
+    }
+
+    window.ProjectDocumentsDisciplines = {
+        list: DRAWING_DISCIPLINES,
+        classify: classifyDrawingDiscipline,
+        getMeta: getDisciplineMeta
+    };
+
+    function pruneSelectionSet() {
+        const validIds = new Set(allDocumentRows().map(d => String(d.id)));
+        for (const checkedId of Array.from(selectedDocumentCheckboxIds)) {
+            if (!validIds.has(String(checkedId))) {
+                selectedDocumentCheckboxIds.delete(checkedId);
+            }
+        }
+    }
+
+    function syncDocumentsSubheadInfo() {
+        pruneSelectionSet();
+        const container = $('documentsSubheadItemInfo');
+        if (!container) return;
+
+        const isDocsTab = document.body.classList.contains('is-documents-tab') ||
+            document.querySelector('.project-subhead-wrapper')?.classList.contains('is-documents-tab');
+        if (!isDocsTab) {
+            container.classList.remove('is-visible');
+            container.style.display = 'none';
+            container.setAttribute('aria-hidden', 'true');
+            return;
+        }
+
+        const checkedIds = Array.from(selectedDocumentCheckboxIds);
+        if (!checkedIds.length) {
+            container.classList.remove('is-visible');
+            container.style.display = 'none';
+            container.setAttribute('aria-hidden', 'true');
+            return;
+        }
+
+        const allDocs = allDocumentRows();
+        const selectedDocs = checkedIds.map(id => allDocs.find(d => String(d.id) === String(id))).filter(Boolean);
+        if (!selectedDocs.length) {
+            container.classList.remove('is-visible');
+            container.style.display = 'none';
+            container.setAttribute('aria-hidden', 'true');
+            return;
+        }
+
+        const dotEl = $('documentsSubheadItemDot') || container.querySelector('.pro-active-layer-dot');
+        const nameEl = $('documentsSubheadItemName') || container.querySelector('.takeoff-subhead-item-name');
+        const metaEl = $('documentsSubheadItemMeta') || container.querySelector('.takeoff-subhead-item-meta');
+        const actionsEl = $('documentsSubheadItemActions') || container.querySelector('.takeoff-subhead-item-actions');
+
+        if (dotEl) {
+            dotEl.style.background = 'transparent';
+            dotEl.style.boxShadow = 'none';
+            dotEl.innerHTML = `<i class="fas fa-folder" style="color: #f59e0b; font-size: 11.5px;"></i>`;
+        }
+
+        const count = selectedDocs.length;
+        const labelText = count === 1 ? (selectedDocs[0].name || '1 document selected') : `${count} documents selected`;
+        if (nameEl) {
+            nameEl.textContent = labelText;
+            nameEl.title = selectedDocs.map(d => d.name).join(', ');
+        }
+
+        if (metaEl) {
+            metaEl.textContent = `${count} ${count === 1 ? 'document' : 'documents'}`;
+        }
+
+        if (actionsEl) {
+            actionsEl.innerHTML = `
+                <button type="button" class="subhead-item-act-btn danger" data-doc-subhead-action="delete-all" title="Delete selected documents">
+                    <i class="fas fa-trash"></i><span>Delete All</span>
+                </button>
+            `;
+        }
+
+        container.classList.add('is-visible');
+        container.style.display = 'inline-flex';
+        container.setAttribute('aria-hidden', 'false');
+    }
+    window.syncDocumentsSubheadInfo = syncDocumentsSubheadInfo;
+
+    async function deleteSelectedDocuments() {
+        pruneSelectionSet();
+        const checkedIds = Array.from(selectedDocumentCheckboxIds);
+        if (!checkedIds.length) return;
+
+        const allDocs = allDocumentRows();
+        const selectedDocs = checkedIds.map(id => allDocs.find(d => String(d.id) === String(id))).filter(Boolean);
+        if (!selectedDocs.length) return;
+
+        const count = selectedDocs.length;
+        const confirmed = await showConfirmDialog({
+            title: count === 1 ? 'Delete Selected Document' : `Delete ${count} Selected Documents`,
+            message: `Are you sure you want to permanently delete ${count === 1 ? `"${selectedDocs[0].name}"` : `the ${count} selected documents (${selectedDocs.map(d => `"${d.name}"`).join(', ')})`}? This action cannot be undone.`,
+            confirmText: count === 1 ? 'Delete Document' : `Delete All (${count})`,
+            cancelText: 'Cancel',
+            type: 'error',
+            badge: 'CONFIRM DELETION',
+            icon: 'fas fa-trash-can',
+            primaryDanger: true
+        });
+        if (!confirmed) return;
+
+        const delBtn = document.querySelector('[data-doc-subhead-action="delete-all"]');
+        const origDelHtml = delBtn ? delBtn.innerHTML : '';
+        if (delBtn) {
+            delBtn.disabled = true;
+            delBtn.innerHTML = `<i class="fas fa-circle-notch fa-spin"></i><span>Deleting...</span>`;
+        }
+
+        const projectId = Number(window.ProjectState?.projectId || 0);
+        let deletedCount = 0;
+        const errors = [];
+
+        try {
+            for (const doc of selectedDocs) {
+                if (doc.source === 'existing') {
+                    try {
+                        await request('document_action', {
+                            project_id: projectId,
+                            id: doc.backendId,
+                            source: doc.originalSource,
+                            operation: 'delete'
+                        });
+                        window.ProjectState.documents = (window.ProjectState.documents || []).filter(
+                            row => !(String(row.id) === String(doc.backendId) && row.source === doc.originalSource)
+                        );
+                        deletedCount++;
+                    } catch (err) {
+                        errors.push(`${doc.name}: ${err.message || 'Delete failed'}`);
+                    }
+                } else {
+                    localDocuments = localDocuments.filter(row => String(row.id) !== String(doc.id));
+                    sessionFiles.delete(String(doc.id));
+                    const objectUrl = sessionFileUrls.get(String(doc.id));
+                    if (objectUrl) URL.revokeObjectURL(objectUrl);
+                    sessionFileUrls.delete(String(doc.id));
+                    deletedCount++;
+                }
+                selectedDocumentCheckboxIds.delete(String(doc.id));
+                if (String(selectedDocumentsId) === String(doc.id)) selectedDocumentsId = null;
+                if (selectedDocumentsFolder === `document:${doc.id}`) selectedDocumentsFolder = 'drawings';
+            }
+        } finally {
+            if (delBtn && delBtn.isConnected) {
+                delBtn.disabled = false;
+                delBtn.innerHTML = origDelHtml;
+            }
+        }
+
+        persistLocalDocuments();
+        syncDocumentsToProjectState();
+        renderDocumentsPage();
+        window.projectTakeoffRefreshDrawings?.();
+        syncDocumentsSubheadInfo();
+
+        if (errors.length) {
+            showAlertDialog({
+                title: 'Deletion Completed with Errors',
+                message: `Deleted ${deletedCount} document(s). Errors: ${errors.join('; ')}`,
+                buttonText: 'Understood',
+                type: 'error',
+                badge: 'DELETE ALERT',
+                icon: 'fas fa-circle-exclamation'
+            });
+        } else {
+            showAlertDialog({
+                title: 'Documents Deleted',
+                message: `Successfully deleted ${deletedCount} ${deletedCount === 1 ? 'document' : 'documents'} from the project.`,
+                buttonText: 'Got It',
+                type: 'info',
+                badge: 'DELETED',
+                icon: 'fas fa-trash-can'
+            });
+        }
+    }
+
     function getFolderReorderList() {
         try {
             const raw = localStorage.getItem('takeoff.docFolderOrder');
@@ -1687,7 +3312,9 @@
             });
 
             item.addEventListener('dragover', (e) => {
+                if (!draggedDocId) return;
                 e.preventDefault();
+                e.stopPropagation();
                 e.dataTransfer.dropEffect = 'move';
                 const rect = item.getBoundingClientRect();
                 const relY = e.clientY - rect.top;
@@ -1705,10 +3332,18 @@
             });
 
             item.addEventListener('drop', (e) => {
+                if (!draggedDocId) return;
                 e.preventDefault();
+                e.stopPropagation();
                 item.classList.remove('drag-over-top', 'drag-over-bottom');
                 const targetDocId = item.dataset.dragDocId;
                 if (!draggedDocId || draggedDocId === targetDocId) return;
+
+                const targetDoc = findDocumentById(targetDocId);
+                if (targetDoc) {
+                    const targetDiscipline = classifyDrawingDiscipline(targetDoc);
+                    saveDisciplineOverride(draggedDocId, targetDiscipline);
+                }
 
                 const rect = item.getBoundingClientRect();
                 const insertBefore = (e.clientY - rect.top) < (rect.height / 2);
@@ -1718,7 +3353,33 @@
 
             item.addEventListener('dragend', () => {
                 items.forEach(i => i.classList.remove('is-dragging', 'drag-over-top', 'drag-over-bottom'));
+                container.querySelectorAll('.doc-discipline-group-head').forEach(h => h.classList.remove('is-drop-target'));
                 draggedDocId = null;
+            });
+        });
+
+        container.querySelectorAll('.doc-discipline-group-head[data-discipline-key]').forEach(header => {
+            header.addEventListener('dragover', (e) => {
+                if (!draggedDocId) return;
+                e.preventDefault();
+                e.stopPropagation();
+                e.dataTransfer.dropEffect = 'move';
+                header.classList.add('is-drop-target');
+            });
+            header.addEventListener('dragleave', () => {
+                header.classList.remove('is-drop-target');
+            });
+            header.addEventListener('drop', (e) => {
+                if (!draggedDocId) return;
+                e.preventDefault();
+                e.stopPropagation();
+                header.classList.remove('is-drop-target');
+                const discKey = header.dataset.disciplineKey;
+                if (discKey) {
+                    saveDisciplineOverride(draggedDocId, discKey);
+                    collapsedDisciplines.delete(discKey);
+                    renderDocumentsPage();
+                }
             });
         });
     }
@@ -1751,9 +3412,9 @@
     function documentsForSelectedFolder() {
         const all = allDocumentRows();
         if (selectedDocumentsFolder === 'attachments') return all.filter(doc => doc.category !== 'Drawings');
-        if (selectedDocumentsFolder.startsWith('custom:')) {
-            const folderId = selectedDocumentsFolder.replace('custom:', '');
-            return all.filter(doc => String(doc.folderId || '') === folderId);
+        if (selectedDocumentsFolder.startsWith('discipline:')) {
+            const discKey = selectedDocumentsFolder.replace('discipline:', '');
+            return drawingDocuments().filter(doc => classifyDrawingDiscipline(doc) === discKey);
         }
         if (selectedDocumentsFolder.startsWith('document:')) {
             const docId = selectedDocumentsFolder.replace('document:', '');
@@ -1761,7 +3422,7 @@
             if (!doc) return [];
             return doc.pages.length ? doc.pages.map(page => ({ ...page, parentId: doc.id, category: 'Drawings', source: 'sheet' })) : [doc];
         }
-        return all.filter(doc => doc.category === 'Drawings');
+        return drawingDocuments();
     }
 
     function folderCounts() {
@@ -1774,6 +3435,7 @@
         const emptyView = $('documentsEmptyView');
         const pageView = $('documentsPageView');
         const all = allDocumentRows();
+        pruneSelectionSet();
 
         if (!all.length) {
             if (emptyView) {
@@ -1784,6 +3446,7 @@
                 pageView.classList.add('is-hidden');
                 pageView.style.setProperty('display', 'none', 'important');
             }
+            syncDocumentsSubheadInfo();
             return;
         }
 
@@ -1798,6 +3461,7 @@
 
         renderDocumentFolderTree();
         renderDocumentsContent();
+        syncDocumentsSubheadInfo();
     }
 
     function renderDocumentFolderTree() {
@@ -1805,61 +3469,182 @@
         if (!tree) return;
         const counts = folderCounts();
         const drawings = drawingDocuments();
+        const attachments = attachmentDocuments();
 
-        // Asynchronously ensure any PDF missing a page count gets calculated and updated
+        // Asynchronously ensure any PDF missing a page count gets calculated sequentially in background
         drawings.forEach(doc => {
             if (doc.extension === 'pdf' && (!doc.pageCount || doc.pageCount <= 0)) {
-                ensurePdfPageCount(doc);
+                enqueuePdfPageCount(doc);
             }
         });
 
-        const customRows = customFolders.map(folder => {
-            const count = allDocumentRows().filter(doc => String(doc.folderId || '') === String(folder.id)).length;
-            const isActive = selectedDocumentsFolder === `custom:${folder.id}`;
-            return `<div class="doc-tree-item ${isActive ? 'active' : ''}" data-doc-folder="custom:${escapeHtml(folder.id)}">
-                <i class="fas fa-folder doc-tree-item-icon"></i>
-                <span class="doc-tree-item-title">${escapeHtml(folder.name)}</span>
-                <span class="doc-tree-item-badge">${count}</span>
-                <button class="btn-ghost icon-only doc-tree-item-more" type="button" data-doc-sidebar-more="custom:${escapeHtml(folder.id)}" title="Folder options"><i class="fas fa-ellipsis-vertical"></i></button>
-            </div>`;
-        }).join('');
+        const allDrawingsChecked = drawings.length > 0 && drawings.every(d => selectedDocumentCheckboxIds.has(String(d.id)));
+        const someDrawingsChecked = drawings.some(d => selectedDocumentCheckboxIds.has(String(d.id)));
+        const allAttachmentsChecked = attachments.length > 0 && attachments.every(d => selectedDocumentCheckboxIds.has(String(d.id)));
+        const someAttachmentsChecked = attachments.some(d => selectedDocumentCheckboxIds.has(String(d.id)));
 
-        const isDrawingsActive = selectedDocumentsFolder === 'drawings' || selectedDocumentsFolder.startsWith('document:');
         const isAttachmentsActive = selectedDocumentsFolder === 'attachments';
 
-        tree.innerHTML = `
-            <div class="doc-tree-item ${selectedDocumentsFolder === 'drawings' ? 'active' : ''}" data-doc-folder="drawings">
-                <i class="far fa-file-lines doc-tree-item-icon"></i>
-                <span class="doc-tree-item-title">Drawings</span>
-                <span class="doc-tree-item-badge">${counts.drawings}</span>
-                <button class="btn-ghost icon-only doc-tree-item-more" type="button" data-doc-sidebar-more="category:Drawings" title="Drawings options"><i class="fas fa-ellipsis-vertical"></i></button>
-            </div>
-            <div class="documents-folder-children">
-                ${drawings.map(doc => {
-            const pageVal = doc.pageCount || (doc.pages && doc.pages.length) || '';
-            const isDocActive = selectedDocumentsFolder === `document:${doc.id}`;
-            return `
-                    <div class="doc-tree-item child ${isDocActive ? 'active' : ''}" data-doc-folder="document:${escapeHtml(doc.id)}" data-drag-doc-id="${escapeHtml(doc.id)}" draggable="true">
-                        <i class="fas fa-grip-vertical doc-drag-handle" title="Drag to reorder"></i>
-                        <i class="fas fa-folder doc-tree-item-icon"></i>
-                        <span class="doc-tree-item-title" title="${escapeHtml(doc.name)}">${escapeHtml(doc.name)}</span>
-                        ${pageVal ? `<span class="doc-tree-item-badge">${escapeHtml(pageVal)}</span>` : ''}
-                        <button class="btn-ghost icon-only doc-tree-item-more" type="button" data-doc-sidebar-more="doc:${escapeHtml(doc.id)}" title="Document options"><i class="fas fa-ellipsis-vertical"></i></button>
+        // Group drawings by smart discipline classification
+        const groupedDrawings = new Map();
+        DRAWING_DISCIPLINES.forEach(disc => groupedDrawings.set(disc.key, []));
+        drawings.forEach(doc => {
+            const discKey = classifyDrawingDiscipline(doc);
+            if (!groupedDrawings.has(discKey)) groupedDrawings.set(discKey, []);
+            groupedDrawings.get(discKey).push(doc);
+        });
+
+        const disciplineGroupsHtml = DRAWING_DISCIPLINES.map(disc => {
+            const groupDocs = groupedDrawings.get(disc.key) || [];
+            if (!groupDocs.length) return '';
+            const isCollapsed = collapsedDisciplines.has(disc.key);
+            const isDiscActive = selectedDocumentsFolder === `discipline:${disc.key}`;
+            const allGroupChecked = groupDocs.every(d => selectedDocumentCheckboxIds.has(String(d.id)));
+
+            const childrenHtml = isCollapsed ? '' : groupDocs.map(doc => {
+                const pageVal = doc.pageCount || (doc.pages && doc.pages.length) || '';
+                const isDocActive = selectedDocumentsFolder === `document:${doc.id}`;
+                const isDocChecked = selectedDocumentCheckboxIds.has(String(doc.id));
+                return `
+                    <div class="doc-tree-item child ${isDocActive ? 'active' : ''} ${isDocChecked ? 'is-checked' : ''}" data-doc-folder="document:${escapeHtml(doc.id)}" data-drag-doc-id="${escapeHtml(doc.id)}" draggable="true">
+                        <input type="checkbox" class="doc-sidebar-check" data-doc-check-id="${escapeHtml(doc.id)}" ${isDocChecked ? 'checked' : ''} title="Select document">
+                        <div class="doc-tree-child-details">
+                            <span class="doc-tree-item-title" title="${escapeHtml(doc.name)}">${escapeHtml(doc.name)}</span>
+                        </div>
+                        <div class="doc-tree-row-actions">
+                            ${pageVal ? `<span class="doc-tree-item-badge">${escapeHtml(pageVal)}</span>` : `<span class="doc-tree-badge-spacer" aria-hidden="true"></span>`}
+                            <button class="btn-ghost icon-only doc-tree-item-more" type="button" data-doc-sidebar-more="doc:${escapeHtml(doc.id)}" title="Document options"><i class="fas fa-ellipsis-vertical"></i></button>
+                        </div>
                     </div>`;
-        }).join('')}
+            }).join('');
+
+            return `
+                <div class="doc-discipline-group ${isCollapsed ? 'is-collapsed' : ''}" data-discipline-group="${escapeHtml(disc.key)}">
+                    <div class="doc-discipline-group-head ${isDiscActive ? 'active' : ''} ${allGroupChecked ? 'is-checked' : ''}" data-doc-folder="discipline:${escapeHtml(disc.key)}" data-discipline-key="${escapeHtml(disc.key)}">
+                        <input type="checkbox" class="doc-sidebar-check" data-doc-check-discipline="${escapeHtml(disc.key)}" ${allGroupChecked ? 'checked' : ''} title="Select all ${escapeHtml(disc.label)} drawings">
+                        <div class="doc-tree-folder-title is-discipline-level">
+                            <button type="button" class="doc-discipline-chevron" data-doc-toggle-discipline="${escapeHtml(disc.key)}" title="${isCollapsed ? 'Expand group' : 'Collapse group'}">
+                                <i class="fas fa-chevron-${isCollapsed ? 'right' : 'down'}"></i>
+                            </button>
+                            ${renderDisciplinePill(disc, 'is-sidebar-pill')}
+                        </div>
+                        <div class="doc-tree-row-actions">
+                            <span class="doc-tree-item-badge">${groupDocs.length}</span>
+                            <span class="doc-tree-more-spacer" aria-hidden="true"></span>
+                        </div>
+                    </div>
+                    <div class="doc-discipline-group-items">
+                        ${childrenHtml}
+                    </div>
+                </div>
+            `;
+        }).join('');
+
+        tree.innerHTML = `
+            <div class="doc-tree-item doc-tree-root ${selectedDocumentsFolder === 'drawings' ? 'active' : ''} ${allDrawingsChecked ? 'is-checked' : ''}" data-doc-folder="drawings">
+                <input type="checkbox" class="doc-sidebar-check" data-doc-check-group="drawings" ${allDrawingsChecked ? 'checked' : ''} title="Select all drawings">
+                <div class="doc-tree-folder-title">
+                    <button type="button" class="doc-discipline-chevron" data-doc-toggle-root="drawings" title="${isDrawingsRootCollapsed ? 'Expand Drawings' : 'Collapse Drawings'}">
+                        <i class="fas fa-chevron-${isDrawingsRootCollapsed ? 'right' : 'down'}"></i>
+                    </button>
+                    <span class="doc-tree-root-name"><strong>Drawings</strong></span>
+                </div>
+                <div class="doc-tree-row-actions">
+                    <span class="doc-tree-item-badge">${counts.drawings}</span>
+                    <button class="btn-ghost icon-only doc-tree-item-more" type="button" data-doc-sidebar-more="category:Drawings" title="Drawings options"><i class="fas fa-ellipsis-vertical"></i></button>
+                </div>
             </div>
-            <div class="doc-tree-item ${isAttachmentsActive ? 'active' : ''}" data-doc-folder="attachments">
-                <i class="fas fa-paperclip doc-tree-item-icon"></i>
-                <span class="doc-tree-item-title">Attachments</span>
-                <span class="doc-tree-item-badge">${counts.attachments}</span>
-                <button class="btn-ghost icon-only doc-tree-item-more" type="button" data-doc-sidebar-more="category:Attachments" title="Attachment options"><i class="fas fa-ellipsis-vertical"></i></button>
+            <div class="documents-folder-children ${isDrawingsRootCollapsed ? 'is-collapsed' : ''}">
+                ${disciplineGroupsHtml}
             </div>
-            ${customRows}
+            <div class="doc-tree-item doc-tree-root ${isAttachmentsActive ? 'active' : ''} ${allAttachmentsChecked ? 'is-checked' : ''}" data-doc-folder="attachments">
+                <input type="checkbox" class="doc-sidebar-check" data-doc-check-group="attachments" ${allAttachmentsChecked ? 'checked' : ''} title="Select all attachments">
+                <div class="doc-tree-folder-title">
+                    <span class="doc-tree-root-caret-spacer" aria-hidden="true"></span>
+                    <span class="doc-tree-root-name"><strong>Attachments</strong></span>
+                </div>
+                <div class="doc-tree-row-actions">
+                    <span class="doc-tree-item-badge">${counts.attachments}</span>
+                    <button class="btn-ghost icon-only doc-tree-item-more" type="button" data-doc-sidebar-more="category:Attachments" title="Attachment options"><i class="fas fa-ellipsis-vertical"></i></button>
+                </div>
+            </div>
         `;
+
+        const drawingsMasterCheck = tree.querySelector('[data-doc-check-group="drawings"]');
+        if (drawingsMasterCheck) {
+            drawingsMasterCheck.indeterminate = !allDrawingsChecked && someDrawingsChecked;
+        }
+        const attachmentsMasterCheck = tree.querySelector('[data-doc-check-group="attachments"]');
+        if (attachmentsMasterCheck) {
+            attachmentsMasterCheck.indeterminate = !allAttachmentsChecked && someAttachmentsChecked;
+        }
+        tree.querySelectorAll('[data-doc-check-discipline]').forEach(chk => {
+            const key = chk.dataset.docCheckDiscipline;
+            const docs = groupedDrawings.get(key) || [];
+            const allChk = docs.length > 0 && docs.every(d => selectedDocumentCheckboxIds.has(String(d.id)));
+            const someChk = docs.some(d => selectedDocumentCheckboxIds.has(String(d.id)));
+            chk.indeterminate = !allChk && someChk;
+        });
+
+        tree.querySelectorAll('.doc-sidebar-check').forEach(chk => {
+            chk.addEventListener('click', e => e.stopPropagation());
+            chk.addEventListener('change', e => {
+                e.stopPropagation();
+                const checked = chk.checked;
+                if (chk.dataset.docCheckId) {
+                    const id = String(chk.dataset.docCheckId);
+                    if (checked) selectedDocumentCheckboxIds.add(id);
+                    else selectedDocumentCheckboxIds.delete(id);
+                } else if (chk.dataset.docCheckDiscipline) {
+                    const key = chk.dataset.docCheckDiscipline;
+                    const docs = groupedDrawings.get(key) || [];
+                    docs.forEach(d => {
+                        if (checked) selectedDocumentCheckboxIds.add(String(d.id));
+                        else selectedDocumentCheckboxIds.delete(String(d.id));
+                    });
+                } else if (chk.dataset.docCheckGroup === 'drawings') {
+                    drawings.forEach(d => {
+                        if (checked) selectedDocumentCheckboxIds.add(String(d.id));
+                        else selectedDocumentCheckboxIds.delete(String(d.id));
+                    });
+                } else if (chk.dataset.docCheckGroup === 'attachments') {
+                    attachments.forEach(d => {
+                        if (checked) selectedDocumentCheckboxIds.add(String(d.id));
+                        else selectedDocumentCheckboxIds.delete(String(d.id));
+                    });
+                }
+                renderDocumentsPage();
+            });
+        });
+
+        tree.querySelectorAll('[data-doc-toggle-root="drawings"]').forEach(btn => {
+            btn.addEventListener('click', e => {
+                e.stopPropagation();
+                isDrawingsRootCollapsed = !isDrawingsRootCollapsed;
+                renderDocumentFolderTree();
+            });
+        });
+
+        tree.querySelectorAll('[data-doc-toggle-discipline]').forEach(btn => {
+            btn.addEventListener('click', e => {
+                e.stopPropagation();
+                const key = btn.dataset.docToggleDiscipline;
+                if (collapsedDisciplines.has(key)) collapsedDisciplines.delete(key);
+                else collapsedDisciplines.add(key);
+                renderDocumentFolderTree();
+            });
+        });
 
         tree.querySelectorAll('[data-doc-folder]').forEach(row => {
             row.addEventListener('click', (e) => {
-                if (e.target.closest('.doc-tree-item-more') || e.target.closest('[data-doc-action]') || e.target.closest('.doc-drag-handle')) return;
+                if (
+                    e.target.closest('.doc-tree-item-more') ||
+                    e.target.closest('[data-doc-action]') ||
+                    e.target.closest('.doc-drag-handle') ||
+                    e.target.closest('.doc-sidebar-check') ||
+                    e.target.closest('[data-doc-toggle-discipline]') ||
+                    e.target.closest('[data-doc-toggle-root]')
+                ) return;
                 selectedDocumentsFolder = row.dataset.docFolder;
                 renderDocumentsPage();
             });
@@ -1875,31 +3660,55 @@
         bindFolderTreeDragDrop(tree);
     }
 
+    function canDropDocumentsInCurrentView() {
+        if (allDocumentRows().length === 0) return true;
+        return selectedDocumentsFolder === 'drawings' || selectedDocumentsFolder.startsWith('discipline:');
+    }
+
     async function renderDocumentsContent() {
         const list = $('documentsList');
         if (!list) return;
+        const renderSeq = ++documentsContentRenderSeq;
+        cleanupThumbnailObserver();
         const title = $('documentsContentTitle');
         const isAttachments = selectedDocumentsFolder === 'attachments';
         const isPackage = selectedDocumentsFolder.startsWith('document:');
+        const isDiscipline = selectedDocumentsFolder.startsWith('discipline:');
+        const contentFooter = $('documentsContentFooter');
+        if (contentFooter) {
+            const canDrop = selectedDocumentsFolder === 'drawings' || isDiscipline;
+            contentFooter.style.display = canDrop ? 'flex' : 'none';
+        }
 
         if (title) {
             if (isPackage) {
+                const docId = selectedDocumentsFolder.replace('document:', '');
+                const docObj = findDocumentById(docId);
+                const discMeta = getDisciplineMeta(classifyDrawingDiscipline(docObj));
                 const docName = selectedFolderDocumentName();
                 title.innerHTML = `
                     <div class="doc-topbar-breadcrumb">
                         <span class="doc-breadcrumb-link" data-doc-breadcrumb="drawings">Drawings</span>
                         <span class="doc-breadcrumb-sep"><i class="fas fa-chevron-right"></i></span>
+                        <span class="doc-breadcrumb-link" data-doc-breadcrumb="discipline:${escapeHtml(discMeta.key)}">${escapeHtml(discMeta.label)}</span>
+                        <span class="doc-breadcrumb-sep"><i class="fas fa-chevron-right"></i></span>
                         <span class="doc-breadcrumb-current">${escapeHtml(docName)}</span>
+                    </div>
+                `;
+            } else if (isDiscipline) {
+                const discKey = selectedDocumentsFolder.replace('discipline:', '');
+                const discMeta = getDisciplineMeta(discKey);
+                title.innerHTML = `
+                    <div class="doc-topbar-breadcrumb">
+                        <span class="doc-breadcrumb-link" data-doc-breadcrumb="drawings">Drawings</span>
+                        <span class="doc-breadcrumb-sep"><i class="fas fa-chevron-right"></i></span>
+                        <span class="doc-breadcrumb-current">${escapeHtml(discMeta.label)}</span>
                     </div>
                 `;
             } else if (isAttachments) {
                 title.textContent = 'Attachments';
-            } else if (selectedDocumentsFolder.startsWith('custom:')) {
-                const fId = selectedDocumentsFolder.replace('custom:', '');
-                const folder = customFolders.find(f => String(f.id) === fId);
-                title.textContent = folder ? folder.name : 'Custom Drawings';
             } else {
-                title.textContent = 'Custom Drawings';
+                title.textContent = 'Drawings';
             }
         }
 
@@ -1919,6 +3728,10 @@
 
         // 1. PDF Document Page Separation View
         if (isPackage) {
+            if (!isDocumentsTabActive()) {
+                documentsNeedsRenderOnTabEnter = true;
+                return;
+            }
             const docId = selectedDocumentsFolder.replace('document:', '');
             const doc = allDocumentRows().find(r => r.id === docId);
             if (!doc) {
@@ -1926,7 +3739,18 @@
                 list.innerHTML = `<div style="padding: 30px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">Document not found.</div>`;
                 return;
             }
+            if ((!Array.isArray(doc.pages) || !doc.pages.length) && (!doc.pageCount || Number(doc.pageCount) <= 0)) {
+                list.className = 'documents-list';
+                list.innerHTML = `
+                    <div class="doc-panel-loading-state" role="status" aria-live="polite">
+                        <span class="doc-loading-spinner" aria-hidden="true"></span>
+                        <span class="doc-loading-title">Loading drawing sheets...</span>
+                        <span class="doc-loading-sub">${escapeHtml(doc.name || 'Document')}</span>
+                    </div>
+                `;
+            }
             const sheets = await getDocumentSheets(doc);
+            if (renderSeq !== documentsContentRenderSeq) return;
             const filtered = query
                 ? sheets.filter(s => `${s.name || ''} ${s.title || ''} page ${s.pageNumber || ''}`.toLowerCase().includes(query))
                 : sheets;
@@ -1959,11 +3783,11 @@
             return;
         }
 
-        // 3. Drawings / Custom Folders (File List View)
+        // 3. Drawings / Discipline Filtered View (File List View)
         const docs = sortedDocuments(filteredDocuments(documentsForSelectedFolder()));
         if (!docs.length) {
             list.className = 'documents-list';
-            list.innerHTML = `<div style="padding: 30px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">${query ? 'No files match your search.' : 'No files in this folder yet.'}</div>`;
+            list.innerHTML = `<div style="padding: 30px; text-align: center; color: var(--text-muted); font-size: 0.85rem;">${query ? 'No files match your search.' : 'No files in this group yet.'}</div>`;
             return;
         }
 
@@ -1997,11 +3821,13 @@
     function renderSheetCard(doc, sheet) {
         const cId = cleanId(sheet.id);
         const isActive = selectedDocumentsId === sheet.id;
+        const cachedUrl = getCachedSheetThumbUrl(doc, sheet.pageNumber || 1);
         return `
             <div class="doc-list-item-row ${isActive ? 'active' : ''}" data-doc-sheet-id="${escapeHtml(sheet.id)}" data-parent-doc-id="${escapeHtml(doc.id)}" data-page-num="${sheet.pageNumber}">
                 <div class="doc-item-thumb-box" data-doc-action="select-sheet" data-doc-id="${escapeHtml(sheet.id)}">
+                    ${cachedUrl ? `<img class="doc-sheet-canvas" id="img-${cId}" src="${cachedUrl}" alt="${escapeHtml(sheet.name)}" loading="lazy" decoding="async" style="display:block;">` : ''}
                     <canvas class="doc-sheet-canvas" id="canvas-${cId}" style="display:none;"></canvas>
-                    <div class="doc-sheet-blueprint" id="bp-${cId}">
+                    <div class="doc-sheet-blueprint" id="bp-${cId}" ${cachedUrl ? 'style="display:none;"' : ''}>
                         <i class="fas fa-drafting-compass"></i>
                         <span class="doc-sheet-blueprint-badge">P.${sheet.pageNumber}</span>
                     </div>
@@ -2020,7 +3846,6 @@
                         <i class="fas fa-ellipsis-vertical"></i>
                     </button>
                     <div class="documents-menu row-menu" data-doc-menu="${escapeHtml(sheet.id)}">
-                        <button type="button" data-doc-action="takeoff" data-doc-id="${escapeHtml(doc.id)}" data-page-num="${sheet.pageNumber}"><i class="fas fa-ruler-combined"></i> Takeoff Page ${sheet.pageNumber}</button>
                         <button type="button" data-doc-action="view-sheet" data-doc-id="${escapeHtml(doc.id)}" data-page-num="${sheet.pageNumber}"><i class="fas fa-eye"></i> View File</button>
                     </div>
                 </div>
@@ -2032,15 +3857,20 @@
         const isImage = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg'].includes(doc.extension);
         const isPdf = doc.extension === 'pdf';
         const cleanDocId = cleanId(doc.id);
-        const imgUrl = doc.path || sessionFileUrls.get(String(doc.id)) || '';
+        const docKey = String(doc.id);
+        const rawImgUrl = doc.path || sessionFileUrls.get(docKey) || '';
+        const thumbImgUrl = imageThumbnailUrlCache.get(docKey) || rawImgUrl;
+        const isChecked = selectedDocumentCheckboxIds.has(docKey);
 
         let thumbHtml = '';
-        if (isImage && imgUrl) {
-            thumbHtml = `<img src="${escapeHtml(imgUrl)}" alt="${escapeHtml(doc.name)}" style="width: 100%; height: 100%; object-fit: contain;">`;
+        if (isImage && thumbImgUrl) {
+            thumbHtml = `<img id="att-img-${cleanDocId}" src="${escapeHtml(thumbImgUrl)}" alt="${escapeHtml(doc.name)}" loading="lazy" decoding="async" style="width: 100%; height: 100%; object-fit: contain;">`;
         } else if (isPdf) {
+            const cachedPdfThumb = getCachedSheetThumbUrl(doc, 1);
             thumbHtml = `
+                ${cachedPdfThumb ? `<img class="doc-sheet-canvas" id="img-${cleanDocId}" src="${cachedPdfThumb}" alt="${escapeHtml(doc.name)}" loading="lazy" decoding="async" style="display:block;">` : ''}
                 <canvas class="doc-sheet-canvas" id="canvas-${cleanDocId}" style="display:none;"></canvas>
-                <div class="doc-attachment-thumb" id="bp-${cleanDocId}">
+                <div class="doc-attachment-thumb" id="bp-${cleanDocId}" ${cachedPdfThumb ? 'style="display:none;"' : ''}>
                     <i class="far fa-file-pdf" style="color: #ef4444;"></i>
                     <span style="font-size: 10px; color: var(--text-muted);">${formatBytes(doc.size)}</span>
                 </div>
@@ -2057,8 +3887,9 @@
         }
 
         return `
-            <div class="doc-list-item-row ${selectedDocumentsId === doc.id ? 'active' : ''}" data-doc-id="${escapeHtml(doc.id)}">
-                <div class="doc-item-thumb-box" data-doc-action="select" data-doc-id="${escapeHtml(doc.id)}">
+            <div class="doc-list-item-row ${selectedDocumentsId === doc.id ? 'active' : ''} ${isChecked ? 'is-checked' : ''}" data-doc-id="${escapeHtml(doc.id)}">
+                <input type="checkbox" class="doc-sidebar-check doc-row-check" data-doc-list-check-id="${escapeHtml(doc.id)}" ${isChecked ? 'checked' : ''} title="Select document">
+                <div class="doc-item-thumb-box doc-attachment-preview-trigger" data-doc-action="preview-attachment" data-doc-id="${escapeHtml(doc.id)}" title="Click to preview attachment">
                     ${thumbHtml}
                 </div>
                 <div class="doc-item-details" data-doc-action="select" data-doc-id="${escapeHtml(doc.id)}">
@@ -2086,10 +3917,13 @@
     }
 
     function renderDocumentRow(doc) {
-        return `<div class="doc-file-row ${selectedDocumentsId === doc.id ? 'active' : ''}" data-doc-id="${escapeHtml(doc.id)}">
+        const isChecked = selectedDocumentCheckboxIds.has(String(doc.id));
+        const discMeta = getDisciplineMeta(classifyDrawingDiscipline(doc));
+        return `<div class="doc-file-row ${selectedDocumentsId === doc.id ? 'active' : ''} ${isChecked ? 'is-checked' : ''}" data-doc-id="${escapeHtml(doc.id)}">
             <div class="doc-file-info" data-doc-action="select" data-doc-id="${escapeHtml(doc.id)}">
-                <i class="fas fa-folder doc-file-icon"></i>
+                <input type="checkbox" class="doc-sidebar-check doc-row-check" data-doc-list-check-id="${escapeHtml(doc.id)}" ${isChecked ? 'checked' : ''} title="Select document">
                 <span class="doc-file-name" title="${escapeHtml(doc.name || doc.title || 'Document')}">${escapeHtml(doc.name || doc.title || 'Document')}</span>
+                ${renderDisciplinePill(discMeta, 'is-row-pill')}
             </div>
             <div class="doc-file-actions">
                 <button class="btn-ghost icon-only" type="button" data-doc-action="menu" data-doc-id="${escapeHtml(doc.id)}" title="Options">
@@ -2097,11 +3931,9 @@
                 </button>
                 <div class="documents-menu row-menu" data-doc-menu="${escapeHtml(doc.id)}">
                     <button type="button" data-doc-action="view" data-doc-id="${escapeHtml(doc.id)}"><i class="fas fa-eye"></i> View</button>
-                    <button type="button" data-doc-action="takeoff" data-doc-id="${escapeHtml(doc.id)}"><i class="fas fa-ruler-combined"></i> Start Takeoff</button>
                     <button type="button" data-doc-action="rename" data-doc-id="${escapeHtml(doc.id)}"><i class="fas fa-pen"></i> Rename</button>
-                    <button type="button" data-doc-action="move" data-doc-id="${escapeHtml(doc.id)}"><i class="fas fa-folder-tree"></i> Move</button>
                     <button type="button" data-doc-action="download" data-doc-id="${escapeHtml(doc.id)}"><i class="fas fa-download"></i> Download</button>
-                    <button type="button" data-doc-action="delete" data-doc-id="${escapeHtml(doc.id)}"><i class="fas fa-trash"></i> Delete</button>
+                    <button type="button" class="danger" data-doc-action="delete" data-doc-id="${escapeHtml(doc.id)}"><i class="fas fa-trash"></i> Delete</button>
                 </div>
             </div>
         </div>`;
@@ -2110,7 +3942,23 @@
     function bindDocumentListActions(root) {
         if (root.dataset.documentActionsBound === '1') return;
         root.dataset.documentActionsBound = '1';
+
+        root.addEventListener('change', event => {
+            const chk = event.target.closest('[data-doc-list-check-id]');
+            if (!chk) return;
+            event.stopPropagation();
+            const docId = String(chk.dataset.docListCheckId);
+            if (chk.checked) selectedDocumentCheckboxIds.add(docId);
+            else selectedDocumentCheckboxIds.delete(docId);
+            renderDocumentsPage();
+        });
+
         root.addEventListener('click', event => {
+            if (event.target.closest('[data-doc-list-check-id]')) {
+                event.stopPropagation();
+                return;
+            }
+
             const breadcrumb = event.target.closest('[data-doc-breadcrumb]');
             if (breadcrumb) {
                 event.stopPropagation();
@@ -2142,7 +3990,8 @@
             if (sheetRow && sheetRow.dataset.parentDocId) {
                 selectedDocumentsId = sheetRow.dataset.parentDocId;
                 const pageNum = sheetRow.dataset.pageNum ? Number(sheetRow.dataset.pageNum) : 1;
-                startDocumentsTakeoff(pageNum);
+                const parentDoc = findDocumentById(sheetRow.dataset.parentDocId);
+                if (parentDoc) openDocumentInBrowser(parentDoc, pageNum);
                 return;
             }
             const row = event.target.closest('.doc-file-row');
@@ -2235,27 +4084,31 @@
         menu.__trigger = trigger;
         trigger.classList.add('active');
         trigger.setAttribute('aria-expanded', 'true');
+        let html = '';
         if (target.startsWith('doc:')) {
             const docId = target.replace('doc:', '');
             const doc = findDocumentById(docId);
             if (!doc) return;
+            const currentDisc = classifyDrawingDiscipline(doc);
+            const discButtons = DRAWING_DISCIPLINES.map(d => `
+                <button type="button" data-sidebar-action="set-discipline" data-id="${escapeHtml(docId)}" data-discipline="${escapeHtml(d.key)}" style="${d.key === currentDisc ? 'color: var(--primary); font-weight: 700;' : ''}">
+                    <span class="bb-status-dot" style="background-color: ${d.color}; display: inline-block; flex-shrink: 0;"></span> ${escapeHtml(d.label)}${d.key === currentDisc ? ' ✓' : ''}
+                </button>
+            `).join('');
             html = `
                 <button type="button" data-sidebar-action="view-doc" data-id="${escapeHtml(docId)}"><i class="fas fa-eye"></i> View File</button>
                 <button type="button" data-sidebar-action="rename-doc" data-id="${escapeHtml(docId)}"><i class="fas fa-pen"></i> Rename</button>
-                <button type="button" data-sidebar-action="takeoff-doc" data-id="${escapeHtml(docId)}"><i class="fas fa-ruler-combined"></i> Move to Takeoff</button>
                 <button type="button" data-sidebar-action="download-doc" data-id="${escapeHtml(docId)}"><i class="fas fa-download"></i> Download</button>
-                <button type="button" class="danger" data-sidebar-action="delete-doc" data-id="${escapeHtml(docId)}" style="color: #ef4444;"><i class="fas fa-trash"></i> Delete</button>
-            `;
-        } else if (target.startsWith('custom:')) {
-            const folderId = target.replace('custom:', '');
-            html = `
-                <button type="button" data-sidebar-action="rename-folder" data-id="${escapeHtml(folderId)}"><i class="fas fa-pen"></i> Rename folder</button>
-                <button type="button" class="danger" data-sidebar-action="delete-folder" data-id="${escapeHtml(folderId)}" style="color: #ef4444;"><i class="fas fa-trash"></i> Delete folder</button>
+                <div class="documents-menu-eyebrow" style="margin-top: 4px; border-top: 1px solid var(--border-soft); padding-top: 6px;">Drawing Group</div>
+                ${discButtons}
+                <button type="button" class="danger" data-sidebar-action="delete-doc" data-id="${escapeHtml(docId)}" style="color: #ef4444; margin-top: 4px; border-top: 1px solid var(--border-soft);"><i class="fas fa-trash"></i> Delete</button>
             `;
         } else if (target === 'category:Drawings') {
             html = `
                 <button type="button" data-sidebar-action="upload-category" data-cat="Drawings"><i class="fas fa-upload"></i> Upload drawing</button>
-                <button type="button" data-sidebar-action="sort-folders"><i class="fas fa-arrow-down-a-z"></i> Sort drawings</button>
+                <button type="button" data-sidebar-action="expand-disciplines"><i class="fas fa-angles-down"></i> Expand all groups</button>
+                <button type="button" data-sidebar-action="collapse-disciplines"><i class="fas fa-angles-up"></i> Collapse all groups</button>
+                <button type="button" data-sidebar-action="sort-folders"><i class="fas fa-arrow-down-a-z"></i> Sort drawings A–Z</button>
             `;
         } else if (target === 'category:Attachments') {
             html = `
@@ -2264,8 +4117,9 @@
         } else {
             // header:folders
             html = `
-                <button type="button" data-sidebar-action="create-folder"><i class="fas fa-folder-plus"></i> Create folder</button>
-                <button type="button" data-sidebar-action="sort-folders"><i class="fas fa-arrow-down-a-z"></i> Sort folders</button>
+                <button type="button" data-sidebar-action="expand-disciplines"><i class="fas fa-angles-down"></i> Expand all groups</button>
+                <button type="button" data-sidebar-action="collapse-disciplines"><i class="fas fa-angles-up"></i> Collapse all groups</button>
+                <button type="button" data-sidebar-action="sort-folders"><i class="fas fa-arrow-down-a-z"></i> Sort drawings A–Z</button>
             `;
         }
 
@@ -2368,53 +4222,22 @@
             handleDocumentAction('download', id);
         } else if (action === 'delete-doc') {
             handleDocumentAction('delete', id);
-        } else if (action === 'rename-folder') {
-            const folder = customFolders.find(f => String(f.id) === String(id));
-            if (folder) {
-                openRenameModal({
-                    title: 'Rename Folder',
-                    label: 'Folder Name',
-                    currentName: folder.name,
-                    onSave: (name) => {
-                        folder.name = name;
-                        persistDocumentFolders();
-                        renderDocumentsPage();
-                        showToast(`Folder renamed to "${name}".`);
-                    }
-                });
+        } else if (action === 'set-discipline') {
+            const discKey = btn?.dataset?.discipline;
+            if (id && discKey) {
+                saveDisciplineOverride(id, discKey);
+                collapsedDisciplines.delete(discKey);
+                renderDocumentsPage();
+                const discMeta = getDisciplineMeta(discKey);
+                showToast(`Moved to ${discMeta.label}.`);
             }
-        } else if (action === 'delete-folder') {
-            const folder = customFolders.find(f => String(f.id) === String(id));
-            const hasDocs = allDocumentRows().some(doc => String(doc.folderId || '') === String(id));
-            if (hasDocs) {
-                showAlertDialog({
-                    title: 'Folder Not Empty',
-                    message: 'Folder must be empty before deleting it. Please move or delete its files first.',
-                    buttonText: 'Got It',
-                    type: 'warning',
-                    badge: 'CANNOT DELETE',
-                    icon: 'fas fa-folder-closed'
-                });
-                return;
-            }
-            const confirmed = await showConfirmDialog({
-                title: 'Delete Folder',
-                message: `Are you sure you want to delete the folder "${folder ? folder.name : 'this folder'}"?`,
-                confirmText: 'Delete Folder',
-                cancelText: 'Cancel',
-                type: 'error',
-                badge: 'DELETE FOLDER',
-                icon: 'fas fa-trash',
-                primaryDanger: true
-            });
-            if (!confirmed) return;
-            customFolders = customFolders.filter(f => String(f.id) !== String(id));
-            if (selectedDocumentsFolder === `custom:${id}`) selectedDocumentsFolder = 'drawings';
-            persistDocumentFolders();
-            renderDocumentsPage();
-            showToast('Folder deleted.');
-        } else if (action === 'create-folder') {
-            createDocumentFolder();
+        } else if (action === 'expand-disciplines') {
+            isDrawingsRootCollapsed = false;
+            collapsedDisciplines.clear();
+            renderDocumentFolderTree();
+        } else if (action === 'collapse-disciplines') {
+            DRAWING_DISCIPLINES.forEach(d => collapsedDisciplines.add(d.key));
+            renderDocumentFolderTree();
         } else if (action === 'sort-folders') {
             sortDocumentFolders();
         } else if (action === 'upload-category') {
@@ -2452,6 +4275,248 @@
         window.open(targetUrl, '_blank');
     }
 
+    let currentAttachmentPreviewId = null;
+
+    function getPreviewableAttachmentList(currentDoc = null) {
+        const filtered = sortedDocuments(filteredDocuments(attachmentDocuments()));
+        if (currentDoc && filtered.some(d => String(d.id) === String(currentDoc.id))) {
+            return filtered;
+        }
+        const allAtt = sortedDocuments(attachmentDocuments());
+        if (currentDoc && allAtt.some(d => String(d.id) === String(currentDoc.id))) {
+            return allAtt;
+        }
+        return currentDoc ? [currentDoc] : allAtt;
+    }
+
+    function closeAttachmentPreviewModal() {
+        const modal = $('pdAttachmentPreviewModal');
+        if (!modal) return;
+        modal.classList.remove('open');
+        const viewport = modal.querySelector('#docAttachmentPreviewViewport');
+        if (viewport) viewport.innerHTML = '';
+    }
+
+    function navigateAttachmentPreview(delta) {
+        const currentDoc = currentAttachmentPreviewId ? findDocumentById(currentAttachmentPreviewId) : null;
+        const list = getPreviewableAttachmentList(currentDoc);
+        if (list.length <= 1) return;
+        const currentIndex = list.findIndex(d => String(d.id) === String(currentAttachmentPreviewId));
+        const baseIndex = currentIndex >= 0 ? currentIndex : 0;
+        const nextIndex = (baseIndex + delta + list.length) % list.length;
+        const nextDoc = list[nextIndex];
+        if (nextDoc) {
+            selectedDocumentsId = nextDoc.id;
+            document.querySelectorAll('.doc-list-item-row[data-doc-id]').forEach(row => {
+                row.classList.toggle('active', String(row.dataset.docId) === String(nextDoc.id));
+            });
+            openAttachmentPreviewModal(nextDoc);
+        }
+    }
+
+    function ensureAttachmentPreviewModal() {
+        let modal = $('pdAttachmentPreviewModal');
+        if (modal) return modal;
+
+        modal = document.createElement('div');
+        modal.id = 'pdAttachmentPreviewModal';
+        modal.className = 'pd-modal-backdrop doc-attachment-preview-backdrop';
+        modal.setAttribute('role', 'dialog');
+        modal.setAttribute('aria-modal', 'true');
+        modal.setAttribute('aria-labelledby', 'docAttachmentPreviewTitle');
+        modal.innerHTML = `
+            <div class="pd-modal doc-attachment-preview-modal">
+                <div class="pd-modal-head doc-attachment-preview-head">
+                    <div class="doc-attachment-preview-title-wrap">
+                        <i class="far fa-file-image doc-attachment-preview-type-icon" id="docAttachmentPreviewIcon"></i>
+                        <h3 id="docAttachmentPreviewTitle">
+                            <span id="docAttachmentPreviewName">Attachment Preview</span>
+                        </h3>
+                        <span class="doc-attachment-preview-counter" id="docAttachmentPreviewCounter">1 / 1</span>
+                        <span class="doc-attachment-preview-meta" id="docAttachmentPreviewMeta"></span>
+                    </div>
+                    <div class="doc-attachment-preview-actions">
+                        <button type="button" class="doc-custom-btn" id="docAttachmentDownloadBtn" title="Download file">
+                            <i class="fas fa-download"></i> Download
+                        </button>
+                        <button type="button" class="doc-custom-btn" id="docAttachmentOpenTabBtn" title="Open in new tab">
+                            <i class="fas fa-arrow-up-right-from-square"></i> Open
+                        </button>
+                        <button type="button" class="pd-modal-head-close" id="docAttachmentPreviewCloseBtn" title="Close preview" aria-label="Close preview">
+                            <i class="fas fa-times"></i>
+                        </button>
+                    </div>
+                </div>
+                <div class="doc-attachment-preview-body" id="docAttachmentPreviewBody">
+                    <button type="button" class="doc-attachment-nav-btn is-prev" id="docAttachmentPrevBtn" title="Previous attachment (←)" aria-label="Previous attachment">
+                        <i class="fas fa-chevron-left"></i>
+                    </button>
+                    <div class="doc-attachment-preview-viewport" id="docAttachmentPreviewViewport"></div>
+                    <button type="button" class="doc-attachment-nav-btn is-next" id="docAttachmentNextBtn" title="Next attachment (→)" aria-label="Next attachment">
+                        <i class="fas fa-chevron-right"></i>
+                    </button>
+                </div>
+            </div>
+        `;
+        document.body.appendChild(modal);
+
+        modal.addEventListener('click', (e) => {
+            if (e.target.closest('#docAttachmentPreviewCloseBtn')) {
+                e.preventDefault();
+                e.stopPropagation();
+                closeAttachmentPreviewModal();
+                return;
+            }
+            if (e.target.closest('#docAttachmentPrevBtn')) {
+                e.preventDefault();
+                e.stopPropagation();
+                navigateAttachmentPreview(-1);
+                return;
+            }
+            if (e.target.closest('#docAttachmentNextBtn')) {
+                e.preventDefault();
+                e.stopPropagation();
+                navigateAttachmentPreview(1);
+                return;
+            }
+            if (!e.target.closest('.doc-attachment-preview-modal')) {
+                closeAttachmentPreviewModal();
+            }
+        });
+
+        return modal;
+    }
+
+    function openAttachmentPreviewModal(doc) {
+        if (!doc) return;
+        let url = '';
+        if (doc.source === 'existing' && doc.path) {
+            url = doc.path;
+        } else {
+            url = sessionFileUrls.get(String(doc.id)) || doc.path || '';
+            if (!url) {
+                const file = sessionFiles.get(String(doc.id));
+                if (file) {
+                    url = URL.createObjectURL(file);
+                    sessionFileUrls.set(String(doc.id), url);
+                }
+            }
+        }
+
+        if (!url) {
+            showToast('Unable to open preview: file not available in memory or storage.');
+            return;
+        }
+
+        currentAttachmentPreviewId = doc.id;
+        const modal = ensureAttachmentPreviewModal();
+        const list = getPreviewableAttachmentList(doc);
+        const currentIdx = Math.max(0, list.findIndex(d => String(d.id) === String(doc.id)));
+
+        const iconEl = modal.querySelector('#docAttachmentPreviewIcon');
+        const nameEl = modal.querySelector('#docAttachmentPreviewName');
+        const counterEl = modal.querySelector('#docAttachmentPreviewCounter');
+        const metaEl = modal.querySelector('#docAttachmentPreviewMeta');
+        const viewportEl = modal.querySelector('#docAttachmentPreviewViewport');
+        const openBtn = modal.querySelector('#docAttachmentOpenTabBtn');
+        const downloadBtn = modal.querySelector('#docAttachmentDownloadBtn');
+        const prevBtn = modal.querySelector('#docAttachmentPrevBtn');
+        const nextBtn = modal.querySelector('#docAttachmentNextBtn');
+
+        const ext = String(doc.extension || '').toLowerCase();
+        const isImage = ['jpg', 'jpeg', 'png', 'webp', 'gif', 'svg', 'bmp', 'tif', 'tiff', 'heic'].includes(ext);
+        const isPdf = ext === 'pdf';
+
+        if (iconEl) {
+            iconEl.className = `far ${isPdf ? 'fa-file-pdf' : isImage ? 'fa-file-image' : 'fa-file'} doc-attachment-preview-type-icon`;
+            iconEl.style.color = isPdf ? '#ef4444' : 'var(--primary, #fb5a3a)';
+        }
+        if (nameEl) {
+            nameEl.textContent = doc.name || doc.filename || 'Attachment Preview';
+            nameEl.title = doc.name || doc.filename || '';
+        }
+        if (counterEl) {
+            counterEl.textContent = `${currentIdx + 1} / ${list.length}`;
+            counterEl.style.display = list.length > 0 ? 'inline-flex' : 'none';
+        }
+        if (metaEl) {
+            const parts = [];
+            if (doc.extension) parts.push(String(doc.extension).toUpperCase());
+            if (doc.size) parts.push(formatBytes(doc.size));
+            metaEl.textContent = parts.join(' • ');
+            metaEl.style.display = parts.length ? 'inline-flex' : 'none';
+        }
+        if (openBtn) {
+            openBtn.onclick = () => openDocumentInBrowser(doc);
+        }
+        if (downloadBtn) {
+            downloadBtn.onclick = () => handleDocumentAction('download', doc.id);
+        }
+        if (prevBtn) {
+            prevBtn.disabled = list.length <= 1;
+            prevBtn.classList.toggle('is-hidden', list.length <= 1);
+        }
+        if (nextBtn) {
+            nextBtn.disabled = list.length <= 1;
+            nextBtn.classList.toggle('is-hidden', list.length <= 1);
+        }
+
+        if (viewportEl) {
+            if (isImage) {
+                viewportEl.innerHTML = `
+                    <div class="doc-attachment-preview-loader" id="docAttachmentPreviewLoader" role="status" aria-live="polite">
+                        <span class="doc-loading-spinner" aria-hidden="true"></span>
+                        <span>Loading image...</span>
+                    </div>
+                    <div class="doc-attachment-preview-stage">
+                        <img src="${escapeHtml(url)}" alt="${escapeHtml(doc.name || 'Attachment')}" class="doc-attachment-preview-img" id="docAttachmentPreviewImgEl" style="opacity: 0; transition: opacity 0.18s ease;">
+                    </div>
+                `;
+                const imgEl = viewportEl.querySelector('#docAttachmentPreviewImgEl');
+                const loaderEl = viewportEl.querySelector('#docAttachmentPreviewLoader');
+                if (imgEl) {
+                    const done = () => {
+                        if (loaderEl) loaderEl.remove();
+                        imgEl.style.opacity = '1';
+                    };
+                    if (imgEl.complete && imgEl.naturalWidth > 0) {
+                        done();
+                    } else {
+                        imgEl.addEventListener('load', done, { once: true });
+                        imgEl.addEventListener('error', () => {
+                            if (loaderEl) loaderEl.remove();
+                            imgEl.style.opacity = '1';
+                        }, { once: true });
+                    }
+                }
+            } else if (isPdf) {
+                viewportEl.innerHTML = `
+                    <div class="doc-attachment-preview-loader" id="docAttachmentPreviewLoader" role="status" aria-live="polite">
+                        <span class="doc-loading-spinner" aria-hidden="true"></span>
+                        <span>Loading PDF preview...</span>
+                    </div>
+                    <iframe src="${escapeHtml(url)}" class="doc-attachment-preview-frame" id="docAttachmentPreviewFrameEl" title="${escapeHtml(doc.name || 'PDF Preview')}"></iframe>
+                `;
+                const frameEl = viewportEl.querySelector('#docAttachmentPreviewFrameEl');
+                const loaderEl = viewportEl.querySelector('#docAttachmentPreviewLoader');
+                if (frameEl && loaderEl) {
+                    const removeLoader = () => { if (loaderEl.isConnected) loaderEl.remove(); };
+                    frameEl.addEventListener('load', removeLoader, { once: true });
+                    setTimeout(removeLoader, 1800);
+                }
+            } else {
+                viewportEl.innerHTML = `
+                    <div class="doc-attachment-preview-fallback">
+                        <i class="far fa-file"></i>
+                        <p>${escapeHtml(doc.name || 'File')}</p>
+                    </div>
+                `;
+            }
+        }
+
+        modal.classList.add('open');
+    }
+
     async function handleDocumentAction(action, id, trigger = null) {
         if (action === 'menu' || action === 'sheet-menu') {
             const menu = [...document.querySelectorAll('.documents-menu.row-menu')]
@@ -2475,6 +4540,11 @@
         if (!doc) return;
         closeAllDocumentsMenus();
 
+        if (action === 'preview-attachment') {
+            selectedDocumentsId = doc.id;
+            openAttachmentPreviewModal(doc);
+            return;
+        }
         if (action === 'select') {
             selectedDocumentsId = doc.id;
             if (doc.category === 'Drawings' || doc.extension === 'pdf') {
@@ -2541,6 +4611,7 @@
                 try {
                     await request('document_action', payload);
                     window.ProjectState.documents = (window.ProjectState.documents || []).filter(row => !(String(row.id) === String(doc.backendId) && row.source === doc.originalSource));
+                    selectedDocumentCheckboxIds.delete(String(id));
                     if (selectedDocumentsId === id) selectedDocumentsId = null;
                     if (selectedDocumentsFolder === `document:${id}`) selectedDocumentsFolder = 'drawings';
                     renderDocumentsPage();
@@ -2558,6 +4629,7 @@
                 const objectUrl = sessionFileUrls.get(String(id));
                 if (objectUrl) URL.revokeObjectURL(objectUrl);
                 sessionFileUrls.delete(String(id));
+                selectedDocumentCheckboxIds.delete(String(id));
                 persistLocalDocuments();
                 syncDocumentsToProjectState();
                 if (selectedDocumentsId === id) selectedDocumentsId = null;
@@ -2566,47 +4638,6 @@
                 showToast('Document deleted.');
                 return;
             }
-        }
-        if (action === 'move') {
-            openRenameModal({
-                title: 'Move Document',
-                label: 'Folder / Category (e.g. Drawings, Attachments)',
-                currentName: doc.category || 'Drawings',
-                onSave: async (next) => {
-                    if (!next) return;
-                    if (doc.source === 'existing') {
-                        const projectId = Number(window.ProjectState?.projectId || 0);
-                        let payload = { project_id: projectId, id: doc.backendId, source: doc.originalSource, operation: 'move' };
-                        if (/^\d+$/.test(next.trim())) {
-                            payload.folder_id = Number(next.trim());
-                        } else {
-                            const normalized = next.toLowerCase().startsWith('attach') ? 'Attachments' : 'Drawings';
-                            payload.category = normalized;
-                        }
-                        if (trigger) trigger.disabled = true;
-                        try {
-                            await request('document_action', payload);
-                            window.ProjectState.documents = (window.ProjectState.documents || []).map(row => {
-                                if (String(row.id) !== String(doc.backendId) || row.source !== doc.originalSource) return row;
-                                return { ...row, folder_id: payload.folder_id || null };
-                            });
-                            renderDocumentsPage();
-                            showToast('Document moved.');
-                        } catch (error) {
-                            showAlertDialog({ title: 'Move Failed', message: error.message || 'Document action failed.', type: 'error' });
-                        } finally {
-                            if (trigger?.isConnected) trigger.disabled = false;
-                        }
-                    } else {
-                        const normalized = next.toLowerCase().startsWith('attach') ? 'Attachments' : 'Drawings';
-                        localDocuments = localDocuments.map(row => row.id === id ? { ...row, category: normalized } : row);
-                        persistLocalDocuments();
-                        renderDocumentsPage();
-                        showToast(`Moved to ${normalized}.`);
-                    }
-                }
-            });
-            return;
         }
     }
 
@@ -2759,71 +4790,26 @@
         resizer.addEventListener('pointercancel', stopDragging);
     }
 
-    function createDocumentFolder() {
-        openRenameModal({
-            title: 'Create Folder',
-            label: 'Folder Name',
-            currentName: '',
-            onSave: (name) => {
-                if (!name) return;
-                customFolders.push({ id: `folder-${Date.now()}-${Math.random().toString(16).slice(2)}`, name, order: Date.now() });
-                persistDocumentFolders();
-                renderDocumentsPage();
-                showToast(`Folder "${name}" created.`);
-            }
-        });
-    }
-
-    function renameDocumentFolder() {
-        if (!selectedDocumentsFolder.startsWith('custom:')) {
-            showToast('Select a custom folder first.');
-            return;
-        }
-        const id = selectedDocumentsFolder.replace('custom:', '');
-        const folder = customFolders.find(row => row.id === id);
-        if (!folder) return;
-        openRenameModal({
-            title: 'Rename Folder',
-            label: 'Folder Name',
-            currentName: folder.name,
-            onSave: (name) => {
-                if (!name || name === folder.name) return;
-                folder.name = name;
-                persistDocumentFolders();
-                renderDocumentsPage();
-                showToast(`Folder renamed to "${name}".`);
-            }
-        });
-    }
-
-    function deleteDocumentFolder() {
-        if (!selectedDocumentsFolder.startsWith('custom:')) {
-            showToast('Base folders cannot be deleted.');
-            return;
-        }
-        const id = selectedDocumentsFolder.replace('custom:', '');
-        const hasDocs = allDocumentRows().some(doc => String(doc.folderId || '') === id);
-        if (hasDocs) {
-            showToast('Folder must be empty before deleting it.');
-            return;
-        }
-        customFolders = customFolders.filter(row => row.id !== id);
-        selectedDocumentsFolder = 'drawings';
-        persistDocumentFolders();
-        renderDocumentsPage();
-    }
-
     function sortDocumentFolders() {
-        customFolders.sort((a, b) => String(a.name).localeCompare(String(b.name), undefined, { sensitivity: 'base' }));
-        persistDocumentFolders();
+        const drawings = [...allDocumentRows().filter(doc => doc.category === 'Drawings')];
+        drawings.sort((a, b) => String(a.name || '').localeCompare(String(b.name || ''), undefined, { numeric: true, sensitivity: 'base' }));
+        setFolderReorderList(drawings.map(d => String(d.id)));
+        documentSortBy = 'name';
         renderDocumentsPage();
+        showToast('Drawings sorted A–Z.');
     }
 
     async function startDocumentsTakeoff(targetPage = 1) {
         if (startTakeoffInFlight) return;
         startTakeoffInFlight = true;
         const startButton = $('documentsStartTakeoffBtn');
+        const topMoveBtn = $('docMoveToTakeoffBtn');
+        const origTopMoveHtml = topMoveBtn ? topMoveBtn.innerHTML : '';
         if (startButton) startButton.disabled = true;
+        if (topMoveBtn) {
+            topMoveBtn.disabled = true;
+            topMoveBtn.innerHTML = `<i class="fas fa-circle-notch fa-spin"></i> Opening Takeoff...`;
+        }
         try {
             const drawings = drawingDocuments();
             if (!drawings.length) {
@@ -2948,6 +4934,10 @@
         } finally {
             startTakeoffInFlight = false;
             if (startButton) startButton.disabled = false;
+            if (topMoveBtn) {
+                topMoveBtn.disabled = false;
+                topMoveBtn.innerHTML = origTopMoveHtml;
+            }
         }
     }
 
@@ -2963,7 +4953,11 @@
 
     function openDocumentPicker(category = null) {
         uploadCategory = category;
-        $('documentsBrowseInput')?.click();
+        const input = $('documentsBrowseInput');
+        if (input) {
+            input.setAttribute('accept', DOCUMENT_ACCEPT_FILTER);
+            input.click();
+        }
     }
 
     document.addEventListener('DOMContentLoaded', () => {
@@ -3190,9 +5184,14 @@
         });
 
         function openCustomerModal() {
+            setEditingDirectoryCustomer(null);
+            setCustomerModalView('form');
+            populateCustomerSelector();
             $('pdCustomerModal')?.classList.add('open');
         }
         function closeCustomerModal() {
+            setEditingDirectoryCustomer(null);
+            setCustomerModalView('form');
             $('pdCustomerModal')?.classList.remove('open');
             syncCustomerDisplayCard();
         }
@@ -3237,6 +5236,7 @@
 
         document.querySelectorAll('.pd-modal-backdrop').forEach(backdrop => {
             backdrop.addEventListener('click', e => {
+                if (backdrop.id === 'pdDocumentUploadModal') return;
                 if (e.target === backdrop) {
                     backdrop.classList.remove('open');
                     syncCustomerDisplayCard();
@@ -3296,6 +5296,36 @@
         });
         $('saveCustomerBtn')?.addEventListener('click', saveCurrentCustomerToDirectory);
         $('clearCustomerBtn')?.addEventListener('click', clearCustomerFields);
+        $('openCustomerDirectoryBtn')?.addEventListener('click', () => {
+            setCustomerModalView(customerModalView === 'directory' ? 'form' : 'directory');
+        });
+        $('customerDirectoryBackBtn')?.addEventListener('click', () => setCustomerModalView('form'));
+        $('customerDirectoryNewBtn')?.addEventListener('click', () => {
+            clearCustomerFields();
+            setCustomerModalView('form');
+            setTimeout(() => $('poCustomerCompany')?.focus(), 40);
+        });
+        $('cancelEditDirectoryCustomerBtn')?.addEventListener('click', () => setEditingDirectoryCustomer(null));
+        $('poCustomerDirectorySearch')?.addEventListener('input', renderCustomerDirectory);
+        $('poCustomerDirectoryList')?.addEventListener('click', async event => {
+            const useBtn = event.target.closest('[data-dir-use]');
+            if (useBtn) {
+                selectCustomerByIndex(Number(useBtn.dataset.dirUse), { editDirectory: false });
+                setCustomerModalView('form');
+                return;
+            }
+            const editBtn = event.target.closest('[data-dir-edit]');
+            if (editBtn) {
+                selectCustomerByIndex(Number(editBtn.dataset.dirEdit), { editDirectory: true });
+                setCustomerModalView('form');
+                setTimeout(() => $('poCustomerCompany')?.focus(), 40);
+                return;
+            }
+            const deleteBtn = event.target.closest('[data-dir-delete]');
+            if (deleteBtn) {
+                await deleteDirectoryCustomer(Number(deleteBtn.dataset.dirDelete));
+            }
+        });
         loadCustomersDirectory();
         $('addNoteBtn')?.addEventListener('click', () => openNoteModal(-1));
         $('addNoteBtnHead')?.addEventListener('click', () => openNoteModal(-1));
@@ -3381,28 +5411,6 @@
             event.stopPropagation();
             toggleFloatingMenu('documentsViewMenu', event.currentTarget);
         });
-        $('docMoveToTakeoffBtn')?.addEventListener('click', () => {
-            let targetDocId = null;
-            let targetPage = 1;
-            if (selectedDocumentsFolder.startsWith('document:')) {
-                targetDocId = selectedDocumentsFolder.replace('document:', '');
-                if (selectedDocumentsId && String(selectedDocumentsId).startsWith(targetDocId + '-p')) {
-                    const p = parseInt(selectedDocumentsId.replace(targetDocId + '-p', ''), 10);
-                    if (!isNaN(p) && p > 0) targetPage = p;
-                }
-            } else if (selectedDocumentsId) {
-                targetDocId = selectedDocumentsId;
-            } else {
-                const drawings = drawingDocuments();
-                if (drawings.length) targetDocId = drawings[0].id;
-            }
-            if (!targetDocId) {
-                showToast('Please upload or select a document to move to Takeoff.');
-                return;
-            }
-            selectedDocumentsId = targetDocId;
-            startDocumentsTakeoff(targetPage);
-        });
 
         $('modalSaveDocRenameBtn')?.addEventListener('click', () => {
             const input = $('modalDocRenameInput');
@@ -3429,13 +5437,36 @@
         document.querySelectorAll('[data-doc-folder-action]').forEach(button => {
             button.addEventListener('click', () => {
                 const action = button.dataset.docFolderAction;
-                if (action === 'create') createDocumentFolder();
-                if (action === 'rename') renameDocumentFolder();
-                if (action === 'delete') deleteDocumentFolder();
+                if (action === 'expand-all') {
+                    isDrawingsRootCollapsed = false;
+                    collapsedDisciplines.clear();
+                    renderDocumentFolderTree();
+                }
+                if (action === 'collapse-all') {
+                    DRAWING_DISCIPLINES.forEach(d => collapsedDisciplines.add(d.key));
+                    renderDocumentFolderTree();
+                }
                 if (action === 'sort') sortDocumentFolders();
                 closeAllDocumentsMenus();
             });
         });
+
+        $('documentsSubheadItemInfo')?.addEventListener('click', (event) => {
+            const docActionBtn = event.target.closest('[data-doc-subhead-action]');
+            if (!docActionBtn) return;
+            event.preventDefault();
+            event.stopPropagation();
+            const action = docActionBtn.dataset.docSubheadAction;
+            if (action === 'delete-all') {
+                deleteSelectedDocuments();
+            }
+        });
+
+        $('documentsContentFooter')?.addEventListener('click', () => {
+            if (!canDropDocumentsInCurrentView()) return;
+            openDocumentPicker(categoryForSelectedFolder());
+        });
+
         document.querySelectorAll('[data-doc-view-action]').forEach(button => {
             button.addEventListener('click', () => {
                 documentDensity = button.dataset.docViewAction === 'compact' ? 'compact' : 'comfortable';
@@ -3459,32 +5490,49 @@
         const emptyView = $('documentsEmptyView');
         const emptyBox = $('docEmptyDropzone');
         const pageView = $('documentsPageView');
+        const contentFooter = $('documentsContentFooter');
 
         [emptyView, pageView].filter(Boolean).forEach(zone => {
             ['dragenter', 'dragover'].forEach(eventName => {
                 zone.addEventListener(eventName, event => {
+                    if (draggedDocId) return;
+                    const types = Array.from(event.dataTransfer?.types || []);
+                    if (types.length && !types.includes('Files')) return;
                     event.preventDefault();
                     event.stopPropagation();
+                    if (zone === pageView && !canDropDocumentsInCurrentView()) {
+                        if (event.dataTransfer) event.dataTransfer.dropEffect = 'none';
+                        zone.classList.remove('is-dragover');
+                        if (contentFooter) contentFooter.classList.remove('is-dragover');
+                        return;
+                    }
                     zone.classList.add('is-dragover');
                     if (emptyBox && zone === emptyView) emptyBox.classList.add('is-dragover');
+                    if (contentFooter && zone === pageView) contentFooter.classList.add('is-dragover');
                 });
             });
             zone.addEventListener('dragleave', event => {
+                if (draggedDocId) return;
                 event.preventDefault();
                 event.stopPropagation();
                 if (event.relatedTarget && zone.contains(event.relatedTarget)) return;
                 zone.classList.remove('is-dragover');
                 if (emptyBox && zone === emptyView) emptyBox.classList.remove('is-dragover');
+                if (contentFooter && zone === pageView) contentFooter.classList.remove('is-dragover');
             });
             zone.addEventListener('drop', event => {
+                if (draggedDocId) return;
+                const dtFiles = event.dataTransfer?.files;
+                if (!dtFiles || !dtFiles.length) return;
                 event.preventDefault();
                 event.stopPropagation();
                 zone.classList.remove('is-dragover');
                 if (emptyBox && zone === emptyView) emptyBox.classList.remove('is-dragover');
-                const dtFiles = event.dataTransfer?.files;
-                if (dtFiles && dtFiles.length) {
-                    addFiles(dtFiles, null);
+                if (contentFooter && zone === pageView) contentFooter.classList.remove('is-dragover');
+                if (zone === pageView && !canDropDocumentsInCurrentView()) {
+                    return;
                 }
+                addFiles(dtFiles, null);
             });
         });
 
@@ -3496,6 +5544,24 @@
             }
         }, true);
         document.addEventListener('keydown', (e) => {
+            const previewModal = $('pdAttachmentPreviewModal');
+            if (previewModal && previewModal.classList.contains('open')) {
+                if (e.key === 'Escape') {
+                    e.preventDefault();
+                    closeAttachmentPreviewModal();
+                    return;
+                }
+                if (e.key === 'ArrowLeft') {
+                    e.preventDefault();
+                    navigateAttachmentPreview(-1);
+                    return;
+                }
+                if (e.key === 'ArrowRight') {
+                    e.preventDefault();
+                    navigateAttachmentPreview(1);
+                    return;
+                }
+            }
             if (e.key === 'Escape') {
                 closeAllDocumentsMenus();
                 $('pdDocRenameModal')?.classList.remove('open');
@@ -3545,8 +5611,11 @@
             if (!link) return;
 
             const href = link.getAttribute('href');
-            if (!href || href === '#' || href.startsWith('javascript:') || link.target === '_blank') return;
-            if (href.startsWith('#')) return;
+            if (!href || href === '#' || href.startsWith('#') || href.startsWith('javascript:')
+                || href.startsWith('blob:') || href.startsWith('data:')
+                || href.startsWith('mailto:') || href.startsWith('tel:')
+                || link.hasAttribute('download') || link.dataset.noNavGuard === '1'
+                || link.target === '_blank') return;
 
             event.preventDefault();
             event.stopPropagation();
@@ -3644,5 +5713,289 @@
             event.preventDefault();
             event.returnValue = '';
         });
+
+        function ensureTemplateActionModal() {
+            let backdrop = $('pdTemplateActionModal');
+            if (backdrop) return backdrop;
+            backdrop = document.createElement('div');
+            backdrop.id = 'pdTemplateActionModal';
+            backdrop.className = 'pd-modal-backdrop';
+            backdrop.innerHTML = `
+                <div class="pd-modal" style="max-width: 520px; width: 92vw;" role="dialog" aria-modal="true" aria-labelledby="pdTemplateModalTitle">
+                    <div class="pd-modal-head">
+                        <h3 id="pdTemplateModalTitle" style="margin:0;font-size:15px;font-weight:700;">Project Template</h3>
+                        <button type="button" class="pd-modal-head-close" id="pdTemplateModalClose" aria-label="Close"><i class="fas fa-times"></i></button>
+                    </div>
+                    <div class="pd-modal-body" id="pdTemplateModalBody" style="display:flex;flex-direction:column;gap:12px;"></div>
+                    <div class="pd-modal-foot">
+                        <button type="button" class="btn-ghost" id="pdTemplateModalCancel">Cancel</button>
+                        <button type="button" class="btn-main orange" id="pdTemplateModalConfirm">Confirm</button>
+                    </div>
+                </div>
+            `;
+            document.body.appendChild(backdrop);
+            const close = () => backdrop.classList.remove('open');
+            backdrop.querySelector('#pdTemplateModalClose')?.addEventListener('click', close);
+            backdrop.querySelector('#pdTemplateModalCancel')?.addEventListener('click', close);
+            backdrop.addEventListener('click', e => { if (e.target === backdrop) close(); });
+            return backdrop;
+        }
+
+        function escHtml(v) {
+            return String(v ?? '').replace(/[&<>"']/g, ch => ({ '&': '&amp;', '<': '&lt;', '>': '&gt;', '"': '&quot;', "'": '&#039;' }[ch]));
+        }
+
+        function ensureProjectSavedForTemplateAction(actionDescription, onContinue) {
+            if (!checkIsDirty()) {
+                return Promise.resolve().then(onContinue);
+            }
+            if (window.TakeoffAnnouncement) {
+                window.TakeoffAnnouncement.show({
+                    type: 'warning',
+                    force: true,
+                    title: 'Unsaved Changes in Project',
+                    badge: 'UNSAVED CHANGES',
+                    content: `<p>You have made changes to this project that have not been saved yet.</p>
+                              <div class="g-announcement-highlight-box" style="border-left-color: #f59e0b;">
+                                  Save all changes across Overview, Takeoff, and Estimating before ${escHtml(actionDescription)}?
+                              </div>`,
+                    primaryText: 'Save & Continue',
+                    cancelText: 'Go Back',
+                    showDontShow: false,
+                    onPrimary: async () => {
+                        await Promise.resolve();
+                        try {
+                            await saveProject({ silent: true, throwOnError: true });
+                            await onContinue();
+                        } catch (err) {
+                            console.error('Failed to save project before template action:', err);
+                        }
+                    },
+                    onCancel: () => {}
+                });
+                return;
+            }
+            if (confirm(`You have unsaved changes. Save project before ${actionDescription}?`)) {
+                return saveProject({ silent: true, throwOnError: true }).then(() => onContinue()).catch(() => {});
+            }
+        }
+
+        async function openConvertToTemplateDialog() {
+            const projectId = Number(window.ProjectState?.projectId || 0);
+            if (projectId <= 0) {
+                showToast('Please save the project first before converting it to a template.');
+                return;
+            }
+            return ensureProjectSavedForTemplateAction('converting it to a template', () => {
+                const currentName = ($('poEstimateName')?.value || window.ProjectState?.projectInfo?.name || 'Project').trim();
+                const suggested = /template$/i.test(currentName) ? currentName : `${currentName} Template`;
+                const modal = ensureTemplateActionModal();
+                modal.querySelector('#pdTemplateModalTitle').innerHTML = '<i class="fas fa-layer-group" style="color:#0d9488;margin-right:6px;"></i> Convert to Template';
+                modal.querySelector('#pdTemplateModalBody').innerHTML = `
+                    <p class="pd-template-modal-desc" style="margin:0;font-size:13px;line-height:1.45;">
+                        Creates a clean copy of this project in the <strong>Templates</strong> stage with all Estimating and Takeoff quantities reset to <strong>0</strong>. Your current project will remain unchanged.
+                    </p>
+                    <label class="pd-template-field-label" style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;font-weight:600;">
+                        <span>Template Name</span>
+                        <input type="text" id="pdConvertTemplateNameInput" class="pd-input" value="${escHtml(suggested)}" placeholder="Template name" style="padding:8px 10px;border:1px solid var(--border,#cbd5e1);border-radius:6px;font-size:13px;">
+                    </label>
+                `;
+                const confirmBtn = modal.querySelector('#pdTemplateModalConfirm');
+                confirmBtn.textContent = 'Create Template';
+                confirmBtn.disabled = false;
+                modal.classList.add('open');
+                setTimeout(() => modal.querySelector('#pdConvertTemplateNameInput')?.focus(), 40);
+
+                confirmBtn.onclick = async () => {
+                    const nameInput = modal.querySelector('#pdConvertTemplateNameInput');
+                    const tplName = (nameInput?.value || '').trim();
+                    if (!tplName) {
+                        nameInput?.focus();
+                        return;
+                    }
+                    confirmBtn.disabled = true;
+                    confirmBtn.textContent = 'Converting...';
+                    try {
+                        await saveProject({ silent: true, throwOnError: true });
+                        const res = await request('convert_to_template', { id: projectId, name: tplName });
+                        modal.classList.remove('open');
+                        const createdId = Number(res.project_id || res.id || 0);
+                        showToast(`Template "${res.name || tplName}" created in Templates stage.`);
+                        if (createdId > 0 && typeof window.showConfirmDialog === 'function') {
+                            const go = await window.showConfirmDialog({
+                                title: 'Template Created',
+                                message: `"${res.name || tplName}" was created in the Templates stage with quantities set to 0. Do you want to open the new template now?`,
+                                confirmText: 'Open Template',
+                                cancelText: 'Stay Here',
+                                type: 'info',
+                                badge: 'TEMPLATES',
+                                icon: 'fas fa-layer-group'
+                            });
+                            if (go) {
+                                isDirty = false;
+                                window.location.href = `project_dashboard.php?id=${encodeURIComponent(createdId)}&tab=estimating`;
+                            }
+                        }
+                    } catch (err) {
+                        showToast(err?.message || 'Could not convert project to template.');
+                        confirmBtn.disabled = false;
+                        confirmBtn.textContent = 'Create Template';
+                    }
+                };
+            });
+        }
+
+        async function openApplyTemplateDialog() {
+            const projectId = Number(window.ProjectState?.projectId || 0);
+            if (projectId <= 0) {
+                showToast('Please save the project first before applying a template.');
+                return;
+            }
+            return ensureProjectSavedForTemplateAction('applying a template', async () => {
+                const modal = ensureTemplateActionModal();
+                modal.querySelector('#pdTemplateModalTitle').innerHTML = '<i class="fas fa-wand-magic-sparkles" style="color:#0d9488;margin-right:6px;"></i> Apply Template';
+                modal.querySelector('#pdTemplateModalBody').innerHTML = '<div style="padding:12px 0;font-size:13px;color:var(--muted,#64748b);">Loading available templates...</div>';
+                const confirmBtn = modal.querySelector('#pdTemplateModalConfirm');
+                confirmBtn.textContent = 'Apply Template';
+                confirmBtn.disabled = true;
+                modal.classList.add('open');
+
+                try {
+                    const resp = await fetch(`${apiUrl}?action=templates`, { cache: 'no-store' });
+                    const data = await resp.json();
+                    const templates = Array.isArray(data?.templates) ? data.templates : [];
+                    if (!templates.length) {
+                        modal.querySelector('#pdTemplateModalBody').innerHTML = '<p style="margin:0;font-size:13px;color:#dc2626;">No templates are currently available.</p>';
+                        return;
+                    }
+                    modal.querySelector('#pdTemplateModalBody').innerHTML = `
+                        <p class="pd-template-modal-desc" style="margin:0;font-size:13px;line-height:1.45;">
+                            Creates a <strong>new empty estimate</strong> in this project prefixed with <code>TMPLT_</code> and copies all groups, items, assemblies, Takeoff layers, and settings from the chosen template.
+                        </p>
+                        <label class="pd-template-field-label" style="display:flex;flex-direction:column;gap:6px;font-size:12.5px;font-weight:600;">
+                            <span>Select Template</span>
+                            <select id="pdApplyTemplateSelect" class="pd-input" style="padding:8px 10px;border:1px solid var(--border,#cbd5e1);border-radius:6px;font-size:13px;">
+                                ${templates.map(t => `<option value="${escHtml(t.id)}">${escHtml(t.name)}${t.trade ? ` (${escHtml(t.trade)})` : ''}</option>`).join('')}
+                            </select>
+                        </label>
+                        <div id="pdApplyTemplatePreview" class="pd-template-preview-box"></div>
+                    `;
+                    const sel = modal.querySelector('#pdApplyTemplateSelect');
+                    const preview = modal.querySelector('#pdApplyTemplatePreview');
+                    const refreshPreview = () => {
+                        const chosen = templates.find(t => String(t.id) === String(sel?.value));
+                        if (!chosen || !preview) return;
+                        const prefixed = String(chosen.name || '').startsWith('TMPLT_') ? chosen.name : `TMPLT_${chosen.name}`;
+                        preview.innerHTML = `<strong>New Estimate:</strong> ${escHtml(prefixed)}${chosen.description ? `<br><span>${escHtml(chosen.description)}</span>` : ''}`;
+                    };
+                    sel?.addEventListener('change', refreshPreview);
+                    refreshPreview();
+                    confirmBtn.disabled = false;
+
+                    confirmBtn.onclick = async () => {
+                        const tplId = Number(sel?.value || 0);
+                        if (tplId <= 0) return;
+                        confirmBtn.disabled = true;
+                        confirmBtn.textContent = 'Applying...';
+                        try {
+                            await saveProject({ silent: true, throwOnError: true });
+                            const res = await request('apply_template', { id: projectId, template_id: tplId });
+                            const clientEstId = res?.estimate?.client_estimate_id || '';
+                            try {
+                                if (clientEstId) {
+                                    sessionStorage.setItem(`takeoff.pendingActivateEstimateId.${projectId}`, clientEstId);
+                                }
+                                localStorage.removeItem(`takeoff_project_groups_${projectId}`);
+                            } catch (_) {}
+                            isDirty = false;
+                            modal.classList.remove('open');
+                            window.location.href = `project_dashboard.php?id=${encodeURIComponent(projectId)}&tab=estimating`;
+                        } catch (err) {
+                            showToast(err?.message || 'Could not apply template.');
+                            confirmBtn.disabled = false;
+                            confirmBtn.textContent = 'Apply Template';
+                        }
+                    };
+                } catch (err) {
+                    modal.querySelector('#pdTemplateModalBody').innerHTML = `<p style="margin:0;font-size:13px;color:#dc2626;">${escHtml(err?.message || 'Error loading templates.')}</p>`;
+                }
+            });
+        }
+
+        $('projectActionsMenu')?.addEventListener('click', async event => {
+            const btn = event.target?.closest?.('[data-project-action]');
+            if (!btn) return;
+            event.stopPropagation();
+            $('projectActionsMenu')?.classList.remove('open');
+            const action = btn.dataset.projectAction;
+            const projectId = Number(window.ProjectState?.projectId || 0);
+            if (action === 'convert-template') return openConvertToTemplateDialog();
+            if (action === 'apply-template') return openApplyTemplateDialog();
+            if (projectId <= 0) {
+                showToast('Please save the project first.');
+                return;
+            }
+            if (action === 'copy') {
+                const ok = typeof window.showConfirmDialog === 'function'
+                    ? await window.showConfirmDialog({
+                        title: 'Copy Project',
+                        message: 'Create a full duplicate of this project including documents, takeoffs, and estimates?',
+                        confirmText: 'Copy Project',
+                        cancelText: 'Cancel',
+                        type: 'info',
+                        icon: 'fas fa-copy'
+                    })
+                    : window.confirm('Create a copy of this project?');
+                if (!ok) return;
+                try {
+                    const res = await request('copy', { id: projectId });
+                    if (res?.id) {
+                        isDirty = false;
+                        window.location.href = `project_dashboard.php?id=${encodeURIComponent(res.id)}&tab=overview`;
+                    }
+                } catch (err) {
+                    showToast(err?.message || 'Could not copy project.');
+                }
+            } else if (action === 'archive') {
+                const ok = typeof window.showConfirmDialog === 'function'
+                    ? await window.showConfirmDialog({
+                        title: 'Archive Project',
+                        message: 'Move this project to Archived stage?',
+                        confirmText: 'Archive',
+                        cancelText: 'Cancel',
+                        type: 'warning',
+                        icon: 'fas fa-box-archive'
+                    })
+                    : window.confirm('Archive this project?');
+                if (!ok) return;
+                await changeProjectStatus('archived');
+            } else if (action === 'delete') {
+                const projLabel = ($('poEstimateName')?.value || window.ProjectState?.projectInfo?.name || `Project #${projectId}`).trim();
+                const safeProjLabel = escHtml(projLabel || 'this project');
+                const ok = typeof window.showConfirmDialog === 'function'
+                    ? await window.showConfirmDialog({
+                        title: 'Delete Project',
+                        message: `Are you sure you want to delete <strong>"${safeProjLabel}"</strong>? It will be moved to the deleted archive and hidden from the Bid Board.`,
+                        confirmText: 'Delete Project',
+                        cancelText: 'Cancel',
+                        type: 'error',
+                        badge: 'DELETE',
+                        icon: 'fas fa-trash',
+                        primaryDanger: true
+                    })
+                    : window.confirm(`Are you sure you want to delete "${projLabel}"?`);
+                if (!ok) return;
+                try {
+                    await request('delete', { id: projectId });
+                    isDirty = false;
+                    window.location.href = 'bid_board.php';
+                } catch (err) {
+                    showToast(err?.message || 'Could not delete project.');
+                }
+            }
+        });
+        if (Number(window.ProjectState?.projectId || 0) > 0 && window.ProjectState?.projectInfo?.status) {
+            syncProjectBidBoardReturnStage(false);
+        }
     });
 })();

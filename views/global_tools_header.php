@@ -58,7 +58,7 @@ $favoriteTools = array_slice(company_tools_favorites(), 0, 3);
 $bidBoardPath = company_tools_bid_board_path();
 $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
 ?>
-<header class="bt-global-header bt-floating-header" data-global-tools-header data-user-role="<?= htmlspecialchars($authRole) ?>" data-can-write="<?= $canWrite ? 'true' : 'false' ?>" data-read-only="<?= $readOnly ? 'true' : 'false' ?>" data-can-mutate="<?= $canMutate ? 'true' : 'false' ?>" data-display-name="<?= htmlspecialchars($authDisplayName) ?>">
+<header class="bt-global-header bt-floating-header" data-global-tools-header data-user-role="<?= htmlspecialchars($authRole) ?>" data-can-write="<?= $canWrite ? 'true' : 'false' ?>" data-read-only="<?= $readOnly ? 'true' : 'false' ?>" data-can-mutate="<?= $canMutate ? 'true' : 'false' ?>" data-display-name="<?= htmlspecialchars($authDisplayName) ?>" data-user-key="<?= htmlspecialchars((string)($authUser['user_id'] ?? $authUser['username'] ?? $authDisplayName ?? 'default')) ?>">
     <div class="bt-global-left">
         <button class="bt-icon-procore bt-header-theme-toggle" type="button" data-theme-toggle
             title="Toggle Dark/Light Mode" aria-label="Toggle Theme">
@@ -170,7 +170,9 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
     <!-- Center: Brand Logo & Subtitle Centered Vertically & Horizontally -->
     <div class="bt-global-center">
         <?php
-        $navReturnStage = $_GET['stage'] ?? $_GET['status'] ?? '';
+        $navReturnStage = (!empty($project['id']) && !empty($project['status']))
+            ? $project['status']
+            : ($_GET['stage'] ?? $_GET['status'] ?? '');
         $navBidBoardHref = 'bid_board.php' . (!empty($navReturnStage) ? '?status=' . urlencode($navReturnStage) : '');
         ?>
         <a class="bt-brand" href="<?= htmlspecialchars($navBidBoardHref) ?>" id="btHeaderBrandLink" aria-label="Brightronix Estimating Hub">
@@ -613,26 +615,46 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
         var primaryCallback = null;
         var secondaryCallback = null;
         var cancelCallback = null;
+        var currentAnnouncementPerUser = false;
 
-        function getDismissedList() {
+        function getAnnouncementUserKey() {
             try {
-                var raw = localStorage.getItem('takeoff.dismissedAnnouncements');
+                var headerEl = document.querySelector('[data-global-tools-header]');
+                var raw = (headerEl && headerEl.getAttribute('data-user-key')) || (authData && authData.displayName) || 'default';
+                var clean = String(raw).trim().toLowerCase().replace(/[^a-z0-9_-]+/g, '_');
+                return clean || 'default';
+            } catch (e) {
+                return 'default';
+            }
+        }
+
+        function dismissStorageKey(id, perUser) {
+            if (perUser || String(id || '').indexOf('user_alert_') === 0) {
+                return 'takeoff.userAlertDismissed.' + getAnnouncementUserKey();
+            }
+            return 'takeoff.dismissedAnnouncements';
+        }
+
+        function getDismissedList(id, perUser) {
+            try {
+                var raw = localStorage.getItem(dismissStorageKey(id, perUser));
                 return raw ? JSON.parse(raw) : [];
             } catch (e) {
                 return [];
             }
         }
 
-        function isDismissed(id) {
-            return getDismissedList().indexOf(id) !== -1;
+        function isDismissed(id, perUser) {
+            return getDismissedList(id, perUser).indexOf(id) !== -1;
         }
 
-        function markDismissed(id) {
+        function markDismissed(id, perUser) {
             try {
-                var list = getDismissedList();
+                var key = dismissStorageKey(id, perUser);
+                var list = getDismissedList(id, perUser);
                 if (list.indexOf(id) === -1) {
                     list.push(id);
-                    localStorage.setItem('takeoff.dismissedAnnouncements', JSON.stringify(list));
+                    localStorage.setItem(key, JSON.stringify(list));
                 }
             } catch (e) { }
             updateNotifDot();
@@ -650,9 +672,11 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
         function showAnnouncement(options) {
             options = options || {};
             var id = options.id || currentAnnouncementId;
+            var perUser = Boolean(options.perUser || String(id || '').indexOf('user_alert_') === 0);
             currentAnnouncementId = id;
+            currentAnnouncementPerUser = perUser;
 
-            if (!options.force && isDismissed(id)) {
+            if (!options.force && isDismissed(id, perUser)) {
                 return;
             }
 
@@ -747,6 +771,10 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
 
             var dontShowWrap = document.getElementById('globalAnnouncementDontShowWrap');
             if (dontShowWrap) {
+                var dontShowSpan = dontShowWrap.querySelector('span');
+                if (dontShowSpan) {
+                    dontShowSpan.textContent = options.dontShowLabel || "Don't show this announcement again";
+                }
                 if (options.showDontShow === true || (options.showDontShow !== false && type === 'system')) {
                     dontShowWrap.style.display = 'inline-flex';
                 } else {
@@ -759,18 +787,25 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
             }
 
             if (modalBackdrop) {
+                if (document.body && typeof document.body.appendChild === 'function' && document.body.lastElementChild !== modalBackdrop) {
+                    document.body.appendChild(modalBackdrop);
+                }
+                if (modalBackdrop.style) {
+                    modalBackdrop.style.zIndex = '2147483647';
+                }
                 modalBackdrop.classList.add('open');
             }
         }
 
         function closeAnnouncement() {
             var cb = cancelCallback;
+            var perUserFlag = currentAnnouncementPerUser;
             primaryCallback = null;
             secondaryCallback = null;
             cancelCallback = null;
             if (cb) cb();
             if (dontShowCheck && dontShowCheck.checked) {
-                markDismissed(currentAnnouncementId);
+                markDismissed(currentAnnouncementId, perUserFlag);
             }
             if (modalBackdrop) {
                 modalBackdrop.classList.remove('open');
@@ -822,8 +857,18 @@ $currentPath = parse_url($_SERVER['REQUEST_URI'] ?? '', PHP_URL_PATH) ?: '';
         }
 
         document.addEventListener('keydown', function (e) {
-            if (e.key === 'Escape' && modalBackdrop && modalBackdrop.classList.contains('open')) {
+            if (!modalBackdrop || !modalBackdrop.classList.contains('open')) return;
+            if (e.key === 'Escape') {
                 handleCancelDismiss();
+                return;
+            }
+            if (e.key === 'Enter' && !e.isComposing && !e.shiftKey && !e.ctrlKey && !e.metaKey && !e.altKey
+                && primBtn && !primBtn.disabled && !primBtn.hidden && primBtn.style.display !== 'none') {
+                var activeTag = document.activeElement && document.activeElement.tagName;
+                if (activeTag !== 'TEXTAREA' && activeTag !== 'BUTTON' && activeTag !== 'A') {
+                    e.preventDefault();
+                    primBtn.click();
+                }
             }
         });
 

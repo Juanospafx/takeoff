@@ -4,7 +4,7 @@
     const pipelineStatuses = [
         'Invitations',
         'To Do',
-        'Estimating',
+        'Templates',
         'Bid Submitted',
         'Accepted',
         'In Progress',
@@ -16,7 +16,7 @@
     const statusCodes = {
         Invitations: 'invitations',
         'To Do': 'to_do',
-        Estimating: 'estimating',
+        Templates: 'templates',
         'Bid Submitted': 'bid_submitted',
         Accepted: 'accepted',
         'In Progress': 'in_progress',
@@ -29,12 +29,14 @@
         draft: 'To Do',
         to_do: 'To Do',
         todo: 'To Do',
-        active: 'Estimating',
+        active: 'To Do',
         invitations: 'Invitations',
         invitation: 'Invitations',
         invited: 'Invitations',
-        bidding: 'Estimating',
-        estimating: 'Estimating',
+        templates: 'Templates',
+        template: 'Templates',
+        bidding: 'To Do',
+        estimating: 'To Do',
         submitted: 'Bid Submitted',
         bid_submitted: 'Bid Submitted',
         awarded: 'Accepted',
@@ -58,7 +60,7 @@
     const defaultPhaseConfig = {
         'Invitations': { label: 'Invitations', color: '#b45309' },
         'To Do': { label: 'To Do', color: '#1d5cc9' },
-        'Estimating': { label: 'Estimating', color: '#d97706' },
+        'Templates': { label: 'Templates', color: '#0d9488' },
         'Bid Submitted': { label: 'Bid Submitted', color: '#ea580c' },
         'Accepted': { label: 'Accepted', color: '#059669' },
         'In Progress': { label: 'In Progress', color: '#2563eb' },
@@ -192,11 +194,26 @@
             .catch(err => showError(err.message));
     }
 
-    function saveActiveStage(status) {
+    function saveActiveStage(status, options = {}) {
         if (!status) return;
+        const code = statusCodes[status] || status;
         try {
             localStorage.setItem('takeoff.bidBoardStage', status);
             sessionStorage.setItem('takeoff.bidBoardStage', status);
+        } catch (e) {}
+        try {
+            const brandLink = document.getElementById('btHeaderBrandLink');
+            if (brandLink) {
+                brandLink.setAttribute('href', `bid_board.php?status=${encodeURIComponent(code)}`);
+            }
+            if (options.syncUrl !== false && window.history && typeof window.history.replaceState === 'function') {
+                const url = new URL(window.location.href);
+                url.searchParams.set('status', code);
+                if (options.clearProjectId) {
+                    url.searchParams.delete('project_id');
+                }
+                window.history.replaceState(null, '', url.toString());
+            }
         } catch (e) {}
     }
 
@@ -223,6 +240,21 @@
         const targetProjectId = params.get('project_id');
         const urlStatus = params.get('status') || params.get('stage');
 
+        // Honor stage changes made inside Project Dashboard when returning to Bid Board
+        try {
+            const rawOverride = sessionStorage.getItem('takeoff.bidBoardStageOverride');
+            if (rawOverride) {
+                sessionStorage.removeItem('takeoff.bidBoardStageOverride');
+                const parsed = JSON.parse(rawOverride);
+                const overrideStatus = resolveStatusFromInput(parsed?.stage || parsed?.code);
+                if (overrideStatus) {
+                    activeStatus = overrideStatus;
+                    saveActiveStage(activeStatus, { clearProjectId: true });
+                    return;
+                }
+            }
+        } catch (e) {}
+
         if (targetProjectId) {
             const found = (state.projects || []).find(p => String(p.id) === String(targetProjectId));
             if (found) {
@@ -244,6 +276,7 @@
         const fromSaved = resolveStatusFromInput(savedStage);
         if (fromSaved) {
             activeStatus = fromSaved;
+            saveActiveStage(activeStatus);
             return;
         }
 
@@ -326,25 +359,51 @@
             const metadata = parseMetadata(project);
             const estimatorName = String(metadata.estimator || metadata.estimator_name || '').trim();
             const sqft = Number(metadata.square_footage || metadata.sqft || metadata.area_sqft || 0);
-            const metadataPrimary = Number(metadata.primary_estimate_total ?? metadata.primary_quote_value ?? metadata.primaryEstimateTotal ?? 0);
+            const rawServerPrimary = project?.has_primary_estimate_total
+                ? project.primary_estimate_total
+                : (metadata.primary_estimate_total ?? metadata.primary_quote_value ?? metadata.primaryEstimateTotal);
+            const hasServerPrimary = rawServerPrimary !== undefined && rawServerPrimary !== null && Number.isFinite(Number(rawServerPrimary));
+            const metadataPrimary = hasServerPrimary ? Number(rawServerPrimary) : 0;
+            const serverUpdatedMs = Date.parse(metadata.primary_estimate_updated_at || project.primary_estimate_updated_at || project.updated_at || '') || 0;
+
+            let hasStoragePrimary = false;
             let storagePrimary = 0;
-            if (!metadataPrimary && project?.id) {
+            let storageUpdatedMs = 0;
+            if (project?.id) {
                 try {
                     const raw = localStorage.getItem(`takeoff.estimating.module.${project.id}`);
                     if (raw) {
                         const parsed = JSON.parse(raw);
                         const list = Array.isArray(parsed.estimates) ? parsed.estimates : [];
+                        const metaPrimaryId = String(project?.primary_estimate_id || metadata.primary_estimate_id || '');
                         const explicitId = String(parsed.activeEstimateId || '');
-                        const pEst = list.find(e => Boolean(e.is_primary || e.isPrimary)) || list.find(e => String(e.id) === explicitId) || list[0];
+                        const pEst = list.find(e => Boolean(e.is_primary || e.isPrimary))
+                            || (metaPrimaryId ? list.find(e => String(e.id) === metaPrimaryId) : null)
+                            || list.find(e => String(e.id) === explicitId)
+                            || list[0];
                         if (pEst) {
-                            const val = Number(pEst.estimateTotal || pEst.totalSales || pEst.grand_total || pEst.total_amount || pEst.total || 0);
-                            if (val > 0) storagePrimary = val;
+                            const rawVal = pEst.estimateTotal ?? pEst.totalSales ?? pEst.estimateSummary?.estimateTotal ?? pEst.estimateSummary?.total ?? pEst.grand_total ?? pEst.total_amount ?? pEst.total;
+                            const val = Number(rawVal);
+                            if (rawVal !== undefined && rawVal !== null && Number.isFinite(val)) {
+                                hasStoragePrimary = true;
+                                storagePrimary = val;
+                                storageUpdatedMs = Date.parse(parsed.clientUiUpdatedAt || pEst.updatedAt || '') || 0;
+                            }
                         }
                     }
                 } catch (e) {}
             }
-            const fallbackValue = Number(metadata.estimate_total || metadata.total_sales || metadata.totalValue || 0);
-            const totalValue = metadataPrimary > 0 ? metadataPrimary : (storagePrimary > 0 ? storagePrimary : fallbackValue);
+            const fallbackValue = Number(metadata.estimate_total ?? metadata.total_sales ?? metadata.totalValue ?? 0);
+            let totalValue;
+            if (hasStoragePrimary && (!hasServerPrimary || (storageUpdatedMs > serverUpdatedMs && (storagePrimary > 0 || Number(metadataPrimary) <= 0)))) {
+                totalValue = storagePrimary;
+            } else if (hasServerPrimary) {
+                totalValue = metadataPrimary;
+            } else if (hasStoragePrimary) {
+                totalValue = storagePrimary;
+            } else {
+                totalValue = fallbackValue;
+            }
             const primaryQuoteValue = totalValue;
             const salesPerSqFt = sqft > 0 ? `${money(totalValue / sqft, 2)} /sq ft` : '$0 /sq ft';
 
@@ -750,7 +809,7 @@
         root.querySelectorAll('[data-status]').forEach(tab => {
             tab.addEventListener('click', () => {
                 activeStatus = tab.dataset.status;
-                saveActiveStage(activeStatus);
+                saveActiveStage(activeStatus, { clearProjectId: true });
                 render();
             });
         });
@@ -968,6 +1027,7 @@
                     openLink.href = `project_dashboard.php?id=${encodeURIComponent(projectId)}&tab=overview&stage=${encodeURIComponent(activeStatus)}`;
                 }
 
+                menu.style.display = '';
                 menu.hidden = false;
                 const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
                 const rect = button.getBoundingClientRect();
@@ -1207,11 +1267,34 @@
         const previousState = JSON.parse(JSON.stringify(state));
         rawProject.status = statusCodes[statusLabel] || 'to_do';
         render();
-        postProjectAction('save', savePayload(rawProject, statusLabel)).catch(err => {
+        postProjectAction('save', savePayload(rawProject, statusLabel)).then(res => {
+            if (res && res.data) {
+                state = res.data;
+                renderTemplateOptions();
+            }
+        }).catch(err => {
             state = previousState;
             render();
             showError(err.message);
         });
+    }
+
+    function confirmDeleteProjectModal(project) {
+        const rawName = String(project?.name || `Project #${project?.id || ''}`).trim();
+        const projName = esc(rawName);
+        if (window.TakeoffAnnouncement && typeof window.TakeoffAnnouncement.confirm === 'function') {
+            return window.TakeoffAnnouncement.confirm({
+                type: 'error',
+                badge: 'DELETE',
+                icon: 'fas fa-trash',
+                title: 'Delete Project',
+                message: `Are you sure you want to delete <strong>"${projName}"</strong>? This project will be moved to the deleted archive and hidden from the Bid Board.`,
+                confirmText: 'Delete Project',
+                cancelText: 'Cancel',
+                primaryDanger: true
+            });
+        }
+        return Promise.resolve(window.confirm(`Are you sure you want to delete "${rawName}" from the Bid Board?`));
     }
 
     async function runProjectAction(action, projectId) {
@@ -1221,18 +1304,8 @@
         }
         openMenuId = null;
         if (action === 'delete') {
-            const ok = typeof window.showConfirmDialog === 'function'
-                ? await window.showConfirmDialog({
-                    title: 'Delete Project',
-                    message: 'Delete this project from the Bid Board? This will move it to the deleted archive.',
-                    confirmText: 'Delete Project',
-                    cancelText: 'Cancel',
-                    type: 'error',
-                    badge: 'DELETE',
-                    icon: 'fas fa-trash',
-                    primaryDanger: true
-                })
-                : window.confirm('Delete this project from the Bid Board?');
+            const targetProject = (state.projects || []).find(p => Number(p.id) === Number(projectId));
+            const ok = await confirmDeleteProjectModal(targetProject);
             if (!ok) {
                 renderTable();
                 return;
@@ -1255,7 +1328,9 @@
                                         delete est.estimateItemId;
                                     });
                                 }
-                                localStorage.setItem(`takeoff.estimating.module.${res.id}`, JSON.stringify(parsed));
+                                try {
+                        localStorage.setItem(`takeoff.estimating.module.${res.id}`, JSON.stringify(parsed));
+                    } catch (_) { }
                             }
                         }
                     } catch (_) {}
@@ -1417,6 +1492,14 @@
                 });
             }
         }
+        const excelInput = document.getElementById('bbProjectExcelFile');
+        const excelName = document.getElementById('bbProjectExcelFileName');
+        const excelMeta = document.getElementById('bbProjectExcelFileMeta');
+        const excelErr = document.getElementById('bbProjectExcelError');
+        if (excelInput) excelInput.value = '';
+        if (excelName) excelName.textContent = 'Click or drag & drop exported .xlsx file here';
+        if (excelMeta) excelMeta.textContent = 'Generated by Estimating -> Export Estimate (.xlsx)';
+        if (excelErr) { excelErr.textContent = ''; excelErr.style.display = 'none'; }
         document.querySelector('input[name="bbProjectMode"][value="template"]').checked = true;
         toggleProjectTemplate();
         updateModalLivePreview();
@@ -1437,6 +1520,8 @@
         });
         const wrap = document.getElementById('bbProjectTemplateWrap');
         if (wrap) wrap.style.display = mode === 'template' ? 'block' : 'none';
+        const excelWrap = document.getElementById('bbProjectExcelWrap');
+        if (excelWrap) excelWrap.style.display = mode === 'excel' ? 'block' : 'none';
         updateModalLivePreview();
     }
 
@@ -1447,6 +1532,19 @@
             return;
         }
         const mode = document.querySelector('input[name="bbProjectMode"]:checked')?.value || 'empty';
+        if (mode === 'excel' && typeof window.__bbCreateProjectFromExcel === 'function') {
+            const excelProjectName = document.getElementById('bbProjectName')?.value.trim() || 'New Project';
+            const excelStage = document.getElementById('bbProjectStage')?.value || activeStatus || 'To Do';
+            const excelStatusCode = statusCodes[excelStage] || 'to_do';
+            const excelSubmitBtn = event.target.querySelector('button[type="submit"]');
+            return window.__bbCreateProjectFromExcel({
+                projectName: excelProjectName,
+                statusCode: excelStatusCode,
+                stage: excelStage,
+                submitBtn: excelSubmitBtn,
+                originalButtonHtml: excelSubmitBtn ? excelSubmitBtn.innerHTML : '<i class="fas fa-plus"></i> Create Project'
+            });
+        }
         const templateId = mode === 'template' ? document.getElementById('bbProjectTemplate').value : '';
         const template = (state.templates || []).find(row => String(row.id) === String(templateId));
         const projectName = document.getElementById('bbProjectName')?.value.trim() || 'New Project';
@@ -1480,8 +1578,9 @@
                 try {
                     localStorage.removeItem('takeoff.projectDraft');
                 } catch (ignore) {}
+                saveActiveStage(selectedStage);
                 const newId = res.id || res.project_id;
-                window.location.href = `project_dashboard.php?id=${encodeURIComponent(newId)}&tab=overview`;
+                window.location.href = `project_dashboard.php?id=${encodeURIComponent(newId)}&tab=overview&stage=${encodeURIComponent(selectedStage)}`;
                 return;
             }
             throw new Error('Server returned an invalid project response.');
@@ -1528,6 +1627,52 @@
     function closeModals() {
         document.querySelectorAll('.bb-modal-backdrop').forEach(el => el.classList.remove('open'));
     }
+
+    window.__bbCreateProjectFromExcel = async function ({ projectName, statusCode, stage, submitBtn, originalButtonHtml }) {
+        const fileInput = document.getElementById('bbProjectExcelFile');
+        const excelErr = document.getElementById('bbProjectExcelError');
+        const setInlineErr = (msg) => {
+            if (excelErr) {
+                excelErr.textContent = msg || '';
+                excelErr.style.display = msg ? 'block' : 'none';
+            }
+            if (msg) showError(msg);
+        };
+        setInlineErr('');
+        const file = fileInput?.files?.[0];
+        if (!file) {
+            setInlineErr('Please choose an exported Project Estimate (.xlsx) file to import.');
+            document.getElementById('bbProjectExcelDropzone')?.focus();
+            return;
+        }
+        if (submitBtn) {
+            submitBtn.disabled = true;
+            submitBtn.innerHTML = '<i class="fas fa-spinner fa-spin"></i> Importing Excel...';
+        }
+        try {
+            const fd = new FormData();
+            fd.append('file', file);
+            fd.append('name', projectName);
+            fd.append('status', statusCode || 'to_do');
+            const resp = await fetch('../api/project_estimate_excel.php?action=import_project', {
+                method: 'POST',
+                body: fd
+            });
+            const data = await resp.json().catch(() => null);
+            if (!resp.ok || data?.status !== 'success' || !data?.project_id) {
+                throw new Error(data?.msg || 'Failed to import project from Excel.');
+            }
+            const targetStage = stage || activeStatus || 'To Do';
+            saveActiveStage(targetStage);
+            window.location.href = `project_dashboard.php?id=${encodeURIComponent(data.project_id)}&tab=estimating&stage=${encodeURIComponent(targetStage)}`;
+        } catch (err) {
+            if (submitBtn) {
+                submitBtn.disabled = false;
+                submitBtn.innerHTML = originalButtonHtml || '<i class="fas fa-plus"></i> Create Project';
+            }
+            setInlineErr(err?.message || 'Could not import project from Excel.');
+        }
+    };
 
     function showError(message) {
         const el = document.getElementById('bbError');
@@ -1639,6 +1784,7 @@
             moreBtn.addEventListener('click', (e) => {
                 e.stopPropagation();
                 const willOpen = moreDropdown.hidden;
+                moreDropdown.style.display = '';
                 moreDropdown.hidden = !willOpen;
                 moreBtn.setAttribute('aria-expanded', String(!willOpen));
             });
@@ -1651,6 +1797,46 @@
         document.querySelectorAll('[data-close-modal]').forEach(btn => btn.addEventListener('click', closeModals));
         document.querySelectorAll('input[name="bbProjectMode"]').forEach(input => input.addEventListener('change', toggleProjectTemplate));
         document.getElementById('bbProjectForm')?.addEventListener('submit', createProjectDraft);
+
+        const excelDropzone = document.getElementById('bbProjectExcelDropzone');
+        const excelInput = document.getElementById('bbProjectExcelFile');
+        const updateSelectedExcelUi = (file) => {
+            const nameEl = document.getElementById('bbProjectExcelFileName');
+            const metaEl = document.getElementById('bbProjectExcelFileMeta');
+            if (!file) return;
+            if (nameEl) nameEl.textContent = file.name;
+            if (metaEl) metaEl.textContent = `${(file.size / 1024).toFixed(1)} KB • Ready to import`;
+            const projNameInput = document.getElementById('bbProjectName');
+            if (projNameInput && (!projNameInput.value.trim() || projNameInput.value.trim() === 'New Project')) {
+                projNameInput.value = file.name.replace(/\.(xlsx|xlsm)$/i, '').replace(/[_-]+/g, ' ').trim() || 'Imported Project';
+                updateModalLivePreview();
+            }
+        };
+        if (excelDropzone && excelInput) {
+            excelDropzone.addEventListener('click', () => excelInput.click());
+            excelDropzone.addEventListener('keydown', (e) => {
+                if (e.key === 'Enter' || e.key === ' ') { e.preventDefault(); excelInput.click(); }
+            });
+            excelInput.addEventListener('change', () => {
+                if (excelInput.files?.[0]) updateSelectedExcelUi(excelInput.files[0]);
+            });
+            excelDropzone.addEventListener('dragover', (e) => {
+                e.preventDefault();
+                excelDropzone.classList.add('is-dragover');
+            });
+            excelDropzone.addEventListener('dragleave', () => excelDropzone.classList.remove('is-dragover'));
+            excelDropzone.addEventListener('drop', (e) => {
+                e.preventDefault();
+                excelDropzone.classList.remove('is-dragover');
+                const dropped = e.dataTransfer?.files?.[0];
+                if (dropped && excelInput) {
+                    const dt = new DataTransfer();
+                    dt.items.add(dropped);
+                    excelInput.files = dt.files;
+                    updateSelectedExcelUi(dropped);
+                }
+            });
+        }
 
         document.getElementById('bbActionDuplicate')?.addEventListener('click', (e) => {
             e.stopPropagation();
@@ -1751,10 +1937,12 @@
             }
         });
 
-        // Ensure browser Back button (bfcache) preserves the active stage
+        // Ensure browser Back button (bfcache) preserves the active stage and fetches latest totals
         window.addEventListener('pageshow', (event) => {
             applyUrlInitialFilter();
-            if (state.projects && state.projects.length) {
+            if (event.persisted) {
+                load();
+            } else if (state.projects && state.projects.length) {
                 render();
             }
         });

@@ -4,6 +4,8 @@
     const now = () => new Date().toISOString();
     const uid = prefix => `${prefix}_${Date.now().toString(36)}_${Math.random().toString(36).slice(2, 8)}`;
     const numeric = (value, fallback = 0) => Number.isFinite(Number(value)) ? Number(value) : fallback;
+    const nullableNumeric = value => (value === undefined || value === null || value === '' || !Number.isFinite(Number(value)))
+        ? null : Number(value);
     const text = (value, fallback = '') => value === null || value === undefined ? fallback : String(value);
     const clone = value => JSON.parse(JSON.stringify(value));
     const CatalogSnapshot = global.EstimatingCatalogSnapshotService
@@ -15,13 +17,27 @@
     }
 
     function settings(input = {}) {
+        const hasVal = value => value !== undefined && value !== null && value === '' ? false : (value !== undefined && value !== null && Number.isFinite(Number(value)));
+        const globalLaborCost = hasVal(input.globalLaborCost) ? numeric(input.globalLaborCost, 36) : 36;
+        const globalLaborMargin = hasVal(input.globalLaborMargin) ? numeric(input.globalLaborMargin) : 34.6;
+        const computedLaborSales = globalLaborMargin < 100
+            ? Number((globalLaborCost / (1 - globalLaborMargin / 100)).toFixed(2))
+            : globalLaborCost;
         const result = {
             assemblyExpansionPolicy: String(input.assemblyExpansionPolicy ?? input.assembly_expansion_policy ?? 'LEGACY').toUpperCase() === 'CANONICAL'
                 ? 'CANONICAL' : 'LEGACY',
             marginMode: input.marginMode === 'markup' ? 'markup' : 'margin',
-            globalLaborCost: numeric(input.globalLaborCost, 85),
-            globalLaborSales: numeric(input.globalLaborSales, 110),
-            globalLaborMargin: numeric(input.globalLaborMargin),
+            globalLaborCost,
+            globalLaborSales: (hasVal(input.globalLaborSales) && Number(input.globalLaborSales) !== 110)
+                ? numeric(input.globalLaborSales, computedLaborSales)
+                : computedLaborSales,
+            globalLaborMargin,
+            materialMargin: hasVal(input.materialMargin) ? numeric(input.materialMargin) : 15,
+            equipmentMargin: hasVal(input.equipmentMargin) ? numeric(input.equipmentMargin) : 15,
+            laborWaste: hasVal(input.laborWaste) ? numeric(input.laborWaste) : 0,
+            materialWaste: hasVal(input.materialWaste) ? numeric(input.materialWaste) : 0,
+            equipmentWaste: hasVal(input.equipmentWaste) ? numeric(input.equipmentWaste) : 0,
+            laborDifficulty: hasVal(input.laborDifficulty) ? numeric(input.laborDifficulty, 1) : 1,
             taxes: {
                 Materials: numeric(input.taxes?.Materials),
                 Labor: numeric(input.taxes?.Labor),
@@ -30,14 +46,25 @@
             preTaxMarkups: Array.isArray(input.preTaxMarkups) ? input.preTaxMarkups.map(markup) : [],
             postTaxMarkups: Array.isArray(input.postTaxMarkups) ? input.postTaxMarkups.map(markup) : []
         };
-        if (input.materialMargin !== undefined && input.materialMargin !== null) result.materialMargin = numeric(input.materialMargin, 15);
-        if (input.equipmentMargin !== undefined && input.equipmentMargin !== null) result.equipmentMargin = numeric(input.equipmentMargin, 15);
-        if (input.laborWaste !== undefined && input.laborWaste !== null) result.laborWaste = numeric(input.laborWaste, 0);
-        if (input.materialWaste !== undefined && input.materialWaste !== null) result.materialWaste = numeric(input.materialWaste, 0);
-        if (input.equipmentWaste !== undefined && input.equipmentWaste !== null) result.equipmentWaste = numeric(input.equipmentWaste, 0);
-        if (input.laborDifficulty !== undefined && input.laborDifficulty !== null) result.laborDifficulty = numeric(input.laborDifficulty, 1);
         if (input.squareFootage !== undefined && input.squareFootage !== null) result.squareFootage = numeric(input.squareFootage, 0);
         if (input._markupsSeeded !== undefined) result._markupsSeeded = Boolean(input._markupsSeeded);
+        if (input._defaultsActivated !== undefined) result._defaultsActivated = Boolean(input._defaultsActivated);
+        if (input._laborDefaultsActivated !== undefined) result._laborDefaultsActivated = Boolean(input._laborDefaultsActivated);
+        if (Array.isArray(input.visibleColumns) && input.visibleColumns.length > 0) {
+            result.visibleColumns = input.visibleColumns.map(col => text(col)).filter(Boolean);
+        }
+        if (Array.isArray(input.columnsOrder) && input.columnsOrder.length > 0) {
+            result.columnsOrder = input.columnsOrder.map(col => text(col)).filter(Boolean);
+        }
+        if (input.columnWidths && typeof input.columnWidths === 'object' && !Array.isArray(input.columnWidths)) {
+            const cleanedWidths = {};
+            Object.entries(input.columnWidths).forEach(([k, v]) => {
+                const key = text(k);
+                const val = Number(v);
+                if (key && Number.isFinite(val) && val > 0) cleanedWidths[key] = val;
+            });
+            if (Object.keys(cleanedWidths).length > 0) result.columnWidths = cleanedWidths;
+        }
         return result;
     }
 
@@ -65,6 +92,15 @@
             (row.isAssembly || row.is_assembly) ? 'assembly' : 'part').toLowerCase();
         const childRows = row.children ?? row.assemblyItems ?? row.components
             ?? row.catalogSnapshot?.assemblyComponents ?? row.catalogMetadata?.assemblyComponents;
+        const snapPricing = (row.pricingSnapshot && typeof row.pricingSnapshot === 'object') ? row.pricingSnapshot : {};
+        const explicitRate = nullableNumeric(row.laborRate ?? row.labor_rate);
+        const hasManualZeroRate = row._manualFields?.laborRate === true || (row.overrides?.laborRate !== null && row.overrides?.laborRate !== undefined);
+        const snapRate = numeric(snapPricing.laborRate, 0);
+        const inferredLaborUnit = (
+            row.laborHours !== undefined || row.labor_hours !== undefined || row.child_labor_hours !== undefined
+            || snapPricing.laborHoursPerUnit !== undefined || row.catalogSnapshot || row.catalogMetadata
+            || takeoffLayerId
+        ) ? 'hrs' : 'mins';
         // The workspace snapshot is the lossless source of truth. Start from a
         // deep copy so forward-compatible fields (tags, multiplier, locks and
         // calculation extensions) survive normalization and estimate copies.
@@ -73,7 +109,7 @@
             id: text(row.id) || uid('item'),
             takeoffLayerId: takeoffLayerId || null,
             copiedFromTakeoffLayerId: text(row.copiedFromTakeoffLayerId) || null,
-            catalogItemId: row.catalogItemId ?? row.catalog_item_id ?? null,
+            catalogItemId: row.catalogItemId ?? row.catalog_item_id ?? row.part_catalog_item_id ?? null,
             catalogRevision: row.catalogRevision ?? null,
             catalogSnapshot: row.catalogSnapshot ? clone(row.catalogSnapshot) : null,
             catalogMetadata: row.catalogMetadata ? clone(row.catalogMetadata) : null,
@@ -93,12 +129,12 @@
             ratioType: text(row.ratioType ?? row.ratio_type, 'per_unit'),
             spacing: row.spacing === null || row.spacing === undefined ? null : numeric(row.spacing),
             componentWaste: numeric(row.componentWaste ?? row.wasteFactorPercent ?? row.waste_factor_percent),
-            name: text(row.name ?? row.catalog_item_name, 'Cost item'),
-            description: text(row.description),
+            name: text(row.name ?? row.child_item_name ?? row.childItemName ?? row.componentName ?? row.catalog_item_name, 'Cost item'),
+            description: text(row.description ?? row.child_description),
             budgetCode: text(row.budgetCode ?? row.budget_code),
             costCode: text(row.costCode ?? row.cost_code ?? row.budgetCode),
             costCategory: category(row.costCategory ?? row.cost_type ?? row.item_type ?? row.type),
-            uom: text(row.uom ?? row.unit_of_measure, 'ea'),
+            uom: text(row.uom ?? row.unit_of_measure ?? row.child_unit_of_measure, 'ea'),
             quantity,
             multiplier: numeric(row.multiplier, 1),
             locked: row.locked === true || Number(row.locked ?? 0) === 1,
@@ -110,20 +146,19 @@
             quantitySyncStatus: (row.quantityOverride === true || String(row.quantitySyncStatus || '').toLowerCase() === 'overridden')
                 ? 'overridden' : (takeoffLayerId ? 'synced' : 'manual'),
             lastSyncedTakeoffQuantity: numeric(row.lastSyncedTakeoffQuantity, takeoffLayerId ? numeric(row.originalQuantity, quantity) : 0),
-            unitMaterialCost: numeric(row.unitMaterialCost ?? row.unitCost ?? row.unit_cost),
-            waste: numeric(row.waste ?? row.waste_percentage),
-            materialMargin: numeric(row.materialMargin ?? row.margin ?? row.margin_percentage),
-            unitEquipmentCost: numeric(row.unitEquipmentCost ?? row.equipment_cost),
-            unitSubcontractorCost: numeric(row.unitSubcontractorCost ?? row.subcontractor_cost),
+            unitMaterialCost: numeric(row.unitMaterialCost ?? row.unitCost ?? row.unit_cost ?? snapPricing.materialUnitCost ?? row.child_unit_cost),
+            waste: nullableNumeric(row.waste ?? row.waste_percentage),
+            materialMargin: nullableNumeric(row.materialMargin ?? row.margin ?? row.margin_percentage),
+            unitEquipmentCost: numeric(row.unitEquipmentCost ?? row.equipment_cost ?? snapPricing.equipmentUnitCost),
+            unitSubcontractorCost: numeric(row.unitSubcontractorCost ?? row.subcontractor_cost ?? snapPricing.subcontractorUnitCost),
             equipmentQuantity: numeric(row.equipmentQuantity),
-            equipmentMargin: numeric(row.equipmentMargin),
-            unitLabor: numeric(row.unitLabor ?? row.unit_labor_time ?? row.laborHours ?? row.labor_hours),
-            laborUnitType: text(row.laborUnitType ?? row.laborUnit, 'mins'),
-            laborRate: numeric(row.laborRate ?? row.labor_rate, 85),
-            difficulty: numeric(row.difficulty ?? row.difficulty_factor, 1),
-            laborWaste: row.laborWaste !== undefined && row.laborWaste !== null ? numeric(row.laborWaste) : null,
-            laborMargin: row.laborMargin === '' || row.labor_margin_percentage === '' ? null
-                : (row.laborMargin ?? row.labor_margin_percentage ?? null),
+            equipmentMargin: nullableNumeric(row.equipmentMargin),
+            unitLabor: numeric(row.unitLabor ?? row.unit_labor_time ?? row.laborHours ?? row.labor_hours ?? snapPricing.laborHoursPerUnit ?? row.child_labor_hours),
+            laborUnitType: text(row.laborUnitType ?? row.laborUnit, inferredLaborUnit),
+            laborRate: (explicitRate !== null && (explicitRate > 0 || hasManualZeroRate)) ? explicitRate : (snapRate > 0 ? snapRate : null),
+            difficulty: nullableNumeric(row.difficulty ?? row.difficulty_factor),
+            laborWaste: nullableNumeric(row.laborWaste),
+            laborMargin: nullableNumeric(row.laborMargin ?? row.labor_margin_percentage),
             taxable: row.taxable !== false && Number(row.taxable ?? 1) !== 0,
             _manualFields: (row._manualFields && typeof row._manualFields === 'object') ? { ...row._manualFields } : {},
             notes: text(row.notes),
@@ -157,7 +192,13 @@
         const takeoffSyncMode = row.takeoffSyncMode === 'linked-only'
             || row.takeoffSync?.mode === 'linked-only' ? 'linked-only' : 'mirror';
         const explicitPrimaryId = String(row.primary_estimate_id || global.ProjectState?.projectMeta?.primary_estimate_id || '');
-        const isPrimary = explicitPrimaryId ? String(row.id) === explicitPrimaryId : Boolean(row.is_primary ?? row.isPrimary ?? (index === 0));
+        const hasRowPrimaryFlag = typeof row.is_primary === 'boolean' || typeof row.isPrimary === 'boolean';
+        const isPrimary = row.primary_estimate_id
+            ? String(row.id) === String(row.primary_estimate_id)
+            : (hasRowPrimaryFlag
+                ? Boolean(row.is_primary ?? row.isPrimary)
+                : (explicitPrimaryId ? String(row.id) === explicitPrimaryId : (index === 0)));
+        const resolvedEstimateTotal = row.estimateTotal ?? row.totalSales ?? row.estimateSummary?.estimateTotal ?? row.estimateSummary?.total ?? null;
         return {
             id: text(row.id) || uid('estimate'),
             dbEstimateId: projectId(row.dbEstimateId) || undefined,
@@ -165,6 +206,9 @@
             isLocked: row.isLocked === true,
             is_primary: isPrimary,
             isPrimary: isPrimary,
+            estimateTotal: resolvedEstimateTotal !== null ? numeric(resolvedEstimateTotal) : undefined,
+            totalSales: resolvedEstimateTotal !== null ? numeric(resolvedEstimateTotal) : undefined,
+            estimateSummary: row.estimateSummary && typeof row.estimateSummary === 'object' ? clone(row.estimateSummary) : undefined,
             revision: Math.max(0, numeric(row.revision)),
             estimateRevision: Math.max(1, numeric(row.estimateRevision, 1)),
             parentEstimateId: text(row.parentEstimateId) || null,
@@ -304,6 +348,7 @@
         }));
         const created = estimate({ name: text(name).trim() || 'New Estimate', groups,
             creationMode,
+            sourceEstimateId: creationMode === 'all' ? (source?.id || null) : null,
             takeoffSyncMode: 'linked-only',
             settings: source?.settings ? clone(source.settings) : {},
             notes: creationMode === 'all' ? clone(source.notes) : {} }, state.projectId, state.estimates.length);

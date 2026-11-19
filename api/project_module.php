@@ -10,12 +10,13 @@ $input = json_decode(file_get_contents('php://input'), true);
 if (!is_array($input)) $input = [];
 $action = $_GET['action'] ?? $_POST['action'] ?? $input['action'] ?? null;
 
-$readActions = ['list', 'detail'];
-$mutationActions = ['save', 'copy', 'archive', 'delete', 'document_action'];
+$readActions = ['list', 'detail', 'templates'];
+$mutationActions = ['save', 'copy', 'archive', 'delete', 'document_action', 'convert_to_template', 'apply_template'];
 
 $user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'list');
 
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/services/ProjectTemplateService.php';
 
 function project_json(array $payload, int $status = 200): void
 {
@@ -81,6 +82,22 @@ function project_table_exists(PDO $pdo, string $table): bool
     } catch (Throwable $e) {
         return false;
     }
+}
+
+function project_column_exists(PDO $pdo, string $table, string $column): bool
+{
+    static $cache = [];
+    $key = spl_object_hash($pdo) . ':' . $table . ':' . $column;
+    if (array_key_exists($key, $cache)) return $cache[$key];
+    $found = false;
+    try {
+        $stmt = $pdo->query("SHOW COLUMNS FROM `{$table}` LIKE " . $pdo->quote($column));
+        $found = (bool)($stmt && $stmt->fetch(PDO::FETCH_ASSOC));
+    } catch (Throwable $e) {
+        $found = false;
+    }
+    $cache[$key] = $found;
+    return $found;
 }
 
 function project_deep_clone(PDO $pdo, int $sourceId, int $newId): void
@@ -199,7 +216,8 @@ function project_deep_clone(PDO $pdo, int $sourceId, int $newId): void
 
         // 4. Takeoff Layers
         if (project_table_exists($pdo, 'takeoff_layers')) {
-            $stmt = $pdo->prepare("SELECT * FROM takeoff_layers WHERE project_id = ? AND deleted_at IS NULL");
+            $layerOrderBy = project_column_exists($pdo, 'takeoff_layers', 'sort_order') ? 'ORDER BY sort_order ASC, id ASC' : 'ORDER BY id ASC';
+            $stmt = $pdo->prepare("SELECT * FROM takeoff_layers WHERE project_id = ? AND deleted_at IS NULL {$layerOrderBy}");
             $stmt->execute([$sourceId]);
             $layers = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
             foreach ($layers as $ly) {
@@ -316,7 +334,8 @@ function project_deep_clone(PDO $pdo, int $sourceId, int $newId): void
         if (project_table_exists($pdo, 'estimate_items') && !empty($estimateMap)) {
             $estIds = array_keys($estimateMap);
             $inClause = implode(',', array_fill(0, count($estIds), '?'));
-            $stmt = $pdo->prepare("SELECT * FROM estimate_items WHERE estimate_id IN ($inClause) AND deleted_at IS NULL");
+            $itemOrderBy = project_column_exists($pdo, 'estimate_items', 'sort_order') ? 'ORDER BY sort_order ASC, id ASC' : 'ORDER BY id ASC';
+            $stmt = $pdo->prepare("SELECT * FROM estimate_items WHERE estimate_id IN ($inClause) AND deleted_at IS NULL {$itemOrderBy}");
             $stmt->execute($estIds);
             $estItems = $stmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
             foreach ($estItems as $ei) {
@@ -458,9 +477,118 @@ function project_validate_schema(PDO $pdo): void
     }
 }
 
+function project_extract_estimate_total(array $estRow, array $snapshot): array
+{
+    if (isset($snapshot['estimateSummary']) && is_array($snapshot['estimateSummary'])) {
+        if (array_key_exists('estimateTotal', $snapshot['estimateSummary'])) {
+            return [true, (float)$snapshot['estimateSummary']['estimateTotal']];
+        }
+        if (array_key_exists('total', $snapshot['estimateSummary'])) {
+            return [true, (float)$snapshot['estimateSummary']['total']];
+        }
+    }
+    if (array_key_exists('estimateTotal', $snapshot)) {
+        return [true, (float)$snapshot['estimateTotal']];
+    }
+    if (array_key_exists('totalSales', $snapshot)) {
+        return [true, (float)$snapshot['totalSales']];
+    }
+    $dbTotal = isset($estRow['total_cost']) ? (float)$estRow['total_cost'] : 0.0;
+    if ($dbTotal > 0) {
+        return [true, $dbTotal];
+    }
+    return [false, 0.0];
+}
+
+function project_enrich_primary_estimates(PDO $pdo, array $projects): array
+{
+    if (!$projects) return $projects;
+    if (!project_table_exists($pdo, 'estimates') || !project_table_exists($pdo, 'estimate_workspace_states')) {
+        return $projects;
+    }
+    $projectIds = array_values(array_unique(array_filter(array_map(function ($p) {
+        return (int)($p['id'] ?? 0);
+    }, $projects))));
+    if (!$projectIds) return $projects;
+
+    $placeholders = implode(',', array_fill(0, count($projectIds), '?'));
+    $stmt = $pdo->prepare(
+        "SELECT e.id, e.project_id, e.total_cost, e.updated_at, ws.client_estimate_id, ws.state_json, ws.updated_at AS ws_updated_at
+         FROM estimates e
+         LEFT JOIN estimate_workspace_states ws ON ws.estimate_id = e.id
+         WHERE e.project_id IN ($placeholders) AND e.deleted_at IS NULL
+         ORDER BY e.project_id ASC, e.id ASC"
+    );
+    $stmt->execute($projectIds);
+    $byProject = [];
+    foreach ($stmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $row) {
+        $pid = (int)$row['project_id'];
+        $snap = !empty($row['state_json']) ? json_decode((string)$row['state_json'], true) : [];
+        if (!is_array($snap)) $snap = [];
+        $row['_snapshot'] = $snap;
+        $row['_client_id'] = !empty($row['client_estimate_id']) ? (string)$row['client_estimate_id'] : (string)$row['id'];
+        $byProject[$pid][] = $row;
+    }
+
+    foreach ($projects as &$proj) {
+        $pid = (int)($proj['id'] ?? 0);
+        if (empty($byProject[$pid])) continue;
+        $meta = !empty($proj['metadata_json']) ? json_decode((string)$proj['metadata_json'], true) : [];
+        if (!is_array($meta)) $meta = [];
+        $metaPrimaryId = isset($meta['primary_estimate_id']) ? (string)$meta['primary_estimate_id'] : '';
+
+        $candidates = [];
+        $metaMatch = null;
+        foreach ($byProject[$pid] as $estRow) {
+            $snap = $estRow['_snapshot'];
+            if (!empty($snap['is_primary']) || !empty($snap['isPrimary'])) {
+                $candidates[] = $estRow;
+            }
+            if ($metaPrimaryId !== '' && ($estRow['_client_id'] === $metaPrimaryId || (string)$estRow['id'] === $metaPrimaryId)) {
+                $metaMatch = $estRow;
+            }
+        }
+        $chosen = null;
+        if (count($candidates) === 1) {
+            $chosen = $candidates[0];
+        } elseif (count($candidates) > 1) {
+            usort($candidates, function ($a, $b) {
+                $ta = (string)($a['ws_updated_at'] ?: $a['updated_at'] ?: '');
+                $tb = (string)($b['ws_updated_at'] ?: $b['updated_at'] ?: '');
+                $cmp = strcmp($tb, $ta);
+                return $cmp !== 0 ? $cmp : ((int)$b['id'] - (int)$a['id']);
+            });
+            $chosen = $candidates[0];
+        } elseif ($metaMatch) {
+            $chosen = $metaMatch;
+        } else {
+            $chosen = $byProject[$pid][0];
+        }
+
+        [$hasExplicitTotal, $resolvedTotal] = project_extract_estimate_total($chosen, $chosen['_snapshot']);
+        $proj['primary_estimate_id'] = $chosen['_client_id'];
+        $meta['primary_estimate_id'] = $chosen['_client_id'];
+        if ($hasExplicitTotal) {
+            $proj['primary_estimate_total'] = $resolvedTotal;
+            $proj['has_primary_estimate_total'] = true;
+            $proj['primary_estimate_updated_at'] = $chosen['ws_updated_at'] ?: $chosen['updated_at'] ?: ($meta['primary_estimate_updated_at'] ?? null);
+            $meta['primary_estimate_total'] = $resolvedTotal;
+            $meta['primary_quote_value'] = $resolvedTotal;
+            $meta['total_sales'] = $resolvedTotal;
+            $meta['estimate_total'] = $resolvedTotal;
+            $encodedMeta = json_encode($meta, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            if ($encodedMeta !== false) {
+                $proj['metadata_json'] = $encodedMeta;
+            }
+        }
+    }
+    unset($proj);
+    return $projects;
+}
+
 function project_payload(PDO $pdo, ?int $projectId = null): array
 {
-    $templates = $pdo->query("SELECT * FROM project_templates WHERE deleted_at IS NULL AND active = 1 ORDER BY name")->fetchAll(PDO::FETCH_ASSOC);
+    $templates = ProjectTemplateService::listTemplates($pdo);
     $projects = $pdo->query(
         "SELECT p.*, pt.name AS template_name
          FROM projects p
@@ -468,6 +596,7 @@ function project_payload(PDO $pdo, ?int $projectId = null): array
          WHERE p.deleted_at IS NULL
          ORDER BY p.updated_at DESC, p.id DESC"
     )->fetchAll(PDO::FETCH_ASSOC);
+    $projects = project_enrich_primary_estimates($pdo, $projects);
 
     $project = null;
     if ($projectId) {
@@ -478,7 +607,11 @@ function project_payload(PDO $pdo, ?int $projectId = null): array
              WHERE p.id = ? AND p.deleted_at IS NULL"
         );
         $stmt->execute([$projectId]);
-        $project = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        $fetched = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        if ($fetched) {
+            $enriched = project_enrich_primary_estimates($pdo, [$fetched]);
+            $project = $enriched[0];
+        }
     }
 
     return compact('templates', 'projects', 'project');
@@ -512,12 +645,16 @@ try {
         case 'list':
             project_json(['status' => 'success', 'data' => project_payload($pdo)]);
 
+        case 'templates':
+            project_json(['status' => 'success', 'templates' => ProjectTemplateService::listTemplates($pdo)]);
+
         case 'detail':
             $id = project_int($_GET['id'] ?? $input['id'] ?? 0);
             project_json(['status' => 'success', 'data' => project_payload($pdo, $id)]);
 
         case 'save':
             $id = project_int($input['id'] ?? 0);
+            $isCreate = ($id <= 0);
             $data = project_input_data($input);
             if ($data['name'] === '') project_json(['status' => 'error', 'msg' => 'Project name is required'], 422);
 
@@ -527,18 +664,43 @@ try {
             }, ARRAY_FILTER_USE_KEY);
 
             if ($id > 0) {
+                if (array_key_exists('metadata_json', $filteredData)) {
+                    $existingMetaStmt = $pdo->prepare("SELECT metadata_json FROM projects WHERE id = ? LIMIT 1");
+                    $existingMetaStmt->execute([$id]);
+                    $existingMetaRaw = $existingMetaStmt->fetchColumn();
+                    $existingMeta = is_string($existingMetaRaw) ? json_decode($existingMetaRaw, true) : null;
+                    $incomingMeta = is_string($filteredData['metadata_json']) ? json_decode($filteredData['metadata_json'], true) : (is_array($filteredData['metadata_json']) ? $filteredData['metadata_json'] : null);
+                    if (is_array($existingMeta) && is_array($incomingMeta)) {
+                        foreach (['primary_estimate_id', 'primary_estimate_total', 'primary_quote_value', 'total_sales', 'estimate_total', 'primary_estimate_updated_at', 'is_template', 'converted_from_project_id'] as $preserveKey) {
+                            if (array_key_exists($preserveKey, $existingMeta) && (!array_key_exists($preserveKey, $incomingMeta) || $incomingMeta[$preserveKey] === null || $incomingMeta[$preserveKey] === '')) {
+                                $incomingMeta[$preserveKey] = $existingMeta[$preserveKey];
+                            }
+                        }
+                        $filteredData['metadata_json'] = json_encode($incomingMeta, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                    }
+                }
                 $set = implode(', ', array_map(function ($column) {
                     return "$column = ?";
                 }, array_keys($filteredData)));
                 $stmt = $pdo->prepare("UPDATE projects SET $set WHERE id = ?");
                 $stmt->execute(array_merge(array_values($filteredData), [$id]));
+                ProjectTemplateService::syncPrimaryEstimateMetadata($pdo, $id, false);
             } else {
                 $columns = array_keys($filteredData);
                 $stmt = $pdo->prepare("INSERT INTO projects (" . implode(', ', $columns) . ") VALUES (" . implode(', ', array_fill(0, count($columns), '?')) . ")");
                 $stmt->execute(array_values($filteredData));
                 $id = (int)$pdo->lastInsertId();
-
             }
+
+            if ($isCreate && !empty($filteredData['project_template_id'])) {
+                ProjectTemplateService::instantiateTemplateIntoProject(
+                    $pdo,
+                    (int)$filteredData['project_template_id'],
+                    $id,
+                    (string)$filteredData['name']
+                );
+            }
+            ProjectTemplateService::syncTemplateStatusForProject($pdo, $id);
 
             $payload = project_payload($pdo, $id);
             if (empty($payload['project'])) project_json(['status' => 'error', 'msg' => 'Project could not be loaded after saving'], 500);
@@ -548,6 +710,36 @@ try {
                 'project_id' => $id,
                 'project' => $payload['project'],
                 'data' => $payload,
+            ]);
+
+        case 'convert_to_template':
+            $id = project_int($input['id'] ?? $input['project_id'] ?? 0);
+            if ($id <= 0) project_json(['status' => 'error', 'msg' => 'Valid project id is required'], 422);
+            $templateName = isset($input['name']) ? trim((string)$input['name']) : null;
+            $result = ProjectTemplateService::convertProjectToTemplate($pdo, $id, $templateName ?: null);
+            $newId = (int)$result['project_id'];
+            project_json([
+                'status' => 'success',
+                'id' => $newId,
+                'project_id' => $newId,
+                'template_id' => $result['template_id'],
+                'name' => $result['name'],
+                'data' => project_payload($pdo, $newId),
+            ]);
+
+        case 'apply_template':
+            $id = project_int($input['id'] ?? $input['project_id'] ?? 0);
+            $templateId = project_int($input['template_id'] ?? $input['project_template_id'] ?? 0);
+            if ($id <= 0 || $templateId <= 0) {
+                project_json(['status' => 'error', 'msg' => 'Project id and template id are required'], 422);
+            }
+            $applied = ProjectTemplateService::applyTemplateToProject($pdo, $id, $templateId);
+            project_json([
+                'status' => 'success',
+                'id' => $id,
+                'project_id' => $id,
+                'estimate' => $applied,
+                'data' => project_payload($pdo, $id),
             ]);
 
         case 'copy':

@@ -141,7 +141,7 @@ button.proposal-export-btn {
     font-family: 'Outfit', sans-serif !important;
     box-shadow: 0 2px 6px rgba(251, 90, 58, 0.28) !important;
     cursor: pointer !important;
-    transition: all 0.16s ease !important;
+    transition: background-color 0.16s var(--ds-ease, ease), border-color 0.16s var(--ds-ease, ease), color 0.16s var(--ds-ease, ease), opacity 0.16s var(--ds-ease, ease), box-shadow 0.16s var(--ds-ease, ease), transform 0.16s var(--ds-ease, ease) !important;
 }
 
 .proposal-export-btn:hover {
@@ -238,7 +238,7 @@ button.proposal-export-btn i {
     border: 1px solid var(--border-soft, #e2e8f0);
     border-radius: 12px;
     padding: 15px 16px;
-    transition: all 0.18s ease;
+    transition: background-color 0.18s var(--ds-ease, ease), border-color 0.18s var(--ds-ease, ease), color 0.18s var(--ds-ease, ease), opacity 0.18s var(--ds-ease, ease), box-shadow 0.18s var(--ds-ease, ease), transform 0.18s var(--ds-ease, ease);
     box-shadow: 0 1px 4px rgba(15, 23, 42, 0.04);
 }
 
@@ -313,7 +313,7 @@ button.proposal-export-btn i {
     font-family: 'Outfit', sans-serif;
     font-size: 12px;
     font-weight: 500;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
     box-sizing: border-box;
 }
 
@@ -339,7 +339,7 @@ button.proposal-export-btn i {
     align-items: center;
     justify-content: center;
     gap: 6px;
-    transition: all 0.14s ease;
+    transition: background-color 0.14s var(--ds-ease, ease), border-color 0.14s var(--ds-ease, ease), color 0.14s var(--ds-ease, ease), opacity 0.14s var(--ds-ease, ease), box-shadow 0.14s var(--ds-ease, ease), transform 0.14s var(--ds-ease, ease);
 }
 
 .proposal-reset-company-btn:hover {
@@ -443,7 +443,7 @@ button.proposal-export-btn i {
     font-family: 'Outfit', sans-serif;
     font-size: 11.5px;
     font-weight: 600;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
     cursor: pointer;
 }
 
@@ -546,7 +546,7 @@ body.theme-dark .proposal-dep-badge.is-warning {
 
 .proposal-dep-badge.is-info {
     background: rgba(59, 130, 246, 0.12);
-    color: #1d4ed8;
+    color: var(--accent-blue, #0055b8);
     border: 1px solid rgba(59, 130, 246, 0.28);
 }
 
@@ -635,7 +635,7 @@ body.theme-dark .proposal-dep-badge.is-info {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    transition: all 0.14s ease;
+    transition: background-color 0.14s var(--ds-ease, ease), border-color 0.14s var(--ds-ease, ease), color 0.14s var(--ds-ease, ease), opacity 0.14s var(--ds-ease, ease), box-shadow 0.14s var(--ds-ease, ease), transform 0.14s var(--ds-ease, ease);
 }
 
 .proposal-small-btn:hover {
@@ -751,7 +751,7 @@ body.theme-dark .proposal-dep-badge.is-info {
     display: inline-flex;
     align-items: center;
     gap: 5px;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .proposal-view-btn:hover {
@@ -774,7 +774,7 @@ body.theme-dark .proposal-dep-badge.is-info {
     border: 1px solid #bfdbfe;
     border-radius: 8px;
     background: #eff6ff;
-    color: #1d4ed8;
+    color: var(--accent-blue, #0055b8);
     font-weight: 700;
     font-size: 12px;
     box-sizing: border-box;
@@ -2010,7 +2010,7 @@ body.theme-dark .proposal-dep-badge.is-info {
     border-radius: 4px !important;
     position: relative !important;
     cursor: text !important;
-    transition: all 0.2s ease !important;
+    transition: background-color 0.2s var(--ds-ease, ease), border-color 0.2s var(--ds-ease, ease), color 0.2s var(--ds-ease, ease), opacity 0.2s var(--ds-ease, ease), box-shadow 0.2s var(--ds-ease, ease), transform 0.2s var(--ds-ease, ease) !important;
 }
 
 .is-builder-mode [contenteditable="true"]:hover {
@@ -2212,6 +2212,11 @@ body.theme-dark .proposal-dep-badge.is-info {
     box-shadow: 0 8px 24px rgba(15, 23, 42, 0.08) !important;
     position: relative;
     overflow: hidden;
+    padding: 24px 24px !important;
+    display: flex !important;
+    justify-content: center !important;
+    align-items: center !important;
+    text-align: center !important;
 }
 
 .proposal-hero-total-accent-bar {
@@ -2227,16 +2232,13 @@ body.theme-dark .proposal-dep-badge.is-info {
     padding: 20px 24px;
     display: flex;
     align-items: center;
-    justify-content: space-between;
+    justify-content: center;
     gap: 24px;
     box-sizing: border-box !important;
 }
 
 .proposal-hero-total-left {
-    display: flex;
-    flex-direction: column;
-    gap: 4px;
-    flex: 1 1 auto;
+    display: none;
 }
 
 .proposal-hero-tag {
@@ -2287,34 +2289,38 @@ body.theme-dark .proposal-dep-badge.is-info {
 .proposal-hero-total-right {
     display: flex;
     flex-direction: column;
-    align-items: flex-end;
-    text-align: right;
-    flex-shrink: 0;
+    align-items: center !important;
+    text-align: center !important;
+    margin: 0 auto !important;
+    width: 100%;
 }
 
 .proposal-hero-val-label {
-    font-size: 9.5px;
+    font-size: 10px;
     font-weight: 800;
     text-transform: uppercase;
     letter-spacing: .08em;
     color: #64748b;
-    margin-bottom: 2px;
+    margin-bottom: 4px;
+    text-align: center;
 }
 
 .proposal-hero-amount-val {
-    font-size: 34px;
+    font-size: 36px;
     font-weight: 900;
     color: #0f172a !important; /* High-contrast hero amount in dark charcoal */
     letter-spacing: -0.02em;
     font-variant-numeric: tabular-nums;
     line-height: 1.1;
     white-space: nowrap;
+    text-align: center;
 }
 
 .proposal-hero-val-sub {
     font-size: 10px;
     color: #64748b;
-    margin-top: 3px;
+    margin-top: 4px;
+    text-align: center;
 }
 
 /* ==========================================================
@@ -2376,8 +2382,8 @@ body.theme-dark .proposal-dep-badge.is-info {
 
 .proposal-sign-compact-label {
     display: flex;
-    align-items: baseline;
-    justify-content: space-between;
+    align-items: center;
+    justify-content: flex-start;
     gap: 8px;
     padding-bottom: 4px;
     border-bottom: 1px solid #e2e8f0;
@@ -2656,7 +2662,7 @@ body.theme-dark .proposal-dep-badge.is-info {
     display: flex;
     align-items: center;
     justify-content: center;
-    backdrop-filter: blur(4px);
+    backdrop-filter: blur(5px);
     animation: propFadeIn 0.2s ease;
 }
 
@@ -2725,7 +2731,7 @@ body.theme-dark .proposal-dep-badge.is-info {
     font-size: 12px;
     font-weight: 600;
     cursor: pointer;
-    transition: all 0.15s ease;
+    transition: background-color 0.15s var(--ds-ease, ease), border-color 0.15s var(--ds-ease, ease), color 0.15s var(--ds-ease, ease), opacity 0.15s var(--ds-ease, ease), box-shadow 0.15s var(--ds-ease, ease), transform 0.15s var(--ds-ease, ease);
 }
 
 .proposal-contact-modal-cancel:hover {
@@ -2736,9 +2742,9 @@ body.theme-dark .proposal-dep-badge.is-info {
 /* Dark Theme Overrides for New Components */
 [data-theme="dark"] .proposal-contact-modal-card,
 body.theme-dark .proposal-contact-modal-card {
-    background: #1e293b;
-    border-color: #334155;
-    color: #f8fafc;
+    background: var(--bg-panel, #242a38);
+    border-color: var(--border, #2f384a);
+    color: var(--text-main, #f8fafc);
 }
 
 [data-theme="dark"] .proposal-contact-modal-title,
@@ -2753,7 +2759,7 @@ body.theme-dark .proposal-contact-modal-desc {
 
 [data-theme="dark"] .proposal-contact-progress-bar,
 body.theme-dark .proposal-contact-progress-bar {
-    background: #334155;
+    background: var(--border-soft, #283040);
 }
 
 [data-theme="dark"] .proposal-contact-modal-cancel,

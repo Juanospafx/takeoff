@@ -52,12 +52,17 @@ $selectedDocumentId = (int) ($_GET['file_id'] ?? $_GET['document_id'] ?? 0);
 if (!function_exists('dash_table_exists')) {
     function dash_table_exists(PDO $pdo, string $table): bool
     {
+        static $tableCache = [];
+        $cacheKey = spl_object_id($pdo) . ':' . $table;
+        if (array_key_exists($cacheKey, $tableCache)) {
+            return $tableCache[$cacheKey];
+        }
         try {
             $stmt = $pdo->prepare("SELECT COUNT(*) FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ?");
             $stmt->execute([$table]);
-            return (int) $stmt->fetchColumn() > 0;
+            return $tableCache[$cacheKey] = ((int) $stmt->fetchColumn() > 0);
         } catch (Throwable $e) {
-            return false;
+            return $tableCache[$cacheKey] = false;
         }
     }
 }
@@ -65,14 +70,19 @@ if (!function_exists('dash_table_exists')) {
 if (!function_exists('dash_column_exists')) {
     function dash_column_exists(PDO $pdo, string $table, string $column): bool
     {
+        static $colCache = [];
+        $cacheKey = spl_object_id($pdo) . ':' . $table . '.' . $column;
+        if (array_key_exists($cacheKey, $colCache)) {
+            return $colCache[$cacheKey];
+        }
         try {
-        $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");
-        $stmt->execute([$column]);
-        return (bool) $stmt->fetch(PDO::FETCH_ASSOC);
-    } catch (Throwable $e) {
-        return false;
+            $stmt = $pdo->prepare("SHOW COLUMNS FROM `$table` LIKE ?");
+            $stmt->execute([$column]);
+            return $colCache[$cacheKey] = (bool) $stmt->fetch(PDO::FETCH_ASSOC);
+        } catch (Throwable $e) {
+            return $colCache[$cacheKey] = false;
+        }
     }
-}
 }
 
 function dash_public_path(?string $path): string
@@ -134,6 +144,8 @@ function dash_status_label(?string $status): string
         'invitations' => 'Invitations',
         'to_do' => 'To Do',
         'draft' => 'To Do',
+        'templates' => 'Templates',
+        'template' => 'Templates',
         'estimating' => 'Estimating',
         'bid_submitted' => 'Bid Submitted',
         'accepted' => 'Accepted',
@@ -282,33 +294,162 @@ if ($projectId > 0 && dash_table_exists($pdo, 'drawings')) {
 }
 
 $takeoffLayers = [];
-if ($projectId > 0 && dash_table_exists($pdo, 'takeoff_layers')) {
-    $stmt = $pdo->prepare(dash_column_exists($pdo, 'takeoff_layers', 'project_id') ? "
-        SELECT * FROM takeoff_layers
-        WHERE project_id = ? AND deleted_at IS NULL
-        ORDER BY sort_order ASC, id DESC
+$catalogItemMetaMap = [];
+if ($projectId > 0 && dash_table_exists($pdo, 'takeoff_layers') && dash_table_exists($pdo, 'takeoffs')) {
+    $hasLayerProjectId = dash_column_exists($pdo, 'takeoff_layers', 'project_id');
+    $stmt = $pdo->prepare($hasLayerProjectId ? "
+        SELECT tl.*, COALESCE(NULLIF(tl.drawing_id, 0), t.drawing_id) AS resolved_drawing_id
+        FROM takeoff_layers tl
+        LEFT JOIN takeoffs t ON t.id = tl.takeoff_id AND t.deleted_at IS NULL
+        WHERE (tl.project_id = ? OR t.project_id = ?) AND tl.deleted_at IS NULL
+        ORDER BY tl.sort_order ASC, tl.id ASC
     " : "
-        SELECT tl.*
+        SELECT tl.*, t.drawing_id AS resolved_drawing_id
         FROM takeoff_layers tl
         INNER JOIN takeoffs t ON t.id = tl.takeoff_id
-        WHERE t.project_id = ? AND tl.deleted_at IS NULL
-        ORDER BY tl.sort_order ASC, tl.id DESC
+        WHERE t.project_id = ? AND t.deleted_at IS NULL
+        ORDER BY tl.sort_order ASC, tl.id ASC
     ");
-    $stmt->execute([$projectId]);
-    $takeoffLayers = array_map(function ($tl) {
+    $catalogItemMetaMap = [];
+    $stmt->execute($hasLayerProjectId ? [$projectId, $projectId] : [$projectId]);
+    $takeoffLayers = array_map(function ($tl) use (&$catalogItemMetaMap) {
+        if (empty($tl['drawing_id']) && !empty($tl['resolved_drawing_id'])) {
+            $tl['drawing_id'] = (int) $tl['resolved_drawing_id'];
+        }
+        unset($tl['resolved_drawing_id']);
         if (!empty($tl['metadata_json'])) {
-            $meta = is_array($tl['metadata_json']) ? $tl['metadata_json'] : json_decode($tl['metadata_json'], true);
+            $meta = is_array($tl['metadata_json']) ? $tl['metadata_json'] : json_decode((string) $tl['metadata_json'], true);
             if (is_array($meta)) {
                 if (isset($meta['difficulty']) && !isset($tl['difficulty'])) {
-                    $tl['difficulty'] = (float)$meta['difficulty'];
+                    $tl['difficulty'] = (float) $meta['difficulty'];
                 }
                 if (isset($meta['multiplier']) && !isset($tl['multiplier'])) {
-                    $tl['multiplier'] = (float)$meta['multiplier'];
+                    $tl['multiplier'] = (float) $meta['multiplier'];
+                }
+                if (empty($tl['drawing_id']) && !empty($meta['file_drawing_id'])) {
+                    $tl['drawing_id'] = (int) $meta['file_drawing_id'];
+                }
+                if (!empty($meta['catalog_item']) && is_array($meta['catalog_item'])) {
+                    $ciJson = json_encode($meta['catalog_item'], JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
+                    $ciId = trim((string) ($meta['catalog_item']['catalogItemId'] ?? $meta['catalog_item']['id'] ?? $tl['catalog_item_id'] ?? 'anon'));
+                    if ($ciId === '') {
+                        $ciId = 'anon';
+                    }
+                    $refKey = $ciId . ':' . substr(sha1((string) $ciJson), 0, 10);
+                    if (!isset($catalogItemMetaMap[$refKey])) {
+                        $catalogItemMetaMap[$refKey] = $meta['catalog_item'];
+                    }
+                    unset($meta['catalog_item']);
+                    $meta['catalog_item_ref'] = $refKey;
+                    $tl['metadata_json'] = json_encode($meta, JSON_UNESCAPED_UNICODE | JSON_UNESCAPED_SLASHES);
                 }
             }
         }
         return $tl;
     }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+}
+
+$takeoffDrawingStates = [];
+if ($projectId > 0 && dash_table_exists($pdo, 'takeoff_estimate_states')) {
+    try {
+        $stmtStates = $pdo->prepare("
+            SELECT estimate_key, drawing_id, state_json, updated_at
+            FROM takeoff_estimate_states
+            WHERE project_id = ? AND drawing_id > 0
+            ORDER BY updated_at ASC
+        ");
+        $stmtStates->execute([$projectId]);
+        foreach ($stmtStates->fetchAll(PDO::FETCH_ASSOC) as $stRow) {
+            $estKey = trim((string) ($stRow['estimate_key'] ?? ''));
+            $did = (int) ($stRow['drawing_id'] ?? 0);
+            if ($estKey === '' || $did <= 0)
+                continue;
+            $decoded = json_decode((string) ($stRow['state_json'] ?? '{}'), true);
+            if (!is_array($decoded))
+                continue;
+            $rawLayers = is_array($decoded['layers'] ?? null) ? $decoded['layers'] : [];
+            $rawMarkers = is_array($decoded['markers'] ?? null) ? $decoded['markers'] : [];
+            $rawSegments = is_array($decoded['segments'] ?? null) ? $decoded['segments'] : [];
+            $shapesByLayer = [];
+            foreach ($rawMarkers as $m) {
+                if (!is_array($m))
+                    continue;
+                $lid = (string) ($m['layer_client_uid'] ?? $m['layer_id'] ?? '');
+                if ($lid === '')
+                    continue;
+                $mult = isset($m['multiplier']) && $m['multiplier'] !== '' ? (float) $m['multiplier'] : 1.0;
+                $qVal = isset($m['quantity']) && $m['quantity'] !== '' ? (float) $m['quantity'] : $mult;
+                $shapesByLayer[$lid][] = [
+                    'id' => (string) ($m['client_uid'] ?? $m['id'] ?? ''),
+                    'client_uid' => (string) ($m['client_uid'] ?? $m['id'] ?? ''),
+                    'layerId' => $lid,
+                    'documentId' => (string) $did,
+                    'pageNumber' => max(1, (int) ($m['page_number'] ?? 1)),
+                    'type' => 'Count',
+                    'quantityValue' => $qVal,
+                    'quantity' => $qVal,
+                ];
+            }
+            foreach ($rawSegments as $s) {
+                if (!is_array($s))
+                    continue;
+                $lid = (string) ($s['layer_client_uid'] ?? $s['layer_id'] ?? '');
+                if ($lid === '')
+                    continue;
+                $isArea = strtolower((string) ($s['takeoff_type'] ?? $s['type'] ?? '')) === 'area';
+                $qVal = (float) ($isArea
+                    ? ($s['total_area'] ?? $s['measured_area'] ?? $s['total_length'] ?? 0)
+                    : ($s['total_length'] ?? $s['measured_length'] ?? 0));
+                $shapesByLayer[$lid][] = [
+                    'id' => (string) ($s['client_uid'] ?? $s['id'] ?? ''),
+                    'client_uid' => (string) ($s['client_uid'] ?? $s['id'] ?? ''),
+                    'layerId' => $lid,
+                    'documentId' => (string) $did,
+                    'pageNumber' => max(1, (int) ($s['page_number'] ?? 1)),
+                    'type' => $isArea ? 'Area' : 'Linear',
+                    'quantityValue' => $qVal,
+                    'quantity' => $qVal,
+                ];
+            }
+            $compactLayers = [];
+            $seenCompactLayerIds = [];
+            foreach ($rawLayers as $rl) {
+                if (!is_array($rl))
+                    continue;
+                $lid = (string) ($rl['client_uid'] ?? $rl['id'] ?? '');
+                if ($lid === '' || isset($seenCompactLayerIds[$lid]))
+                    continue;
+                $seenCompactLayerIds[$lid] = true;
+                $meta = is_array($rl['metadata_json'] ?? null) ? $rl['metadata_json'] : [];
+                $baseQty = (float) ($rl['baseQuantity'] ?? $rl['base_quantity'] ?? $rl['seed_quantity'] ?? $meta['base_quantity'] ?? 0);
+                $compactLayers[] = [
+                    'id' => $lid,
+                    'layerId' => $lid,
+                    'client_uid' => $lid,
+                    'name' => (string) ($rl['name'] ?? ''),
+                    'color' => (string) ($rl['color'] ?? '#2563eb'),
+                    'symbol' => (string) ($rl['symbol'] ?? 'circle'),
+                    'type' => (string) ($rl['takeoff_type'] ?? $rl['type'] ?? 'count'),
+                    'unit_of_measure' => (string) ($rl['unit_of_measure'] ?? 'ea'),
+                    'quantity' => (float) ($rl['quantity'] ?? 0),
+                    'baseQuantity' => $baseQty,
+                    'base_quantity' => $baseQty,
+                    'seed_quantity' => $baseQty,
+                    'shapes' => $shapesByLayer[$lid] ?? [],
+                ];
+            }
+            $takeoffDrawingStates[] = [
+                'estimateId' => $estKey,
+                'estimateKey' => $estKey,
+                'drawingId' => $did,
+                'documentId' => (string) $did,
+                'updatedAt' => (string) ($stRow['updated_at'] ?? ''),
+                'layers' => $compactLayers,
+            ];
+        }
+    } catch (Throwable $e) {
+        // Tolerate missing migration table in older environments
+    }
 }
 
 $takeoffLocations = [];
@@ -396,44 +537,147 @@ if (!empty($takeoffLayers)) {
     }
 }
 
-$estimateItems = [];
-if ($projectId > 0 && dash_table_exists($pdo, 'estimate_items') && dash_table_exists($pdo, 'estimates')) {
-    $stmt = $pdo->prepare("
-        SELECT ei.*, ci.name AS catalog_item_name
-        FROM estimate_items ei
-        INNER JOIN estimates e ON e.id = ei.estimate_id
-        LEFT JOIN catalog_items ci ON ci.id = ei.catalog_item_id
-        WHERE e.project_id = ? AND ei.deleted_at IS NULL AND e.deleted_at IS NULL
-        ORDER BY ei.sort_order ASC, ei.id DESC
-    ");
-    $stmt->execute([$projectId]);
-    $estimateItems = array_map(function ($ei) {
-        if (!empty($ei['metadata_json'])) {
-            $meta = is_array($ei['metadata_json']) ? $ei['metadata_json'] : json_decode($ei['metadata_json'], true);
-            if (is_array($meta)) {
-                $ws = isset($meta['workspace']) && is_array($meta['workspace']) ? $meta['workspace'] : $meta;
-                if (isset($ws['difficulty']) && !isset($ei['difficulty'])) {
-                    $ei['difficulty'] = (float)$ws['difficulty'];
-                }
-                if (isset($ws['laborWaste']) && !isset($ei['laborWaste'])) {
-                    $ei['laborWaste'] = (float)$ws['laborWaste'];
-                }
-                if (isset($ws['laborMargin']) && !isset($ei['laborMargin'])) {
-                    $ei['laborMargin'] = (float)$ws['laborMargin'];
-                }
-                if (isset($ws['factorOverride']) && !isset($ei['factorOverride'])) {
-                    $ei['factorOverride'] = (float)$ws['factorOverride'];
-                }
-                if (isset($ws['ratio']) && !isset($ei['ratio'])) {
-                    $ei['ratio'] = (float)$ws['ratio'];
-                }
-                if (isset($ws['children']) && !isset($ei['children'])) {
-                    $ei['children'] = $ws['children'];
+$projectMeta = [];
+if (!empty($project['metadata_json'])) {
+    $decodedMeta = json_decode((string) $project['metadata_json'], true);
+    if (is_array($decodedMeta)) {
+        $projectMeta = $decodedMeta;
+    }
+}
+
+$dashEstimatesSummary = [];
+$hasPopulatedWorkspaceState = false;
+$resolvedActiveEstimateId = trim((string) ($projectMeta['primary_estimate_id'] ?? ''));
+if ($projectId > 0 && dash_table_exists($pdo, 'estimates')) {
+    try {
+        $hasWsState = dash_table_exists($pdo, 'estimate_workspace_states');
+        $estSql = $hasWsState
+            ? "SELECT e.id, e.name, e.total_cost, ws.client_estimate_id, ws.state_json FROM estimates e LEFT JOIN estimate_workspace_states ws ON ws.estimate_id = e.id WHERE e.project_id = ? AND e.deleted_at IS NULL ORDER BY e.id ASC"
+            : "SELECT e.id, e.name, e.total_cost, NULL AS client_estimate_id, NULL AS state_json FROM estimates e WHERE e.project_id = ? AND e.deleted_at IS NULL ORDER BY e.id ASC";
+        $estRowsStmt = $pdo->prepare($estSql);
+        $estRowsStmt->execute([$projectId]);
+        $estRows = $estRowsStmt->fetchAll(PDO::FETCH_ASSOC) ?: [];
+        $activeCandidate = '';
+        $primaryCandidate = '';
+        foreach ($estRows as $er) {
+            $snap = !empty($er['state_json']) ? json_decode((string) $er['state_json'], true) : [];
+            if (!is_array($snap))
+                $snap = [];
+            if (!empty($snap) && isset($snap['groups']) && is_array($snap['groups'])) {
+                $hasPopulatedWorkspaceState = true;
+            }
+            $estItemCount = 0;
+            foreach (($snap['groups'] ?? []) as $wsGroup) {
+                if (is_array($wsGroup) && !empty($wsGroup['items']) && is_array($wsGroup['items'])) {
+                    $estItemCount += count($wsGroup['items']);
                 }
             }
+            $cid = trim((string) ($er['client_estimate_id'] ?: ($snap['id'] ?? $er['id'])));
+            $isPrim = !empty($snap['isPrimary']) || !empty($snap['is_primary']);
+            $isAct = !empty($snap['isActive']);
+            $estVal = (float) ($snap['estimateTotal'] ?? $snap['totalSales'] ?? $er['total_cost'] ?? 0);
+            $dashEstimatesSummary[] = [
+                'id' => $cid,
+                'dbEstimateId' => (int) $er['id'],
+                'name' => (string) ($snap['name'] ?? $er['name'] ?? 'Estimate'),
+                'isPrimary' => $isPrim,
+                'is_primary' => $isPrim,
+                'isActive' => $isAct,
+                'estimateTotal' => $estVal,
+                'totalSales' => $estVal,
+                'itemCount' => $estItemCount,
+            ];
+            if ($isAct && $activeCandidate === '')
+                $activeCandidate = $cid;
+            if ($isPrim && $primaryCandidate === '')
+                $primaryCandidate = $cid;
         }
-        return $ei;
-    }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+        if ($activeCandidate !== '') {
+            $resolvedActiveEstimateId = $activeCandidate;
+        } elseif ($primaryCandidate !== '') {
+            $resolvedActiveEstimateId = $primaryCandidate;
+        } elseif (!empty($dashEstimatesSummary)) {
+            $resolvedActiveEstimateId = (string) $dashEstimatesSummary[0]['id'];
+        }
+        if ($resolvedActiveEstimateId === '' && !empty($takeoffLayers[0]['estimate_key'])) {
+            $resolvedActiveEstimateId = (string) $takeoffLayers[0]['estimate_key'];
+        }
+        if ($primaryCandidate !== '') {
+            $projectMeta['primary_estimate_id'] = $primaryCandidate;
+        } elseif ($resolvedActiveEstimateId !== '' && empty($projectMeta['primary_estimate_id'])) {
+            $projectMeta['primary_estimate_id'] = $resolvedActiveEstimateId;
+        }
+    } catch (Throwable $e) {
+    }
+}
+if ($resolvedActiveEstimateId === '' && !empty($takeoffLayers[0]['estimate_key'])) {
+    $resolvedActiveEstimateId = (string) $takeoffLayers[0]['estimate_key'];
+}
+if ($resolvedActiveEstimateId === '') {
+    $resolvedActiveEstimateId = 'est_primary';
+}
+
+$estimateItems = [];
+$estimateItemAggTotals = null;
+if ($projectId > 0 && dash_table_exists($pdo, 'estimate_items') && dash_table_exists($pdo, 'estimates')) {
+    if ($hasPopulatedWorkspaceState) {
+        try {
+            $aggStmt = $pdo->prepare("
+                SELECT
+                    COALESCE(SUM(ei.material_cost), 0) AS material_subtotal,
+                    COALESCE(SUM(ei.labor_cost), 0) AS labor_subtotal,
+                    COALESCE(SUM(ei.equipment_cost), 0) AS equipment_subtotal,
+                    COALESCE(SUM(COALESCE(ei.total_cost, ei.subtotal_cost, 0)), 0) AS estimate_total,
+                    COALESCE(SUM(COALESCE(ei.subtotal_cost, 0) * (COALESCE(ei.waste_factor_percent, ei.waste_percentage, 0) / 100)), 0) AS waste_total,
+                    COALESCE(SUM(COALESCE(ei.subtotal_cost, 0) * (COALESCE(ei.markup_percent, ei.margin_percentage, 0) / 100)), 0) AS markup_total
+                FROM estimate_items ei
+                INNER JOIN estimates e ON e.id = ei.estimate_id
+                WHERE e.project_id = ? AND ei.deleted_at IS NULL AND e.deleted_at IS NULL
+            ");
+            $aggStmt->execute([$projectId]);
+            $estimateItemAggTotals = $aggStmt->fetch(PDO::FETCH_ASSOC) ?: null;
+        } catch (Throwable $e) {
+            $estimateItemAggTotals = null;
+        }
+    }
+    if ($estimateItemAggTotals === null) {
+        $stmt = $pdo->prepare("
+            SELECT ei.*, ci.name AS catalog_item_name
+            FROM estimate_items ei
+            INNER JOIN estimates e ON e.id = ei.estimate_id
+            LEFT JOIN catalog_items ci ON ci.id = ei.catalog_item_id
+            WHERE e.project_id = ? AND ei.deleted_at IS NULL AND e.deleted_at IS NULL
+            ORDER BY ei.sort_order ASC, ei.id DESC
+        ");
+        $stmt->execute([$projectId]);
+        $estimateItems = array_map(function ($ei) {
+            if (!empty($ei['metadata_json'])) {
+                $meta = is_array($ei['metadata_json']) ? $ei['metadata_json'] : json_decode($ei['metadata_json'], true);
+                if (is_array($meta)) {
+                    $ws = isset($meta['workspace']) && is_array($meta['workspace']) ? $meta['workspace'] : $meta;
+                    if (isset($ws['difficulty']) && !isset($ei['difficulty'])) {
+                        $ei['difficulty'] = (float) $ws['difficulty'];
+                    }
+                    if (isset($ws['laborWaste']) && !isset($ei['laborWaste'])) {
+                        $ei['laborWaste'] = (float) $ws['laborWaste'];
+                    }
+                    if (isset($ws['laborMargin']) && !isset($ei['laborMargin'])) {
+                        $ei['laborMargin'] = (float) $ws['laborMargin'];
+                    }
+                    if (isset($ws['factorOverride']) && !isset($ei['factorOverride'])) {
+                        $ei['factorOverride'] = (float) $ws['factorOverride'];
+                    }
+                    if (isset($ws['ratio']) && !isset($ei['ratio'])) {
+                        $ei['ratio'] = (float) $ws['ratio'];
+                    }
+                    if (isset($ws['children']) && !isset($ei['children'])) {
+                        $ei['children'] = $ws['children'];
+                    }
+                }
+            }
+            return $ei;
+        }, $stmt->fetchAll(PDO::FETCH_ASSOC));
+    }
 }
 
 $proposals = [];
@@ -490,13 +734,6 @@ if (empty($availableEstimators)) {
     ];
 }
 
-$projectMeta = [];
-if (!empty($project['metadata_json'])) {
-    $decodedMeta = json_decode((string) $project['metadata_json'], true);
-    if (is_array($decodedMeta)) {
-        $projectMeta = $decodedMeta;
-    }
-}
 $estimatorName = $projectMeta['estimator'] ?? $estimatorName;
 $measurementSystem = $projectMeta['measurement_system'] ?? 'US';
 $estimatePricing = $projectMeta['estimate_pricing'] ?? 'Unlocked';
@@ -516,13 +753,22 @@ $equipmentSubtotal = 0.0;
 $wasteTotal = 0.0;
 $markupTotal = 0.0;
 $estimateTotal = 0.0;
-foreach ($estimateItems as $item) {
-    $materialSubtotal += (float) ($item['material_cost'] ?? 0);
-    $laborSubtotal += (float) ($item['labor_cost'] ?? 0);
-    $equipmentSubtotal += (float) ($item['equipment_cost'] ?? 0);
-    $estimateTotal += (float) ($item['total_cost'] ?? $item['subtotal_cost'] ?? 0);
-    $wasteTotal += ((float) ($item['subtotal_cost'] ?? 0)) * ((float) ($item['waste_factor_percent'] ?? $item['waste_percentage'] ?? 0) / 100);
-    $markupTotal += ((float) ($item['subtotal_cost'] ?? 0)) * ((float) ($item['markup_percent'] ?? $item['margin_percentage'] ?? 0) / 100);
+if ($estimateItemAggTotals !== null) {
+    $materialSubtotal = (float) ($estimateItemAggTotals['material_subtotal'] ?? 0);
+    $laborSubtotal = (float) ($estimateItemAggTotals['labor_subtotal'] ?? 0);
+    $equipmentSubtotal = (float) ($estimateItemAggTotals['equipment_subtotal'] ?? 0);
+    $estimateTotal = (float) ($estimateItemAggTotals['estimate_total'] ?? 0);
+    $wasteTotal = (float) ($estimateItemAggTotals['waste_total'] ?? 0);
+    $markupTotal = (float) ($estimateItemAggTotals['markup_total'] ?? 0);
+} else {
+    foreach ($estimateItems as $item) {
+        $materialSubtotal += (float) ($item['material_cost'] ?? 0);
+        $laborSubtotal += (float) ($item['labor_cost'] ?? 0);
+        $equipmentSubtotal += (float) ($item['equipment_cost'] ?? 0);
+        $estimateTotal += (float) ($item['total_cost'] ?? $item['subtotal_cost'] ?? 0);
+        $wasteTotal += ((float) ($item['subtotal_cost'] ?? 0)) * ((float) ($item['waste_factor_percent'] ?? $item['waste_percentage'] ?? 0) / 100);
+        $markupTotal += ((float) ($item['subtotal_cost'] ?? 0)) * ((float) ($item['markup_percent'] ?? $item['margin_percentage'] ?? 0) / 100);
+    }
 }
 
 $displayFolders = array_values(array_filter($folders, function ($folder) {
@@ -570,6 +816,8 @@ $state = [
     'projectId' => $projectId,
     'isDraftProject' => $isDraftProject,
     'activeTab' => $activeTab,
+    'activeEstimateId' => $resolvedActiveEstimateId,
+    'estimatesSummary' => $dashEstimatesSummary,
     'projectInfo' => $project,
     'projectMeta' => $projectMeta,
     'documents' => $documents,
@@ -578,7 +826,9 @@ $state = [
     'selectedDrawingId' => $selectedDocumentId,
     'takeoffGroups' => [],
     'takeoffLayers' => $takeoffLayers,
+    'catalogItemMetaMap' => $catalogItemMetaMap,
     'takeoffLocations' => $takeoffLocations,
+    'takeoffDrawingStates' => $takeoffDrawingStates,
     'takeoffMeasurements' => [],
     'estimateItems' => $estimateItems,
     'estimateTotals' => [
@@ -607,7 +857,12 @@ $state = [
     <link
         href="https://fonts.googleapis.com/css2?family=Inter:wght@400;500;600;700&family=Outfit:wght@400;500;600;700;800&display=swap"
         rel="stylesheet">
-    <link rel="stylesheet" href="../assets/global_tools.css?v=<?= filemtime(__DIR__ . '/../assets/global_tools.css') ?>">
+    <link rel="stylesheet"
+        href="../assets/global_tools.css?v=<?= filemtime(__DIR__ . '/../assets/global_tools.css') ?>">
+    <link rel="stylesheet"
+        href="../assets/design_system.css?v=<?= filemtime(__DIR__ . '/../assets/design_system.css') ?>">
+    <link rel="stylesheet"
+        href="../assets/project_dashboard.css?v=<?= filemtime(__DIR__ . '/../assets/project_dashboard.css') ?>">
     <script>
         (function () {
             try {
@@ -618,324 +873,24 @@ $state = [
             }
         })();
     </script>
-    <style>
-        a {
-            color: inherit;
-        }
-
-        .grid {
-            display: grid;
-            gap: 16px;
-        }
-
-        .overview-grid {
-            grid-template-columns: repeat(12, minmax(0, 1fr));
-        }
-
-        .card-panel {
-            background: var(--card);
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            padding: 18px;
-            min-width: 0;
-        }
-
-        .card-panel h2,
-        .card-panel h3 {
-            margin: 0 0 14px;
-            font-size: 1rem;
-            font-weight: 800;
-        }
-
-        .span-3 {
-            grid-column: span 3;
-        }
-
-        .span-4 {
-            grid-column: span 4;
-        }
-
-        .span-6 {
-            grid-column: span 6;
-        }
-
-        .span-8 {
-            grid-column: span 8;
-        }
-
-        .span-12 {
-            grid-column: span 12;
-        }
-
-        .metric-value {
-            font-size: 1.6rem;
-            font-weight: 800;
-            color: #60a5fa;
-        }
-
-        .label {
-            color: var(--muted);
-            font-size: .78rem;
-            text-transform: uppercase;
-            letter-spacing: .04em;
-        }
-
-        .value {
-            font-weight: 700;
-            color: var(--text);
-        }
-
-        .info-list {
-            display: grid;
-            gap: 12px;
-        }
-
-        .info-row {
-            display: flex;
-            justify-content: space-between;
-            gap: 16px;
-            border-bottom: 1px solid rgba(255, 255, 255, .06);
-            padding-bottom: 10px;
-        }
-
-        .btn-main,
-        .btn-ghost {
-            border: 0;
-            border-radius: 6px;
-            padding: 10px 14px;
-            font-weight: 700;
-            text-decoration: none;
-            display: inline-flex;
-            align-items: center;
-            gap: 8px;
-            cursor: pointer;
-        }
-
-        .btn-main {
-            background: var(--primary);
-            color: #fff;
-        }
-
-        .btn-ghost {
-            background: rgba(255, 255, 255, .07);
-            color: var(--text);
-            border: 1px solid var(--line);
-        }
-
-        .btn-ghost:disabled {
-            opacity: .45;
-            cursor: not-allowed;
-        }
-
-        .quick-actions {
-            display: flex;
-            flex-wrap: wrap;
-            gap: 10px;
-        }
-
-        .documents-layout {
-            display: grid;
-            grid-template-columns: 260px minmax(280px, 430px) 1fr;
-            gap: 16px;
-            height: calc(100vh - 177px);
-            min-height: 580px;
-        }
-
-        .folder-list,
-        .document-list {
-            overflow: auto;
-        }
-
-        .folder-item,
-        .doc-item {
-            width: 100%;
-            border: 1px solid transparent;
-            background: transparent;
-            color: var(--text);
-            text-align: left;
-            padding: 10px 12px;
-            border-radius: 6px;
-            display: flex;
-            align-items: center;
-            gap: 10px;
-            cursor: pointer;
-        }
-
-        .folder-item:hover,
-        .doc-item:hover {
-            background: rgba(255, 255, 255, .05);
-        }
-
-        .folder-item.active,
-        .doc-item.active {
-            background: rgba(37, 99, 235, .18);
-            border-color: rgba(96, 165, 250, .35);
-        }
-
-        .doc-title {
-            min-width: 0;
-            overflow: hidden;
-            text-overflow: ellipsis;
-            white-space: nowrap;
-            font-weight: 700;
-        }
-
-        .doc-meta {
-            color: var(--muted);
-            font-size: .78rem;
-        }
-
-        .preview-frame,
-        .takeoff-frame {
-            width: 100%;
-            height: 100%;
-            border: 0;
-            background: #0f172a;
-            border-radius: 8px;
-        }
-
-        .preview-empty,
-        .takeoff-empty {
-            height: 100%;
-            display: flex;
-            align-items: center;
-            justify-content: center;
-            text-align: center;
-            color: var(--muted);
-            border: 1px dashed var(--line);
-            border-radius: 8px;
-        }
-
-        .takeoff-workspace {
-            height: 100%;
-            background: var(--bg-body, #eaedf2);
-        }
-
-        .estimating-toolbar {
-            display: flex;
-            gap: 10px;
-            flex-wrap: wrap;
-            margin-bottom: 16px;
-        }
-
-        .estimating-toolbar input,
-        .estimating-toolbar select {
-            background: var(--card);
-            color: var(--text);
-            border: 1px solid var(--line);
-            border-radius: 6px;
-            padding: 10px 12px;
-        }
-
-        .table-wrap {
-            background: var(--card);
-            border: 1px solid var(--line);
-            border-radius: 8px;
-            overflow: auto;
-        }
-
-        table {
-            width: 100%;
-            border-collapse: collapse;
-            min-width: 980px;
-        }
-
-        th,
-        td {
-            padding: 12px 14px;
-            border-bottom: 1px solid rgba(255, 255, 255, .07);
-            text-align: left;
-            vertical-align: middle;
-        }
-
-        th {
-            color: #93c5fd;
-            background: rgba(37, 99, 235, .16);
-            font-size: .78rem;
-            text-transform: uppercase;
-        }
-
-        td {
-            color: #e2e8f0;
-        }
-
-        .totals-grid {
-            grid-template-columns: repeat(6, minmax(150px, 1fr));
-            margin-top: 16px;
-        }
-
-        .proposal-sheet {
-            max-width: 920px;
-            margin: 0 auto;
-            background: #f8fafc;
-            color: #0f172a;
-            border-radius: 8px;
-            padding: 32px;
-        }
-
-        .proposal-sheet h2 {
-            margin: 0;
-            font-weight: 800;
-        }
-
-        .proposal-line {
-            border-bottom: 1px solid #cbd5e1;
-            padding: 12px 0;
-        }
-
-        @media (max-width: 1100px) {
-            .documents-layout {
-                grid-template-columns: 220px 1fr;
-                height: auto;
-            }
-
-            .documents-layout .preview-card {
-                grid-column: 1 / -1;
-                min-height: 560px;
-            }
-
-            .span-3,
-            .span-4,
-            .span-6,
-            .span-8 {
-                grid-column: span 12;
-            }
-
-            .totals-grid {
-                grid-template-columns: repeat(2, minmax(0, 1fr));
-            }
-        }
-
-        @media (max-width: 720px) {
-            .project-header {
-                align-items: flex-start;
-                flex-direction: column;
-            }
-
-            .tab-panel {
-                padding: 16px;
-            }
-
-            .documents-layout {
-                grid-template-columns: 1fr;
-            }
-
-            .totals-grid {
-                grid-template-columns: 1fr;
-            }
-        }
-    </style>
-    <link rel="stylesheet" href="../assets/project_overview.css?v=<?= filemtime(__DIR__ . '/../assets/project_overview.css') ?>">
-    <link rel="stylesheet" href="../assets/project_takeoff.css?v=<?= filemtime(__DIR__ . '/../assets/project_takeoff.css') ?>">
-    <link rel="stylesheet" href="../assets/project_estimating.css?v=<?= filemtime(__DIR__ . '/../assets/project_estimating.css') ?>">
-    <link rel="stylesheet" href="../assets/project_proposal.css?v=<?= filemtime(__DIR__ . '/../assets/project_proposal.css') ?>">
-    <link rel="stylesheet" href="../assets/won_project_export.css?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.css') ?>">
+    <link rel="stylesheet"
+        href="../assets/project_overview.css?v=<?= filemtime(__DIR__ . '/../assets/project_overview.css') ?>">
+    <link rel="stylesheet"
+        href="../assets/project_takeoff.css?v=<?= filemtime(__DIR__ . '/../assets/project_takeoff.css') ?>">
+    <link rel="stylesheet"
+        href="../assets/project_estimating.css?v=<?= filemtime(__DIR__ . '/../assets/project_estimating.css') ?>">
+    <link rel="stylesheet"
+        href="../assets/project_proposal.css?v=<?= filemtime(__DIR__ . '/../assets/project_proposal.css') ?>">
+    <link rel="stylesheet"
+        href="../assets/won_project_export.css?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.css') ?>">
 </head>
 
-<body data-user-role="<?= htmlspecialchars($authRole, ENT_QUOTES, 'UTF-8') ?>" data-can-write="<?= $canWrite ? 'true' : 'false' ?>" data-read-only="<?= $canWrite ? 'false' : 'true' ?>">
+<body data-user-role="<?= htmlspecialchars($authRole, ENT_QUOTES, 'UTF-8') ?>"
+    data-can-write="<?= $canWrite ? 'true' : 'false' ?>" data-read-only="<?= $canWrite ? 'false' : 'true' ?>">
     <?php include __DIR__ . '/../views/global_tools_header.php'; ?>
     <div class="workspace-shell">
-        <div class="project-subhead-wrapper <?= $activeTab === 'takeoff' ? 'is-takeoff-tab' : '' ?>">
+        <div
+            class="project-subhead-wrapper <?= $activeTab === 'takeoff' ? 'is-takeoff-tab' : ($activeTab === 'documents' ? 'is-documents-tab' : ($activeTab === 'estimating' ? 'is-estimating-tab' : '')) ?>">
             <header class="project-header">
                 <div class="pd-header-left">
                     <?php
@@ -956,20 +911,21 @@ $state = [
                             <div class="bb-status-menu-panel project-status-menu" id="projectStatusMenu"></div>
                         </div>
                         <?php if ($projectId > 0): ?>
-                        <div class="won-export-container" id="wonProjectExportContainer">
-                            <?php if ($isAdminUser): ?>
-                            <button type="button" class="btn-retry-export" id="retryWonExportBtn" style="display:none;">
-                                <i class="fas fa-arrows-rotate"></i>
-                                <span>Retry Export</span>
-                            </button>
-                            <?php endif; ?>
-                            <span class="won-export-status-badge" id="wonExportStatusBadge" style="display:none;">
-                                <span class="won-export-dot"></span>
-                                <span class="won-export-label" id="wonExportStatusLabel"></span>
-                                <span class="won-export-meta" id="wonExportStatusMeta"></span>
-                            </span>
-                            <div class="won-export-alert" id="wonProjectAlert" role="alert" aria-live="polite" style="display:none;"></div>
-                        </div>
+                            <div class="won-export-container" id="wonProjectExportContainer">
+                                <?php if ($isAdminUser): ?>
+                                    <button type="button" class="btn-retry-export" id="retryWonExportBtn" style="display:none;">
+                                        <i class="fas fa-arrows-rotate"></i>
+                                        <span>Retry Export</span>
+                                    </button>
+                                <?php endif; ?>
+                                <span class="won-export-status-badge" id="wonExportStatusBadge" style="display:none;">
+                                    <span class="won-export-dot"></span>
+                                    <span class="won-export-label" id="wonExportStatusLabel"></span>
+                                    <span class="won-export-meta" id="wonExportStatusMeta"></span>
+                                </span>
+                                <div class="won-export-alert" id="wonProjectAlert" role="alert" aria-live="polite"
+                                    style="display:none;"></div>
+                            </div>
                         <?php endif; ?>
                         <!-- Active Takeoff Item info with quick actions -->
                         <div class="takeoff-subhead-item-info" id="takeoffSubheadItemInfo" style="display:none;"
@@ -991,6 +947,52 @@ $state = [
                                 </button>
                                 <button type="button" class="subhead-item-act-btn danger"
                                     data-subhead-item-action="delete" title="Delete item or selection">
+                                    <i class="fas fa-trash"></i><span>Delete</span>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Selected Documents info with quick actions (Independent from Takeoff) -->
+                        <div class="takeoff-subhead-item-info documents-subhead-item-info" id="documentsSubheadItemInfo"
+                            style="display:none;" title="Selected Documents">
+                            <div class="takeoff-subhead-item-main">
+                                <span class="pro-active-layer-dot" id="documentsSubheadItemDot"><i class="fas fa-folder"
+                                        style="color: #f59e0b; font-size: 11.5px;"></i></span>
+                                <strong class="takeoff-subhead-item-name" id="documentsSubheadItemName"></strong>
+                                <span class="takeoff-subhead-item-meta" id="documentsSubheadItemMeta"></span>
+                            </div>
+                            <div class="takeoff-subhead-item-divider"></div>
+                            <div class="takeoff-subhead-item-actions" id="documentsSubheadItemActions">
+                                <button type="button" class="subhead-item-act-btn"
+                                    data-doc-subhead-action="move-takeoff" title="Move selected documents to Takeoff">
+                                    <i class="fas fa-folder-tree"></i><span>Move to Takeoff</span>
+                                </button>
+                                <button type="button" class="subhead-item-act-btn danger"
+                                    data-doc-subhead-action="delete-all" title="Delete selected documents">
+                                    <i class="fas fa-trash"></i><span>Delete All</span>
+                                </button>
+                            </div>
+                        </div>
+                        <!-- Selected Estimating Items info with quick actions (Independent from Takeoff & Documents) -->
+                        <div class="takeoff-subhead-item-info estimating-subhead-item-info"
+                            id="estimatingSubheadItemInfo" style="display:none;" title="Selected Estimate Items">
+                            <div class="takeoff-subhead-item-main">
+                                <span class="pro-active-layer-dot" id="estimatingSubheadItemDot"><i
+                                        class="fas fa-list-check" style="color: #fb5a3a; font-size: 11.5px;"></i></span>
+                                <strong class="takeoff-subhead-item-name" id="estimatingSubheadItemName"></strong>
+                                <span class="takeoff-subhead-item-meta" id="estimatingSubheadItemMeta"></span>
+                            </div>
+                            <div class="takeoff-subhead-item-divider"></div>
+                            <div class="takeoff-subhead-item-actions" id="estimatingSubheadItemActions">
+                                <button type="button" class="subhead-item-act-btn" data-est-subhead-action="copy"
+                                    title="Copy selected items">
+                                    <i class="fas fa-copy"></i><span>Copy</span>
+                                </button>
+                                <button type="button" class="subhead-item-act-btn" data-est-subhead-action="move"
+                                    title="Move selected items to group">
+                                    <i class="fas fa-folder-tree"></i><span>Move to</span>
+                                </button>
+                                <button type="button" class="subhead-item-act-btn danger"
+                                    data-est-subhead-action="delete" title="Delete selected items">
                                     <i class="fas fa-trash"></i><span>Delete</span>
                                 </button>
                             </div>
@@ -1029,8 +1031,10 @@ $state = [
                                         <span><?= htmlspecialchars($selfInitials) ?></span>
                                     </div>
                                     <div class="pd-presence-user-info">
-                                        <span class="pd-presence-user-name"><?= htmlspecialchars($selfName) ?> (You)</span>
-                                        <span class="pd-presence-user-role"><?= htmlspecialchars($selfRole) ?> &bull; Active now</span>
+                                        <span class="pd-presence-user-name"><?= htmlspecialchars($selfName) ?>
+                                            (You)</span>
+                                        <span class="pd-presence-user-role"><?= htmlspecialchars($selfRole) ?> &bull;
+                                            Active now</span>
                                     </div>
                                 </div>
                             </div>
@@ -1042,11 +1046,16 @@ $state = [
                         <button class="btn-ghost icon-only" type="button" data-menu-toggle="projectActionsMenu"
                             aria-label="Project actions"><i class="fas fa-ellipsis-vertical"></i></button>
                         <div class="project-menu align-right" id="projectActionsMenu">
-                            <button type="button"><i class="fas fa-copy"></i> Copy Project</button>
-                            <button type="button"><i class="fas fa-layer-group"></i> Convert to Template</button>
-                            <button type="button"><i class="fas fa-wand-magic-sparkles"></i> Apply Template</button>
-                            <button type="button"><i class="fas fa-box-archive"></i> Archive Project</button>
-                            <button type="button" class="danger"><i class="fas fa-trash"></i> Delete Project</button>
+                            <button type="button" data-project-action="copy"><i class="fas fa-copy"></i> Copy
+                                Project</button>
+                            <button type="button" data-project-action="convert-template"><i
+                                    class="fas fa-layer-group"></i> Convert to Template</button>
+                            <button type="button" data-project-action="apply-template"><i
+                                    class="fas fa-wand-magic-sparkles"></i> Apply Template</button>
+                            <button type="button" data-project-action="archive"><i class="fas fa-box-archive"></i>
+                                Archive Project</button>
+                            <button type="button" class="danger" data-project-action="delete"><i
+                                    class="fas fa-trash"></i> Delete Project</button>
                         </div>
                     </div>
                 </div>
@@ -1062,6 +1071,14 @@ $state = [
                 </div>
                 <!-- Drawings & Sheets + Page Count (Point 7: right next to proposal tab) -->
                 <div class="takeoff-subhead-sheet-group" id="takeoffSubheadSheetGroup">
+                    <div class="takeoff-subhead-nav-arrows">
+                        <button class="pro-icon-btn takeoff-subhead-nav-btn" type="button"
+                            data-viewer-command="previous" title="Previous drawing / sheet"
+                            aria-label="Previous drawing or sheet"><i class="fas fa-chevron-left"></i></button>
+                        <button class="pro-icon-btn takeoff-subhead-nav-btn" type="button" data-viewer-command="next"
+                            title="Next drawing / sheet" aria-label="Next drawing or sheet"><i
+                                class="fas fa-chevron-right"></i></button>
+                    </div>
                     <div class="takeoff-subhead-drawing-wrap">
                         <div class="pro-drawing-selector">
                             <button class="pro-sheet-select pro-sheet-trigger" id="takeoffSheetSelect" type="button"
@@ -1130,13 +1147,8 @@ $state = [
                         <i class="fas fa-code-compare"></i><span>Compare</span>
                     </button>
                 </div>
-                <!-- Right tools: Download icon first, then Drawing Scale directly underneath Save Project -->
+                <!-- Right tools: Drawing Scale aligned directly underneath Save Project -->
                 <div class="takeoff-subhead-tabs-tools" id="takeoffSubheadTabsTools">
-                    <button class="pro-actions-btn takeoff-subhead-download-btn icon-only"
-                        id="takeoffDownloadDrawingBtn" type="button" title="Download current drawing"
-                        aria-label="Download current drawing">
-                        <i class="fas fa-download"></i>
-                    </button>
                     <div class="takeoff-subhead-scale-slot" id="takeoffSubheadScaleSlot">
                         <div class="pro-scale-wrap">
                             <button class="pro-scale-status" id="takeoffScaleStatus" type="button" data-scale-toggle
@@ -1192,13 +1204,13 @@ $state = [
                 </div>
                 <!-- Overview: Move to Portfolio centered right under Save Project button in top-tabs -->
                 <?php if ($projectId > 0 && $isAdminUser): ?>
-                <div class="overview-subhead-tabs-tools <?= $activeTab === 'overview' ? 'is-overview-tab' : '' ?>" id="overviewSubheadTabsTools" <?= $activeTab !== 'overview' ? 'style="display:none !important;"' : '' ?>>
-                    <button type="button" class="btn-mark-won" id="markAsWonBtn"
-                        title="Move to Portfolio" aria-label="Move to Portfolio"
-                        <?= ($project['status'] ?? '') === 'accepted' ? 'disabled' : '' ?>>
-                        <span>Move to Portfolio</span>
-                    </button>
-                </div>
+                    <div class="overview-subhead-tabs-tools <?= $activeTab === 'overview' ? 'is-overview-tab' : '' ?>"
+                        id="overviewSubheadTabsTools" <?= $activeTab !== 'overview' ? 'style="display:none !important;"' : '' ?>>
+                        <button type="button" class="btn-mark-won" id="markAsWonBtn" title="Move to Portfolio"
+                            aria-label="Move to Portfolio" <?= ($project['status'] ?? '') === 'accepted' ? 'disabled' : '' ?>>
+                            <span>Move to Portfolio</span>
+                        </button>
+                    </div>
                 <?php endif; ?>
             </nav>
         </div>
@@ -1331,7 +1343,8 @@ $state = [
                                         <div class="pd-company-avatar" id="customerAvatarLetter">
                                             <?= htmlspecialchars($companyInitial) ?>
                                         </div>
-                                        <div class="pd-customer-details" style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
+                                        <div class="pd-customer-details"
+                                            style="flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px;">
                                             <div class="pd-customer-name" id="displayCustomerCompany"
                                                 style="font-weight: 700; font-size: 13.5px; color: var(--text-main); line-height: 1.25;">
                                                 <?= htmlspecialchars($displayCompany ?: 'Customer') ?>
@@ -1486,7 +1499,8 @@ $state = [
                                                         <?= htmlspecialchars($task['responsible'] ?? 'Isaac De Jesus') ?>
                                                     </div>
                                                     <?php if (!empty($task['due_date'])): ?>
-                                                        <div class="pd-task-due-badge">Due <?= htmlspecialchars($task['due_date']) ?></div>
+                                                        <div class="pd-task-due-badge">Due
+                                                            <?= htmlspecialchars($task['due_date']) ?></div>
                                                     <?php endif; ?>
                                                 </div>
                                             </div>
@@ -1550,7 +1564,12 @@ $state = [
                         </svg>
 
                         <h2 class="doc-empty-title">Upload Documents to Get Started</h2>
-                        <p class="doc-empty-desc">Once you upload, you and your team can manage documents here.</p>
+                        <p class="doc-empty-desc">Drag and drop your PDF or image documents into this area to load them
+                            onto the page, or click the button below to select files from your computer.</p>
+                        <div class="doc-empty-drop-hint">
+                            <i class="fas fa-cloud-arrow-up"></i>
+                            <span>Drag &amp; drop files here (PDF, PNG, JPG, WEBP)</span>
+                        </div>
                         <button type="button" class="btn-main orange doc-empty-upload-btn" id="docEmptyUploadBtn">
                             <i class="fas fa-upload"></i>
                             <span>Upload</span>
@@ -1562,19 +1581,19 @@ $state = [
                 <div class="documents-layout pro-documents" id="documentsPageView" style="display: none;">
                     <aside class="documents-sidebar" id="documentsSidebar" aria-label="Document folders">
                         <div class="documents-sidebar-head">
-                            <h2>Folders</h2>
+                            <h2>Documents</h2>
                             <div class="documents-menu-wrap">
                                 <button class="btn-ghost icon-only" type="button" data-doc-folder-menu-toggle
-                                    title="Folder options"><i class="fas fa-ellipsis-vertical"></i></button>
+                                    title="Drawing group options"><i class="fas fa-ellipsis-vertical"></i></button>
                                 <div class="documents-menu" id="documentsFolderMenu">
-                                    <button type="button" data-doc-folder-action="create"><i
-                                            class="fas fa-folder-plus"></i> Create folder</button>
-                                    <button type="button" data-doc-folder-action="rename"><i class="fas fa-pen"></i>
-                                        Rename folder</button>
-                                    <button type="button" data-doc-folder-action="delete"><i class="fas fa-trash"></i>
-                                        Delete folder</button>
+                                    <button type="button" data-doc-folder-action="expand-all"><i
+                                            class="fas fa-up-right-and-down-left-from-center"></i> Expand all
+                                        groups</button>
+                                    <button type="button" data-doc-folder-action="collapse-all"><i
+                                            class="fas fa-down-left-and-up-right-to-center"></i> Collapse all
+                                        groups</button>
                                     <button type="button" data-doc-folder-action="sort"><i
-                                            class="fas fa-arrow-down-a-z"></i> Sort folders</button>
+                                            class="fas fa-arrow-down-a-z"></i> Sort drawings A–Z</button>
                                 </div>
                             </div>
                         </div>
@@ -1586,15 +1605,10 @@ $state = [
                     </div>
 
                     <section class="documents-content-panel" aria-label="Documents content">
-                        <!-- Top title bar with density slider & Move to Takeoff -->
+                        <!-- Top title bar with density slider -->
                         <div class="doc-main-topbar">
                             <h2 id="documentsContentTitle">Custom Drawings</h2>
                             <div class="doc-topbar-actions">
-                                <button type="button" class="btn-main orange doc-move-takeoff-btn"
-                                    id="docMoveToTakeoffBtn" title="Move current document to Takeoff workspace">
-                                    <i class="fas fa-ruler-combined"></i>
-                                    <span>Move to Takeoff</span>
-                                </button>
                                 <div class="doc-slider-wrap" title="Adjust row density">
                                     <input id="documentsZoom" class="doc-density-slider" type="range" min="0" max="2"
                                         step="1" value="1" aria-label="Document row density">
@@ -1645,6 +1659,10 @@ $state = [
                         </div>
 
                         <div class="documents-list" id="documentsList"></div>
+                        <footer class="documents-content-footer" id="documentsContentFooter">
+                            <i class="fas fa-cloud-arrow-up"></i>
+                            <span>Drag and drop your documents here to upload them</span>
+                        </footer>
                     </section>
                     <!-- Universal Sidebar Context Menu -->
                     <div class="documents-menu" id="docSidebarMenu" style="display: none;"></div>
@@ -1658,37 +1676,31 @@ $state = [
                             <div>
                                 <h2 id="takeoffPanelTitle">Takeoffs (0)</h2>
                             </div>
-                            <button class="pro-add-btn" type="button" data-takeoff-action="create-layer"
-                                title="Create New Takeoff Layer" aria-label="Create New Takeoff Layer"><i
-                                    class="fas fa-plus"></i></button>
-                        </div>
-                        <div class="pro-takeoff-searchbar">
-                            <div class="pro-search-input">
-                                <input id="takeoffItemSearch" type="search" placeholder="Search Takeoffs">
-                                <i class="fas fa-magnifying-glass"></i>
+                            <div class="pro-takeoff-searchbar">
+                                <div class="pro-search-input">
+                                    <input id="takeoffItemSearch" type="search" placeholder="Search Takeoffs">
+                                    <i class="fas fa-magnifying-glass"></i>
+                                </div>
                             </div>
                         </div>
                         <div class="pro-takeoff-actions-row">
                             <button class="pro-visibility-btn pro-global-eye-btn" type="button"
                                 data-takeoff-action="toggle-global-visibility" title="Show/hide all takeoffs"
                                 aria-label="Show/hide all takeoffs"><i class="fas fa-eye"></i></button>
-                            <div class="pro-menu-wrap">
-                                <button class="pro-actions-btn" type="button"
-                                    data-takeoff-menu-toggle="takeoffItemsActions" aria-label="Takeoff actions">
-                                    Actions <i class="fas fa-caret-down"></i>
-                                </button>
-                                <div class="pro-menu" id="takeoffItemsActions">
-                                    <button type="button" data-takeoff-action="create-layer"><i class="fas fa-plus"></i>
-                                        Create New Layer</button>
-                                    <button type="button" data-takeoff-action="create-group"><i
-                                            class="fas fa-folder-plus"></i>
-                                        Create New Group</button>
-                                    <button type="button" data-takeoff-action="collapse-all"><i
-                                            class="fas fa-down-left-and-up-right-to-center"></i> Collapse All</button>
-                                    <button type="button" class="excel" data-takeoff-action="export-excel"><i
-                                            class="fas fa-file-excel"></i> Takeoff Quantities to Excel</button>
-                                </div>
-                            </div>
+                            <button class="pro-row-action-btn" type="button" data-takeoff-action="create-group"
+                                title="New Group" aria-label="New Group"><i class="fas fa-folder-plus"></i></button>
+                            <button class="pro-row-action-btn" type="button" data-takeoff-action="collapse-all"
+                                title="Collapse All Groups" aria-label="Collapse All Groups"><i
+                                    class="fas fa-down-left-and-up-right-to-center"></i></button>
+                            <button class="pro-row-action-btn" id="takeoffDownloadDrawingBtn" type="button"
+                                title="Download current drawing" aria-label="Download current drawing"><i
+                                    class="fas fa-download"></i></button>
+                            <button class="pro-row-action-btn excel" type="button" data-takeoff-action="export-excel"
+                                title="Takeoff Quantities to Excel" aria-label="Takeoff Quantities to Excel"><i
+                                    class="fas fa-file-excel"></i></button>
+                            <button class="pro-add-btn" type="button" data-takeoff-action="create-layer"
+                                title="Create New Takeoff Layer" aria-label="Create New Takeoff Layer"><i
+                                    class="fas fa-plus"></i></button>
                         </div>
                         <div class="pro-takeoff-tree" id="takeoffItemsTree"></div>
                     </aside>
@@ -1703,7 +1715,8 @@ $state = [
                     </div>
 
                     <!-- Takeoff Layer Drawer Sub-Panel (Option B) -->
-                    <aside class="pro-layer-drawer" id="takeoffLayerModal" aria-label="Takeoff Layer Details" hidden></aside>
+                    <aside class="pro-layer-drawer" id="takeoffLayerModal" aria-label="Takeoff Layer Details" hidden>
+                    </aside>
 
                     <section class="pro-takeoff-viewer">
                         <div class="pro-viewer-toolbar" style="display:none;"></div>
@@ -1741,11 +1754,11 @@ $state = [
                                         class="fas fa-right-left"></i></button>
                             </div>
 
-                            <?php if ($selectedDoc && $selectedDoc['source'] === 'legacy_file'): ?>
+                            <?php if ($selectedDoc && $selectedDoc['source'] === 'legacy_file' && $activeTab === 'takeoff'): ?>
                                 <iframe id="takeoffFrame" class="takeoff-frame pro-takeoff-frame"
-                                    src="editor.php?id=<?= (int) $selectedDoc['id'] ?>&embedded=1&estimate_key=est_primary&inherit_legacy=1&_v=<?= time() ?>"></iframe>
+                                    src="editor.php?id=<?= (int) $selectedDoc['id'] ?>&embedded=1&estimate_key=<?= htmlspecialchars(urlencode($resolvedActiveEstimateId)) ?>&inherit_legacy=1&_v=<?= time() ?>"></iframe>
                             <?php else: ?>
-                                <div id="takeoffEmpty" class="takeoff-empty pro-takeoff-empty">
+                                <div id="takeoffEmpty" class="takeoff-empty pro-takeoff-empty" <?= ($selectedDoc && $selectedDoc['source'] === 'legacy_file') ? 'style="display:none;"' : '' ?>>
                                     <div>
                                         <i class="fas fa-file-pdf fa-3x mb-3"></i>
                                         <h3>No drawing selected</h3>
@@ -1757,13 +1770,13 @@ $state = [
                             <?php endif; ?>
 
                             <div class="pro-floating-controls">
+                                <button class="pro-icon-btn pro-controls-collapse-toggle" type="button"
+                                    id="takeoffControlsCollapseToggle" title="Collapse floating controls"
+                                    aria-label="Collapse floating controls" aria-expanded="true"><i
+                                        class="fas fa-chevron-right"></i></button>
                                 <button class="pro-icon-btn" type="button" id="takeoffControlsDockToggle"
                                     title="Dock left / right" aria-label="Dock left or right"><i
                                         class="fas fa-right-left"></i></button>
-                                <button class="pro-icon-btn" type="button" data-viewer-command="previous"
-                                    title="Previous sheet"><i class="fas fa-chevron-left"></i></button>
-                                <button class="pro-icon-btn" type="button" data-viewer-command="next"
-                                    title="Next sheet"><i class="fas fa-chevron-right"></i></button>
                                 <button class="pro-icon-btn" type="button" data-viewer-command="zoom-out"
                                     title="Zoom out"><i class="fas fa-minus"></i></button>
                                 <input id="takeoffZoomSlider" type="range" min="25" max="400" value="100"
@@ -1802,46 +1815,47 @@ $state = [
                 <div id="estimatingModule" class="est-shell est-v2" data-project-id="<?= (int) $projectId ?>">
                     <div class="est-main">
                         <!-- Table Settings Drawer (Aside sliding from left displacing table to right) -->
-                        <aside class="est-table-settings-drawer" id="estTableSettingsDrawer" aria-label="Table Settings" hidden></aside>
+                        <aside class="est-table-settings-drawer" id="estTableSettingsDrawer" aria-label="Table Settings"
+                            hidden></aside>
 
                         <section class="est-left" aria-label="Estimate cost items">
                             <div class="est-toolbar">
                                 <div class="bb-search-field-procore cc-search-procore est-search-box">
-                                    <input id="estSearch" type="search" placeholder="Search estimate items..." autocomplete="off">
+                                    <input id="estSearch" type="search" placeholder="Search estimate items..."
+                                        autocomplete="off">
                                 </div>
-                                <div class="est-toolbar-actions" style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
-                                    <button class="est-icon-btn" id="estBtnCreateGroup" type="button" data-est-action="create-group"
-                                        title="Create Group"><i class="fas fa-folder-plus"></i></button>
-                                    <button class="est-icon-btn" id="estBtnTableSettings" type="button" data-est-action="table-settings"
-                                        title="Table Settings"><i class="fas fa-sliders"></i></button>
-                                    <button class="est-icon-btn" id="estBtnFullscreen" type="button" data-est-action="fullscreen"
-                                        title="Full screen"><i class="fas fa-expand"></i></button>
+                                <div class="est-toolbar-actions"
+                                    style="display: flex; align-items: center; gap: 8px; margin-left: auto;">
+                                    <button class="btn-main est-toolbar-btn est-btn-import" id="estBtnImport"
+                                        type="button" data-est-option="import"
+                                        title="Import Project Estimate (.xlsx)"><i class="fas fa-file-import"></i>
+                                        <span>Import</span></button>
+                                    <button class="btn-main est-toolbar-btn est-btn-export" id="estBtnExport"
+                                        type="button" data-est-option="export" title="Export Estimate"><i
+                                            class="fas fa-file-export"></i> <span>Export</span></button>
+                                    <button class="est-icon-btn" id="estBtnCreateGroup" type="button"
+                                        data-est-action="create-group" title="Create Group"><i
+                                            class="fas fa-folder-plus"></i></button>
+                                    <button class="est-icon-btn" id="estBtnTableSettings" type="button"
+                                        data-est-action="table-settings" title="Table Settings"><i
+                                            class="fas fa-sliders"></i></button>
+                                    <button class="est-icon-btn" id="estBtnFullscreen" type="button"
+                                        data-est-action="fullscreen" title="Full screen"><i
+                                            class="fas fa-expand"></i></button>
                                     <div class="est-menu-wrap">
-                                        <button class="est-icon-btn" id="estBtnMoreOptions" type="button" data-est-action="options"
-                                            title="Options"><i class="fas fa-ellipsis-vertical"></i></button>
+                                        <button class="est-icon-btn" id="estBtnMoreOptions" type="button"
+                                            data-est-action="options" title="Options"><i
+                                                class="fas fa-ellipsis-vertical"></i></button>
                                         <div class="est-menu" id="optionsMenu">
-                                            <button type="button" data-est-action="catalog-update"><i class="fas fa-arrows-rotate"></i> Update from Cost Catalog</button>
-                                            <button type="button" data-est-action="reset-quantities"><i class="fas fa-rotate-left"></i> Reset Quantities</button>
-                                            <button type="button" data-est-action="delete-selected" id="estBtnDeleteSelected" disabled><i class="fas fa-trash"></i> Delete Selected</button>
-                                            <div class="est-menu-divider" style="height: 1px; background: var(--border, #e2e8f0); margin: 4px 0;"></div>
-                                            <button type="button" data-est-option="save"><i class="fas fa-floppy-disk"></i>
-                                                Save estimate</button>
-                                            <button type="button" data-est-option="copy"><i class="fas fa-copy"></i> Copy
-                                                estimate</button>
-                                            <button type="button" data-est-option="status"><i
-                                                    class="fas fa-circle-check"></i> Change project status</button>
-                                            <button type="button" data-est-option="import"><i
-                                                    class="fas fa-file-import"></i> Import</button>
-                                            <button type="button" data-est-option="export"><i
-                                                    class="fas fa-file-export"></i> Export</button>
-                                            <button type="button" data-est-option="export-bom"><i
-                                                    class="fas fa-file-excel"></i> Export BOM (Excel)</button>
-                                            <button type="button" data-est-option="delete-estimate" class="danger"><i
-                                                    class="fas fa-trash"></i> Delete estimate</button>
+                                            <button type="button" data-est-action="catalog-update"><i
+                                                    class="fas fa-arrows-rotate"></i> Update from Cost Catalog</button>
+                                            <button type="button" data-est-action="reset-quantities"><i
+                                                    class="fas fa-rotate-left"></i> Reset Quantities</button>
                                         </div>
                                     </div>
-                                    <button class="est-icon-btn est-toggle-right-btn" id="estToolbarToggleRight" type="button" data-est-action="toggle-right"
-                                        title="Hide summary panel"><i class="fas fa-chevron-right"></i></button>
+                                    <button class="est-icon-btn est-toggle-right-btn" id="estToolbarToggleRight"
+                                        type="button" data-est-action="toggle-right" title="Hide summary panel"><i
+                                            class="fas fa-chevron-right"></i></button>
                                 </div>
                             </div>
                             <div class="est-table-wrap bb-table-scroll">
@@ -1851,7 +1865,8 @@ $state = [
                                 </table>
                             </div>
                         </section>
-                        <div class="pro-sidebar-resizer est-sidebar-resizer" id="estSplitResizer" role="separator" aria-orientation="vertical" title="Drag to resize panels">
+                        <div class="pro-sidebar-resizer est-sidebar-resizer" id="estSplitResizer" role="separator"
+                            aria-orientation="vertical" title="Drag to resize panels">
                             <div class="pro-resizer-handle"></div>
                         </div>
                         <aside class="est-right" aria-label="Estimate notes and summary">
@@ -1880,9 +1895,15 @@ $state = [
                                         class="fas fa-chevron-down"></i>
                                 </button>
                                 <div class="proposal-export-menu" id="proposalExportMenu">
-                                    <button type="button" data-proposal-export="pdf"><i class="fas fa-file-pdf" style="color:#ef4444; width:16px; margin-right:6px;"></i> Download PDF (.pdf)</button>
-                                    <button type="button" data-proposal-export="docx"><i class="fas fa-file-word" style="color:#2563eb; width:16px; margin-right:6px;"></i> Download Word (.doc)</button>
-                                    <button type="button" data-proposal-export="print"><i class="fas fa-print" style="color:#64748b; width:16px; margin-right:6px;"></i> Print / System Dialog</button>
+                                    <button type="button" data-proposal-export="pdf"><i class="fas fa-file-pdf"
+                                            style="color:#ef4444; width:16px; margin-right:6px;"></i> Download PDF
+                                        (.pdf)</button>
+                                    <button type="button" data-proposal-export="docx"><i class="fas fa-file-word"
+                                            style="color:#2563eb; width:16px; margin-right:6px;"></i> Download Word
+                                        (.doc)</button>
+                                    <button type="button" data-proposal-export="print"><i class="fas fa-print"
+                                            style="color:#64748b; width:16px; margin-right:6px;"></i> Print / System
+                                        Dialog</button>
                                 </div>
                             </div>
                         </div>
@@ -1895,7 +1916,8 @@ $state = [
                             be connected.</div>
                         <div class="proposal-document" id="proposalDocument"></div>
                     </div>
-                    <footer class="est-version-bar project-estimate-footer" id="proposalEstimateTypesFooter" aria-label="Available estimates">
+                    <footer class="est-version-bar project-estimate-footer" id="proposalEstimateTypesFooter"
+                        aria-label="Available estimates">
                         <span class="est-pill">Loading estimates&hellip;</span>
                     </footer>
                 </div>
@@ -1903,20 +1925,34 @@ $state = [
         </main>
     </div>
 
-    <input type="file" id="projectUploadInput" class="d-none" multiple>
-    <input type="file" id="documentsBrowseInput" class="d-none" multiple>
+    <input type="file" id="projectUploadInput" class="d-none" multiple
+        accept=".pdf,image/*,application/pdf,image/png,image/jpeg,image/jpg,image/webp,image/gif,image/bmp,image/tiff">
+    <input type="file" id="documentsBrowseInput" class="d-none" multiple
+        accept=".pdf,image/*,application/pdf,image/png,image/jpeg,image/jpg,image/webp,image/gif,image/bmp,image/tiff">
 
     <!-- Customer Information Modal -->
     <div class="pd-modal-backdrop" id="pdCustomerModal" role="dialog" aria-modal="true"
         aria-labelledby="customerModalTitle">
-        <div class="pd-modal">
+        <div class="pd-modal pd-customer-modal">
             <div class="pd-modal-head">
                 <h3 id="customerModalTitle"><i class="far fa-id-badge" style="color: var(--primary);"></i> Customer
                     Information</h3>
-                <button class="pd-modal-head-close" type="button" data-close-modal="pdCustomerModal"
-                    aria-label="Close">&times;</button>
+                <div class="pd-modal-head-actions">
+                    <button type="button" class="pd-customer-head-dir-btn" id="openCustomerDirectoryBtn"
+                        title="Open Customer Directory (View, Edit &amp; Delete)">
+                        <i class="fas fa-address-book"></i> <span>Directory</span>
+                    </button>
+                    <button class="pd-modal-head-close" type="button" data-close-modal="pdCustomerModal"
+                        aria-label="Close">&times;</button>
+                </div>
             </div>
-            <div class="pd-modal-body">
+            <div class="pd-modal-body" id="pdCustomerFormView">
+                <div class="pd-customer-edit-banner overview-field full" id="pdCustomerEditBanner" hidden>
+                    <span><i class="fas fa-pen-to-square"></i> Editing directory record: <strong
+                            id="pdCustomerEditBannerName"></strong></span>
+                    <button type="button" class="pd-customer-edit-cancel" id="cancelEditDirectoryCustomerBtn">Cancel
+                        Edit</button>
+                </div>
                 <label class="overview-field full">
                     <span>Select Saved Customer</span>
                     <div style="display: flex; gap: 8px; align-items: center; margin-top: 2px;">
@@ -1948,7 +1984,18 @@ $state = [
                     <input id="poCustomerAddress" value="<?= htmlspecialchars($customerAddress) ?>">
                 </label>
             </div>
-            <div class="pd-modal-foot" style="display: flex; justify-content: space-between; align-items: center; gap: 8px;">
+            <div class="pd-modal-body pd-customer-directory-body" id="pdCustomerDirectoryView" hidden>
+                <div class="pd-customer-dir-toolbar">
+                    <div class="pd-customer-dir-search-wrap">
+                        <i class="fas fa-search"></i>
+                        <input type="text" id="poCustomerDirectorySearch"
+                            placeholder="Search company, contact, phone, email...">
+                    </div>
+                    <span class="pd-customer-dir-count" id="poCustomerDirectoryCount">0 customers</span>
+                </div>
+                <div class="pd-customer-dir-list" id="poCustomerDirectoryList"></div>
+            </div>
+            <div class="pd-modal-foot pd-customer-foot-between" id="pdCustomerFormFoot">
                 <button type="button" class="btn-ghost" id="saveCustomerBtn"
                     title="Save this customer to database directory for use in other projects"
                     style="color: var(--primary, #ea580c); font-weight: 600;">
@@ -1956,8 +2003,20 @@ $state = [
                 </button>
                 <div style="display: flex; gap: 8px; align-items: center;">
                     <button type="button" class="btn-ghost" data-close-modal="pdCustomerModal">Cancel</button>
-                    <button type="button" class="btn-main orange" id="applyCustomerModalBtn"><i class="fas fa-check"></i>
+                    <button type="button" class="btn-main orange" id="applyCustomerModalBtn"><i
+                            class="fas fa-check"></i>
                         Apply &amp; Close</button>
+                </div>
+            </div>
+            <div class="pd-modal-foot pd-customer-foot-between" id="pdCustomerDirectoryFoot" hidden>
+                <button type="button" class="btn-ghost" id="customerDirectoryBackBtn">
+                    <i class="fas fa-arrow-left"></i> Back to Form
+                </button>
+                <div style="display: flex; gap: 8px; align-items: center;">
+                    <button type="button" class="btn-ghost" id="customerDirectoryNewBtn">
+                        <i class="fas fa-plus"></i> New Customer
+                    </button>
+                    <button type="button" class="btn-main orange" data-close-modal="pdCustomerModal">Done</button>
                 </div>
             </div>
         </div>
@@ -2075,6 +2134,40 @@ $state = [
         </div>
     </div>
 
+    <!-- Real-Time Document Upload Progress Modal -->
+    <div class="pd-modal-backdrop doc-upload-modal-backdrop" id="pdDocumentUploadModal" role="dialog" aria-modal="true"
+        aria-labelledby="docUploadModalTitle" aria-live="polite">
+        <div class="pd-modal doc-upload-modal" style="width: min(480px, 100%);">
+            <div class="pd-modal-head">
+                <h3 id="docUploadModalTitle">
+                    <i class="fas fa-cloud-arrow-up doc-upload-modal-icon" id="docUploadModalIcon"
+                        style="color: var(--primary);"></i>
+                    <span id="docUploadModalHeading">Uploading Documents...</span>
+                </h3>
+                <span class="doc-upload-modal-counter" id="docUploadModalCounter">0 / 0</span>
+            </div>
+            <div class="pd-modal-body doc-upload-modal-body" style="grid-template-columns: 1fr; gap: 14px;">
+                <div class="doc-upload-current-card">
+                    <div class="doc-upload-file-row">
+                        <div class="doc-upload-file-meta">
+                            <i class="far fa-file-pdf doc-upload-file-icon" id="docUploadFileIcon"></i>
+                            <span class="doc-upload-file-name" id="docUploadFileName">Preparing upload...</span>
+                        </div>
+                        <span class="doc-upload-file-percent" id="docUploadFilePercent">0%</span>
+                    </div>
+                    <div class="doc-upload-progress-track" role="progressbar" aria-valuemin="0" aria-valuemax="100"
+                        aria-valuenow="0" id="docUploadProgressTrack">
+                        <div class="doc-upload-progress-bar" id="docUploadProgressBar" style="width: 0%;"></div>
+                    </div>
+                    <div class="doc-upload-status-line">
+                        <span class="doc-upload-status-text" id="docUploadStatusText">Uploading file...</span>
+                    </div>
+                </div>
+                <div class="doc-upload-file-list" id="docUploadFileList" style="display: none;"></div>
+            </div>
+        </div>
+    </div>
+
     <!-- Item Options Floating Menu for Notes & Tasks -->
     <div class="pd-floating-options-menu" id="pdItemContextMenu" style="display:none;">
         <button type="button" id="pdItemActionEdit"><i class="fas fa-pen"></i> Edit</button>
@@ -2086,35 +2179,42 @@ $state = [
         aria-labelledby="takeoffGroupModalTitle" hidden style="display:none;">
         <div class="pd-modal" style="width: min(480px, 100%);">
             <div class="pd-modal-head">
-                <h3 id="takeoffGroupModalTitle"><i class="fas fa-folder-plus" id="takeoffGroupModalIcon" style="color: var(--primary);"></i> <span id="takeoffGroupModalHeading">Create new group</span></h3>
-                <button class="pd-modal-head-close" type="button" data-group-modal-close
-                    aria-label="Close dialog"><i class="fas fa-times"></i></button>
+                <h3 id="takeoffGroupModalTitle"><i class="fas fa-folder-plus" id="takeoffGroupModalIcon"
+                        style="color: var(--primary);"></i> <span id="takeoffGroupModalHeading">Create new group</span>
+                </h3>
+                <button class="pd-modal-head-close" type="button" data-group-modal-close aria-label="Close dialog"><i
+                        class="fas fa-times"></i></button>
             </div>
             <form id="takeoffGroupForm" novalidate>
                 <div class="pd-modal-body" style="grid-template-columns: 1fr; gap: 14px;">
                     <div class="pd-field">
-                        <label class="pro-group-field" for="takeoffGroupName" id="takeoffGroupNameLabel">Group Name</label>
-                        <input id="takeoffGroupName" name="groupName" class="pd-composer-input" type="text" maxlength="120"
-                            autocomplete="off" placeholder="For example, Lighting" required
+                        <label class="pro-group-field" for="takeoffGroupName" id="takeoffGroupNameLabel">Group
+                            Name</label>
+                        <input id="takeoffGroupName" name="groupName" class="pd-composer-input" type="text"
+                            maxlength="120" autocomplete="off" placeholder="For example, Lighting" required
                             aria-describedby="takeoffGroupNameHint takeoffGroupNameError">
                     </div>
-                    <div style="display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: var(--text-muted, #64748b); margin-top: -6px;">
+                    <div
+                        style="display: flex; justify-content: space-between; align-items: center; font-size: 11.5px; color: var(--text-muted, #64748b); margin-top: -6px;">
                         <span id="takeoffGroupNameHint">Use a clear scope or system name.</span>
                         <span id="takeoffGroupNameCount">0 / 120</span>
                     </div>
-                    <div class="pro-group-error" id="takeoffGroupNameError" role="alert" hidden style="color: #ef4444; font-size: 12px; margin-top: -4px;"></div>
+                    <div class="pro-group-error" id="takeoffGroupNameError" role="alert" hidden
+                        style="color: #ef4444; font-size: 12px; margin-top: -4px;"></div>
                 </div>
                 <div class="pd-modal-foot">
                     <button type="button" class="btn-ghost" data-group-modal-close>Cancel</button>
                     <button type="submit" class="btn-main orange" id="takeoffGroupCreateSubmit">
-                        <i class="fas fa-check" id="takeoffGroupSubmitIcon"></i> <span id="takeoffGroupSubmitText">Create group</span>
+                        <i class="fas fa-check" id="takeoffGroupSubmitIcon"></i> <span
+                            id="takeoffGroupSubmitText">Create group</span>
                     </button>
                 </div>
             </form>
         </div>
     </div>
 
-    <script id="takeoff-auth-metadata" type="application/json"><?= json_encode($clientAuthMetadata, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
+    <script id="takeoff-auth-metadata"
+        type="application/json"><?= json_encode($clientAuthMetadata, JSON_HEX_TAG | JSON_HEX_AMP | JSON_HEX_APOS | JSON_HEX_QUOT) ?></script>
     <script>
         (function () {
             var fallback = { displayName: 'Viewer', role: 'viewer', canWrite: false, readOnly: true };
@@ -2149,17 +2249,16 @@ $state = [
                 };
                 document.addEventListener('DOMContentLoaded', function () {
                     var mutationSelectors = [
-                        '#saveProjectBtn','#projectStatusButton','#markAsWonBtn','#retryWonExportBtn',
-                        '#saveCustomerBtn','#editCustomerInfoBtn','#editProjectAddressBtn','#addProjectAddressBtn','#addNoteBtnHead',
-                        '#docUploadArrowBtn','[data-doc-folder-action]','[data-doc-action="delete"]','[data-doc-action="move"]',
-                        '[data-subhead-item-action]','[data-scale-apply-manual]','[data-scale-clear-line]','#takeoffScaleApplyBtn',
-                        '[data-takeoff-action="create-layer"]','[data-takeoff-action="create-group"]',
-                        '[data-tool-command="count"]','[data-tool-command="linear"]','[data-tool-command="area"]',
-                        '[data-tool-command="measure"]','[data-tool-command="text"]','[data-tool-command="cloud"]',
-                        '[data-tool-command="undo"]','[data-tool-command="redo"]',
-                        '[data-est-action="create-group"]','[data-est-action="reset-quantities"]','[data-est-action="delete-selected"]',
-                        '[data-est-option="save"]','[data-est-option="copy"]','[data-est-option="status"]',
-                        '[data-est-option="import"]','[data-est-option="delete-estimate"]','[data-editor-cmd]'
+                        '#saveProjectBtn', '#projectStatusButton', '#markAsWonBtn', '#retryWonExportBtn',
+                        '#saveCustomerBtn', '#clearCustomerBtn', '#customerDirectoryNewBtn', '#editCustomerInfoBtn', '#editProjectAddressBtn', '#addProjectAddressBtn', '#addNoteBtnHead',
+                        '#docUploadArrowBtn', '[data-doc-folder-action]', '[data-doc-action="delete"]', '[data-doc-action="move"]',
+                        '[data-subhead-item-action]', '[data-est-subhead-action]', '[data-scale-apply-manual]', '[data-scale-clear-line]', '#takeoffScaleApplyBtn',
+                        '[data-takeoff-action="create-layer"]', '[data-takeoff-action="create-group"]',
+                        '[data-tool-command="count"]', '[data-tool-command="linear"]', '[data-tool-command="area"]',
+                        '[data-tool-command="measure"]', '[data-tool-command="text"]', '[data-tool-command="cloud"]',
+                        '[data-tool-command="undo"]', '[data-tool-command="redo"]',
+                        '[data-est-action="create-group"]', '[data-est-action="reset-quantities"]', '#optionsMenu button[data-est-action]',
+                        '#estBtnImport', '[data-est-option="import"]', '[data-editor-cmd]', '[data-project-action]'
                     ];
                     document.querySelectorAll(mutationSelectors.join(',')).forEach(function (element) {
                         element.hidden = true;
@@ -2168,7 +2267,7 @@ $state = [
                     });
                 });
                 document.addEventListener('click', function (event) {
-                    var target = event.target?.closest?.('[data-subhead-item-action],[data-doc-folder-action],[data-takeoff-action],[data-scale-apply-manual],[data-scale-clear-line],[data-est-action],[data-est-option],[data-editor-cmd],#saveProjectBtn,#projectStatusButton,#markAsWonBtn,#retryWonExportBtn,#docUploadArrowBtn');
+                    var target = event.target?.closest?.('[data-project-action],[data-subhead-item-action],[data-est-subhead-action],[data-doc-folder-action],[data-takeoff-action],[data-scale-apply-manual],[data-scale-clear-line],[data-est-action],[data-est-option],[data-editor-cmd],#saveProjectBtn,#projectStatusButton,#markAsWonBtn,#retryWonExportBtn,#docUploadArrowBtn');
                     if (!target) return;
                     event.preventDefault(); event.stopImmediatePropagation();
                 }, true);
@@ -2190,15 +2289,15 @@ $state = [
             'isAdmin' => $isAdminUser,
             'integrationEnabled' => $integrationEnabled,
         ]) ?>;
-        <?php if (!empty($_GET['stage'])): ?>
+        <?php
+        $effectiveReturnStage = !empty($project['status'])
+            ? dash_status_label($project['status'])
+            : (!empty($_GET['stage']) ? $_GET['stage'] : '');
+        ?>
+        <?php if ($effectiveReturnStage !== ''): ?>
             try {
-                localStorage.setItem('takeoff.bidBoardStage', <?= json_encode($_GET['stage']) ?>);
-                sessionStorage.setItem('takeoff.bidBoardStage', <?= json_encode($_GET['stage']) ?>);
-            } catch (e) { }
-        <?php elseif (!empty($project['status'])): ?>
-            try {
-                localStorage.setItem('takeoff.bidBoardStage', <?= json_encode(dash_status_label($project['status'])) ?>);
-                sessionStorage.setItem('takeoff.bidBoardStage', <?= json_encode(dash_status_label($project['status'])) ?>);
+                localStorage.setItem('takeoff.bidBoardStage', <?= json_encode($effectiveReturnStage) ?>);
+                sessionStorage.setItem('takeoff.bidBoardStage', <?= json_encode($effectiveReturnStage) ?>);
             } catch (e) { }
         <?php endif; ?>
 
@@ -2224,19 +2323,53 @@ $state = [
             const scrollTabs = ['overview'];
             document.querySelector('.workspace-shell')?.classList.toggle('workspace-scroll-mode', scrollTabs.includes(tab));
             const isTakeoff = (tab === 'takeoff');
+            const isDocuments = (tab === 'documents');
+            const isEstimating = (tab === 'estimating');
             document.querySelector('.project-subhead-wrapper')?.classList.toggle('is-takeoff-tab', isTakeoff);
             document.querySelector('.workspace-shell')?.classList.toggle('is-takeoff-tab', isTakeoff);
             document.body.classList.toggle('is-takeoff-tab', isTakeoff);
+            document.querySelector('.project-subhead-wrapper')?.classList.toggle('is-documents-tab', isDocuments);
+            document.querySelector('.workspace-shell')?.classList.toggle('is-documents-tab', isDocuments);
+            document.body.classList.toggle('is-documents-tab', isDocuments);
+            document.querySelector('.project-subhead-wrapper')?.classList.toggle('is-estimating-tab', isEstimating);
+            document.querySelector('.workspace-shell')?.classList.toggle('is-estimating-tab', isEstimating);
+            document.body.classList.toggle('is-estimating-tab', isEstimating);
             const footer = document.querySelector('.bb-brightronix-footer');
             if (footer) footer.style.display = isTakeoff ? 'none' : '';
+            window.onDocumentsTabVisibilityChange?.(isDocuments);
             if (!isTakeoff) {
                 const info = document.getElementById('takeoffSubheadItemInfo');
                 if (info) {
                     info.style.display = 'none';
                     info.classList.remove('is-visible');
                 }
-            } else {
+            }
+            if (!isDocuments) {
+                const docInfo = document.getElementById('documentsSubheadItemInfo');
+                if (docInfo) {
+                    docInfo.style.display = 'none';
+                    docInfo.classList.remove('is-visible');
+                }
+            }
+            if (!isEstimating) {
+                const estInfo = document.getElementById('estimatingSubheadItemInfo');
+                if (estInfo) {
+                    estInfo.style.display = 'none';
+                    estInfo.classList.remove('is-visible');
+                }
+                document.getElementById('estimatingSubheadMovePopover')?.remove();
+            }
+            if (isDocuments) {
                 setTimeout(() => {
+                    window.syncDocumentsSubheadInfo?.();
+                }, 0);
+            } else if (isEstimating) {
+                setTimeout(() => {
+                    window.syncEstimatingSubheadInfo?.();
+                }, 0);
+            } else if (isTakeoff) {
+                setTimeout(() => {
+                    window.updateTakeoffSubheadInfo?.();
                     window.syncTakeoffLayout?.();
                 }, 0);
             }
@@ -2264,10 +2397,38 @@ $state = [
                 if (ProjectState.selectedDocumentId) url.searchParams.set('file_id', ProjectState.selectedDocumentId);
                 history.pushState({ ...ProjectState }, '', url.toString());
             }
+            if (tab === 'documents') {
+                window.ensureDashboardFeature?.('pdfjs').then(function () {
+                    if (window.pdfjsLib) {
+                        window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+                    }
+                    window.onDocumentsTabVisibilityChange?.(true);
+                });
+            } else if (tab === 'proposal') {
+                window.ensureDashboardFeature?.('proposal').then(function () {
+                    window.dispatchEvent(new CustomEvent('takeoff:tab-activated', { detail: { tab: 'proposal' } }));
+                });
+            }
             if (tab === 'takeoff') {
+                if (window._pendingTakeoffDrawingId) {
+                    const pendingId = Number(window._pendingTakeoffDrawingId);
+                    window._pendingTakeoffDrawingId = null;
+                    if (pendingId > 0) {
+                        ProjectState.selectedDocumentId = pendingId;
+                        ProjectState.selectedDrawingId = pendingId;
+                    }
+                    if (typeof window.projectTakeoffRefreshDrawings === 'function') {
+                        window.projectTakeoffRefreshDrawings(pendingId || null);
+                    }
+                } else if (window._pendingTakeoffSync) {
+                    window._pendingTakeoffSync = false;
+                    if (typeof window.projectTakeoffRefreshDrawings === 'function') {
+                        window.projectTakeoffRefreshDrawings(ProjectState.selectedDocumentId || null);
+                    }
+                }
                 let drawing = selectedDocument();
                 if (!drawing || drawing.source !== 'legacy_file') {
-                    drawing = ProjectState.documents.find(doc => doc.source === 'legacy_file' && ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'heic'].includes(String(doc.extension || '').toLowerCase()));
+                    drawing = ProjectState.documents.find(doc => doc.source === 'legacy_file' && ['pdf', 'png', 'jpg', 'jpeg', 'webp', 'gif', 'bmp', 'tif', 'tiff', 'svg', 'heic'].includes(String(doc.extension || '').toLowerCase()));
                     if (drawing) {
                         ProjectState.selectedDocumentId = Number(drawing.id);
                         ProjectState.selectedDrawingId = Number(drawing.id);
@@ -2279,6 +2440,19 @@ $state = [
                         ? window.projectTakeoffEditorUrl(drawing.id)
                         : 'editor.php?id=' + encodeURIComponent(drawing.id) + '&embedded=1';
                     if (!takeoffFrame.getAttribute('src') || !takeoffFrame.getAttribute('src').includes('id=' + encodeURIComponent(drawing.id))) {
+                        const drawingLabel = drawing.filename || drawing.title || 'plano';
+                        if (typeof window.showTakeoffCanvasLoader === 'function') {
+                            window.showTakeoffCanvasLoader(`Renderizando y cargando plano (${drawingLabel}) en Takeoff...`);
+                        }
+                        const hideLoaderFallback = setTimeout(() => {
+                            if (typeof window.hideTakeoffCanvasLoader === 'function') window.hideTakeoffCanvasLoader();
+                        }, 6000);
+                        takeoffFrame.addEventListener('load', () => {
+                            clearTimeout(hideLoaderFallback);
+                            setTimeout(() => {
+                                if (typeof window.hideTakeoffCanvasLoader === 'function') window.hideTakeoffCanvasLoader();
+                            }, 280);
+                        }, { once: true });
                         takeoffFrame.src = expectedSrc;
                     }
                     takeoffFrame.style.display = 'block';
@@ -2449,7 +2623,7 @@ $state = [
                 };
                 xhr.onload = () => {
                     let result = null;
-                    try { result = JSON.parse(xhr.responseText); } catch (_) {}
+                    try { result = JSON.parse(xhr.responseText); } catch (_) { }
                     if (xhr.status >= 200 && xhr.status < 300 && result?.status === 'success') resolve(result);
                     else reject(new Error(result?.msg || `Upload failed (HTTP ${xhr.status || 0}).`));
                 };
@@ -2462,28 +2636,40 @@ $state = [
             const files = Array.from(this.files || []);
             this.value = '';
             if (!files.length) return;
+            if (typeof window.uploadProjectDocumentsWithModal === 'function') {
+                await window.uploadProjectDocumentsWithModal(files);
+                return;
+            }
 
-            const host = document.createElement('div');
-            host.style.cssText = 'position:fixed;right:24px;bottom:24px;z-index:10000;width:min(420px,calc(100vw - 48px));padding:16px;border-radius:12px;background:#111827;color:#fff;box-shadow:0 14px 40px rgba(0,0,0,.35)';
-            const label = document.createElement('div');
-            const count = document.createElement('div');
-            count.style.cssText = 'font-size:12px;color:#cbd5e1;margin:5px 0';
-            const track = document.createElement('div');
-            track.style.cssText = 'height:8px;border-radius:999px;overflow:hidden;background:#334155';
-            const bar = document.createElement('div');
-            bar.style.cssText = 'width:0;height:100%;background:#3b82f6;transition:width .15s ease';
-            const results = document.createElement('div');
-            results.style.cssText = 'font-size:12px;max-height:140px;overflow:auto;margin-top:8px';
-            track.appendChild(bar);
-            host.append(label, count, track, results);
-            document.body.appendChild(host);
+            const allowedExts = new Set(['pdf', 'png', 'jpg', 'jpeg', 'gif', 'webp', 'bmp', 'tif', 'tiff', 'svg']);
+            const validFiles = [];
+            const invalidFiles = [];
+            for (const file of files) {
+                const ext = String(file.name.split('.').pop() || '').toLowerCase();
+                if (allowedExts.has(ext)) validFiles.push(file);
+                else invalidFiles.push(file);
+            }
+            if (invalidFiles.length) {
+                alert('Cannot process unsupported file(s): ' + invalidFiles.map(f => f.name).join(', ') + '. Only PDF and image files are allowed.');
+            }
+            if (!validFiles.length) return;
+
+            const modal = document.getElementById('pdDocumentUploadModal');
+            const label = document.getElementById('docUploadFileName');
+            const count = document.getElementById('docUploadModalCounter');
+            const percentEl = document.getElementById('docUploadFilePercent');
+            const bar = document.getElementById('docUploadProgressBar');
+            const statusText = document.getElementById('docUploadStatusText');
+            if (modal) modal.classList.add('open');
 
             const errors = [];
             let completed = 0;
             let succeeded = 0;
-            for (const file of files) {
-                label.textContent = file.name;
-                count.textContent = `${completed} / ${files.length} · 0%`;
+            for (const file of validFiles) {
+                if (label) label.textContent = file.name;
+                if (count) count.textContent = `${completed + 1} / ${validFiles.length}`;
+                if (percentEl) percentEl.textContent = '0%';
+                if (bar) bar.style.width = '0%';
                 if (file.size > MAX_PROJECT_FILE_BYTES) {
                     errors.push({ filename: file.name, message: 'File exceeds the 10 GB limit.' });
                     completed++;
@@ -2491,25 +2677,27 @@ $state = [
                 }
                 try {
                     await uploadProjectFile(file, percent => {
-                        count.textContent = `${completed} / ${files.length} · ${percent}%`;
-                        bar.style.width = `${Math.round(((completed + percent / 100) / files.length) * 100)}%`;
+                        if (percentEl) percentEl.textContent = `${percent}%`;
+                        if (bar) bar.style.width = `${percent}%`;
                     });
+                    if (percentEl) percentEl.textContent = '100%';
+                    if (bar) bar.style.width = '100%';
                     succeeded++;
                 } catch (error) {
                     errors.push({ filename: file.name, message: error.message || 'Upload failed.' });
                 }
                 completed++;
             }
-            bar.style.width = '100%';
-            label.textContent = errors.length ? `${succeeded} uploaded, ${errors.length} failed` : `${succeeded} uploaded`;
-            count.textContent = `${completed} / ${files.length}`;
-            for (const error of errors) {
-                const row = document.createElement('div');
-                row.style.color = '#fca5a5';
-                row.textContent = `${error.filename}: ${error.message}`;
-                results.appendChild(row);
+            if (bar) bar.style.width = '100%';
+            if (percentEl) percentEl.textContent = '100%';
+            if (statusText) statusText.textContent = errors.length ? `${succeeded} uploaded, ${errors.length} failed` : 'Upload completed';
+            await new Promise(r => setTimeout(r, 2000));
+            if (modal) modal.classList.remove('open');
+            if (errors.length) {
+                alert(errors.map(e => `${e.filename}: ${e.message}`).join('\n'));
+            } else {
+                location.reload();
             }
-            if (!errors.length) location.reload();
         });
 
         function alignOverviewWonBtn() {
@@ -2534,16 +2722,18 @@ $state = [
         setActiveTab(ProjectState.activeTab || 'overview', false);
         setTimeout(alignOverviewWonBtn, 60);
     </script>
-    <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
-    <script>if (window.pdfjsLib) window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';</script>
+    <?php if ($activeTab === 'documents'): ?>
+        <script src="https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js"></script>
+        <script>if (window.pdfjsLib) window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';</script>
+    <?php endif; ?>
     <script src="../assets/project_overview.js?v=<?= filemtime(__DIR__ . '/../assets/project_overview.js') ?>"></script>
     <script src="../assets/estimating_catalog_snapshot_service.js?v=estimating-catalog-snapshot-20260827-1"></script>
-    <script src="../assets/catalog_change_detection_service.js?v=catalog-change-detection-20260827-1"></script>
-    <script src="../assets/takeoff_estimating_sync_service.js?v=estimating-qty-override-20261028-1"></script>
-    <script src="../assets/project_estimate_footer.js?v=<?= filemtime(__DIR__ . '/../assets/project_estimate_footer.js') ?>"></script>
+    <script src="../assets/takeoff_estimating_sync_service.js?v=<?= filemtime(__DIR__ . '/../assets/takeoff_estimating_sync_service.js') ?>"></script>
+    <script
+        src="../assets/project_estimate_footer.js?v=<?= filemtime(__DIR__ . '/../assets/project_estimate_footer.js') ?>"></script>
     <script src="../assets/catalog_item_contract.js?v=catalog-item-contract-20260826-1"></script>
-    <script src="../assets/catalog_metadata.js?v=catalog-metadata-20260826-1"></script>
-    <script src="../assets/catalog_service.js?v=catalog-service-20260826-1"></script>
+    <script src="../assets/catalog_metadata.js?v=<?= filemtime(__DIR__ . '/../assets/catalog_metadata.js') ?>"></script>
+    <script src="../assets/catalog_service.js?v=<?= filemtime(__DIR__ . '/../assets/catalog_service.js') ?>"></script>
     <script src="../assets/boq_catalog_adapter.js?v=boq-catalog-boundary-20260826-1"></script>
     <script src="../assets/takeoff_catalog_adapter.js?v=takeoff-catalog-boundary-20260826-1"></script>
     <script src="../assets/takeoff_color_palette.js?v=takeoff-duplicate-color-20260831-1"></script>
@@ -2552,16 +2742,150 @@ $state = [
     <script src="../assets/estimating_assembly_expansion_adapter.js?v=estimating-assembly-adapter-20260828-1"></script>
     <script src="../assets/quantity_format_service.js?v=quantity-context-format-20260831-1"></script>
     <script src="../assets/estimate_calculation_service.js?v=estimating-normal-item-quantity-20260831-1"></script>
-    <script src="../assets/catalog_update_preview_service.js?v=catalog-update-preview-20260827-1"></script>
-    <script src="../assets/estimating_export_service.js?v=estimating-boq-export-20260820-1"></script>
-    <script src="../assets/estimating_workspace_service.js?v=workspace-primary-20261028-3"></script>
-    <script src="../assets/catalog_update_application_service.js?v=catalog-update-application-20260827-2"></script>
+    <script>
+        (function () {
+            window.DASHBOARD_LAZY_SCRIPTS = Object.assign(window.DASHBOARD_LAZY_SCRIPTS || {}, {
+                'estimating-export': [
+                    '../assets/estimating_export_service.js?v=estimating-boq-export-20260820-1'
+                ],
+                'catalog-update': [
+                    '../assets/catalog_change_detection_service.js?v=catalog-change-detection-20260827-1',
+                    '../assets/catalog_update_preview_service.js?v=catalog-update-preview-20260827-1',
+                    '../assets/catalog_update_application_service.js?v=catalog-update-application-20260827-2',
+                    '../assets/catalog_update_ui.js?v=<?= filemtime(__DIR__ . '/../assets/catalog_update_ui.js') ?>'
+                ],
+                'pdfjs': [
+                    'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.min.js'
+                ],
+                'proposal': [
+                    '../assets/project_proposal.js?v=<?= filemtime(__DIR__ . '/../assets/project_proposal.js') ?>'
+                ]
+            });
+
+            const featurePromises = new Map();
+            const scriptPromises = new Map();
+
+            function loadSequentialScript(src) {
+                if (scriptPromises.has(src)) return scriptPromises.get(src);
+                const base = src.split('?')[0].split('/').pop();
+                if (base === 'pdf.min.js' && window.pdfjsLib) {
+                    const p = Promise.resolve();
+                    scriptPromises.set(src, p);
+                    return p;
+                }
+                if (base === 'project_proposal.js' && window.__proposalModuleLoaded) {
+                    const p = Promise.resolve();
+                    scriptPromises.set(src, p);
+                    return p;
+                }
+                const promise = new Promise((resolve, reject) => {
+                    const script = document.createElement('script');
+                    script.src = src;
+                    script.async = false;
+                    script.onload = () => {
+                        if (base === 'project_proposal.js') window.__proposalModuleLoaded = true;
+                        if (base === 'pdf.min.js' && window.pdfjsLib) {
+                            window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';
+                        }
+                        resolve();
+                    };
+                    script.onerror = () => reject(new Error('Failed to load dashboard module: ' + src));
+                    document.body.appendChild(script);
+                });
+                scriptPromises.set(src, promise);
+                return promise;
+            }
+
+            window.ensureDashboardFeature = function (featureName) {
+                const key = String(featureName || '');
+                if (!key) return Promise.resolve();
+                if (key === 'estimating-export' && window.EstimatingExportService) return Promise.resolve();
+                if (key === 'catalog-update' && window.CatalogUpdateUI) return Promise.resolve();
+                if (key === 'proposal' && window.__proposalModuleLoaded) return Promise.resolve();
+                if (key === 'pdfjs' && window.pdfjsLib) return Promise.resolve();
+                if (featurePromises.has(key)) return featurePromises.get(key);
+                const list = (window.DASHBOARD_LAZY_SCRIPTS && window.DASHBOARD_LAZY_SCRIPTS[key]) || [];
+                const chain = list.reduce((prev, src) => prev.then(() => loadSequentialScript(src)), Promise.resolve())
+                    .catch((err) => {
+                        featurePromises.delete(key);
+                        throw err;
+                    });
+                featurePromises.set(key, chain);
+                return chain;
+            };
+
+            // Keep ProjectState.estimateSummary updated even while Proposal script is deferred
+            window.addEventListener('takeoff:estimate-summary-updated', function (event) {
+                if (window.__proposalModuleLoaded || !window.ProjectState) return;
+                const detail = event.detail;
+                window.ProjectState.estimateSummary = detail ? {
+                    direct: detail.direct,
+                    byCategory: detail.byCategory,
+                    preTaxTotal: detail.preTaxTotal,
+                    preTaxMarkup: detail.preTaxTotal,
+                    totalTax: detail.totalTax,
+                    taxes: detail.totalTax,
+                    profit: detail.profit,
+                    estimateTotal: detail.estimateTotal,
+                    material: detail.direct?.materialSales,
+                    labor: detail.direct?.laborSales,
+                    equipment: detail.direct?.equipmentSales,
+                    total: detail.estimateTotal
+                } : {};
+            });
+
+            // Lazy-load Catalog Update stack on first click with loading blur card
+            document.addEventListener('click', async function (event) {
+                const trigger = event.target?.closest?.('[data-est-action]');
+                if (!trigger || trigger.dataset?.estAction !== 'catalog-update' || window.CatalogUpdateUI) return;
+                event.preventDefault();
+                event.stopImmediatePropagation();
+                document.querySelectorAll('#optionsMenu.open, .est-menu.open').forEach((menu) => menu.classList.remove('open'));
+                const estMain = document.querySelector('#estimatingModule .est-main');
+                let overlay = estMain?.querySelector('#estLoadingOverlay');
+                let createdTemp = false;
+                if (estMain && !overlay) {
+                    overlay = document.createElement('div');
+                    overlay.id = 'estLoadingOverlay';
+                    overlay.className = 'est-loading-overlay';
+                    overlay.setAttribute('role', 'status');
+                    overlay.setAttribute('aria-live', 'polite');
+                    overlay.innerHTML = '<div class="est-loading-card"><i class="fas fa-circle-notch fa-spin" aria-hidden="true"></i><span id="estLoadingOverlayText">Cargando actualización desde Cost Catalog...</span></div>';
+                    estMain.appendChild(overlay);
+                    createdTemp = true;
+                } else if (overlay) {
+                    const txt = overlay.querySelector('#estLoadingOverlayText');
+                    if (txt) txt.textContent = 'Cargando actualización desde Cost Catalog...';
+                    overlay.hidden = false;
+                }
+                try {
+                    await window.ensureDashboardFeature('catalog-update');
+                    if (overlay && !createdTemp) overlay.hidden = true;
+                    if (overlay && createdTemp) overlay.remove();
+                    if (window.CatalogUpdateUI && typeof window.CatalogUpdateUI.checkCatalog === 'function') {
+                        window.CatalogUpdateUI.checkCatalog();
+                    }
+                } catch (err) {
+                    if (overlay && !createdTemp) overlay.hidden = true;
+                    if (overlay && createdTemp) overlay.remove();
+                    console.error('Failed to load Catalog Update tools:', err);
+                    alert('Unable to load Cost Catalog Update tools. Please try again.');
+                }
+            }, true);
+        })();
+    </script>
+    <script
+        src="../assets/estimating_workspace_service.js?v=<?= filemtime(__DIR__ . '/../assets/estimating_workspace_service.js') ?>"></script>
     <script src="../assets/estimating_catalog_adapter.js?v=estimating-catalog-snapshot-20260827-1"></script>
-    <script src="../assets/project_estimating.js?v=<?= filemtime(__DIR__ . '/../assets/project_estimating.js') ?>"></script>
-    <script src="../assets/catalog_update_ui.js?v=<?= filemtime(__DIR__ . '/../assets/catalog_update_ui.js') ?>"></script>
-    <script src="../assets/project_proposal.js?v=<?= filemtime(__DIR__ . '/../assets/project_proposal.js') ?>"></script>
-    <script src="../assets/won_project_export.js?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.js') ?>"></script>
-    <script src="../assets/global_tools.js"></script>
+    <script
+        src="../assets/project_estimating.js?v=<?= filemtime(__DIR__ . '/../assets/project_estimating.js') ?>"></script>
+    <?php if ($activeTab === 'proposal'): ?>
+        <script>window.__proposalModuleLoaded = true;</script>
+        <script src="../assets/project_proposal.js?v=<?= filemtime(__DIR__ . '/../assets/project_proposal.js') ?>"></script>
+    <?php endif; ?>
+    <script defer
+        src="../assets/won_project_export.js?v=<?= filemtime(__DIR__ . '/../assets/won_project_export.js') ?>"></script>
+    <script src="../assets/global_tools.js?v=<?= filemtime(__DIR__ . '/../assets/global_tools.js') ?>"></script>
 </body>
 
 </html>

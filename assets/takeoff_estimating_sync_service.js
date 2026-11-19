@@ -38,9 +38,9 @@
             unitMaterialCost: number(layer.unitMaterialCost ?? layer.unitCost ?? layer.unit_cost ?? previous?.unitMaterialCost),
             unitLabor: number(layer.unitLabor ?? layer.laborHours ?? layer.labor_hours ?? previous?.unitLabor),
             laborUnitType: layer.laborUnitType || previous?.laborUnitType || 'hrs',
-            difficulty: (layer.difficulty !== undefined && layer.difficulty !== null)
+            difficulty: (layer.difficulty !== undefined && layer.difficulty !== null && layer.difficulty !== '')
                 ? number(layer.difficulty)
-                : (previous?.difficulty !== undefined ? number(previous.difficulty) : 1),
+                : (previous?.difficulty !== undefined ? previous.difficulty : null),
             groupId: stringId(group.id),
             groupName: group.name || 'Default Group'
         };
@@ -65,9 +65,48 @@
             }
             CatalogSnapshot.refreshEffectiveLegacyFields(item);
         }
+        if (layer.copiedFromTakeoffLayerId && !item.copiedFromTakeoffLayerId) {
+            item.copiedFromTakeoffLayerId = stringId(layer.copiedFromTakeoffLayerId);
+        }
         if (Array.isArray(previous?.children) && previous.children.length > 0) {
             item.children = JSON.parse(JSON.stringify(previous.children));
             item.isAssembly = true;
+        } else if (Array.isArray(layer.children) && layer.children.length > 0) {
+            item.children = JSON.parse(JSON.stringify(layer.children));
+            item.isAssembly = true;
+            item.itemType = 'assembly';
+        } else if (Array.isArray(item.catalogSnapshot?.assemblyComponents) && item.catalogSnapshot.assemblyComponents.length > 0
+            && (!Array.isArray(item.children) || item.children.length === 0)) {
+            item.children = item.catalogSnapshot.assemblyComponents.map((comp, idx) => ({
+                id: `${item.id}_comp_${idx}`,
+                catalogItemId: comp.catalogItemId ?? comp.part_catalog_item_id ?? null,
+                assemblyComponentId: comp.id ?? null,
+                name: comp.name || 'Assembly component',
+                description: comp.description || '',
+                uom: comp.uom || 'ea',
+                itemType: comp.itemType || 'part',
+                costCode: comp.costCode || '',
+                ratio: number(comp.quantity || 1),
+                quantity: number(comp.quantity || 1),
+                ratioType: comp.ratioType || 'per_unit',
+                spacing: comp.spacing ?? null,
+                componentWaste: number(comp.waste || 0),
+                pricingSnapshot: comp.pricingSnapshot ? JSON.parse(JSON.stringify(comp.pricingSnapshot)) : undefined,
+                unitMaterialCost: number(comp.pricingSnapshot?.materialUnitCost),
+                unitEquipmentCost: number(comp.pricingSnapshot?.equipmentUnitCost),
+                unitSubcontractorCost: number(comp.pricingSnapshot?.subcontractorUnitCost),
+                unitLabor: number(comp.pricingSnapshot?.laborHoursPerUnit),
+                laborUnitType: 'hrs',
+                laborRate: number(comp.pricingSnapshot?.laborRate) > 0 ? number(comp.pricingSnapshot.laborRate) : null
+            }));
+            item.isAssembly = true;
+            item.itemType = 'assembly';
+        }
+        if (item.isAssembly
+            || layer.isAssembly === true
+            || String(layer.itemType || layer.item_type || item.catalogSnapshot?.type || layer.catalogMetadata?.type || '').toLowerCase() === 'assembly') {
+            item.isAssembly = true;
+            item.itemType = 'assembly';
         }
         if (previous?.factorOverride !== undefined && previous.factorOverride !== null) {
             item.factorOverride = previous.factorOverride;
@@ -134,23 +173,47 @@
 
     function reconcileLinkedOnly(existingGroups = [], incomingGroups = []) {
         const incomingByLayer = new Map();
-        (incomingGroups || []).forEach(group => (group.items || group.layers || []).forEach(layer => {
-            const layerId = stringId(layer.takeoffLayerId ?? layer.id);
-            if (layerId) incomingByLayer.set(layerId, { layer, group });
-        }));
+        const incomingGroupById = new Map();
+        const incomingGroupByTakeoffId = new Map();
+        (incomingGroups || []).forEach(group => {
+            const gId = stringId(group.id);
+            const tgId = stringId(group.takeoffGroupId);
+            if (gId) incomingGroupById.set(gId, group);
+            if (tgId) incomingGroupByTakeoffId.set(tgId, group);
+            (group.items || group.layers || []).forEach(layer => {
+                const layerId = stringId(layer.takeoffLayerId ?? layer.id);
+                if (layerId) incomingByLayer.set(layerId, { layer, group });
+            });
+        });
         const consumed = new Set();
-        const result = (existingGroups || []).map((group, groupIndex) => ({
-            ...group,
-            items: (group.items || []).flatMap(existing => {
+        const result = (existingGroups || []).map((group, groupIndex) => {
+            const gId = stringId(group.id);
+            const tgId = stringId(group.takeoffGroupId);
+            let matchedIncomingGroup = (gId && incomingGroupById.get(gId))
+                || (tgId && incomingGroupByTakeoffId.get(tgId))
+                || null;
+            const items = (group.items || []).flatMap(existing => {
                 const layerId = stringId(existing.takeoffLayerId);
                 if (!layerId) return [{ ...existing }];
                 const incoming = incomingByLayer.get(layerId);
                 if (!incoming) return [];
+                if (!matchedIncomingGroup && incoming.group) matchedIncomingGroup = incoming.group;
                 consumed.add(layerId);
                 return [takeoffItem({ ...incoming.layer, id: layerId }, incoming.group, existing)];
-            }),
-            sortOrder: group.sortOrder ?? groupIndex
-        }));
+            });
+            const isTakeoffLinkedGroup = Boolean(
+                group.source === 'takeoff'
+                || group.takeoffMirror
+                || group.takeoffGroupId
+                || String(group.id || '').startsWith('takeoff_')
+            );
+            return {
+                ...group,
+                name: (isTakeoffLinkedGroup && matchedIncomingGroup?.name) ? matchedIncomingGroup.name : group.name,
+                items,
+                sortOrder: group.sortOrder ?? groupIndex
+            };
+        });
         (incomingGroups || []).forEach((incomingGroup, groupIndex) => {
             const pending = (incomingGroup.items || incomingGroup.layers || []).filter(layer => {
                 const layerId = stringId(layer.takeoffLayerId ?? layer.id);

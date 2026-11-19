@@ -11,7 +11,7 @@ if (!is_array($input)) $input = [];
 $action = (string)($_GET['action'] ?? $_POST['action'] ?? $input['action'] ?? ($_SERVER['REQUEST_METHOD'] === 'POST' ? 'save' : 'list'));
 
 $readActions = ['list'];
-$mutationActions = ['save'];
+$mutationActions = ['save', 'delete'];
 
 $user = takeoff_guard_api_action($action, $readActions, $mutationActions);
 
@@ -138,6 +138,26 @@ switch ($action) {
         customer_json([
             'status' => 'success',
             'data' => $savedCustomer,
+            'customers' => get_all_customers($pdo)
+        ]);
+
+    case 'delete':
+        $id = isset($input['id']) && is_numeric($input['id']) && (int)$input['id'] > 0
+            ? (int)$input['id']
+            : (isset($_GET['id']) && is_numeric($_GET['id']) && (int)$_GET['id'] > 0 ? (int)$_GET['id'] : 0);
+        if ($id <= 0) {
+            customer_json(['status' => 'error', 'msg' => 'Valid customer id is required to delete'], 422);
+        }
+        $checkStmt = $pdo->prepare("SELECT id FROM customers WHERE id = ? LIMIT 1");
+        $checkStmt->execute([$id]);
+        if (!$checkStmt->fetchColumn()) {
+            customer_json(['status' => 'error', 'msg' => 'Customer not found in directory'], 404);
+        }
+        $delStmt = $pdo->prepare("DELETE FROM customers WHERE id = ?");
+        $delStmt->execute([$id]);
+        customer_json([
+            'status' => 'success',
+            'deleted_id' => $id,
             'customers' => get_all_customers($pdo)
         ]);
 

@@ -6,6 +6,18 @@
     if (!Contract) throw new Error('CatalogItemContract must load before CatalogService');
 
     const DEFAULT_ENDPOINT = '../api/cost_catalog.php';
+    const CACHE_TTL_MS = 60000;
+    const payloadCache = new Map();
+    const inflightPayloads = new Map();
+
+    function invalidateCache() {
+        payloadCache.clear();
+        inflightPayloads.clear();
+    }
+
+    if (typeof global.addEventListener === 'function') {
+        global.addEventListener('catalog:updated', invalidateCache);
+    }
 
     class CatalogServiceError extends Error {
         constructor(code, message, options = {}) {
@@ -82,28 +94,55 @@
         if (typeof fetchImpl !== 'function') {
             throw new CatalogServiceError('FETCH_UNAVAILABLE', 'No fetch implementation is available.');
         }
-        let response;
+        const url = endpointUrl(options.endpoint || DEFAULT_ENDPOINT, options);
+        const canUseCache = !options.fetchImpl && !options.forceRefresh;
+        if (canUseCache) {
+            const cached = payloadCache.get(url);
+            if (cached && (Date.now() - cached.storedAt) < CACHE_TTL_MS) {
+                return cached.data;
+            }
+            if (inflightPayloads.has(url)) {
+                return inflightPayloads.get(url);
+            }
+        }
+
+        const pending = (async () => {
+            let response;
+            try {
+                response = await fetchImpl(url, {
+                    headers: { Accept: 'application/json' }
+                });
+            } catch (cause) {
+                throw new CatalogServiceError('NETWORK_ERROR', 'Unable to reach the Cost Catalog.', { cause });
+            }
+            let json;
+            try {
+                json = await response.json();
+            } catch (cause) {
+                throw new CatalogServiceError('INVALID_RESPONSE', 'Cost Catalog returned an invalid response.', {
+                    status: response.status, cause
+                });
+            }
+            if (!response.ok || json?.status !== 'success') {
+                throw new CatalogServiceError(json?.code || 'API_ERROR', json?.msg || 'Cost Catalog request failed.', {
+                    status: response.status, cause: json
+                });
+            }
+            const data = json.data || {};
+            if (canUseCache) {
+                payloadCache.set(url, { data, storedAt: Date.now() });
+            }
+            return data;
+        })();
+
+        if (canUseCache) {
+            inflightPayloads.set(url, pending);
+        }
         try {
-            response = await fetchImpl(endpointUrl(options.endpoint || DEFAULT_ENDPOINT, options), {
-                headers: { Accept: 'application/json' }
-            });
-        } catch (cause) {
-            throw new CatalogServiceError('NETWORK_ERROR', 'Unable to reach the Cost Catalog.', { cause });
+            return await pending;
+        } finally {
+            if (canUseCache) inflightPayloads.delete(url);
         }
-        let json;
-        try {
-            json = await response.json();
-        } catch (cause) {
-            throw new CatalogServiceError('INVALID_RESPONSE', 'Cost Catalog returned an invalid response.', {
-                status: response.status, cause
-            });
-        }
-        if (!response.ok || json?.status !== 'success') {
-            throw new CatalogServiceError(json?.code || 'API_ERROR', json?.msg || 'Cost Catalog request failed.', {
-                status: response.status, cause: json
-            });
-        }
-        return json.data || {};
     }
 
     function normalizedItems(payload, options = {}) {
@@ -171,6 +210,7 @@
 
     const api = {
         CatalogServiceError,
+        invalidateCache,
         getSnapshot,
         listCatalogs,
         listCategories,

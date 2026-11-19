@@ -94,8 +94,18 @@ function pew_decode($json, $fallback = array()) {
 function pew_table_columns(PDO $pdo, $table) {
     static $cache = array();
     if (isset($cache[$table])) return $cache[$table];
-    $allowed = array('estimates', 'estimate_items', 'estimate_markups', 'estimate_workspace_states');
+    $allowed = array(
+        'estimates', 'estimate_items', 'estimate_markups', 'estimate_workspace_states',
+        'takeoff_layers', 'takeoff_count_markers', 'takeoff_linear_segments',
+        'takeoff_estimate_states', 'takeoff_estimate_scales'
+    );
     if (!in_array($table, $allowed, true)) throw new RuntimeException('Unsupported schema table.');
+    $existsStmt = $pdo->prepare('SELECT 1 FROM information_schema.TABLES WHERE TABLE_SCHEMA = DATABASE() AND TABLE_NAME = ? LIMIT 1');
+    $existsStmt->execute(array($table));
+    if (!$existsStmt->fetchColumn()) {
+        $cache[$table] = array();
+        return $cache[$table];
+    }
     $rows = $pdo->query('SHOW COLUMNS FROM `' . $table . '`')->fetchAll(PDO::FETCH_ASSOC);
     $cache[$table] = array_fill_keys(array_map(function ($row) { return (string)$row['Field']; }, $rows), true);
     return $cache[$table];
@@ -451,7 +461,340 @@ function pew_save_markups(PDO $pdo, $estimateId, array $settings) {
     }
 }
 
+function pew_extract_estimate_summary(array $summary, array $estimate) {
+    $direct = isset($summary['direct']) && is_array($summary['direct']) ? $summary['direct'] : array();
+    $subtotal = isset($summary['subtotal']) ? pew_num($summary['subtotal'])
+        : (isset($direct['totalCost']) ? pew_num($direct['totalCost']) : 0);
+    $preTaxMarkup = isset($summary['preTaxMarkup']) ? pew_num($summary['preTaxMarkup'])
+        : (isset($summary['preTaxTotal']) ? pew_num($summary['preTaxTotal']) : 0);
+    $postTaxMarkup = isset($summary['postTaxMarkup']) ? pew_num($summary['postTaxMarkup'])
+        : (isset($summary['postTaxTotal']) ? pew_num($summary['postTaxTotal']) : 0);
+    $taxes = isset($summary['taxes']) ? pew_num($summary['taxes'])
+        : (isset($summary['totalTax']) ? pew_num($summary['totalTax']) : 0);
+    $laborHours = isset($summary['laborHours']) ? pew_num($summary['laborHours'])
+        : (isset($direct['adjustedLaborHours']) ? pew_num($direct['adjustedLaborHours']) : 0);
+    $total = isset($summary['estimateTotal']) ? pew_num($summary['estimateTotal'])
+        : (isset($summary['total']) ? pew_num($summary['total'])
+        : (isset($estimate['estimateTotal']) ? pew_num($estimate['estimateTotal'])
+        : (isset($estimate['totalSales']) ? pew_num($estimate['totalSales']) : 0)));
+    return array(
+        'subtotal' => $subtotal,
+        'markup' => $preTaxMarkup + $postTaxMarkup,
+        'taxes' => $taxes,
+        'total' => $total,
+        'laborHours' => $laborHours,
+    );
+}
+
+function pew_resolve_estimate_total(array $estimateRow, array $snapshot) {
+    if (isset($snapshot['estimateSummary']) && is_array($snapshot['estimateSummary'])) {
+        if (array_key_exists('estimateTotal', $snapshot['estimateSummary'])) {
+            return array(true, pew_num($snapshot['estimateSummary']['estimateTotal']));
+        }
+        if (array_key_exists('total', $snapshot['estimateSummary'])) {
+            return array(true, pew_num($snapshot['estimateSummary']['total']));
+        }
+    }
+    if (array_key_exists('estimateTotal', $snapshot)) {
+        return array(true, pew_num($snapshot['estimateTotal']));
+    }
+    if (array_key_exists('totalSales', $snapshot)) {
+        return array(true, pew_num($snapshot['totalSales']));
+    }
+    $dbTotal = pew_num(isset($estimateRow['total_cost']) ? $estimateRow['total_cost'] : 0);
+    if ($dbTotal > 0) return array(true, $dbTotal);
+    return array(false, 0.0);
+}
+
+function pew_sync_project_primary_estimate_metadata(PDO $pdo, $projectId) {
+    $stmt = $pdo->prepare('SELECT metadata_json FROM projects WHERE id=? AND deleted_at IS NULL LIMIT 1');
+    $stmt->execute(array($projectId));
+    $rawMeta = $stmt->fetchColumn();
+    $meta = is_string($rawMeta) ? pew_decode($rawMeta) : array();
+    if (!is_array($meta)) $meta = array();
+    $previousPrimaryId = isset($meta['primary_estimate_id']) ? (string)$meta['primary_estimate_id'] : '';
+
+    $estStmt = $pdo->prepare(
+        'SELECT e.id, e.total_cost, e.updated_at, ws.client_estimate_id, ws.state_json, ws.updated_at AS ws_updated_at
+         FROM estimates e
+         LEFT JOIN estimate_workspace_states ws ON ws.estimate_id = e.id
+         WHERE e.project_id = ? AND e.deleted_at IS NULL
+         ORDER BY e.id ASC'
+    );
+    $estStmt->execute(array($projectId));
+    $rows = $estStmt->fetchAll(PDO::FETCH_ASSOC);
+    if (!$rows) return;
+
+    $primaryCandidates = array();
+    $metaMatch = null;
+    foreach ($rows as $idx => $row) {
+        $snap = isset($row['state_json']) ? pew_decode($row['state_json']) : array();
+        if (!is_array($snap)) $snap = array();
+        $rows[$idx]['_snapshot'] = $snap;
+        $cid = !empty($row['client_estimate_id']) ? (string)$row['client_estimate_id'] : (string)$row['id'];
+        $rows[$idx]['_client_id'] = $cid;
+        if (!empty($snap['is_primary']) || !empty($snap['isPrimary'])) {
+            $primaryCandidates[] = $rows[$idx];
+        }
+        if ($previousPrimaryId !== '' && ($cid === $previousPrimaryId || (string)$row['id'] === $previousPrimaryId)) {
+            $metaMatch = $rows[$idx];
+        }
+    }
+
+    $chosen = null;
+    if (count($primaryCandidates) === 1) {
+        $chosen = $primaryCandidates[0];
+    } elseif (count($primaryCandidates) > 1) {
+        usort($primaryCandidates, function ($a, $b) {
+            $ta = (string)($a['ws_updated_at'] ?: $a['updated_at'] ?: '');
+            $tb = (string)($b['ws_updated_at'] ?: $b['updated_at'] ?: '');
+            $cmp = strcmp($tb, $ta);
+            return $cmp !== 0 ? $cmp : ((int)$b['id'] - (int)$a['id']);
+        });
+        $chosen = $primaryCandidates[0];
+    } elseif ($metaMatch) {
+        $chosen = $metaMatch;
+    } else {
+        $chosen = $rows[0];
+    }
+
+    $chosenId = $chosen['_client_id'];
+    list($hasExplicitTotal, $resolvedTotal) = pew_resolve_estimate_total($chosen, $chosen['_snapshot']);
+    $meta['primary_estimate_id'] = $chosenId;
+    if ($hasExplicitTotal || ($previousPrimaryId !== '' && $previousPrimaryId !== $chosenId)) {
+        $meta['primary_estimate_total'] = $resolvedTotal;
+        $meta['primary_quote_value'] = $resolvedTotal;
+        $meta['total_sales'] = $resolvedTotal;
+        $meta['estimate_total'] = $resolvedTotal;
+        $meta['primary_estimate_updated_at'] = gmdate('c');
+    }
+    $encodedMeta = json_encode($meta, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    if ($encodedMeta !== false) {
+        $upd = $pdo->prepare('UPDATE projects SET metadata_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?');
+        $upd->execute(array($encodedMeta, $projectId));
+    }
+}
+
+function pew_clone_takeoff_uid($prefix) {
+    try {
+        return $prefix . '_' . bin2hex(random_bytes(8));
+    } catch (Throwable $e) {
+        return $prefix . '_' . str_replace('.', '_', uniqid('', true));
+    }
+}
+function pew_clone_takeoff_workspace_for_estimate(PDO $pdo, $projectId, array &$estimate) {
+    $sourceKey = pew_text(isset($estimate['cloneTakeoffFromEstimateId']) ? $estimate['cloneTakeoffFromEstimateId'] : '', 191);
+    $targetKey = pew_text(isset($estimate['id']) ? $estimate['id'] : '', 191);
+    $layerMap = (isset($estimate['cloneTakeoffLayerMap']) && is_array($estimate['cloneTakeoffLayerMap']))
+        ? $estimate['cloneTakeoffLayerMap'] : array();
+    $groupMap = (isset($estimate['cloneTakeoffGroupMap']) && is_array($estimate['cloneTakeoffGroupMap']))
+        ? $estimate['cloneTakeoffGroupMap'] : array();
+    $itemMap = (isset($estimate['cloneTakeoffItemMap']) && is_array($estimate['cloneTakeoffItemMap']))
+        ? $estimate['cloneTakeoffItemMap'] : array();
+
+    unset($estimate['cloneTakeoffFromEstimateId'], $estimate['cloneTakeoffLayerMap'], $estimate['cloneTakeoffGroupMap'], $estimate['cloneTakeoffItemMap']);
+
+    if ($sourceKey === '' || $targetKey === '' || $sourceKey === $targetKey || $projectId < 1) {
+        return;
+    }
+
+    if (pew_table_columns($pdo, 'takeoff_estimate_states')) {
+        $chk = $pdo->prepare('SELECT 1 FROM takeoff_estimate_states WHERE estimate_key=? AND project_id=? LIMIT 1');
+        $chk->execute(array($targetKey, $projectId));
+        if ($chk->fetchColumn()) return;
+    }
+
+    if (pew_table_columns($pdo, 'takeoff_estimate_scales')) {
+        $scaleStmt = $pdo->prepare('SELECT * FROM takeoff_estimate_scales WHERE estimate_key=? AND project_id=?');
+        $scaleStmt->execute(array($sourceKey, $projectId));
+        foreach ($scaleStmt->fetchAll(PDO::FETCH_ASSOC) as $sc) {
+            unset($sc['created_at'], $sc['updated_at']);
+            $sc['estimate_key'] = $targetKey;
+            $sc['project_id'] = $projectId;
+            $cols = array_keys($sc);
+            $ins = $pdo->prepare('INSERT IGNORE INTO takeoff_estimate_scales (' . implode(',', $cols) . ') VALUES (' . implode(',', array_fill(0, count($cols), '?')) . ')');
+            $ins->execute(array_values($sc));
+        }
+    }
+
+    $dbLayerIdMap = array();
+    if (pew_table_columns($pdo, 'takeoff_layers')) {
+        $layerStmt = $pdo->prepare('SELECT tl.* FROM takeoff_layers tl LEFT JOIN takeoffs t ON t.id=tl.takeoff_id WHERE tl.estimate_key=? AND (tl.project_id=? OR t.project_id=?) AND tl.deleted_at IS NULL ORDER BY tl.id ASC');
+        $layerStmt->execute(array($sourceKey, $projectId, $projectId));
+        foreach ($layerStmt->fetchAll(PDO::FETCH_ASSOC) as $ly) {
+            $oldDbId = (int)$ly['id'];
+            $oldIntKey = (string)(isset($ly['integration_key']) ? $ly['integration_key'] : '');
+            $meta = !empty($ly['metadata_json']) ? pew_decode($ly['metadata_json'], array()) : array();
+            if (!is_array($meta)) $meta = array();
+            $oldProjKey = (string)(isset($meta['project_layer_id']) ? $meta['project_layer_id'] : '');
+
+            $newClientKey = '';
+            foreach (array($oldIntKey, $oldProjKey, (string)$oldDbId) as $candidate) {
+                if ($candidate !== '' && isset($layerMap[$candidate])) {
+                    $newClientKey = (string)$layerMap[$candidate];
+                    break;
+                }
+            }
+            if ($newClientKey === '') {
+                $newClientKey = pew_clone_takeoff_uid('layer');
+                if ($oldIntKey !== '') $layerMap[$oldIntKey] = $newClientKey;
+                if ($oldProjKey !== '') $layerMap[$oldProjKey] = $newClientKey;
+                $layerMap[(string)$oldDbId] = $newClientKey;
+            }
+
+            $meta['estimate_id'] = $targetKey;
+            $meta['project_layer_id'] = $newClientKey;
+            if (!empty($meta['estimating_group_id']) && isset($groupMap[(string)$meta['estimating_group_id']])) {
+                $meta['estimating_group_id'] = (string)$groupMap[(string)$meta['estimating_group_id']];
+            }
+            if (!empty($meta['estimating_item_id']) && isset($itemMap[(string)$meta['estimating_item_id']])) {
+                $meta['estimating_item_id'] = (string)$itemMap[(string)$meta['estimating_item_id']];
+            }
+
+            unset($ly['id'], $ly['created_at'], $ly['updated_at'], $ly['deleted_at']);
+            $ly['estimate_key'] = $targetKey;
+            if (array_key_exists('integration_key', $ly)) $ly['integration_key'] = $newClientKey;
+            if (array_key_exists('metadata_json', $ly)) $ly['metadata_json'] = json_encode($meta, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+            if (array_key_exists('estimate_item_id', $ly)) $ly['estimate_item_id'] = null;
+
+            $cols = array_keys($ly);
+            $ins = $pdo->prepare('INSERT INTO takeoff_layers (' . implode(',', $cols) . ') VALUES (' . implode(',', array_fill(0, count($cols), '?')) . ')');
+            $ins->execute(array_values($ly));
+            $dbLayerIdMap[$oldDbId] = (int)$pdo->lastInsertId();
+        }
+
+        if ($dbLayerIdMap && pew_table_columns($pdo, 'takeoff_count_markers')) {
+            $oldIds = array_keys($dbLayerIdMap);
+            $in = implode(',', array_fill(0, count($oldIds), '?'));
+            $mkStmt = $pdo->prepare("SELECT * FROM takeoff_count_markers WHERE layer_id IN ($in) ORDER BY id ASC");
+            $mkStmt->execute($oldIds);
+            foreach ($mkStmt->fetchAll(PDO::FETCH_ASSOC) as $mk) {
+                $oldLayerId = (int)$mk['layer_id'];
+                if (empty($dbLayerIdMap[$oldLayerId])) continue;
+                unset($mk['id'], $mk['created_at'], $mk['updated_at']);
+                $mk['layer_id'] = $dbLayerIdMap[$oldLayerId];
+                if (array_key_exists('client_uid', $mk)) $mk['client_uid'] = pew_clone_takeoff_uid('m');
+                $cols = array_keys($mk);
+                $ins = $pdo->prepare('INSERT INTO takeoff_count_markers (' . implode(',', $cols) . ') VALUES (' . implode(',', array_fill(0, count($cols), '?')) . ')');
+                $ins->execute(array_values($mk));
+            }
+        }
+
+        if ($dbLayerIdMap && pew_table_columns($pdo, 'takeoff_linear_segments')) {
+            $oldIds = array_keys($dbLayerIdMap);
+            $in = implode(',', array_fill(0, count($oldIds), '?'));
+            $sgStmt = $pdo->prepare("SELECT * FROM takeoff_linear_segments WHERE layer_id IN ($in) ORDER BY id ASC");
+            $sgStmt->execute($oldIds);
+            foreach ($sgStmt->fetchAll(PDO::FETCH_ASSOC) as $sg) {
+                $oldLayerId = (int)$sg['layer_id'];
+                if (empty($dbLayerIdMap[$oldLayerId])) continue;
+                unset($sg['id'], $sg['created_at'], $sg['updated_at']);
+                $sg['layer_id'] = $dbLayerIdMap[$oldLayerId];
+                if (array_key_exists('client_uid', $sg)) $sg['client_uid'] = pew_clone_takeoff_uid('s');
+                $cols = array_keys($sg);
+                $ins = $pdo->prepare('INSERT INTO takeoff_linear_segments (' . implode(',', $cols) . ') VALUES (' . implode(',', array_fill(0, count($cols), '?')) . ')');
+                $ins->execute(array_values($sg));
+            }
+        }
+    }
+
+    if (pew_table_columns($pdo, 'takeoff_estimate_states')) {
+        $stStmt = $pdo->prepare('SELECT drawing_id, project_id, state_json FROM takeoff_estimate_states WHERE estimate_key=? AND project_id=?');
+        $stStmt->execute(array($sourceKey, $projectId));
+        $insState = $pdo->prepare('INSERT IGNORE INTO takeoff_estimate_states (estimate_key, drawing_id, project_id, state_json, revision) VALUES (?, ?, ?, ?, 1)');
+        foreach ($stStmt->fetchAll(PDO::FETCH_ASSOC) as $row) {
+            $snap = pew_decode($row['state_json'], array());
+            if (is_array($snap)) {
+                if (isset($snap['layers']) && is_array($snap['layers'])) {
+                    foreach ($snap['layers'] as &$sLayer) {
+                        if (!is_array($sLayer)) continue;
+                        $oldKey = (string)(isset($sLayer['client_uid']) ? $sLayer['client_uid'] : (isset($sLayer['id']) ? $sLayer['id'] : ''));
+                        $meta = (isset($sLayer['metadata_json']) && is_array($sLayer['metadata_json'])) ? $sLayer['metadata_json'] : array();
+                        $metaProjKey = (string)(isset($meta['project_layer_id']) ? $meta['project_layer_id'] : '');
+                        $mappedKey = '';
+                        foreach (array($oldKey, $metaProjKey, isset($sLayer['id']) ? (string)$sLayer['id'] : '') as $cand) {
+                            if ($cand !== '' && isset($layerMap[$cand])) { $mappedKey = (string)$layerMap[$cand]; break; }
+                        }
+                        if ($mappedKey === '') {
+                            $mappedKey = pew_clone_takeoff_uid('layer');
+                            if ($oldKey !== '') $layerMap[$oldKey] = $mappedKey;
+                            if ($metaProjKey !== '') $layerMap[$metaProjKey] = $mappedKey;
+                        }
+                        $sLayer['client_uid'] = $mappedKey;
+                        $sLayer['integration_key'] = $mappedKey;
+                        if (isset($sLayer['id']) && !is_numeric($sLayer['id'])) $sLayer['id'] = $mappedKey;
+                        if (isset($sLayer['id']) && is_numeric($sLayer['id']) && isset($dbLayerIdMap[(int)$sLayer['id']])) {
+                            $sLayer['id'] = $dbLayerIdMap[(int)$sLayer['id']];
+                        }
+                        $meta['project_layer_id'] = $mappedKey;
+                        $meta['estimate_id'] = $targetKey;
+                        if (!empty($meta['estimating_group_id']) && isset($groupMap[(string)$meta['estimating_group_id']])) {
+                            $meta['estimating_group_id'] = (string)$groupMap[(string)$meta['estimating_group_id']];
+                        }
+                        if (!empty($meta['estimating_item_id']) && isset($itemMap[(string)$meta['estimating_item_id']])) {
+                            $meta['estimating_item_id'] = (string)$itemMap[(string)$meta['estimating_item_id']];
+                        }
+                        $sLayer['metadata_json'] = $meta;
+                    }
+                    unset($sLayer);
+                }
+                if (isset($snap['markers']) && is_array($snap['markers'])) {
+                    foreach ($snap['markers'] as &$mRow) {
+                        if (!is_array($mRow)) continue;
+                        $mRow['client_uid'] = pew_clone_takeoff_uid('m');
+                        $oldLKey = (string)(isset($mRow['layer_client_uid']) ? $mRow['layer_client_uid'] : (isset($mRow['layer_id']) ? $mRow['layer_id'] : ''));
+                        if ($oldLKey !== '' && isset($layerMap[$oldLKey])) $mRow['layer_client_uid'] = (string)$layerMap[$oldLKey];
+                        $oldLId = pew_int(isset($mRow['layer_id']) ? $mRow['layer_id'] : 0);
+                        if ($oldLId > 0 && isset($dbLayerIdMap[$oldLId])) $mRow['layer_id'] = $dbLayerIdMap[$oldLId];
+                    }
+                    unset($mRow);
+                }
+                if (isset($snap['segments']) && is_array($snap['segments'])) {
+                    foreach ($snap['segments'] as &$sgRow) {
+                        if (!is_array($sgRow)) continue;
+                        $sgRow['client_uid'] = pew_clone_takeoff_uid('s');
+                        $oldLKey = (string)(isset($sgRow['layer_client_uid']) ? $sgRow['layer_client_uid'] : (isset($sgRow['layer_id']) ? $sgRow['layer_id'] : ''));
+                        if ($oldLKey !== '' && isset($layerMap[$oldLKey])) $sgRow['layer_client_uid'] = (string)$layerMap[$oldLKey];
+                        $oldLId = pew_int(isset($sgRow['layer_id']) ? $sgRow['layer_id'] : 0);
+                        if ($oldLId > 0 && isset($dbLayerIdMap[$oldLId])) $sgRow['layer_id'] = $dbLayerIdMap[$oldLId];
+                    }
+                    unset($sgRow);
+                }
+                if (isset($snap['summary']) && is_array($snap['summary'])) {
+                    foreach ($snap['summary'] as &$sumRow) {
+                        if (!is_array($sumRow)) continue;
+                        $u = (string)(isset($sumRow['layerUid']) ? $sumRow['layerUid'] : '');
+                        if ($u !== '' && isset($layerMap[$u])) $sumRow['layerUid'] = (string)$layerMap[$u];
+                    }
+                    unset($sumRow);
+                }
+            }
+            $insState->execute(array($targetKey, (int)$row['drawing_id'], $projectId, json_encode($snap, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)));
+        }
+    }
+
+    // Remap copied item takeoffLayerId references when created without pre-populated Takeoff map
+    if ($layerMap && !empty($estimate['groups']) && is_array($estimate['groups'])) {
+        foreach ($estimate['groups'] as &$grp) {
+            if (empty($grp['items']) || !is_array($grp['items'])) continue;
+            foreach ($grp['items'] as &$it) {
+                if (!is_array($it)) continue;
+                $oldRef = (string)(isset($it['copiedFromTakeoffLayerId']) ? $it['copiedFromTakeoffLayerId'] : '');
+                if (empty($it['takeoffLayerId']) && $oldRef !== '' && isset($layerMap[$oldRef])) {
+                    $it['takeoffLayerId'] = (string)$layerMap[$oldRef];
+                    $it['source_layer_key'] = (string)$layerMap[$oldRef];
+                }
+            }
+            unset($it);
+        }
+        unset($grp);
+    }
+}
+
 function pew_save_estimate(PDO $pdo, $projectId, array $estimate, array $summary = array(), $expectedRevision = null) {
+    pew_best_effort('clone Takeoff workspace for copied estimate', $pdo, function () use ($pdo, $projectId, &$estimate) {
+        pew_clone_takeoff_workspace_for_estimate($pdo, $projectId, $estimate);
+    });
     $encoded = json_encode($estimate, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
     if ($encoded === false || strlen($encoded) > 8 * 1024 * 1024) pew_error('Estimate snapshot is invalid or too large.', 413, 'snapshot_too_large');
     $clientId = pew_text(isset($estimate['id']) ? $estimate['id'] : '', 191);
@@ -516,11 +859,16 @@ function pew_save_estimate(PDO $pdo, $projectId, array $estimate, array $summary
         )));
     }
     if (isset($estimate['estimateSummary']) && is_array($estimate['estimateSummary'])) $summary = $estimate['estimateSummary'];
+    $normalizedSummary = pew_extract_estimate_summary($summary, $estimate);
+    if (!isset($estimate['estimateTotal'])) $estimate['estimateTotal'] = $normalizedSummary['total'];
+    if (!isset($estimate['totalSales'])) $estimate['totalSales'] = $normalizedSummary['total'];
+    $reencoded = json_encode($estimate, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+    if ($reencoded !== false) $encoded = $reencoded;
     $extendedValues = array(pew_text(isset($estimate['code']) ? $estimate['code'] : '', 100) ?: null, pew_text(isset($estimate['name']) ? $estimate['name'] : 'Estimate'),
-        pew_text(isset($estimate['status']) ? $estimate['status'] : 'draft', 50), pew_num(isset($summary['subtotal']) ? $summary['subtotal'] : 0),
-        pew_num(isset($summary['preTaxMarkup']) ? $summary['preTaxMarkup'] : 0) + pew_num(isset($summary['postTaxMarkup']) ? $summary['postTaxMarkup'] : 0),
-        pew_num(isset($summary['taxes']) ? $summary['taxes'] : 0), pew_num(isset($summary['total']) ? $summary['total'] : 0),
-        pew_num(isset($summary['laborHours']) ? $summary['laborHours'] : 0),
+        pew_text(isset($estimate['status']) ? $estimate['status'] : 'draft', 50), $normalizedSummary['subtotal'],
+        $normalizedSummary['markup'],
+        $normalizedSummary['taxes'], $normalizedSummary['total'],
+        $normalizedSummary['laborHours'],
         json_encode(isset($estimate['settings']) && is_array($estimate['settings']) ? $estimate['settings'] : array(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
         json_encode(isset($estimate['notes']) && is_array($estimate['notes']) ? $estimate['notes'] : array(), JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE),
         json_encode(array('workspaceClientId' => $clientId), JSON_UNESCAPED_SLASHES), $estimateId, $projectId);
@@ -637,6 +985,23 @@ try {
                 SET e.deleted_at=CURRENT_TIMESTAMP WHERE e.project_id=? AND e.deleted_at IS NULL AND e.id NOT IN ($marks)");
             $stmt->execute(array_merge(array($projectId), $keptIds));
         }
+        if (isset($body['project_estimating_table_settings']) && is_array($body['project_estimating_table_settings'])) {
+            pew_best_effort('save project estimating table settings metadata', $pdo, function () use ($pdo, $projectId, $body) {
+                $stmtMeta = $pdo->prepare('SELECT metadata_json FROM projects WHERE id=? AND deleted_at IS NULL LIMIT 1');
+                $stmtMeta->execute(array($projectId));
+                $rawMeta = $stmtMeta->fetchColumn();
+                $meta = is_string($rawMeta) ? pew_decode($rawMeta) : array();
+                if (!is_array($meta)) $meta = array();
+                $meta['estimatingTableSettings'] = $body['project_estimating_table_settings'];
+                $encodedMeta = json_encode($meta, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                if ($encodedMeta !== false) {
+                    $pdo->prepare('UPDATE projects SET metadata_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute(array($encodedMeta, $projectId));
+                }
+            });
+        }
+        pew_best_effort('sync project primary estimate metadata', $pdo, function () use ($pdo, $projectId) {
+            pew_sync_project_primary_estimate_metadata($pdo, $projectId);
+        });
         $pdo->commit();
         if ($mode === 'patch') {
             pew_json(array('ok' => true, 'success' => true, 'mode' => 'patch', 'updates' => $savedEstimates,
@@ -706,6 +1071,23 @@ try {
             }
             $pdo->prepare('DELETE FROM takeoff_estimate_states WHERE estimate_key=? AND project_id=?')->execute(array($clientEstimateId, $projectId));
             $pdo->prepare('DELETE FROM takeoff_estimate_scales WHERE estimate_key=? AND project_id=?')->execute(array($clientEstimateId, $projectId));
+        });
+        if (isset($body['project_estimating_table_settings']) && is_array($body['project_estimating_table_settings'])) {
+            pew_best_effort('save project estimating table settings metadata', $pdo, function () use ($pdo, $projectId, $body) {
+                $stmtMeta = $pdo->prepare('SELECT metadata_json FROM projects WHERE id=? AND deleted_at IS NULL LIMIT 1');
+                $stmtMeta->execute(array($projectId));
+                $rawMeta = $stmtMeta->fetchColumn();
+                $meta = is_string($rawMeta) ? pew_decode($rawMeta) : array();
+                if (!is_array($meta)) $meta = array();
+                $meta['estimatingTableSettings'] = $body['project_estimating_table_settings'];
+                $encodedMeta = json_encode($meta, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+                if ($encodedMeta !== false) {
+                    $pdo->prepare('UPDATE projects SET metadata_json=?, updated_at=CURRENT_TIMESTAMP WHERE id=?')->execute(array($encodedMeta, $projectId));
+                }
+            });
+        }
+        pew_best_effort('sync project primary estimate metadata', $pdo, function () use ($pdo, $projectId) {
+            pew_sync_project_primary_estimate_metadata($pdo, $projectId);
         });
         $pdo->commit();
         $remainingStmt = $pdo->prepare('SELECT * FROM estimates WHERE project_id=? AND deleted_at IS NULL ORDER BY updated_at DESC,id DESC');
