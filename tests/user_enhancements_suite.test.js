@@ -86,14 +86,14 @@ test('Feature 4: Primary Estimate & Bid Board Quote Value', () => {
 });
 
 test('Feature 5: Download Drawings with Flattened Marks', () => {
-    const editorPhp = fs.readFileSync(path.join(root, 'pages/editor.php'), 'utf8');
+    const editorRuntime = fs.readFileSync(path.join(root, 'assets/editor/runtime.js'), 'utf8');
     const takeoffJs = fs.readFileSync(path.join(root, 'assets/project_takeoff.js'), 'utf8');
 
     // Editor exposes window.projectTakeoffDownloadAnnotatedDrawing
-    assert.match(editorPhp, /window\.projectTakeoffDownloadAnnotatedDrawing/);
-    assert.match(editorPhp, /page\.render/);
-    assert.match(editorPhp, /konvaLayer/);
-    assert.match(editorPhp, /window\.jspdf/);
+    assert.match(editorRuntime, /window\.projectTakeoffDownloadAnnotatedDrawing/);
+    assert.match(editorRuntime, /page\.render/);
+    assert.match(editorRuntime, /konvaLayer/);
+    assert.match(editorRuntime, /window\.jspdf/);
 
     // Takeoff calls projectTakeoffDownloadAnnotatedDrawing on download
     assert.match(takeoffJs, /projectTakeoffDownloadAnnotatedDrawing/);

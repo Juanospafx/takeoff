@@ -7,6 +7,7 @@ const { JSDOM } = require('jsdom');
 const root = path.resolve(__dirname, '..');
 const pageHtml = fs.readFileSync(path.join(root, 'pages/cost_catalog.php'), 'utf8');
 const clientJs = fs.readFileSync(path.join(root, 'assets/cost_catalog.js'), 'utf8');
+const itemInspectorJs = fs.readFileSync(path.join(root, 'assets/cost_catalog_item_inspector.js'), 'utf8');
 
 function createFixture() {
     const catalogs = [{ id: 1, name: 'Electrical 2026', active: 1, locked: 0, sort_order: 0 }];
@@ -147,6 +148,7 @@ function setupTestEnvironment(initialState = createFixture()) {
         };
     };
 
+    dom.window.eval(itemInspectorJs);
     dom.window.eval(clientJs);
     dom.window.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
 

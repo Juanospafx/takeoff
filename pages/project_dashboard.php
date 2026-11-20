@@ -2729,6 +2729,7 @@ $state = [
         <script>if (window.pdfjsLib) window.pdfjsLib.GlobalWorkerOptions.workerSrc = 'https://cdnjs.cloudflare.com/ajax/libs/pdf.js/2.16.105/pdf.worker.min.js';</script>
     <?php endif; ?>
     <script src="../assets/project_overview_dialogs.js?v=<?= filemtime(__DIR__ . '/../assets/project_overview_dialogs.js') ?>"></script>
+    <script src="../assets/project_overview_notes_tasks.js?v=<?= filemtime(__DIR__ . '/../assets/project_overview_notes_tasks.js') ?>"></script>
     <script src="../assets/project_overview.js?v=<?= filemtime(__DIR__ . '/../assets/project_overview.js') ?>"></script>
     <script src="../assets/estimating_catalog_snapshot_service.js?v=estimating-catalog-snapshot-20260827-1"></script>
     <script src="../assets/takeoff_estimating_sync_service.js?v=<?= filemtime(__DIR__ . '/../assets/takeoff_estimating_sync_service.js') ?>"></script>
@@ -2884,6 +2885,8 @@ $state = [
     <script
         src="../assets/estimating_workspace_service.js?v=<?= filemtime(__DIR__ . '/../assets/estimating_workspace_service.js') ?>"></script>
     <script src="../assets/estimating_catalog_adapter.js?v=estimating-catalog-snapshot-20260827-1"></script>
+    <script
+        src="../assets/project_estimating_modals.js?v=<?= filemtime(__DIR__ . '/../assets/project_estimating_modals.js') ?>"></script>
     <script
         src="../assets/project_estimating.js?v=<?= filemtime(__DIR__ . '/../assets/project_estimating.js') ?>"></script>
     <?php if ($activeTab === 'proposal'): ?>

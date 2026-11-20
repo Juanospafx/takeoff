@@ -6,7 +6,7 @@ const path = require('node:path');
 const dashboard = fs.readFileSync(path.join(__dirname, '..', 'assets', 'project_takeoff.js'), 'utf8');
 const viewerController = fs.readFileSync(path.join(__dirname, '..', 'assets', 'takeoff_viewer_controller.js'), 'utf8');
 const editor = fs.readFileSync(path.join(__dirname, '..', 'assets', 'editor', 'takeoff.js'), 'utf8');
-const shell = fs.readFileSync(path.join(__dirname, '..', 'pages', 'editor.php'), 'utf8');
+const shell = fs.readFileSync(path.join(__dirname, '..', 'assets', 'editor', 'runtime.js'), 'utf8');
 
 test('pointer and hand are mutually exclusive visual tools', () => {
     assert.match(viewerController, /function setActiveTool\(command\)[\s\S]*?button\.classList\.toggle\('active',\s*button\.dataset\.toolCommand\s*===\s*command\)/);

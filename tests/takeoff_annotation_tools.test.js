@@ -6,7 +6,7 @@ const path = require('node:path');
 const dashboard = fs.readFileSync(path.join(__dirname, '..', 'pages', 'project_dashboard.php'), 'utf8');
 const parent = fs.readFileSync(path.join(__dirname, '..', 'assets', 'project_takeoff.js'), 'utf8');
 const viewerController = fs.readFileSync(path.join(__dirname, '..', 'assets', 'takeoff_viewer_controller.js'), 'utf8');
-const editor = fs.readFileSync(path.join(__dirname, '..', 'pages', 'editor.php'), 'utf8');
+const editor = fs.readFileSync(path.join(__dirname, '..', 'assets', 'editor', 'runtime.js'), 'utf8');
 
 function section(source, startMarker, endMarker) {
     const start = source.indexOf(startMarker);

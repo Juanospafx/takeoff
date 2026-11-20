@@ -7,6 +7,7 @@ const { JSDOM } = require('jsdom');
 const root = path.resolve(__dirname, '..');
 const client = fs.readFileSync(path.join(root, 'assets/project_overview.js'), 'utf8');
 const dialogs = fs.readFileSync(path.join(root, 'assets/project_overview_dialogs.js'), 'utf8');
+const notesTasks = fs.readFileSync(path.join(root, 'assets/project_overview_notes_tasks.js'), 'utf8');
 const api = fs.readFileSync(path.join(root, 'api/project_module.php'), 'utf8');
 
 function documentsBrowser() {
@@ -26,6 +27,7 @@ function documentsBrowser() {
         return { ok: true, status: 200, json: async () => ({ status: 'success' }) };
     };
     dom.window.eval(dialogs);
+    dom.window.eval(notesTasks);
     dom.window.eval(client);
     dom.window.document.dispatchEvent(new dom.window.Event('DOMContentLoaded'));
     return { dom, requests };

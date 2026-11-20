@@ -32,13 +32,21 @@ jobs:
           node tests/asset_cache_keys.test.js
           node tests/portal_styles_extraction.test.js
           node tests/cost_catalog_incremental_render.test.js
+          node tests/cost_catalog_item_inspector_extraction.test.js
           node tests/estimating_incremental_render.test.js
+          node tests/estimating_modals_extraction.test.js
           node tests/project_overview_dialogs.test.js
+          node tests/project_overview_notes_tasks.test.js
+          node tests/editor_runtime_extraction.test.js
           node --check assets/editor/theme_bridge.js
           node --check assets/editor/authorization.js
+          node --check assets/editor/runtime.js
           node --check assets/project_overview_dialogs.js
+          node --check assets/project_overview_notes_tasks.js
           node --check assets/project_estimating.js
+          node --check assets/project_estimating_modals.js
           node --check assets/cost_catalog.js
+          node --check assets/cost_catalog_item_inspector.js
           node --check assets/takeoff_layer_modal.js
           node --check assets/takeoff_catalog_browser.js
           node --check assets/takeoff_viewer_controller.js

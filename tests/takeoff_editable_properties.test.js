@@ -9,6 +9,7 @@ const parent = fs.readFileSync(path.join(root, 'assets/project_takeoff.js'), 'ut
 const layerModal = fs.readFileSync(path.join(root, 'assets/takeoff_layer_modal.js'), 'utf8');
 const viewerController = fs.readFileSync(path.join(root, 'assets/takeoff_viewer_controller.js'), 'utf8');
 const page = fs.readFileSync(path.join(root, 'pages/editor.php'), 'utf8');
+const runtime = fs.readFileSync(path.join(root, 'assets/editor/runtime.js'), 'utf8');
 const dashboard = fs.readFileSync(path.join(root, 'pages/project_dashboard.php'), 'utf8');
 
 test('existing Takeoff geometry remains interactive while repeated Count placement stays armed', () => {
@@ -44,9 +45,9 @@ test('measurement labels stay hidden without removing measured model values', ()
 
 test('deleting a marker removes its transformer and fallback notes start editable', () => {
     assert.match(editor, /function deleteTakeoffSelection[\s\S]*?destroyMarkerNodes\(ref\)/);
-    assert.match(page, /Newly placed fallback annotations must remain movable\/resizable/);
-    assert.match(page, /unlockObject\(t\)/);
-    assert.match(page, /hasControls: true, lockScalingX: false, lockScalingY: false/);
+    assert.match(runtime, /Newly placed fallback annotations must remain movable\/resizable/);
+    assert.match(runtime, /unlockObject\(t\)/);
+    assert.match(runtime, /hasControls: true, lockScalingX: false, lockScalingY: false/);
 });
 
 test('dashboard and editor bypass the previous cached Takeoff scripts', () => {

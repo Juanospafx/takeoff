@@ -27,7 +27,7 @@ test('local assets changed by the cache pass use filemtime cache keys', () => {
             'cost_catalog.js',
             'catalog_admin_service.js'
         ],
-        'editor.php': ['takeoff_color_palette.js']
+        'editor.php': ['runtime.js', 'takeoff_color_palette.js']
     };
 
     for (const [page, assets] of Object.entries(expectations)) {

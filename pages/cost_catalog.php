@@ -1007,6 +1007,7 @@ $readOnly = !$canWrite;
 <script src="../assets/global_tools.js?v=<?= filemtime(__DIR__ . '/../assets/global_tools.js') ?>"></script>
 <script src="../assets/catalog_item_contract.js"></script>
 <script src="../assets/assembly_expansion_service.js"></script>
+<script src="../assets/cost_catalog_item_inspector.js?v=<?= filemtime(__DIR__ . '/../assets/cost_catalog_item_inspector.js') ?>"></script>
 <script src="../assets/cost_catalog.js?v=<?= filemtime(__DIR__ . '/../assets/cost_catalog.js') ?>"></script>
 <script src="../assets/catalog_admin_service.js?v=<?= filemtime(__DIR__ . '/../assets/catalog_admin_service.js') ?>"></script>
 </body>

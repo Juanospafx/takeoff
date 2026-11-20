@@ -55,8 +55,6 @@
     const selectedArchivedGroupIds = new Set();
     let clipboardItemIds = [];
     let modalReturnFocus = null;
-    let detailsItemId = null;
-    let detailsReturnFocus = null;
     let itemQuery = '';
     let itemSort = 'name';
     let itemSortDirection = 1;
@@ -74,6 +72,18 @@
     let entityEditor = null;
     let archivingCategoryId = null;
     let assemblyPartsByAssembly = new Map();
+    const itemInspector = window.CostCatalogItemInspector.create({
+        canWrite,
+        document,
+        window,
+        escape: value => esc(value),
+        formatLaborHours: value => formatLaborHours(value),
+        getAssemblyParts: itemId => assemblyPartsByAssembly.get(Number(itemId)) || [],
+        getItems: () => state.allItems?.length ? state.allItems : state.items,
+        money: value => money(value),
+        canonicalItemMetrics: item => canonicalItemMetrics(item),
+        displayItemType: type => displayItemType(type)
+    });
     let stagedAssemblyComponents = new Map();
     function rebuildAssemblyIndex(){assemblyPartsByAssembly=new Map();state.assemblyParts.forEach(part=>{const key=Number(part.assembly_catalog_item_id);if(!assemblyPartsByAssembly.has(key))assemblyPartsByAssembly.set(key,[]);assemblyPartsByAssembly.get(key).push(part);});assemblyPartsByAssembly.forEach(parts=>parts.sort((a,b)=>Number(a.sort_order||0)-Number(b.sort_order||0)||Number(a.id)-Number(b.id)));}
 
@@ -1178,7 +1188,7 @@
         } else if (item.deleted_at) {
             reasonBadge = `<span class="cc-archived-badge reason-item" title="Item Archived"><i class="fas fa-box-archive"></i> Item Archived</span>`;
         }
-        const isSelected = detailsItemId === Number(item.id);
+        const isSelected = itemInspector.isSelected(item.id);
         const isChecked = selectedItemIds.has(Number(item.id));
         const hideActions = isArchived || selection.view === 'archived' || statusFilter === 'archived';
         return `
@@ -1213,167 +1223,20 @@
         `;
     }
 
-    function safeExternalUrl(value) {
-        try {
-            const url = new URL(String(value || ''), window.location.href);
-            return ['http:', 'https:'].includes(url.protocol) ? url.href : '';
-        } catch (_) { return ''; }
-    }
-
-    function detailField(label, value) {
-        const display = value === null || value === undefined || value === '' ? 'Not provided' : value;
-        return `<div class="cc-detail-field"><dt>${esc(label)}</dt><dd>${esc(display)}</dd></div>`;
-    }
-
-    function detailLink(label, value) {
-        const url = safeExternalUrl(value);
-        return `<div class="cc-detail-field"><dt>${esc(label)}</dt><dd>${url ? `<a href="${esc(url)}" target="_blank" rel="noopener noreferrer">Open ${esc(label)} <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i></a>` : 'Not provided'}</dd></div>`;
-    }
-
-    function renderItemDetails(item) {
-        const type = String(item.item_type || 'part').toLowerCase();
-        const metrics = canonicalItemMetrics(item);
-        const common = [
-            detailField('Type', displayItemType(type)),
-            detailField('Description', item.description),
-            detailField('Unit of measure', item.unit_of_measure || 'ea'),
-            detailField('Measurement type', item.measurement_type || 'count'),
-            detailField('Catalog', item.catalog_name),
-            detailField('Group', item.group_name),
-            detailField('Cost code', item.cost_code),
-            detailField('Part # / Catalog number', item.catalog_number),
-            detailField('Notes', item.notes)
-        ];
-        const specific = [];
-        const laborTimeSnippet = type === 'labor'
-            ? ''
-            : `<span class="cc-detail-metric-divider">·</span><span class="cc-detail-metric-labor" title="Labor time"><i class="fas fa-clock" aria-hidden="true"></i> ${formatLaborHours(item.labor_hours)} hr</span>`;
-        const parts = type === 'assembly' ? (assemblyPartsByAssembly.get(Number(item.id))||[]) : [];
-        const included = type === 'assembly' ? `
-            <section class="cc-detail-section cc-included-section">
-                <div class="cc-detail-section-header">
-                    <h3><i class="fas fa-boxes-stacked" aria-hidden="true"></i> Included items</h3>
-                    <span class="cc-detail-count-badge">${parts.length} ${parts.length === 1 ? 'item' : 'items'}</span>
-                </div>
-                <div class="cc-included-items">
-                    ${parts.map((part) => {
-                        const childName = esc(part.child_item_name || 'Catalog item');
-                        const childUnit = esc(part.child_unit_of_measure || part.child_item_unit || 'ea');
-                        const qtyVal = Number(part.quantity || 0);
-                        const costSnap = money(part.unit_cost_snapshot);
-                        const laborSnap = formatLaborHours(part.unit_labor_time_snapshot);
-                        return `
-                        <article class="cc-included-item-row">
-                            <div class="cc-included-item-top">
-                                <strong class="cc-included-item-name" title="${childName}">${childName}</strong>
-                            </div>
-                            <div class="cc-included-item-meta">
-                                <span class="cc-included-qty">Qty: <strong class="cc-qty-accent">${qtyVal} ${childUnit}</strong></span>
-                                <span class="cc-included-stat"><i class="fas fa-tag" aria-hidden="true"></i> Unit: <span>${costSnap}</span></span>
-                                <span class="cc-included-stat"><i class="fas fa-clock" aria-hidden="true"></i> Labor: <span>${laborSnap} hr</span></span>
-                            </div>
-                        </article>`;
-                    }).join('') || '<div class="cc-details-empty"><i class="fas fa-box-open" aria-hidden="true"></i><span>No included items in this assembly.</span></div>'}
-                </div>
-            </section>` : '';
-        return `<section class="cc-detail-summary"><span class="cc-pill">${displayItemType(type)}</span><h3>${esc(item.name)}</h3><p>${esc(item.description || 'No description provided.')}</p><div class="cc-detail-metrics"><strong>${esc(metrics.primary)}</strong><span>${esc(metrics.secondary)}</span>${laborTimeSnippet}</div></section>${included}<section class="cc-detail-section"><h3>Item information</h3><dl class="cc-detail-list">${common.join('')}${specific.join('')}${detailField('Taxable', Number(item.taxable) ? 'Yes' : 'No')}${detailLink('EPD', item.epd_url)}${detailLink('Attachment', item.attachment_url)}</dl></section>`;
-    }
-
     function openItemDetails(itemId, trigger) {
-        const drawer = document.getElementById('ccItemDetailsDrawer');
-        if (detailsItemId === Number(itemId) && drawer && drawer.classList.contains('open')) {
-            closeItemDetails();
-            return;
-        }
-        const item = (state.allItems?.length ? state.allItems : state.items).find(row => Number(row.id) === Number(itemId));
-        if (!item) return;
-        detailsItemId = Number(item.id);
-        detailsReturnFocus = trigger || document.activeElement;
-        document.querySelectorAll('#ccItemsBody tr.is-selected').forEach(r => r.classList.remove('is-selected'));
-        const activeRow = document.querySelector(`#ccItemsBody tr[data-item-row="${itemId}"]`);
-        if (activeRow) activeRow.classList.add('is-selected');
-        document.getElementById('ccItemDetailsTitle').textContent = 'Item Details';
-        document.getElementById('ccItemDetailsBody').innerHTML = renderItemDetails(item);
-        if (drawer) {
-            drawer.classList.add('open');
-            drawer.setAttribute('aria-hidden', 'false');
-        }
+        itemInspector.open(itemId, trigger);
     }
 
     function closeItemDetails() {
-        if (detailsItemId === null) return;
-        detailsItemId = null;
-        document.querySelectorAll('#ccItemsBody tr.is-selected').forEach(r => r.classList.remove('is-selected'));
-        const drawer = document.getElementById('ccItemDetailsDrawer');
-        if (drawer) {
-            drawer.classList.remove('open');
-            drawer.setAttribute('aria-hidden', 'true');
-        }
-        const target = detailsReturnFocus;
-        detailsReturnFocus = null;
-        target?.focus?.();
+        itemInspector.close();
     }
 
     function openItemRowMenu(triggerBtn, itemId) {
-        if (!canWrite()) return;
-        itemId = Number(itemId);
-        const menu = document.getElementById('ccRowItemFloatingMenu');
-        if (!menu) return;
-
-        if (!menu.hidden && triggerBtn.classList.contains('is-active')) {
-            closeItemRowMenu();
-            return;
-        }
-
-        closeItemRowMenu();
-
-        const item = (state.allItems?.length ? state.allItems : state.items).find(r => Number(r.id) === itemId);
-        if (!item) return;
-
-        triggerBtn.classList.add('is-active');
-        triggerBtn.setAttribute('aria-expanded', 'true');
-
-        const isAssembly = String(item.item_type).toLowerCase() === 'assembly';
-        menu.innerHTML = `
-            <button type="button" data-floating-item-action="edit" data-id="${itemId}"><i class="fas fa-pen"></i>Edit</button>
-            <button type="button" data-floating-item-action="duplicate" data-id="${itemId}"><i class="far fa-copy"></i>Duplicate</button>
-            <button type="button" data-floating-item-action="move" data-id="${itemId}"><i class="fas fa-arrow-right-arrow-left"></i>Move</button>
-            ${!isAssembly ? `<button type="button" data-floating-item-action="assembly" data-id="${itemId}"><i class="fas fa-cubes"></i>Convert to assembly</button>` : ''}
-            <button type="button" class="danger" data-floating-item-action="delete" data-id="${itemId}"><i class="fas fa-box-archive"></i>Archive</button>
-        `;
-        menu.style.display = '';
-        menu.hidden = false;
-
-        const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
-        const rect = triggerBtn.getBoundingClientRect();
-        const menuWidth = 175;
-        const menuHeight = isAssembly ? 140 : 175;
-
-        let left = (rect.left / zoom) - menuWidth - 4;
-        if (left < 10) {
-            left = (rect.right / zoom) + 4;
-        }
-
-        let top = (rect.top / zoom);
-        const maxTop = (window.innerHeight / zoom) - menuHeight - 12;
-        if (top > maxTop) {
-            top = Math.max(10, maxTop);
-        }
-
-        menu.style.left = `${Math.round(left)}px`;
-        menu.style.top = `${Math.round(top)}px`;
+        itemInspector.openMenu(triggerBtn, itemId);
     }
 
     function closeItemRowMenu() {
-        const menu = document.getElementById('ccRowItemFloatingMenu');
-        if (menu) {
-            menu.hidden = true;
-            menu.innerHTML = '';
-        }
-        document.querySelectorAll('.cc-row-menu-toggle.is-active').forEach(b => {
-            b.classList.remove('is-active');
-            b.setAttribute('aria-expanded', 'false');
-        });
+        itemInspector.closeMenu();
     }
 
     function renderItemSelects() {
@@ -4063,7 +3926,7 @@
                 else if (!event.shiftKey && document.activeElement === last) { event.preventDefault(); first.focus(); }
             }
         }
-        if (event.key === 'Tab' && detailsItemId !== null && window.matchMedia?.('(max-width: 760px)').matches) {
+        if (event.key === 'Tab' && itemInspector.isOpen() && window.matchMedia?.('(max-width: 760px)').matches) {
             const drawer = document.getElementById('ccItemDetailsDrawer');
             const focusable = [...drawer.querySelectorAll('a[href],button:not([disabled]),[tabindex]:not([tabindex="-1"])')];
             if (focusable.length) {

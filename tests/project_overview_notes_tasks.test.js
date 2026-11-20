@@ -3,144 +3,116 @@ const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
 const { JSDOM } = require('jsdom');
+const notesTasksModule = require('../assets/project_overview_notes_tasks.js');
 
-test('overview notes and tasks render dynamically in the DOM and support add/delete', () => {
-    const dom = new JSDOM(`
-        <!DOCTYPE html>
-        <html>
-        <body>
-            <div id="overviewNotesComposer" style="display:none;">
-                <textarea id="overviewNoteContent"></textarea>
-            </div>
-            <div id="overviewNotesList"></div>
-
-            <div id="overviewTaskComposer" style="display:none;">
-                <input id="overviewTaskTitle">
-                <input id="overviewTaskAssignee">
-                <input id="overviewTaskDue">
-            </div>
-            <span id="overviewTaskCount">0</span>
-            <div id="overviewTasksList"></div>
-            <input id="poEstimator" value="Juan Estevez">
-        </body>
-        </html>
-    `);
-    const { document } = dom.window;
-    const $ = id => document.getElementById(id);
-    const escapeHtml = str => String(str ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;');
-
-    let notes = [];
-    let tasks = [];
-    let isDirty = false;
-    const markDirty = () => { isDirty = true; };
-
-    function renderNotes() {
-        const list = $('overviewNotesList');
-        if (!list) return;
-        if (!notes.length) {
-            list.innerHTML = `
-                <div class="overview-empty" id="overviewNotesEmpty">
-                    <p>No notes yet</p>
-                    <button class="btn-outline-dark" type="button" id="addNoteBtn">Add note</button>
-                </div>`;
-            return;
+function createHarness({ notes = [], tasks = [], availableEstimators = [] } = {}) {
+    const dom = new JSDOM(`<!doctype html><html><body>
+        <button id="addNoteBtn"></button><button id="addNoteBtnHead"></button>
+        <strong id="overviewNotesCardTitle"></strong><div id="overviewNotesList"></div>
+        <div id="pdNoteModal"><h2 id="noteModalTitle"></h2><input id="modalNoteIndex"><textarea id="modalNoteContent"></textarea><button id="modalSaveNoteBtn"></button></div>
+        <button id="createTaskBtn"></button><button id="createTaskBtnHead"></button>
+        <strong id="overviewTasksCardTitle"></strong><span id="overviewTaskCount"></span><div id="overviewTasksList"></div>
+        <div id="pdTaskModal"><h2 id="taskModalTitle"></h2><input id="modalTaskIndex"><input id="modalTaskTitle"><select id="modalTaskAssignee"></select><input id="modalTaskDue"><button id="modalSaveTaskBtn"></button></div>
+        <select id="poEstimator" data-initial-value="Juan Estevez"><option value="Juan Estevez" selected>Juan Estevez</option></select>
+        <div id="pdItemContextMenu" style="display:none"><button id="pdItemActionEdit"></button><button id="pdItemActionDelete"></button></div>
+    </body></html>`, { pretendToBeVisual: true });
+    const dirtyCalls = [];
+    const toastCalls = [];
+    dom.window.ProjectState = { availableEstimators };
+    const controller = notesTasksModule.create({
+        state: { notes, tasks },
+        dom: { document: dom.window.document, getElement: id => dom.window.document.getElementById(id) },
+        services: {
+            escapeHtml: value => String(value ?? '').replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;'),
+            markDirty: () => dirtyCalls.push(true),
+            showToast: message => toastCalls.push(message)
+        },
+        environment: {
+            window: dom.window,
+            getComputedStyle: dom.window.getComputedStyle.bind(dom.window),
+            setTimeout: callback => callback(),
+            now: () => new Date('2026-09-09T12:00:00Z').getTime()
         }
-        list.innerHTML = notes.map((note, idx) => `
-            <div class="overview-list-item" data-note-index="${idx}">
-                <div class="d-flex justify-content-between align-items-center">
-                    <strong>${escapeHtml(note.user || 'User')}</strong>
-                    <button type="button" data-delete-note="${idx}">Delete</button>
-                </div>
-                <p>${escapeHtml(note.content || '')}</p>
-            </div>`).join('');
-        list.querySelectorAll('[data-delete-note]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const idx = Number(btn.dataset.deleteNote);
-                if (Number.isInteger(idx) && idx >= 0 && idx < notes.length) {
-                    notes.splice(idx, 1);
-                    markDirty();
-                    renderNotes();
-                }
-            });
-        });
-    }
+    });
+    return { dom, document: dom.window.document, controller, notes, tasks, dirtyCalls, toastCalls };
+}
 
-    function renderTasks() {
-        const list = $('overviewTasksList');
-        const countBadge = $('overviewTaskCount');
-        if (countBadge) countBadge.textContent = String(tasks.length);
-        if (!list) return;
-        if (!tasks.length) {
-            list.innerHTML = `
-                <div class="overview-empty" id="overviewTasksEmpty">
-                    <p>No tasks yet</p>
-                    <button class="btn-outline-dark" type="button" id="createTaskBtn">Create first task</button>
-                </div>`;
-            return;
-        }
-        list.innerHTML = tasks.map((task, idx) => `
-            <div class="overview-list-item" data-task-index="${idx}">
-                <div class="d-flex justify-content-between align-items-center">
-                    <strong>${escapeHtml(task.title || '')}</strong>
-                    <button type="button" data-delete-task="${idx}">Delete</button>
-                </div>
-            </div>`).join('');
-        list.querySelectorAll('[data-delete-task]').forEach(btn => {
-            btn.addEventListener('click', () => {
-                const idx = Number(btn.dataset.deleteTask);
-                if (Number.isInteger(idx) && idx >= 0 && idx < tasks.length) {
-                    tasks.splice(idx, 1);
-                    markDirty();
-                    renderTasks();
-                }
-            });
-        });
-    }
+test('notes/tasks controller renders, saves and deletes through production event bindings', () => {
+    const harness = createHarness();
+    const { document, controller, notes, tasks, dirtyCalls, toastCalls } = harness;
+    controller.bindEvents();
+    controller.renderNotes();
+    controller.renderTasks();
 
-    // 1. Initial render
-    renderNotes();
-    renderTasks();
-    assert.ok(document.getElementById('overviewNotesEmpty'), 'Should show empty notes state');
-    assert.ok(document.getElementById('overviewTasksEmpty'), 'Should show empty tasks state');
+    assert.ok(document.getElementById('overviewNotesEmpty'));
+    assert.ok(document.getElementById('overviewTasksEmpty'));
     assert.equal(document.getElementById('overviewTaskCount').textContent, '0');
 
-    // 2. Add note
-    notes.push({ user: 'Juan Estevez', timestamp: '9/2/2026', content: 'Review subpanel conduit runs' });
-    renderNotes();
-    const noteItems = document.querySelectorAll('#overviewNotesList .overview-list-item');
-    assert.equal(noteItems.length, 1, 'Should have 1 note item in DOM');
-    assert.ok(noteItems[0].textContent.includes('Review subpanel conduit runs'));
+    document.getElementById('addNoteBtn').click();
+    assert.ok(document.getElementById('pdNoteModal').classList.contains('open'));
+    document.getElementById('modalNoteContent').value = '<review> feeder schedule';
+    document.getElementById('modalSaveNoteBtn').click();
+    assert.equal(notes.length, 1);
+    assert.match(document.getElementById('overviewNotesList').textContent, /<review> feeder schedule/);
+    assert.doesNotMatch(document.getElementById('overviewNotesList').innerHTML, /<review>/);
 
-    // 3. Add task
-    tasks.push({ title: 'Send quotation to GC', responsible: 'Juan Estevez', due_date: '2026-09-10', status: 'open' });
-    renderTasks();
+    document.getElementById('createTaskBtn').click();
+    document.getElementById('modalTaskTitle').value = 'Send quotation to GC';
+    document.getElementById('modalTaskDue').value = '2026-09-10';
+    document.getElementById('modalSaveTaskBtn').click();
+    assert.equal(tasks.length, 1);
     assert.equal(document.getElementById('overviewTaskCount').textContent, '1');
-    const taskItems = document.querySelectorAll('#overviewTasksList .overview-list-item');
-    assert.equal(taskItems.length, 1);
-    assert.ok(taskItems[0].textContent.includes('Send quotation to GC'));
+    assert.match(document.getElementById('overviewTasksList').textContent, /Send quotation to GC/);
 
-    // 4. Delete note
-    const deleteNoteBtn = noteItems[0].querySelector('[data-delete-note="0"]');
-    deleteNoteBtn.click();
+    document.querySelector('[data-note-menu="0"]').click();
+    assert.equal(document.getElementById('pdItemContextMenu').style.display, 'flex');
+    document.getElementById('pdItemActionDelete').click();
     assert.equal(notes.length, 0);
-    assert.ok(document.getElementById('overviewNotesEmpty'), 'Empty notes state should return');
+    assert.ok(document.getElementById('overviewNotesEmpty'));
 
-    // 5. Delete task
-    const deleteTaskBtn = taskItems[0].querySelector('[data-delete-task="0"]');
-    deleteTaskBtn.click();
+    document.querySelector('[data-task-menu="0"]').click();
+    document.getElementById('pdItemActionDelete').click();
     assert.equal(tasks.length, 0);
-    assert.equal(document.getElementById('overviewTaskCount').textContent, '0');
-    assert.ok(document.getElementById('overviewTasksEmpty'), 'Empty tasks state should return');
+    assert.ok(document.getElementById('overviewTasksEmpty'));
+    assert.equal(dirtyCalls.length, 4);
+    assert.deepEqual(toastCalls, [
+        'Note saved locally. Press Save Project to persist it.',
+        'Task saved locally. Press Save Project to persist it.',
+        'Note deleted.',
+        'Task deleted.'
+    ]);
+});
+
+test('users contract keeps ProjectState estimators and supports runtime replacement', () => {
+    const harness = createHarness({
+        availableEstimators: [{ id: 91, name: 'Production Estimator', role: 'Lead' }]
+    });
+    harness.controller.loadSystemUsers();
+    assert.equal(harness.controller.getUsers()[0].name, 'Production Estimator');
+    assert.match(harness.document.getElementById('poEstimator').textContent, /Production Estimator/);
+
+    harness.controller.setUsers([{ id: 92, name: 'Replacement Estimator', role: 'Chief' }]);
+    assert.equal(harness.controller.getUsers()[0].name, 'Replacement Estimator');
+    assert.match(harness.document.getElementById('modalTaskAssignee').textContent, /Replacement Estimator/);
+});
+
+test('dashboard loads the extracted classic module before overview with filemtime cache keys', () => {
+    const root = path.resolve(__dirname, '..');
+    const dashboard = fs.readFileSync(path.join(root, 'pages/project_dashboard.php'), 'utf8');
+    const overview = fs.readFileSync(path.join(root, 'assets/project_overview.js'), 'utf8');
+    const moduleIndex = dashboard.indexOf('project_overview_notes_tasks.js');
+    const overviewIndex = dashboard.indexOf('project_overview.js');
+
+    assert.ok(moduleIndex >= 0 && moduleIndex < overviewIndex);
+    assert.match(dashboard, /project_overview_notes_tasks\.js\?v=<\?= filemtime\(__DIR__ \. '\/\.\.\/assets\/project_overview_notes_tasks\.js'\) \?>/);
+    assert.match(overview, /window\.ProjectOverviewNotesTasks\.create\(\{[\s\S]*state: \{ notes, tasks \}[\s\S]*dom: \{ getElement: \$, document \}[\s\S]*services: \{ escapeHtml, markDirty, showToast \}/);
+    assert.match(overview, /window\.TakeoffUsers = \{\s*getUsers: overviewNotesTasks\.getUsers,\s*setUsers: overviewNotesTasks\.setUsers,\s*load: loadSystemUsers/);
 });
 
 test('saveProject in project_overview.js isolates takeoffFrame errors gracefully', () => {
     const root = path.resolve(__dirname, '..');
-    const overviewJs = fs.readFileSync(path.join(root, 'assets/project_overview.js'), 'utf8');
-
-    // Verify try/catch around takeoffFrame
-    assert.match(overviewJs, /try\s*\{\s*const takeoffFrame = document\.getElementById\('takeoffFrame'\);/);
-    assert.match(overviewJs, /catch\s*\(takeoffErr\)\s*\{\s*console\.warn\('Takeoff iframe save ignored or unavailable:', takeoffErr\);\s*\}/);
-
-    // Verify window.projectTakeoffSaveState is called
-    assert.match(overviewJs, /window\.projectTakeoffSaveState\(\);/);
+    const overview = fs.readFileSync(path.join(root, 'assets/project_overview.js'), 'utf8');
+    assert.match(overview, /try\s*\{\s*const takeoffFrame = document\.getElementById\('takeoffFrame'\);/);
+    assert.match(overview, /catch\s*\(takeoffErr\)\s*\{\s*console\.warn\('Takeoff iframe save ignored or unavailable:', takeoffErr\);\s*\}/);
+    assert.match(overview, /window\.projectTakeoffSaveState\(\);/);
 });

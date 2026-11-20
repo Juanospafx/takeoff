@@ -44,6 +44,12 @@
         escapeHtml,
         showToast
     });
+    const overviewNotesTasks = window.ProjectOverviewNotesTasks.create({
+        state: { notes, tasks },
+        dom: { getElement: $, document },
+        services: { escapeHtml, markDirty, showToast },
+        environment: { window, getComputedStyle, setTimeout }
+    });
 
     function markDirty() {
         if (!isDirty) {
@@ -864,365 +870,16 @@
         markDirty();
     }
 
-    let contextMenuTarget = null; // { type: 'note' | 'task', index: number }
-
-    function renderNotes() {
-        const list = $('overviewNotesList');
-        const cardTitle = $('overviewNotesCardTitle');
-        if (cardTitle) cardTitle.textContent = `Notes (${notes.length})`;
-        if (!list) return;
-        if (!notes.length) {
-            list.innerHTML = `
-                <div class="pd-empty-card-state" id="overviewNotesEmpty" role="button" tabindex="0">
-                    <div class="pd-empty-graphic">
-                        <svg width="72" height="52" viewBox="0 0 72 52" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <rect x="18" y="10" width="46" height="36" rx="4" fill="rgba(0,0,0,0.08)" />
-                            <rect x="14" y="6" width="46" height="36" rx="4" fill="var(--bg-panel)" stroke="var(--border)" stroke-width="1.5" />
-                            <path d="M14 10C14 7.79 15.79 6 18 6H56C58.21 6 60 7.79 60 10V15H14V10Z" fill="#0055b8" />
-                            <circle cx="20" cy="10.5" r="1.5" fill="#ffffff" opacity="0.8" />
-                            <circle cx="25" cy="10.5" r="1.5" fill="#ffffff" opacity="0.8" />
-                            <rect x="20" y="21" width="18" height="2" rx="1" fill="var(--border)" />
-                            <rect x="20" y="26" width="26" height="2" rx="1" fill="var(--border)" />
-                            <rect x="20" y="31" width="14" height="2" rx="1" fill="var(--border)" />
-                            <path d="M10 28H18M14 24V32" stroke="#fb5a3a" stroke-width="2.5" stroke-linecap="round" />
-                            <path d="M14 20L15 22L17 22L15.5 23.5L16 25.5L14 24.5L12 25.5L12.5 23.5L11 22L13 22L14 20Z" fill="#fb5a3a" />
-                        </svg>
-                    </div>
-                    <div class="pd-empty-title">Create a Note</div>
-                    <div class="pd-empty-subtitle">Take notes to help organize thoughts and information with your team.</div>
-                </div>`;
-            $('overviewNotesEmpty')?.addEventListener('click', () => openNoteModal());
-            return;
-        }
-
-        list.innerHTML = `
-            <div class="pd-list-month-header">September</div>
-            ${notes.map((note, idx) => {
-            const author = note.user || 'Isaac De Jesús';
-            const initial = (author[0] || 'I').toUpperCase();
-            return `
-                    <div class="pd-note-item" data-note-index="${idx}">
-                        <div class="pd-note-avatar">${escapeHtml(initial)}</div>
-                        <div class="pd-note-content-wrap">
-                            <div class="pd-note-author">${escapeHtml(author)}</div>
-                            <div class="pd-note-time">${escapeHtml(note.timestamp || 'in less than a minute')}</div>
-                            <div class="pd-note-bubble">${escapeHtml(note.content || '').replace(/\n/g, '<br>')}</div>
-                        </div>
-                        <div class="pd-item-menu-wrap">
-                            <button type="button" class="pd-row-dots-btn" data-note-menu="${idx}" title="Note options"><i class="fas fa-ellipsis-vertical"></i></button>
-                        </div>
-                    </div>
-                `;
-        }).join('')}
-        `;
-
-        list.querySelectorAll('[data-note-menu]').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const idx = Number(btn.dataset.noteMenu);
-                openItemContextMenu(btn, 'note', idx);
-            });
-        });
-    }
-
-    function openNoteModal(index = -1) {
-        const modal = $('pdNoteModal');
-        const titleEl = $('noteModalTitle');
-        const indexInput = $('modalNoteIndex');
-        const contentInput = $('modalNoteContent');
-        if (!modal) return;
-
-        if (index >= 0 && index < notes.length) {
-            if (titleEl) titleEl.innerHTML = '<i class="fas fa-sticky-note" style="color: var(--primary);"></i> Edit Note';
-            if (indexInput) indexInput.value = String(index);
-            if (contentInput) contentInput.value = notes[index].content || '';
-        } else {
-            if (titleEl) titleEl.innerHTML = '<i class="fas fa-sticky-note" style="color: var(--primary);"></i> Add Note';
-            if (indexInput) indexInput.value = '-1';
-            if (contentInput) contentInput.value = '';
-        }
-
-        modal.classList.add('open');
-        setTimeout(() => contentInput?.focus(), 50);
-    }
-
-    function saveNoteFromModal() {
-        const indexInput = $('modalNoteIndex');
-        const contentInput = $('modalNoteContent');
-        const content = contentInput?.value.trim();
-        if (!content) return;
-
-        const idx = Number(indexInput?.value ?? -1);
-        if (idx >= 0 && idx < notes.length) {
-            notes[idx].content = content;
-            notes[idx].timestamp = 'just now';
-        } else {
-            notes.push({
-                user: $('poEstimator')?.value || 'Isaac De Jesús',
-                timestamp: 'in less than a minute',
-                content
-            });
-        }
-
-        $('pdNoteModal')?.classList.remove('open');
-        markDirty();
-        renderNotes();
-        showToast('Note saved locally. Press Save Project to persist it.');
-    }
-
-    function renderTasks() {
-        const list = $('overviewTasksList');
-        const cardTitle = $('overviewTasksCardTitle');
-        if (cardTitle) cardTitle.textContent = `Tasks (${tasks.length})`;
-        const countBadge = $('overviewTaskCount');
-        if (countBadge) countBadge.textContent = String(tasks.length);
-        if (!list) return;
-        if (!tasks.length) {
-            list.innerHTML = `
-                <div class="pd-empty-card-state" id="overviewTasksEmpty" role="button" tabindex="0">
-                    <div class="pd-empty-graphic">
-                        <svg width="72" height="52" viewBox="0 0 72 52" fill="none" xmlns="http://www.w3.org/2000/svg">
-                            <rect x="18" y="10" width="46" height="36" rx="4" fill="rgba(0,0,0,0.08)" />
-                            <rect x="14" y="6" width="46" height="36" rx="4" fill="var(--bg-panel)" stroke="var(--border)" stroke-width="1.5" />
-                            <path d="M14 10C14 7.79 15.79 6 18 6H56C58.21 6 60 7.79 60 10V15H14V10Z" fill="#0055b8" />
-                            <circle cx="20" cy="10.5" r="1.5" fill="#ffffff" opacity="0.8" />
-                            <circle cx="25" cy="10.5" r="1.5" fill="#ffffff" opacity="0.8" />
-                            <rect x="20" y="21" width="18" height="2" rx="1" fill="var(--border)" />
-                            <rect x="20" y="26" width="26" height="2" rx="1" fill="var(--border)" />
-                            <rect x="20" y="31" width="14" height="2" rx="1" fill="var(--border)" />
-                            <path d="M10 28H18M14 24V32" stroke="#fb5a3a" stroke-width="2.5" stroke-linecap="round" />
-                            <path d="M14 20L15 22L17 22L15.5 23.5L16 25.5L14 24.5L12 25.5L12.5 23.5L11 22L13 22L14 20Z" fill="#fb5a3a" />
-                        </svg>
-                    </div>
-                    <div class="pd-empty-title">Create a Task</div>
-                    <div class="pd-empty-subtitle">Assign a task with a due date to yourself or someone else on your team.</div>
-                </div>`;
-            $('overviewTasksEmpty')?.addEventListener('click', () => openTaskModal());
-            return;
-        }
-
-        list.innerHTML = tasks.map((task, idx) => {
-            const dueText = task.due_date ? formatTaskDue(task.due_date) : '';
-            return `
-                <div class="pd-task-item" data-task-index="${idx}">
-                    <div class="pd-task-icon-box"><i class="fas fa-clipboard"></i></div>
-                    <div class="pd-task-content-wrap">
-                        <div class="pd-task-title">${escapeHtml(task.title || '')}</div>
-                        <div class="pd-task-meta-row">
-                            <div class="pd-task-assignee">For ${escapeHtml(task.responsible || 'Isaac De Jesús')}</div>
-                            ${dueText ? `<div class="pd-task-due-badge">${escapeHtml(dueText)}</div>` : ''}
-                        </div>
-                    </div>
-                    <div class="pd-item-menu-wrap">
-                        <button type="button" class="pd-row-dots-btn" data-task-menu="${idx}" title="Task options"><i class="fas fa-ellipsis-vertical"></i></button>
-                    </div>
-                </div>
-            `;
-        }).join('');
-
-        list.querySelectorAll('[data-task-menu]').forEach(btn => {
-            btn.addEventListener('click', (e) => {
-                e.stopPropagation();
-                const idx = Number(btn.dataset.taskMenu);
-                openItemContextMenu(btn, 'task', idx);
-            });
-        });
-    }
-
-    function formatTaskDue(dateVal) {
-        if (!dateVal) return '';
-        try {
-            const d = new Date(dateVal);
-            if (isNaN(d.getTime())) return `Due ${dateVal}`;
-            const diffHours = Math.round((d.getTime() - Date.now()) / (1000 * 60 * 60));
-            if (diffHours > 0 && diffHours < 48) {
-                return `Due in about ${diffHours} hour${diffHours === 1 ? '' : 's'}`;
-            }
-            return `Due ${d.toLocaleDateString()}`;
-        } catch (e) {
-            return `Due ${dateVal}`;
-        }
-    }
-
-    let systemUsers = [
-        { id: 1, name: 'Isaac Diaz', role: 'Lead Estimator', initials: 'ID', avatarColor: '#5b4364' },
-        { id: 2, name: 'Juan Estevez', role: 'Chief Estimator', initials: 'JE', avatarColor: '#1d5cc9' },
-        { id: 3, name: 'Carlos Rodriguez', role: 'Project Manager', initials: 'CR', avatarColor: '#059669' },
-        { id: 4, name: 'Sarah Jenkins', role: 'Senior Estimator', initials: 'SJ', avatarColor: '#d97706' },
-        { id: 5, name: 'Michael Chang', role: 'Civil Estimator', initials: 'MC', avatarColor: '#0284c7' },
-        { id: 6, name: 'Elena Rostova', role: 'Electrical Estimator', initials: 'ER', avatarColor: '#7c3aed' },
-        { id: 7, name: 'David Miller', role: 'Mechanical Estimator', initials: 'DM', avatarColor: '#059669' },
-        { id: 8, name: 'Amanda Brooks', role: 'Commercial Estimator', initials: 'AB', avatarColor: '#ea580c' },
-        { id: 9, name: 'Marcus Vance', role: 'Structural Estimator', initials: 'MV', avatarColor: '#dc2626' },
-        { id: 10, name: 'Ana Lopez', role: 'Estimating Coordinator', initials: 'AL', avatarColor: '#d97706' }
-    ];
-
-    function loadSystemUsers() {
-        if (window.ProjectState && Array.isArray(window.ProjectState.availableEstimators) && window.ProjectState.availableEstimators.length) {
-            systemUsers = window.ProjectState.availableEstimators;
-        }
-        populateAssigneeSelector();
-        populateEstimatorSelector();
-    }
-
-    function populateAssigneeSelector(selectedAssignee = null) {
-        const select = $('modalTaskAssignee');
-        if (!select) return;
-        const current = (selectedAssignee || select.value || '').trim();
-
-        select.innerHTML = '<option value="">-- Choose an Assignee --</option>' +
-            systemUsers.map(u => {
-                const isSel = (current && (current === u.name || current.toLowerCase() === u.name.toLowerCase())) ? 'selected' : '';
-                return `<option value="${escapeHtml(u.name)}" ${isSel}>${escapeHtml(u.name)} (${escapeHtml(u.role || 'Member')})</option>`;
-            }).join('');
-
-        if (current && !systemUsers.some(u => u.name.toLowerCase() === current.toLowerCase())) {
-            const opt = document.createElement('option');
-            opt.value = current;
-            opt.textContent = `${current} (Custom)`;
-            opt.selected = true;
-            select.appendChild(opt);
-        }
-    }
-
-    function populateEstimatorSelector(selectedEstimator = null) {
-        const select = $('poEstimator');
-        if (!select) return;
-        const current = (selectedEstimator !== null ? selectedEstimator : (select.value || select.dataset.initialValue || '')).trim();
-
-        select.innerHTML = '<option value="">-- Select an Estimator --</option>' +
-            systemUsers.map(u => {
-                const isSel = (current && (current === u.name || current.toLowerCase() === u.name.toLowerCase())) ? 'selected' : '';
-                return `<option value="${escapeHtml(u.name)}" ${isSel}>${escapeHtml(u.name)} (${escapeHtml(u.role || 'Estimator')})</option>`;
-            }).join('');
-
-        if (current && current !== 'Unassigned' && !systemUsers.some(u => u.name.toLowerCase() === current.toLowerCase())) {
-            const opt = document.createElement('option');
-            opt.value = current;
-            opt.textContent = `${current} (Custom)`;
-            opt.selected = true;
-            select.appendChild(opt);
-        }
-    }
-
-    function openTaskModal(index = -1) {
-        const modal = $('pdTaskModal');
-        const titleEl = $('taskModalTitle');
-        const indexInput = $('modalTaskIndex');
-        const taskTitleInput = $('modalTaskTitle');
-        const assigneeInput = $('modalTaskAssignee');
-        const dueInput = $('modalTaskDue');
-        if (!modal) return;
-
-        if (index >= 0 && index < tasks.length) {
-            if (titleEl) titleEl.innerHTML = '<i class="fas fa-tasks" style="color: var(--primary);"></i> Edit Task';
-            if (indexInput) indexInput.value = String(index);
-            if (taskTitleInput) taskTitleInput.value = tasks[index].title || '';
-            const assignee = tasks[index].responsible || 'Isaac Diaz';
-            populateAssigneeSelector(assignee);
-            if (dueInput) dueInput.value = tasks[index].due_date || '';
-        } else {
-            if (titleEl) titleEl.innerHTML = '<i class="fas fa-tasks" style="color: var(--primary);"></i> Create Task';
-            if (indexInput) indexInput.value = '-1';
-            if (taskTitleInput) taskTitleInput.value = '';
-            const defaultAssignee = $('poEstimator')?.value || 'Isaac Diaz';
-            populateAssigneeSelector(defaultAssignee);
-            if (dueInput) dueInput.value = '';
-        }
-
-        modal.classList.add('open');
-        setTimeout(() => taskTitleInput?.focus(), 50);
-    }
-
-    function saveTaskFromModal() {
-        const indexInput = $('modalTaskIndex');
-        const taskTitleInput = $('modalTaskTitle');
-        const assigneeInput = $('modalTaskAssignee');
-        const dueInput = $('modalTaskDue');
-
-        const title = taskTitleInput?.value.trim();
-        if (!title) return;
-        const responsible = assigneeInput?.value.trim() || $('poEstimator')?.value || 'Isaac Diaz';
-        const due = dueInput?.value || '';
-
-        const idx = Number(indexInput?.value ?? -1);
-        if (idx >= 0 && idx < tasks.length) {
-            tasks[idx].title = title;
-            tasks[idx].responsible = responsible;
-            tasks[idx].due_date = due;
-        } else {
-            tasks.push({
-                title,
-                responsible,
-                due_date: due,
-                status: 'open'
-            });
-        }
-
-        $('pdTaskModal')?.classList.remove('open');
-        markDirty();
-        renderTasks();
-        showToast('Task saved locally. Press Save Project to persist it.');
-    }
-
-    function openItemContextMenu(button, type, index) {
-        const menu = $('pdItemContextMenu');
-        if (!menu) return;
-
-        const isOpen = menu.style.display === 'flex' && contextMenuTarget?.type === type && contextMenuTarget?.index === index;
-        closeItemContextMenu();
-        if (isOpen) return;
-
-        contextMenuTarget = { type, index };
-        const rect = button.getBoundingClientRect();
-        const zoom = parseFloat(getComputedStyle(document.documentElement).zoom) || 1;
-
-        menu.__trigger = button;
-        button.classList.add('is-active');
-        button.setAttribute('aria-expanded', 'true');
-        menu.style.display = 'flex';
-        menu.style.position = 'fixed';
-        menu.style.zIndex = '99999';
-
-        const boundaryEl = button.closest('#overviewTab, .workspace-shell, body') || document.body;
-        const margin = 10;
-        const bRect = (boundaryEl && boundaryEl !== document.body) ? boundaryEl.getBoundingClientRect() : {
-            left: 0, top: 0, right: window.innerWidth, bottom: window.innerHeight
-        };
-        const minLeft = Math.max(margin, (bRect.left / zoom) + margin);
-        const maxRight = Math.min((window.innerWidth / zoom) - margin, (bRect.right / zoom) - margin);
-        const maxBottom = Math.min((window.innerHeight / zoom) - margin, (bRect.bottom / zoom) - margin);
-
-        const menuWidth = menu.offsetWidth || 130;
-        const menuHeight = menu.offsetHeight || 140;
-
-        let leftPos = (rect.right / zoom) - menuWidth;
-        if (leftPos < minLeft) {
-            leftPos = (rect.left / zoom);
-        }
-        leftPos = Math.max(minLeft, Math.min(leftPos, maxRight - menuWidth));
-
-        let topPos = (rect.bottom / zoom) + 4;
-        if (topPos + menuHeight > maxBottom) {
-            topPos = Math.max(margin, (rect.top / zoom) - menuHeight - 4);
-        }
-
-        menu.style.left = `${Math.round(leftPos)}px`;
-        menu.style.top = `${Math.round(topPos)}px`;
-    }
-
-    function closeItemContextMenu() {
-        const menu = $('pdItemContextMenu');
-        if (menu) {
-            menu.style.display = 'none';
-            if (menu.__trigger) {
-                menu.__trigger.classList.remove('active', 'is-active');
-                menu.__trigger.setAttribute('aria-expanded', 'false');
-            }
-            menu.__trigger = null;
-        }
-        contextMenuTarget = null;
-    }
+    function renderNotes() { return overviewNotesTasks.renderNotes(); }
+    function openNoteModal(index = -1) { return overviewNotesTasks.openNoteModal(index); }
+    function saveNoteFromModal() { return overviewNotesTasks.saveNoteFromModal(); }
+    function renderTasks() { return overviewNotesTasks.renderTasks(); }
+    function openTaskModal(index = -1) { return overviewNotesTasks.openTaskModal(index); }
+    function saveTaskFromModal() { return overviewNotesTasks.saveTaskFromModal(); }
+    function loadSystemUsers() { return overviewNotesTasks.loadSystemUsers(); }
+    function populateAssigneeSelector(selected = null) { return overviewNotesTasks.populateAssigneeSelector(selected); }
+    function populateEstimatorSelector(selected = null) { return overviewNotesTasks.populateEstimatorSelector(selected); }
+    function closeItemContextMenu() { return overviewNotesTasks.closeItemContextMenu(); }
 
     function showToast(message, type = 'success') {
         if (window.TakeoffAnnouncement && typeof window.TakeoffAnnouncement.show === 'function') {
@@ -5248,43 +4905,7 @@
             }
         });
         loadCustomersDirectory();
-        $('addNoteBtn')?.addEventListener('click', () => openNoteModal(-1));
-        $('addNoteBtnHead')?.addEventListener('click', () => openNoteModal(-1));
-        $('modalSaveNoteBtn')?.addEventListener('click', saveNoteFromModal);
-        $('createTaskBtn')?.addEventListener('click', () => openTaskModal(-1));
-        $('createTaskBtnHead')?.addEventListener('click', () => openTaskModal(-1));
-        $('modalSaveTaskBtn')?.addEventListener('click', saveTaskFromModal);
-
-        $('pdItemActionEdit')?.addEventListener('click', () => {
-            if (!contextMenuTarget) return;
-            const { type, index } = contextMenuTarget;
-            closeItemContextMenu();
-            if (type === 'note') openNoteModal(index);
-            else if (type === 'task') openTaskModal(index);
-        });
-
-        $('pdItemActionDelete')?.addEventListener('click', () => {
-            if (!contextMenuTarget) return;
-            const { type, index } = contextMenuTarget;
-            closeItemContextMenu();
-            if (type === 'note' && index >= 0 && index < notes.length) {
-                notes.splice(index, 1);
-                markDirty();
-                renderNotes();
-                showToast('Note deleted.');
-            } else if (type === 'task' && index >= 0 && index < tasks.length) {
-                tasks.splice(index, 1);
-                markDirty();
-                renderTasks();
-                showToast('Task deleted.');
-            }
-        });
-
-        document.addEventListener('click', (e) => {
-            if (!e.target.closest('#pdItemContextMenu') && !e.target.closest('.pd-item-menu-wrap')) {
-                closeItemContextMenu();
-            }
-        });
+        overviewNotesTasks.bindEvents();
 
         document.querySelectorAll('[data-upload-category]').forEach(button => {
             button.addEventListener('click', event => {
@@ -5486,12 +5107,8 @@
         loadSystemUsers();
 
         window.TakeoffUsers = {
-            getUsers: () => systemUsers,
-            setUsers: (list) => {
-                systemUsers = Array.isArray(list) ? list : systemUsers;
-                populateAssigneeSelector();
-                populateEstimatorSelector();
-            },
+            getUsers: overviewNotesTasks.getUsers,
+            setUsers: overviewNotesTasks.setUsers,
             load: loadSystemUsers
         };
 
