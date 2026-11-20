@@ -131,3 +131,16 @@ test('estimate-scoped serialization prevents a stale autosave from winning after
     assert.equal(serializedSave(registry, 'Old name'), 'New name',
         'a stale save serialized after the rename must receive the canonical name');
 });
+
+test('layer-name registry saves remain compatible when workspace updated_at is absent', () => {
+    const registryHelper = apiSource.slice(
+        apiSource.indexOf('function lock_takeoff_layer_name_registry'),
+        apiSource.indexOf('function apply_explicit_takeoff_layer_name_updates')
+    );
+    assert.match(registryHelper, /takeoff_columns\(\$pdo, 'estimate_workspace_states'\)/,
+        'the rename path must discover the production workspace schema');
+    assert.match(registryHelper, /in_array\('updated_at',[\s\S]*?CURRENT_TIMESTAMP/,
+        'updated_at must be appended only when that optional column exists');
+    assert.doesNotMatch(registryHelper, /SET state_json = \?, updated_at = CURRENT_TIMESTAMP/,
+        'a legacy workspace without updated_at must not reject the rename save');
+});

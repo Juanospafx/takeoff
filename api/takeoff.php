@@ -730,7 +730,11 @@ function lock_takeoff_layer_name_registry(PDO $pdo, int $projectId, string $esti
         $registry[$integrationKey] = $name;
     if ($updates) {
         $workspace['takeoffLayerNames'] = $registry;
-        $update = $pdo->prepare("UPDATE estimate_workspace_states SET state_json = ?, updated_at = CURRENT_TIMESTAMP WHERE estimate_id = ?");
+        $workspaceColumns = takeoff_columns($pdo, 'estimate_workspace_states');
+        $touchUpdatedAt = in_array('updated_at', $workspaceColumns, true)
+            ? ', updated_at = CURRENT_TIMESTAMP'
+            : '';
+        $update = $pdo->prepare("UPDATE estimate_workspace_states SET state_json = ?{$touchUpdatedAt} WHERE estimate_id = ?");
         $update->execute([json_value($workspace) ?? '{}', (int) $row['estimate_id']]);
     }
     return $registry;
