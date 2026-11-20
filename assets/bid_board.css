@@ -2081,6 +2081,19 @@ body.theme-dark .bb-tooltip.bb-tooltip-rich {
     flex-direction: column;
 }
 
+.bb-create-project-modal .bb-modal-head,
+.bb-create-project-modal .bb-modal-foot {
+    flex: 0 0 auto;
+}
+
+.bb-create-project-modal .bb-modal-foot {
+    flex: 0 0 auto;
+    position: sticky;
+    bottom: 0;
+    z-index: 4;
+    background: var(--bb-surface, #ffffff);
+}
+
 .bb-modal-icon-badge {
     width: 38px;
     height: 38px;

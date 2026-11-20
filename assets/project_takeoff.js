@@ -1778,7 +1778,7 @@
         if (!options.suppressDirty) {
             takeoffIsDirty = true;
         }
-        if (options && (options.debounceEstimatingSync || options.debounceLocalSave)) {
+        if (options && options.debounceLocalSave) {
             scheduleTakeoffLocalSave();
         } else {
             pendingLocalSaveEstimateGroups = true;
@@ -3602,17 +3602,15 @@
             if (raw !== null) storedGroups = JSON.parse(raw);
         } catch (_) { }
 
-        if (Array.isArray(storedGroups)) {
+        const seeded = seedGroupsFromProjectLayers();
+        if (seeded.length > 0) {
+            takeoffState.groups = normalizeSavedGroups(seeded);
+        } else if (Array.isArray(storedGroups)) {
             takeoffState.groups = normalizeSavedGroups(storedGroups);
+        } else if (!isTemplateProject) {
+            takeoffState.groups = [defaultGroup(activeEstimateId())];
         } else {
-            const seeded = seedGroupsFromProjectLayers();
-            if (seeded.length > 0) {
-                takeoffState.groups = normalizeSavedGroups(seeded);
-            } else if (!isTemplateProject) {
-                takeoffState.groups = [defaultGroup(activeEstimateId())];
-            } else {
-                takeoffState.groups = [];
-            }
+            takeoffState.groups = [];
         }
         scopeLegacyTakeoffGroupsOnce();
         ensureEstimateTakeoffWorkspace();

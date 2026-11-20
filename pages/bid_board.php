@@ -421,7 +421,7 @@ $readOnly = !$canWrite;
                     </div>
                     <div class="bb-modal-foot-actions">
                         <button class="bb-btn-procore-secondary" type="button" data-close-modal>Cancel</button>
-                        <button class="bb-btn-procore-primary" type="submit">
+                        <button class="bb-btn-procore-primary" id="bbProjectSubmitBtn" type="submit">
                             <i class="fas fa-plus"></i> Create Project
                         </button>
                     </div>

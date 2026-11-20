@@ -247,6 +247,18 @@ function pew_state_row(PDO $pdo, $estimateId) {
 function pew_save_workspace_state(PDO $pdo, $estimateId, $projectId, $clientId, $encoded) {
     $columns = pew_table_columns($pdo, 'estimate_workspace_states');
     $touch = isset($columns['updated_at']) ? ',updated_at=CURRENT_TIMESTAMP' : '';
+    // Takeoff owns this server-side registry. Preserve it when Estimating
+    // replaces its workspace JSON so stale drawing saves stay serialized by
+    // the same estimate-scoped authority without changing client revisions.
+    $registryStmt = $pdo->prepare('SELECT state_json FROM estimate_workspace_states WHERE estimate_id=? LIMIT 1 FOR UPDATE');
+    $registryStmt->execute(array($estimateId));
+    $storedWorkspace = json_decode((string)($registryStmt->fetchColumn() ?: '{}'), true);
+    $incomingWorkspace = json_decode((string)$encoded, true);
+    if (is_array($storedWorkspace) && isset($storedWorkspace['takeoffLayerNames']) && is_array($incomingWorkspace)) {
+        $incomingWorkspace['takeoffLayerNames'] = $storedWorkspace['takeoffLayerNames'];
+        $preserved = json_encode($incomingWorkspace, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE);
+        if ($preserved !== false) $encoded = $preserved;
+    }
     // Remove only mappings whose target no longer represents a live estimate.
     // This prevents a stale unique (project_id, client_estimate_id) row from
     // blocking recovery, while never stealing a mapping from a valid estimate.

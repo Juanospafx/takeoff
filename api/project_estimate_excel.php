@@ -134,6 +134,7 @@ try {
     error_log('ProjectEstimateExcelService rejected an unreadable workbook');
     excel_json_error('The uploaded Excel workbook could not be read.', 422);
 } catch (Throwable $e) {
-    error_log('ProjectEstimateExcelService error: ' . $e->getMessage());
+    $incidentId = bin2hex(random_bytes(8));
+    error_log("ProjectEstimateExcelService failure: {$incidentId}");
     excel_json_error('Excel operation failed.', 500);
 }

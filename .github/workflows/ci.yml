@@ -32,6 +32,7 @@ jobs:
           php tests/excel_runtime_smoke.test.php
           node tests/excel_template_regression_contract.test.js
           node tests/project_creation_contract.test.js
+          node tests/bid_board_excel_import_ui.test.js
           node tests/asset_cache_keys.test.js
           node tests/portal_styles_extraction.test.js
           node tests/cost_catalog_incremental_render.test.js

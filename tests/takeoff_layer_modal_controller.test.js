@@ -102,6 +102,44 @@ test('commit submits deferred title and metadata on the first action when dirty'
     assert.deepEqual(calls, ['flush', 'submit']);
 });
 
+test('concurrent Close and Enter share one in-flight commit', async () => {
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    const { controller, calls } = makeController({
+        isLayerModalNonAutoDirty: () => true,
+        submitLayerModal: () => {
+            calls.push('submit');
+            return pending;
+        }
+    });
+
+    const first = controller.commit();
+    const second = controller.commit();
+    assert.strictEqual(second, first, 'all close paths must reuse the active commit promise');
+    assert.deepEqual(calls, ['flush', 'submit'], 'the layer must only be submitted once');
+    release(true);
+    assert.equal(await first, true);
+});
+
+test('commit exposes busy state for the full persistence acknowledgement', async () => {
+    let release;
+    const pending = new Promise(resolve => { release = resolve; });
+    const { controller, calls } = makeController({
+        isLayerModalNonAutoDirty: () => true,
+        setCommitBusy: busy => calls.push(`busy:${busy}`),
+        submitLayerModal: () => {
+            calls.push('submit');
+            return pending;
+        }
+    });
+
+    const committed = controller.commit();
+    assert.deepEqual(calls, ['busy:true', 'flush', 'submit']);
+    release(false);
+    assert.equal(await committed, false);
+    assert.deepEqual(calls, ['busy:true', 'flush', 'submit', 'busy:false']);
+});
+
 test('new layers submit directly instead of running an edit autosave flush', async () => {
     const { controller, calls } = makeController({
         getEditingLayerId: () => null

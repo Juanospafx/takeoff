@@ -43,6 +43,7 @@
     const dirtyTakeoffObjects = new Map();
     const deletedTakeoffObjects = new Map();
     const deletedTakeoffLayers = new Set();
+    const pendingLayerNameUpdates = new Map();
     const takeoffObjectBaseVersions = new Map();
     const dirtyTakeoffObjectGenerations = new Map();
     let takeoffDirtyGeneration = 0;
@@ -4036,12 +4037,14 @@
         const objectBaseVersions = Object.fromEntries(sentObjectIds.map(id => [id, takeoffObjectBaseVersions.get(id) ?? null]));
         const fallbackPages = dirtyTakeoffPages.size ? [...dirtyTakeoffPages] : (sentObjectIds.length ? [] : sentPages);
         const sentDeletedLayerIds = [...deletedTakeoffLayers];
+        const sentLayerNameUpdates = [...pendingLayerNameUpdates.values()].map(update => ({ ...update }));
         return {
             sentPages,
             sentGenerations,
             sentObjectIds,
             sentObjectGenerations,
             sentDeletedLayerIds,
+            sentLayerNameUpdates,
             body: {
                 drawing_id: fileId,
                 project_id: typeof projectId !== 'undefined' ? projectId : 0,
@@ -4065,6 +4068,7 @@
                 dirty_object_ids: [...dirtyTakeoffObjects.keys()],
                 deleted_object_ids: [...deletedTakeoffObjects.keys()],
                 deleted_layer_ids: sentDeletedLayerIds,
+                layer_name_updates: sentLayerNameUpdates.map(({ integration_key, name }) => ({ integration_key, name })),
                 object_base_versions: objectBaseVersions,
             }
         };
@@ -4118,6 +4122,7 @@
                 dirty_object_ids: body.dirty_object_ids || [],
                 deleted_object_ids: body.deleted_object_ids || [],
                 deleted_layer_ids: body.deleted_layer_ids || [],
+                layer_name_updates: body.layer_name_updates || [],
                 object_base_versions: body.object_base_versions || {},
             };
             serialized = JSON.stringify({ action: 'save_state', ...compactBody });
@@ -4133,7 +4138,7 @@
     }
 
     function saveTakeoff(silent = false, rejectOnError = false) {
-        const { sentPages, sentGenerations, sentObjectIds, sentObjectGenerations, sentDeletedLayerIds, body } = buildSaveTakeoffPayload();
+        const { sentPages, sentGenerations, sentObjectIds, sentObjectGenerations, sentDeletedLayerIds, sentLayerNameUpdates, body } = buildSaveTakeoffPayload();
         return request('save_state', body).then(res => {
             if (res.status !== 'success') throw new Error(res.msg || 'Save failed');
             sentPages.forEach(page => {
@@ -4153,7 +4158,12 @@
                 } else takeoffObjectBaseVersions.delete(id);
             });
             (sentDeletedLayerIds || []).forEach(id => deletedTakeoffLayers.delete(id));
-            state.dirty = dirtyTakeoffPages.size > 0 || dirtyTakeoffObjects.size > 0 || deletedTakeoffObjects.size > 0 || deletedTakeoffLayers.size > 0;
+            sentLayerNameUpdates.forEach(sent => {
+                const pending = pendingLayerNameUpdates.get(sent.integration_key);
+                if (pending?.generation === sent.generation) pendingLayerNameUpdates.delete(sent.integration_key);
+            });
+            state.dirty = dirtyTakeoffPages.size > 0 || dirtyTakeoffObjects.size > 0 || deletedTakeoffObjects.size > 0
+                || deletedTakeoffLayers.size > 0 || pendingLayerNameUpdates.size > 0;
             if (!silent) {
                 hasPendingManualCanvasCheckpoint = false;
                 showToast('Takeoff saved', 'success');
@@ -5003,7 +5013,20 @@
         const prevSubtype = normalizeLinearSubtype(layer.takeoff_subtype || layer.original_takeoff_type || layer.takeoff_type || layer.type);
         let nextType = prevType;
         let nextSubtype = prevSubtype;
-        if (patch.name !== undefined) layer.name = String(patch.name);
+        if (patch.name !== undefined) {
+            const previousName = String(layer.name || '');
+            const nextName = String(patch.name);
+            layer.name = nextName;
+            if (nextName !== previousName) {
+                const integrationKey = String(layer.integration_key || layer.metadata_json?.project_layer_id
+                    || layer.client_uid || layer.id || layerKey);
+                pendingLayerNameUpdates.set(integrationKey, {
+                    integration_key: integrationKey,
+                    name: nextName,
+                    generation: ++takeoffDirtyGeneration
+                });
+            }
+        }
         if (patch.tag !== undefined) {
             layer.tag = String(patch.tag);
             layer.metadata_json = { ...(layer.metadata_json || {}), tag: layer.tag };

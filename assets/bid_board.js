@@ -1502,6 +1502,7 @@
         if (excelErr) { excelErr.textContent = ''; excelErr.style.display = 'none'; }
         document.querySelector('input[name="bbProjectMode"][value="template"]').checked = true;
         toggleProjectTemplate();
+        syncExcelImportUi();
         updateModalLivePreview();
         document.getElementById('bbProjectModal').classList.add('open');
         setTimeout(() => {
@@ -1522,7 +1523,26 @@
         if (wrap) wrap.style.display = mode === 'template' ? 'block' : 'none';
         const excelWrap = document.getElementById('bbProjectExcelWrap');
         if (excelWrap) excelWrap.style.display = mode === 'excel' ? 'block' : 'none';
+        syncExcelImportUi();
         updateModalLivePreview();
+    }
+
+    function isValidProjectExcelFile(file) {
+        return Boolean(file && /\.(xlsx|xlsm)$/i.test(String(file.name || '').trim()));
+    }
+
+    function syncExcelImportUi() {
+        const mode = document.querySelector('input[name="bbProjectMode"]:checked')?.value || 'empty';
+        const file = document.getElementById('bbProjectExcelFile')?.files?.[0] || null;
+        const validFile = isValidProjectExcelFile(file);
+        const submitBtn = document.getElementById('bbProjectSubmitBtn');
+        if (submitBtn) {
+            submitBtn.hidden = false;
+            submitBtn.disabled = mode === 'excel' && !validFile;
+            submitBtn.setAttribute('aria-disabled', submitBtn.disabled ? 'true' : 'false');
+        }
+        document.getElementById('bbProjectExcelDropzone')?.classList.toggle('has-file', mode === 'excel' && validFile);
+        return { mode, file, validFile };
     }
 
     async function createProjectDraft(event) {
@@ -1643,6 +1663,12 @@
         if (!file) {
             setInlineErr('Please choose an exported Project Estimate (.xlsx) file to import.');
             document.getElementById('bbProjectExcelDropzone')?.focus();
+            return;
+        }
+        if (!isValidProjectExcelFile(file)) {
+            setInlineErr('Please choose a valid exported .xlsx or .xlsm workbook.');
+            document.getElementById('bbProjectExcelDropzone')?.focus();
+            syncExcelImportUi();
             return;
         }
         if (submitBtn) {
@@ -1805,12 +1831,15 @@
             const metaEl = document.getElementById('bbProjectExcelFileMeta');
             if (!file) return;
             if (nameEl) nameEl.textContent = file.name;
-            if (metaEl) metaEl.textContent = `${(file.size / 1024).toFixed(1)} KB • Ready to import`;
+            if (metaEl) metaEl.textContent = isValidProjectExcelFile(file)
+                ? `${(file.size / 1024).toFixed(1)} KB - Ready to import`
+                : 'Only exported .xlsx or .xlsm workbooks are supported';
             const projNameInput = document.getElementById('bbProjectName');
             if (projNameInput && (!projNameInput.value.trim() || projNameInput.value.trim() === 'New Project')) {
                 projNameInput.value = file.name.replace(/\.(xlsx|xlsm)$/i, '').replace(/[_-]+/g, ' ').trim() || 'Imported Project';
                 updateModalLivePreview();
             }
+            syncExcelImportUi();
         };
         if (excelDropzone && excelInput) {
             excelDropzone.addEventListener('click', () => excelInput.click());
@@ -1819,6 +1848,7 @@
             });
             excelInput.addEventListener('change', () => {
                 if (excelInput.files?.[0]) updateSelectedExcelUi(excelInput.files[0]);
+                else syncExcelImportUi();
             });
             excelDropzone.addEventListener('dragover', (e) => {
                 e.preventDefault();
@@ -1834,6 +1864,7 @@
                     dt.items.add(dropped);
                     excelInput.files = dt.files;
                     updateSelectedExcelUi(dropped);
+                    syncExcelImportUi();
                 }
             });
         }

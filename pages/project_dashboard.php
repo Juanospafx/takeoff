@@ -304,13 +304,13 @@ if ($projectId > 0 && dash_table_exists($pdo, 'takeoff_layers') && dash_table_ex
         FROM takeoff_layers tl
         LEFT JOIN takeoffs t ON t.id = tl.takeoff_id AND t.deleted_at IS NULL
         WHERE (tl.project_id = ? OR t.project_id = ?) AND tl.deleted_at IS NULL
-        ORDER BY tl.sort_order ASC, tl.id ASC
+        ORDER BY tl.sort_order ASC, tl.id DESC
     " : "
         SELECT tl.*, t.drawing_id AS resolved_drawing_id
         FROM takeoff_layers tl
         INNER JOIN takeoffs t ON t.id = tl.takeoff_id
         WHERE t.project_id = ? AND t.deleted_at IS NULL
-        ORDER BY tl.sort_order ASC, tl.id ASC
+        ORDER BY tl.sort_order ASC, tl.id DESC
     ");
     $catalogItemMetaMap = [];
     $stmt->execute($hasLayerProjectId ? [$projectId, $projectId] : [$projectId]);

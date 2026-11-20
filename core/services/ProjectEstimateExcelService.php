@@ -1149,6 +1149,41 @@ class ProjectEstimateExcelService
         return is_numeric($cleaned) ? (float)$cleaned : $fallback;
     }
 
+    private static function insertEstimateCompatible(PDO $pdo, array $values): int
+    {
+        $available = ProjectTemplateService::tableColumns($pdo, 'estimates');
+        if (!$available) {
+            $available = ['project_id' => true, 'name' => true, 'status' => true];
+        }
+        foreach (['project_id', 'name', 'status'] as $required) {
+            if (!isset($available[$required]) || !array_key_exists($required, $values)) {
+                throw new RuntimeException('The estimates table is missing a required import column.');
+            }
+        }
+        $filtered = array_filter($values, static fn($key) => isset($available[$key]), ARRAY_FILTER_USE_KEY);
+        $columns = array_keys($filtered);
+        $quoted = array_map(static fn($column) => '`' . $column . '`', $columns);
+        $sql = 'INSERT INTO estimates (' . implode(', ', $quoted) . ') VALUES ('
+            . implode(', ', array_fill(0, count($columns), '?')) . ')';
+        $pdo->prepare($sql)->execute(array_values($filtered));
+        $estimateId = (int)$pdo->lastInsertId();
+        if ($estimateId < 1) {
+            throw new RuntimeException('Database did not return the imported estimate identity.');
+        }
+        return $estimateId;
+    }
+
+    private static function updateEstimateTotalsCompatible(PDO $pdo, int $estimateId, array $totals): void
+    {
+        $available = ProjectTemplateService::tableColumns($pdo, 'estimates');
+        $filtered = array_filter($totals, static fn($key) => isset($available[$key]), ARRAY_FILTER_USE_KEY);
+        if (!$filtered) return;
+        $assignments = array_map(static fn($column) => '`' . $column . '` = ?', array_keys($filtered));
+        $values = array_values($filtered);
+        $values[] = $estimateId;
+        $pdo->prepare('UPDATE estimates SET ' . implode(', ', $assignments) . ' WHERE id = ?')->execute($values);
+    }
+
     private static function extractQuotedHeaderMeta(string $raw): string
     {
         if (preg_match('/:\s*"([^"]*)"/s', $raw, $m)) {
@@ -1480,17 +1515,20 @@ class ProjectEstimateExcelService
         $pdo->beginTransaction();
         try {
             $clientEstId = ProjectTemplateService::uid('estimate');
-            $pdo->prepare(
-                "INSERT INTO estimates (project_id, name, description, status, currency_code, settings_json, notes_json, subtotal_cost, markup_total, tax_total, total_cost, labor_hours_total)
-                 VALUES (?, ?, ?, 'draft', 'USD', ?, ?, 0, 0, 0, 0, 0)"
-            )->execute([
-                $projectId,
-                $tabName,
-                $parsed['excelDesc'] ?: 'Imported from Excel workbook',
-                json_encode($parsed['estSettings'], JSON_UNESCAPED_SLASHES),
-                json_encode(['scope' => $parsed['excelScope'], 'included' => [], 'excluded' => []], JSON_UNESCAPED_SLASHES),
+            $estimateId = self::insertEstimateCompatible($pdo, [
+                'project_id' => $projectId,
+                'name' => $tabName,
+                'description' => $parsed['excelDesc'] ?: 'Imported from Excel workbook',
+                'status' => 'draft',
+                'currency_code' => 'USD',
+                'settings_json' => json_encode($parsed['estSettings'], JSON_UNESCAPED_SLASHES),
+                'notes_json' => json_encode(['scope' => $parsed['excelScope'], 'included' => [], 'excluded' => []], JSON_UNESCAPED_SLASHES),
+                'subtotal_cost' => 0,
+                'markup_total' => 0,
+                'tax_total' => 0,
+                'total_cost' => 0,
+                'labor_hours_total' => 0,
             ]);
-            $estimateId = (int)$pdo->lastInsertId();
 
             $built = self::buildWorkspaceFromExcelGroups(
                 $parsed['groups'],
@@ -1535,8 +1573,11 @@ class ProjectEstimateExcelService
                 'total_amount' => round($built['estGrandTotal'], 2),
             ];
 
-            $pdo->prepare("UPDATE estimates SET subtotal_cost = ?, total_cost = ?, labor_hours_total = ? WHERE id = ?")
-                ->execute([round($built['estSubtotalCost'], 4), round($built['estGrandTotal'], 4), round($built['estLaborHrs'], 4), $estimateId]);
+            self::updateEstimateTotalsCompatible($pdo, $estimateId, [
+                'subtotal_cost' => round($built['estSubtotalCost'], 4),
+                'total_cost' => round($built['estGrandTotal'], 4),
+                'labor_hours_total' => round($built['estLaborHrs'], 4),
+            ]);
 
             $pdo->prepare("INSERT INTO estimate_workspace_states (estimate_id, project_id, client_estimate_id, state_json, revision) VALUES (?, ?, ?, ?, 1)")
                 ->execute([$estimateId, $projectId, $clientEstId, json_encode($workspace, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)]);
@@ -1611,17 +1652,20 @@ class ProjectEstimateExcelService
             }
 
             $clientEstId = ProjectTemplateService::uid('estimate');
-            $pdo->prepare(
-                "INSERT INTO estimates (project_id, name, description, status, currency_code, settings_json, notes_json, subtotal_cost, markup_total, tax_total, total_cost, labor_hours_total)
-                 VALUES (?, ?, ?, 'draft', 'USD', ?, ?, 0, 0, 0, 0, 0)"
-            )->execute([
-                $projectId,
-                'Primary Estimate',
-                $excelDesc ?: 'Imported from Excel',
-                json_encode($estSettings, JSON_UNESCAPED_SLASHES),
-                json_encode(['scope' => $excelScope, 'included' => [], 'excluded' => []], JSON_UNESCAPED_SLASHES),
+            $estimateId = self::insertEstimateCompatible($pdo, [
+                'project_id' => $projectId,
+                'name' => 'Primary Estimate',
+                'description' => $excelDesc ?: 'Imported from Excel',
+                'status' => 'draft',
+                'currency_code' => 'USD',
+                'settings_json' => json_encode($estSettings, JSON_UNESCAPED_SLASHES),
+                'notes_json' => json_encode(['scope' => $excelScope, 'included' => [], 'excluded' => []], JSON_UNESCAPED_SLASHES),
+                'subtotal_cost' => 0,
+                'markup_total' => 0,
+                'tax_total' => 0,
+                'total_cost' => 0,
+                'labor_hours_total' => 0,
             ]);
-            $estimateId = (int)$pdo->lastInsertId();
 
             $built = self::buildWorkspaceFromExcelGroups(
                 $groups,
@@ -1670,21 +1714,30 @@ class ProjectEstimateExcelService
                 'total_amount' => round($estGrandTotal, 2),
             ];
 
-            $pdo->prepare("UPDATE estimates SET subtotal_cost = ?, total_cost = ?, labor_hours_total = ? WHERE id = ?")
-                ->execute([round($estSubtotalCost, 4), round($estGrandTotal, 4), round($estLaborHrs, 4), $estimateId]);
+            self::updateEstimateTotalsCompatible($pdo, $estimateId, [
+                'subtotal_cost' => round($estSubtotalCost, 4),
+                'total_cost' => round($estGrandTotal, 4),
+                'labor_hours_total' => round($estLaborHrs, 4),
+            ]);
 
             $pdo->prepare("INSERT INTO estimate_workspace_states (estimate_id, project_id, client_estimate_id, state_json, revision) VALUES (?, ?, ?, ?, 1)")
                 ->execute([$estimateId, $projectId, $clientEstId, json_encode($workspace, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)]);
 
-            // Create corresponding Takeoff layers with quantity=0 and NO canvas geometry, so sidebar shows override badges
-            ProjectTemplateService::ensureTakeoffLayersFromWorkspace($pdo, $projectId, $clientEstId);
-
-            if ($isTemplateStage) {
-                ProjectTemplateService::resetProjectQuantitiesToZero($pdo, $projectId);
-            }
-            ProjectTemplateService::syncPrimaryEstimateMetadata($pdo, $projectId, $isTemplateStage);
-
             $pdo->commit();
+            // The project and its estimating workspace are the atomic import. A
+            // legacy optional Takeoff projection must not roll that import back.
+            try {
+                $pdo->beginTransaction();
+                ProjectTemplateService::ensureTakeoffLayersFromWorkspace($pdo, $projectId, $clientEstId);
+                if ($isTemplateStage) {
+                    ProjectTemplateService::resetProjectQuantitiesToZero($pdo, $projectId);
+                }
+                ProjectTemplateService::syncPrimaryEstimateMetadata($pdo, $projectId, $isTemplateStage);
+                $pdo->commit();
+            } catch (Throwable $projectionError) {
+                if ($pdo->inTransaction()) $pdo->rollBack();
+                error_log('Excel project import optional Takeoff projection failed');
+            }
             return [
                 'project_id' => $projectId,
                 'estimate_id' => $estimateId,

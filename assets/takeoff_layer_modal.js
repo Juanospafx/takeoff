@@ -30,6 +30,25 @@
 
         let modal = null;
         let handlersBound = false;
+        let commitPromise = null;
+        let commitDisabledControls = [];
+
+        function setLayerModalCommitBusy(busy) {
+            const target = modal || $('takeoffLayerModal');
+            if (!target) return;
+            if (busy) {
+                target.setAttribute?.('aria-busy', 'true');
+                commitDisabledControls = Array.from(target.querySelectorAll?.('button, input, textarea, select') || [])
+                    .map(control => ({ control, disabled: Boolean(control.disabled) }));
+                commitDisabledControls.forEach(({ control }) => { control.disabled = true; });
+                return;
+            }
+            target.removeAttribute?.('aria-busy');
+            commitDisabledControls.forEach(({ control, disabled }) => {
+                if (control?.isConnected !== false) control.disabled = disabled;
+            });
+            commitDisabledControls = [];
+        }
 
         function bindModalHandlers(target) {
             if (typeof dependencies.bindCommitPaths === 'function') {
@@ -90,22 +109,32 @@
             return modal;
         }
 
-        async function commit() {
-            const editingLayerId = typeof dependencies.getEditingLayerId === 'function'
-                ? dependencies.getEditingLayerId()
-                : takeoffState?.editingLayerId;
-            if (editingLayerId) {
-                const flush = dependencies.flushActiveLayerModalSave || flushActiveLayerModalSave;
-                const dirty = dependencies.isLayerModalNonAutoDirty || isLayerModalNonAutoDirty;
-                const close = dependencies.closeLayerModal || closeLayerModal;
-                flush();
-                if (!dirty()) {
-                    close();
-                    return true;
+        function commit() {
+            if (commitPromise) return commitPromise;
+            const setBusy = dependencies.setCommitBusy || setLayerModalCommitBusy;
+            setBusy(true);
+            const operation = (async () => {
+                const editingLayerId = typeof dependencies.getEditingLayerId === 'function'
+                    ? dependencies.getEditingLayerId()
+                    : takeoffState?.editingLayerId;
+                if (editingLayerId) {
+                    const flush = dependencies.flushActiveLayerModalSave || flushActiveLayerModalSave;
+                    const dirty = dependencies.isLayerModalNonAutoDirty || isLayerModalNonAutoDirty;
+                    const close = dependencies.closeLayerModal || closeLayerModal;
+                    flush();
+                    if (!dirty()) {
+                        close();
+                        return true;
+                    }
                 }
-            }
-            const submit = dependencies.submitLayerModal || submitLayerModal;
-            return typeof submit === 'function' ? submit() : false;
+                const submit = dependencies.submitLayerModal || submitLayerModal;
+                return typeof submit === 'function' ? await submit() : false;
+            })();
+            commitPromise = operation.finally(() => {
+                setBusy(false);
+                commitPromise = null;
+            });
+            return commitPromise;
         }
 
     function ensureModalDom() {
@@ -1095,9 +1124,7 @@
             // Commit the parent workspace immediately. Waiting for the iframe
             // request before this point made the first Close/Enter appear to
             // retain the previous title and allowed another close to win the race.
-            saveTakeoffState(needsEstimatingSync
-                ? { debounceEstimatingSync: !typeFamilyChanged && !catalogChanged }
-                : { skipEstimatingSync: true });
+            saveTakeoffState({ skipEstimatingSync: true });
             // Cancel any pending live debounce since Save commits durably now.
             if (layerModalLiveBackendTimer) {
                 clearTimeout(layerModalLiveBackendTimer);
@@ -1107,13 +1134,18 @@
             // Modal Save is a durable operation, not merely a request for the
             // editor's delayed autosave. Waiting for this ACK prevents a quick
             // close/reload from restoring the duplicate's previous appearance.
-            try {
-                const saved = callEditor('projectTakeoffSave');
-                if (saved && typeof saved.then === 'function') await saved;
-            } catch (editorErr) {
-                console.warn('Takeoff editor background save notification warning:', editorErr);
+            const saved = callEditor('projectTakeoffSave');
+            if (!saved || typeof saved.then !== 'function') {
+                throw new Error('Takeoff persistence is not available.');
             }
+            await saved;
             closeLayerModal();
+            if (needsEstimatingSync) {
+                saveTakeoffState({
+                    debounceEstimatingSync: !typeFamilyChanged && !catalogChanged,
+                    suppressDirty: true
+                });
+            }
             const savedLayer = findLayer(savedLayerId);
             if (editingLayerId && savedLayer && !catalogChanged && !typeFamilyChanged && !tagChanged) {
                 refreshTakeoffLayerRowDom(savedLayer);

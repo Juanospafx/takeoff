@@ -675,6 +675,82 @@ function strip_deleted_layers_from_project_estimate_states(PDO $pdo, int $projec
     }
 }
 
+function normalize_takeoff_layer_name_updates($raw): array
+{
+    if (!is_array($raw))
+        return [];
+    $updates = [];
+    foreach ($raw as $key => $entry) {
+        $integrationKey = is_array($entry)
+            ? trim((string) ($entry['integration_key'] ?? $entry['key'] ?? ''))
+            : trim((string) $key);
+        $name = trim((string) (is_array($entry) ? ($entry['name'] ?? '') : $entry));
+        if ($integrationKey !== '' && $name !== '')
+            $updates[$integrationKey] = $name;
+    }
+    return $updates;
+}
+
+function apply_layer_name_updates_to_snapshot(array $snapshot, array $updates): array
+{
+    if (!$updates || !is_array($snapshot['layers'] ?? null))
+        return $snapshot;
+    foreach ($snapshot['layers'] as &$layer) {
+        if (!is_array($layer))
+            continue;
+        $meta = is_array($layer['metadata_json'] ?? null) ? $layer['metadata_json'] : [];
+        $integrationKey = trim((string) ($layer['integration_key'] ?? $meta['project_layer_id'] ?? $layer['client_uid'] ?? $layer['id'] ?? ''));
+        if ($integrationKey !== '' && isset($updates[$integrationKey]))
+            $layer['name'] = $updates[$integrationKey];
+    }
+    unset($layer);
+    return $snapshot;
+}
+
+function lock_takeoff_layer_name_registry(PDO $pdo, int $projectId, string $estimateKey, array $updates): array
+{
+    if ($projectId <= 0 || $estimateKey === '' || !takeoff_table_exists($pdo, 'estimate_workspace_states'))
+        return $updates;
+    $stmt = $pdo->prepare(
+        "SELECT estimate_id, state_json
+         FROM estimate_workspace_states
+         WHERE project_id = ? AND client_estimate_id = ?
+         ORDER BY estimate_id
+         LIMIT 1 FOR UPDATE"
+    );
+    $stmt->execute([$projectId, $estimateKey]);
+    $row = $stmt->fetch(PDO::FETCH_ASSOC);
+    if (!$row)
+        return $updates;
+    $workspace = json_decode((string) ($row['state_json'] ?? '{}'), true);
+    if (!is_array($workspace))
+        $workspace = [];
+    $registry = normalize_takeoff_layer_name_updates($workspace['takeoffLayerNames'] ?? []);
+    foreach ($updates as $integrationKey => $name)
+        $registry[$integrationKey] = $name;
+    if ($updates) {
+        $workspace['takeoffLayerNames'] = $registry;
+        $update = $pdo->prepare("UPDATE estimate_workspace_states SET state_json = ?, updated_at = CURRENT_TIMESTAMP WHERE estimate_id = ?");
+        $update->execute([json_value($workspace) ?? '{}', (int) $row['estimate_id']]);
+    }
+    return $registry;
+}
+
+function apply_explicit_takeoff_layer_name_updates(PDO $pdo, int $projectId, string $estimateKey, array $updates): void
+{
+    if ($projectId <= 0 || $estimateKey === '' || !$updates)
+        return;
+    $hasProjectId = in_array('project_id', takeoff_columns($pdo, 'takeoff_layers'), true);
+    $updateLayer = $hasProjectId
+        ? $pdo->prepare("UPDATE takeoff_layers SET name = ? WHERE project_id = ? AND estimate_key = ? AND integration_key = ? AND deleted_at IS NULL")
+        : $pdo->prepare("UPDATE takeoff_layers SET name = ? WHERE estimate_key = ? AND integration_key = ? AND deleted_at IS NULL AND takeoff_id IN (SELECT id FROM takeoffs WHERE project_id = ? AND deleted_at IS NULL)");
+    foreach ($updates as $integrationKey => $name) {
+        $updateLayer->execute($hasProjectId
+            ? [$name, $projectId, $estimateKey, $integrationKey]
+            : [$name, $estimateKey, $integrationKey, $projectId]);
+    }
+}
+
 /**
  * Purges takeoff_layers (and dependent markers/segments) matching client layer keys in an estimate.
  */
@@ -1110,12 +1186,17 @@ try {
                 return $id !== '';
             })));
             $objectBaseVersions = is_array($input['object_base_versions'] ?? null) ? $input['object_base_versions'] : [];
+            $layerNameUpdates = normalize_takeoff_layer_name_updates($input['layer_name_updates'] ?? []);
 
             try {
                 $takeoffId = ensure_drawing_takeoff($pdo, $projectId, $drawingId);
                 $mirrorDrawingId = takeoff_drawing_row_exists($pdo, $drawingId) ? $drawingId : null;
 
                 $pdo->beginTransaction();
+                // Every drawing in the estimate takes this workspace lock first.
+                // Explicit renames become canonical before any drawing snapshot
+                // is locked, so a later stale autosave cannot win by row id.
+                $canonicalLayerNames = lock_takeoff_layer_name_registry($pdo, $projectId, $estimateKey, $layerNameUpdates);
                 $ensureState = $pdo->prepare("INSERT IGNORE INTO takeoff_estimate_states (estimate_key, drawing_id, project_id, state_json, revision) VALUES (?, ?, ?, '{}', 0)");
                 $ensureState->execute([$estimateKey, $drawingId, $projectId ?: null]);
                 $currentStmt = $pdo->prepare("SELECT state_json FROM takeoff_estimate_states WHERE estimate_key = ? AND drawing_id = ? LIMIT 1 FOR UPDATE");
@@ -1152,6 +1233,9 @@ try {
                     $segments = $snapshot['segments'];
                     $summary = $snapshot['summary'];
                 }
+                $snapshot = apply_layer_name_updates_to_snapshot($snapshot, $canonicalLayerNames);
+                $snapshot = apply_layer_name_updates_to_snapshot($snapshot, $layerNameUpdates);
+                $layers = $snapshot['layers'];
                 $stmt = $pdo->prepare(
                     "INSERT INTO takeoff_estimate_states (estimate_key, drawing_id, project_id, state_json, revision)
                  VALUES (?, ?, ?, ?, 1)
@@ -1303,6 +1387,7 @@ try {
                 // an estimate-scoped layer snapshot to its workspace owner, avoiding
                 // the former bug where Takeoff silently updated the project's first estimate.
                 $pdo->commit();
+                apply_explicit_takeoff_layer_name_updates($pdo, $projectId, $estimateKey, $layerNameUpdates);
             } catch (Throwable $mirrorError) {
                 if ($pdo->inTransaction())
                     $pdo->rollBack();
@@ -1311,6 +1396,7 @@ try {
                 // relational mirror is unavailable. Re-lock and re-merge so a
                 // concurrent save on another page cannot be overwritten here.
                 $pdo->beginTransaction();
+                $canonicalLayerNames = lock_takeoff_layer_name_registry($pdo, $projectId, $estimateKey, $layerNameUpdates);
                 $retryState = $pdo->prepare("SELECT state_json FROM takeoff_estimate_states WHERE estimate_key = ? AND drawing_id = ? LIMIT 1 FOR UPDATE");
                 $retryState->execute([$estimateKey, $drawingId]);
                 $latestSnapshot = json_decode((string) ($retryState->fetchColumn() ?: '{}'), true);
@@ -1331,12 +1417,15 @@ try {
                         $retrySnapshot = merge_takeoff_objects($retrySnapshot, ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary], $dirtyObjectIds, $deletedObjectIds);
                     $retrySnapshot = recalculate_takeoff_snapshot_quantities($retrySnapshot);
                 }
+                $retrySnapshot = apply_layer_name_updates_to_snapshot($retrySnapshot, $canonicalLayerNames ?? []);
+                $retrySnapshot = apply_layer_name_updates_to_snapshot($retrySnapshot, $layerNameUpdates);
                 $retrySave = $pdo->prepare(
                     "INSERT INTO takeoff_estimate_states (estimate_key, drawing_id, project_id, state_json, revision) VALUES (?, ?, ?, ?, 1)
                      ON DUPLICATE KEY UPDATE project_id=VALUES(project_id), state_json=VALUES(state_json), revision=revision+1, updated_at=CURRENT_TIMESTAMP"
                 );
                 $retrySave->execute([$estimateKey, $drawingId, $projectId ?: null, json_value($retrySnapshot) ?? '{}']);
                 $pdo->commit();
+                apply_explicit_takeoff_layer_name_updates($pdo, $projectId, $estimateKey, $layerNameUpdates);
                 out_json(['status' => 'success', 'data' => state_payload($pdo, $drawingId, $estimateKey), 'warning' => 'Takeoff saved; relational mirror will retry on the next save.']);
             }
             out_json(['status' => 'success', 'data' => state_payload($pdo, $drawingId, $estimateKey)]);
