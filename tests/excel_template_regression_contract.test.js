@@ -36,6 +36,8 @@ test('template cloning never swallows a failed workspace copy', () => {
     assert.match(cloneBlock, /'estimate_number', 'estimating_id', 'takeoff_id', 'bid_id'/);
     assert.match(cloneBlock, /parent_estimate_item_id/);
     assert.match(cloneBlock, /pendingParentLinks/);
+    assert.match(cloneBlock, /Project template optional Takeoff projection failed/);
+    assert.match(cloneBlock, /try\s*\{\s*ProjectTemplateService|try\s*\{\s*self::ensureTakeoffLayersFromWorkspace/);
 });
 
 test('Excel templates can generate Takeoff layers on legacy schemas without estimate_key', () => {

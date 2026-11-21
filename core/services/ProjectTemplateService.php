@@ -944,7 +944,15 @@ class ProjectTemplateService
 
             // Ensure every item group from estimate_workspace_states has takeoff_layers if the source project had none
             if (empty($layerMap) && !empty($estimateMap)) {
-                self::ensureTakeoffLayersFromWorkspace($pdo, $newId);
+                // Excel imports deliberately treat this legacy Takeoff projection as
+                // optional. Keep the same boundary when cloning an imported template:
+                // the estimate workspace is the authoritative template payload and a
+                // schema/FK mismatch in the derived Takeoff rows must not roll it back.
+                try {
+                    self::ensureTakeoffLayersFromWorkspace($pdo, $newId);
+                } catch (Throwable $projectionError) {
+                    error_log('Project template optional Takeoff projection failed');
+                }
             }
 
             if (!$inTransaction)
