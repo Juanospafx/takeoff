@@ -983,6 +983,7 @@ class ProjectTemplateService
         $wsStmt->execute($params);
 
         $layerCols = self::tableColumns($pdo, 'takeoff_layers');
+        $hasEstimateKey = isset($layerCols['estimate_key']);
         $palette = ['#2563eb', '#059669', '#d97706', '#7c3aed', '#db2777', '#0891b2', '#ea580c', '#4f46e5'];
 
         foreach ($wsStmt->fetchAll(PDO::FETCH_ASSOC) ?: [] as $ws) {
@@ -991,8 +992,15 @@ class ProjectTemplateService
             if (!$decoded || empty($decoded['groups']) || !is_array($decoded['groups']))
                 continue;
 
-            $existsStmt = $pdo->prepare("SELECT COUNT(*) FROM takeoff_layers WHERE project_id = ? AND estimate_key = ? AND deleted_at IS NULL");
-            $existsStmt->execute([$projectId, $cid]);
+            if ($hasEstimateKey) {
+                $existsStmt = $pdo->prepare("SELECT COUNT(*) FROM takeoff_layers WHERE project_id = ? AND estimate_key = ? AND deleted_at IS NULL");
+                $existsStmt->execute([$projectId, $cid]);
+            } else {
+                // Older deployments do not have estimate_key yet. Project scope is
+                // the safest available deduplication boundary on that schema.
+                $existsStmt = $pdo->prepare("SELECT COUNT(*) FROM takeoff_layers WHERE project_id = ? AND deleted_at IS NULL");
+                $existsStmt->execute([$projectId]);
+            }
             if ((int) $existsStmt->fetchColumn() > 0)
                 continue;
 

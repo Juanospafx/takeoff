@@ -38,6 +38,15 @@ test('template cloning never swallows a failed workspace copy', () => {
     assert.match(cloneBlock, /pendingParentLinks/);
 });
 
+test('Excel templates can generate Takeoff layers on legacy schemas without estimate_key', () => {
+    const projectionStart = templateService.indexOf('public static function ensureTakeoffLayersFromWorkspace');
+    const projectionEnd = templateService.indexOf('public static function inferTakeoffTypeFromItem', projectionStart);
+    const projectionBlock = templateService.slice(projectionStart, projectionEnd);
+    assert.match(projectionBlock, /\$hasEstimateKey\s*=\s*isset\(\$layerCols\['estimate_key'\]\)/);
+    assert.match(projectionBlock, /if \(\$hasEstimateKey\)/);
+    assert.match(projectionBlock, /WHERE project_id = \? AND deleted_at IS NULL/);
+});
+
 test('new projects copy and verify the selected template atomically', () => {
     const instantiateStart = templateService.indexOf('public static function instantiateTemplateIntoProject');
     const instantiateEnd = templateService.indexOf('public static function convertProjectToTemplate', instantiateStart);
