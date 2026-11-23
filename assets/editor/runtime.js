@@ -804,9 +804,73 @@
         let lastSyncedKonvaZoom = null;
         let lastSyncedKonvaPage = null;
         let lastSyncedKonvaRulerCount = -1;
+        let paintedKonvaViewport = null;
+        let viewportIdleCommitTimer = null;
+        let pendingViewportIdleZoom = null;
+        const viewportWorkSamples = [];
+
+        function viewportSnapshot() {
+            const vpt = getFabricVpt();
+            return {
+                scale: Number(vpt.scaleX || 1),
+                x: Number(vpt.translateX || 0),
+                y: Number(vpt.translateY || 0)
+            };
+        }
+
+        function konvaSceneCanvases() {
+            if (!konvaStage?.container) return [];
+            return [...konvaStage.container().querySelectorAll('canvas')];
+        }
+
+        function clearKonvaViewportCssTransform() {
+            konvaSceneCanvases().forEach(sceneCanvas => {
+                sceneCanvas.style.transform = '';
+                sceneCanvas.style.transformOrigin = '';
+                sceneCanvas.style.willChange = '';
+            });
+        }
+
+        // Moving the already-painted scene canvas is a constant-cost GPU operation.
+        // It keeps pan/zoom frames independent from the number of Takeoff nodes.
+        function applyKonvaViewportCssTransform() {
+            if (!paintedKonvaViewport) return false;
+            const next = viewportSnapshot();
+            const baseScale = paintedKonvaViewport.scale || 1;
+            const ratio = next.scale / baseScale;
+            const tx = next.x - (ratio * paintedKonvaViewport.x);
+            const ty = next.y - (ratio * paintedKonvaViewport.y);
+            const transform = `matrix(${ratio}, 0, 0, ${ratio}, ${tx}, ${ty})`;
+            konvaSceneCanvases().forEach(sceneCanvas => {
+                sceneCanvas.style.transformOrigin = '0 0';
+                sceneCanvas.style.willChange = 'transform';
+                sceneCanvas.style.transform = transform;
+            });
+            return true;
+        }
+
+        function recordViewportWork(kind, startedAt) {
+            const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+            viewportWorkSamples.push({ kind, duration: Math.max(0, now - startedAt) });
+            if (viewportWorkSamples.length > 240) viewportWorkSamples.splice(0, viewportWorkSamples.length - 240);
+        }
+
+        window.getTakeoffViewportPerformance = function () {
+            const durations = viewportWorkSamples.map(sample => sample.duration).sort((a, b) => a - b);
+            const percentile = value => durations.length
+                ? durations[Math.min(durations.length - 1, Math.floor((durations.length - 1) * value))]
+                : 0;
+            return {
+                samples: durations.length,
+                p50: percentile(0.50),
+                p95: percentile(0.95),
+                p99: percentile(0.99)
+            };
+        };
 
         function syncKonvaToFabric(options = {}) {
             if (!konvaLayer) return;
+            clearKonvaViewportCssTransform();
             const w = document.getElementById('canvas-wrapper');
             if (konvaStage && w && w.clientWidth > 0 && w.clientHeight > 0) {
                 if (konvaStage.width() !== w.clientWidth || konvaStage.height() !== w.clientHeight) {
@@ -874,13 +938,33 @@
             // Reset any stalled batchDraw flag accumulated while the tab/iframe was hidden
             // (display: none skips rAF in Chromium), then draw synchronously with Fabric.
             konvaLayer._waitingForDraw = false;
-            if (!panOnly && !options?.useBatchDraw && w && w.clientWidth > 0 && w.clientHeight > 0 && !document.hidden) {
+            if ((options?.immediate || (!panOnly && !options?.useBatchDraw)) && w && w.clientWidth > 0 && w.clientHeight > 0 && !document.hidden) {
                 konvaLayer.draw();
             } else {
                 konvaLayer.batchDraw();
             }
+            paintedKonvaViewport = viewportSnapshot();
         }
         window.syncKonvaToFabric = syncKonvaToFabric;
+
+        function commitViewportAfterGesture() {
+            if (viewportIdleCommitTimer) {
+                clearTimeout(viewportIdleCommitTimer);
+                viewportIdleCommitTimer = null;
+            }
+            const finalZoom = pendingViewportIdleZoom;
+            pendingViewportIdleZoom = null;
+            if (finalZoom != null) updateTextScales(finalZoom, { deferDraw: true });
+            clearKonvaViewportCssTransform();
+            if (useKonvaRuler) syncKonvaToFabric({ forceScale: true, immediate: true });
+            canvas.requestRenderAll();
+        }
+
+        function scheduleViewportIdleCommit(zoom, delay = 90) {
+            pendingViewportIdleZoom = zoom;
+            if (viewportIdleCommitTimer) clearTimeout(viewportIdleCommitTimer);
+            viewportIdleCommitTimer = setTimeout(commitViewportAfterGesture, delay);
+        }
 
         function updateKonvaLabel(r) {
             const p1 = r.a1.position();
@@ -1802,9 +1886,11 @@
                 if (panRenderRaf) return;
                 const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : cb => setTimeout(cb, 0);
                 panRenderRaf = raf(() => {
+                    const startedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
                     panRenderRaf = null;
                     canvas.requestRenderAll();
-                    syncKonvaToFabric({ panOnly: true, useBatchDraw: true });
+                    applyKonvaViewportCssTransform();
+                    recordViewportWork('pan', startedAt);
                 });
             };
             const emitBackgroundPanState = (active) => {
@@ -1834,7 +1920,7 @@
                 if (konvaLayer) konvaLayer.listening(true);
                 if (wasPanning) {
                     canvas?.requestRenderAll();
-                    syncKonvaToFabric({ panOnly: true });
+                    syncKonvaToFabric({ panOnly: true, immediate: true });
                 }
                 if (canvas) {
                     canvas.isDragging = false;
@@ -4070,14 +4156,14 @@
                 ? requestAnimationFrame
                 : callback => setTimeout(callback, 0);
             viewportFrameRaf = raf(() => {
+                const startedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
                 viewportFrameRaf = null;
                 const pending = pendingViewportFrame;
                 pendingViewportFrame = null;
                 if (!pending) return;
-                updateTextScales(pending.zoom, { deferDraw: true });
                 canvas.requestRenderAll();
-                if (useKonvaRuler) syncKonvaToFabric({ useBatchDraw: true });
-                schedulePdfRerender();
+                if (useKonvaRuler) applyKonvaViewportCssTransform();
+                scheduleViewportIdleCommit(pending.zoom);
                 if (pending.pointer && typeof window.projectTakeoffOnZoom === 'function') {
                     window.projectTakeoffOnZoom({
                         clientX: pending.pointer.clientX,
@@ -4085,6 +4171,7 @@
                         zoom: pending.zoom
                     });
                 }
+                recordViewportWork('zoom', startedAt);
             });
         }
 

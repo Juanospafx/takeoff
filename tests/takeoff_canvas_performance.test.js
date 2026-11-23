@@ -24,7 +24,27 @@ test('wheel work is coalesced into one animation-frame commit', () => {
     assert.doesNotMatch(nativeWheel, /updateTextScales|syncKonvaToFabric|schedulePdfRerender/);
     assert.match(scheduler, /if \(viewportFrameRaf\) return/);
     assert.match(scheduler, /requestAnimationFrame/);
-    assert.match(scheduler, /syncKonvaToFabric\(\{ useBatchDraw: true \}\)/);
+    assert.match(scheduler, /applyKonvaViewportCssTransform\(\)/);
+    assert.match(scheduler, /scheduleViewportIdleCommit\(pending\.zoom\)/);
+    assert.doesNotMatch(scheduler, /syncKonvaToFabric|updateTextScales|schedulePdfRerender/);
+});
+
+test('pan frames move the painted overlay without redrawing every Takeoff node', () => {
+    const panFrame = bodyBetween(runtime, 'const schedulePanFrameRender', 'const emitBackgroundPanState');
+    const transientTransform = bodyBetween(runtime, 'function applyKonvaViewportCssTransform', 'function recordViewportWork');
+
+    assert.match(panFrame, /applyKonvaViewportCssTransform\(\)/);
+    assert.doesNotMatch(panFrame, /syncKonvaToFabric|konvaLayer\.(?:draw|batchDraw)/);
+    assert.match(transientTransform, /style\.transform = transform/);
+    assert.doesNotMatch(transientTransform, /state\.(?:markers|segments)|konvaLayer\.(?:draw|batchDraw)/);
+});
+
+test('viewport work publishes bounded p50, p95 and p99 telemetry', () => {
+    const telemetry = bodyBetween(runtime, 'window.getTakeoffViewportPerformance', 'function syncKonvaToFabric');
+    assert.match(telemetry, /p50:/);
+    assert.match(telemetry, /p95:/);
+    assert.match(telemetry, /p99:/);
+    assert.match(runtime, /viewportWorkSamples\.length > 240/);
 });
 
 test('page changes mount only visible geometry instead of retaining the whole project', () => {
