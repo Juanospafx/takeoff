@@ -31,7 +31,8 @@ $guardedFunctions = [
 $checks = [
     'editor derives identity through SessionGuard' => str_contains($source, 'SessionGuard::getAuthenticatedUser'),
     'editor defaults unknown roles to viewer' => str_contains($source, 'SessionGuard::ROLE_VIEWER'),
-    'editor only grants write to admin' => str_contains($source, '$canWrite = $authRole === SessionGuard::ROLE_ADMIN;'),
+    'editor grants write through centralized project policy' => str_contains($source, 'ProjectAccess::can($pdo, $authUser, $projectId, ProjectAccess::WRITE)'),
+    'editor enforces project read policy' => str_contains($source, 'takeoff_guard_project_access($pdo, $authUser, $projectId, ProjectAccess::READ)'),
     'editor publishes strict capability' => str_contains($clientSource, 'parsed.canWrite === true'),
     'editor blocks viewer non-read fetch' => str_contains($clientSource, "!['GET', 'HEAD', 'OPTIONS'].includes(method)"),
     'scale request guards before fetch' => preg_match('/function takeoffScaleRequest.*?if \(method !== \'GET\' && !window\.takeoffRequireWrite\(\)\).*?fetch\(/s', $runtimeSource) === 1,
