@@ -93,6 +93,45 @@ test('legacy imported linked mode migrates to linked-only instead of destructive
     assert.equal(state.estimates[0].groups[0].items.length, 1);
 });
 
+test('workspace normalization repairs exact archived assembly component duplicates', () => {
+    const duplicatedChild = {
+        catalogItemId: 'part-53k', assemblyComponentId: 'part-53k', name: 'Component',
+        uom: 'ea', ratio: 1, quantity: 0, unitMaterialCost: 53000, unitLabor: 0
+    };
+    const state = Service.workspace({ activeEstimateId: 'imported', estimates: [{
+        id: 'imported', name: 'Imported Estimate', groups: [{ id: 'g1', name: 'Imported', items: [{
+            id: 'assembly-1', name: 'Assembly', itemType: 'assembly', isAssembly: true, quantity: 1,
+            children: [
+                { ...duplicatedChild, id: 'active-child' },
+                { ...duplicatedChild, id: 'archived-child' }
+            ]
+        }] }]
+    }] }, 73);
+    const assembly = state.estimates[0].groups[0].items[0];
+
+    assert.equal(assembly.children.length, 1);
+    assert.deepEqual(Service.consumeRepairFlags(state.estimates[0]), ['duplicate-assembly-components']);
+    assert.equal(assembly._workspaceRepairFlags, undefined, 'repair markers must not be persisted');
+});
+
+test('assembly repair preserves semantically distinct repeated components', () => {
+    const base = {
+        catalogItemId: 'part-1', assemblyComponentId: 'part-1', name: 'Support',
+        uom: 'ea', ratio: 1, quantity: 0, unitMaterialCost: 10, unitLabor: 0
+    };
+    const variants = [
+        { ...base, id: 'a', componentWaste: 0, notes: 'base', costCode: '16-1' },
+        { ...base, id: 'b', componentWaste: 5, notes: 'base', costCode: '16-1' },
+        { ...base, id: 'c', componentWaste: 0, notes: 'special', costCode: '16-1' },
+        { ...base, id: 'd', componentWaste: 0, notes: 'base', costCode: '16-2' },
+        { ...base, id: 'e', componentWaste: 0, notes: 'base', costCode: '16-1', spacing: 12 },
+        { ...base, id: 'f', componentWaste: 0, notes: 'base', costCode: '16-1', factorOverride: 2 }
+    ];
+    const item = Service.item({ id: 'assembly', itemType: 'assembly', children: variants });
+    assert.equal(item.children.length, variants.length);
+    assert.deepEqual(Service.consumeRepairFlags({ groups: [{ items: [item] }] }), []);
+});
+
 test('save API persists workspace activeEstimateId into snapshots and returns it unchanged', () => {
     assert.match(api, /\$requestedActiveId = \$workspace[\s\S]*?activeEstimateId/);
     assert.match(api, /\$estimate\['isActive'\][\s\S]*?\$requestedActiveId/);
@@ -105,6 +144,12 @@ test('client saves the complete workspace and retains a visible retry state', ()
     assert.match(client, /ui\.loadState = 'error'/);
     assert.match(client, /data-retry-save/);
     assert.match(client, /localStorage\.setItem\(storageKey/);
+});
+
+test('server-loaded assembly repairs are marked dirty and persisted', () => {
+    assert.match(client, /function consumeAndMarkWorkspaceRepairs\(\)/);
+    assert.match(client, /Workspace\.consumeRepairFlags\(estimate\)/);
+    assert.match(client, /repairedIds\.length[\s\S]*scheduleSave\('workspace-repair'/);
 });
 
 test('estimate selection stays local while project save flushes dirty content', () => {

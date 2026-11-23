@@ -9,15 +9,32 @@ header('Expires: 0');
 require_once __DIR__ . '/../core/db/connection.php';
 require_once __DIR__ . '/../core/files/upload_storage.php';
 require_once __DIR__ . '/../core/auth/session.php';
+require_once __DIR__ . '/../core/auth/ProjectAccess.php';
 $authRedirect = takeoff_require_page_auth($_SESSION ?? null);
 if ($authRedirect !== null) return;
 
 $authUser = SessionGuard::getAuthenticatedUser($_SESSION ?? null);
 $authRole = $authUser['role'] ?? SessionGuard::ROLE_VIEWER;
-$canWrite = $authRole === SessionGuard::ROLE_ADMIN;
+
+$id = filter_var($_GET['id'] ?? null, FILTER_VALIDATE_INT, ['options' => ['min_range' => 1]]);
+$id = $id === false ? 0 : (int) $id;
+
+$stmt = $pdo->prepare("SELECT * FROM files WHERE id=?");
+$stmt->execute([$id]);
+$file = $stmt->fetch(PDO::FETCH_ASSOC);
+
+if (!$file) {
+    http_response_code(404);
+    die('File not found.');
+}
+
+$projectId = $file['project_id'];
+$projectId = (int) $projectId;
+takeoff_guard_project_access($pdo, $authUser, $projectId, ProjectAccess::READ);
+$canWrite = ProjectAccess::can($pdo, $authUser, $projectId, ProjectAccess::WRITE);
 $authDisplayName = trim((string) ($authUser['username'] ?? ''));
 if ($authDisplayName === '') {
-    $authDisplayName = $canWrite ? 'Admin' : 'Viewer';
+    $authDisplayName = $canWrite ? 'Editor' : 'Viewer';
 }
 $clientAuthMetadata = [
     'displayName' => $authDisplayName,
@@ -25,18 +42,6 @@ $clientAuthMetadata = [
     'canWrite' => $canWrite,
     'readOnly' => !$canWrite,
 ];
-
-$id = $_GET['id'] ?? 0;
-
-$stmt = $pdo->prepare("SELECT * FROM files WHERE id=?");
-$stmt->execute([$id]);
-$file = $stmt->fetch(PDO::FETCH_ASSOC);
-
-if (!$file) {
-    die("<div style='color:white;text-align:center;padding:50px;font-family:sans-serif;'>Error: File not found. ID: $id</div>");
-}
-
-$projectId = $file['project_id'];
 $folderId = $file['folder_id'];
 $projectDashboardUrl = "project_dashboard.php?id={$projectId}";
 $backUrl = $projectDashboardUrl . "&tab=takeoff";

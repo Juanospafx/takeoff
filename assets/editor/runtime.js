@@ -1790,12 +1790,7 @@
                 clampViewportTransform(canvas.viewportTransform);
                 canvas.setViewportTransform(canvas.viewportTransform);
                 notifyTakeoffZoomChanged('wheel');
-                updateTextScales(zoom);
-                syncKonvaToFabric({ useBatchDraw: true });
-                schedulePdfRerender();
-                if (typeof window.projectTakeoffOnZoom === 'function') {
-                    window.projectTakeoffOnZoom({ clientX: e.clientX, clientY: e.clientY, zoom });
-                }
+                scheduleViewportFrameUpdate(zoom, { clientX: e.clientX, clientY: e.clientY });
             }, { passive: false });
 
             // Pan desde Konva -> Fabric (ALT o botón derecho)
@@ -4052,14 +4047,45 @@
             if (active && (active.type === 'i-text' || active.type === 'text' || active.type === 'textbox')) { active.set(prop, val); canvas.requestRenderAll(); }
         }
 
-        function updateTextScales(zoom) {
+        function updateTextScales(zoom, options = {}) {
             const scale = Math.min(1.5, Math.max(0.2, 1 / zoom));
             canvas.getObjects().forEach(obj => {
                 if (obj.isMeasureLabel) { obj.set({ scaleX: scale, scaleY: scale }); }
                 if (obj.isMeasureLine) { obj.set({ strokeWidth: 4 * scale }); }
             });
+            if (options.deferDraw) return;
             canvas.requestRenderAll();
             if (useKonvaRuler) syncKonvaToFabric();
+        }
+
+        // Wheel and trackpad gestures can emit many events inside one display frame.
+        // Keep the latest viewport immediately, but coalesce all expensive redraw and
+        // takeoff-node scaling work into a single animation-frame commit.
+        let viewportFrameRaf = null;
+        let pendingViewportFrame = null;
+        function scheduleViewportFrameUpdate(zoom, pointer = null) {
+            pendingViewportFrame = { zoom, pointer };
+            if (viewportFrameRaf) return;
+            const raf = typeof requestAnimationFrame === 'function'
+                ? requestAnimationFrame
+                : callback => setTimeout(callback, 0);
+            viewportFrameRaf = raf(() => {
+                viewportFrameRaf = null;
+                const pending = pendingViewportFrame;
+                pendingViewportFrame = null;
+                if (!pending) return;
+                updateTextScales(pending.zoom, { deferDraw: true });
+                canvas.requestRenderAll();
+                if (useKonvaRuler) syncKonvaToFabric({ useBatchDraw: true });
+                schedulePdfRerender();
+                if (pending.pointer && typeof window.projectTakeoffOnZoom === 'function') {
+                    window.projectTakeoffOnZoom({
+                        clientX: pending.pointer.clientX,
+                        clientY: pending.pointer.clientY,
+                        zoom: pending.zoom
+                    });
+                }
+            });
         }
 
         function handleSelectionChange() {
@@ -4181,11 +4207,10 @@
             clampViewportTransform(canvas.viewportTransform);
             canvas.setViewportTransform(canvas.viewportTransform);
             notifyTakeoffZoomChanged('wheel');
-            if (useKonvaRuler) syncKonvaToFabric();
-            updateTextScales(zoom);
-            schedulePdfRerender();
+            scheduleViewportFrameUpdate(zoom, { clientX: evt.clientX, clientY: evt.clientY });
             opt.e.preventDefault(); opt.e.stopPropagation();
         });
+        // schedulePdfRerender is committed once by scheduleViewportFrameUpdate.
 
         window.addEventListener('beforeunload', () => {
             saveCurrentPageAnnotations();

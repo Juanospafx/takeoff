@@ -15,7 +15,7 @@ $cases = [
     ['estimator', '', ProjectAccess::WRITE, false],
     ['viewer', 'viewer', ProjectAccess::READ, true],
     ['viewer', 'editor', ProjectAccess::WRITE, false],
-    ['viewer', '', ProjectAccess::READ, false],
+    ['viewer', '', ProjectAccess::READ, true],
     ['unknown', 'owner', ProjectAccess::READ, false],
 ];
 foreach ($cases as [$appRole, $memberRole, $capability, $expected]) {
@@ -72,4 +72,7 @@ if (!str_contains((string)$projectCreatePage, "takeoff_has_capability('project.w
 if (!str_contains((string)$projectCreatePage, 'ProjectAccess::can($pdo, $authUser, $editId, ProjectAccess::WRITE)')) throw new RuntimeException('Project edit UI lacks project membership enforcement.');
 if (!str_contains((string)$projectsPage, '$canCreateProject = takeoff_has_capability(\'project.write\'')) throw new RuntimeException('Projects list hides creation from authorized estimators.');
 if (!str_contains((string)$projectsPage, 'ProjectAccess::can($pdo, $authUser ?: [], $visibleProjectId, ProjectAccess::WRITE)')) throw new RuntimeException('Projects list does not scope edit controls by membership.');
+if (!str_contains((string)file_get_contents(__DIR__ . '/../core/auth/ProjectAccess.php'), "if (\$role === 'viewer' && \$capability === self::READ) return true;")) {
+    throw new RuntimeException('Viewer does not receive global read access while project hierarchy is disabled.');
+}
 echo "project access policy tests passed\n";

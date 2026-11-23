@@ -847,9 +847,20 @@
         return Number(ref?.locked || 0) === 1;
     }
 
-    function isElementLocked(ref) {
+    function buildTakeoffLayerLookup() {
+        const lookup = new Map();
+        state.layers.forEach(layer => {
+            if (layer.client_uid != null) lookup.set(String(layer.client_uid), layer);
+            if (layer.integration_key) lookup.set(String(layer.integration_key), layer);
+            if (layer.metadata_json?.project_layer_id) lookup.set(String(layer.metadata_json.project_layer_id), layer);
+        });
+        return lookup;
+    }
+
+    function isElementLocked(ref, layerLookup = null) {
         if (isObjectIndividuallyLocked(ref)) return true;
-        const layer = state.layers.find(row => String(row.client_uid) === String(ref?.layer_client_uid));
+        const layer = layerLookup?.get(String(ref?.layer_client_uid || ''))
+            || state.layers.find(row => String(row.client_uid) === String(ref?.layer_client_uid));
         return Number(layer?.locked || 0) === 1;
     }
 
@@ -864,6 +875,7 @@
     }
 
     function isTakeoffObjectInteractionBlocked() {
+        if (typeof window.takeoffCanWrite === 'function' && !window.takeoffCanWrite()) return true;
         // Count remains armed for repeated placement, but existing geometry must
         // still receive clicks/drags so it never becomes static after creation.
         return ['takeoff_linear', 'takeoff_area', 'multi-select'].includes(state.tool);
@@ -872,16 +884,21 @@
     function applyTakeoffDrawingInteractivity() {
         const panning = state.panMode || state.temporaryPan;
         const listening = !isTakeoffObjectInteractionBlocked() && !panning && !state.annotationPlacement;
+        const layerLookup = buildTakeoffLayerLookup();
         state.markers.forEach(marker => {
+            if (!marker.node) return;
             marker.node?.listening(listening);
-            marker.node?.draggable(listening && !panning && !isElementLocked(marker));
-            marker.transformer?.listening(listening && !panning && !isElementLocked(marker));
+            const unlocked = !isElementLocked(marker, layerLookup);
+            marker.node?.draggable(listening && !panning && unlocked);
+            marker.transformer?.listening(listening && !panning && unlocked);
         });
         state.segments.forEach(segment => {
+            if (!segment.node) return;
+            const unlocked = !isElementLocked(segment, layerLookup);
             segment.node?.listening(listening);
-            segment.node?.draggable(listening && !panning && !isElementLocked(segment));
+            segment.node?.draggable(listening && !panning && unlocked);
             (segment.handles || []).forEach(handle => handle.listening(listening));
-            (segment.handles || []).forEach(handle => handle.draggable(listening && !panning && !isElementLocked(segment)));
+            (segment.handles || []).forEach(handle => handle.draggable(listening && !panning && unlocked));
         });
         flushKonvaCanvasDraw();
     }
@@ -1378,8 +1395,29 @@
         return Number((baseStroke * 1.03).toFixed(4));
     }
 
+    let lastTakeoffInverseScale = 1;
+    function scaleSegmentInteractionNodes(segment, factor, visibleOnly = false) {
+        if (!segment?.node) return;
+        const isAreaSeg = String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area';
+        segment.node.hitStrokeWidth(segmentHitStrokeWidth(segment, isAreaSeg, factor));
+        const handleR = isAreaSeg ? getAreaNodeRadius(factor) : getLinearNodeRadius(factor);
+        const handleStroke = isAreaSeg ? getAreaNodeStroke(factor) : getLinearNodeStroke(factor);
+        const handleHit = Math.max(22, Math.min(38, 24 * factor));
+        (segment.handles || []).forEach(handle => {
+            if (visibleOnly && typeof handle.visible === 'function' && !handle.visible()) return;
+            if (typeof handle.radius === 'function') {
+                handle.radius(handleR);
+                handle.strokeWidth(handleStroke);
+                handle.hitStrokeWidth(handleHit);
+            } else {
+                resizeVertexHandleNode(handle, handleR, handleStroke, handleHit);
+            }
+        });
+    }
+
     function syncTakeoffHandleScale(inverseScale) {
         const factor = resolveViewportInverseScale(inverseScale);
+        lastTakeoffInverseScale = factor;
         const linearR = getLinearNodeRadius(factor);
         const linearStroke = getLinearNodeStroke(factor);
         const areaR = getAreaNodeRadius(factor);
@@ -1387,21 +1425,7 @@
         const handleHit = Math.max(22, Math.min(38, 24 * factor));
 
         state.segments.forEach(segment => {
-            const isAreaSeg = String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area';
-            if (segment.node) {
-                segment.node.hitStrokeWidth(segmentHitStrokeWidth(segment, isAreaSeg, factor));
-            }
-            const handleR = isAreaSeg ? areaR : linearR;
-            const handleStroke = isAreaSeg ? areaStroke : linearStroke;
-            (segment.handles || []).forEach(handle => {
-                if (typeof handle.radius === 'function') {
-                    handle.radius(handleR);
-                    handle.strokeWidth(handleStroke);
-                    handle.hitStrokeWidth(handleHit);
-                } else {
-                    resizeVertexHandleNode(handle, handleR, handleStroke, handleHit);
-                }
-            });
+            scaleSegmentInteractionNodes(segment, factor, true);
         });
         (state.draftLine?.vertices || []).forEach(vertex => {
             resizeVertexHandleNode(vertex, linearR, linearStroke, handleHit);
@@ -1415,6 +1439,7 @@
             positionLinearDraftLabel(lastPt, nextPt);
         }
         state.markers.forEach(marker => {
+            if (!marker.node) return;
             const r = symbolRadius(marker.symbol_size || marker.size);
             const tooltip = marker.node?.findOne?.('.takeoff-marker-tooltip');
             if (tooltip && typeof tooltip.scale === 'function') {
@@ -1633,7 +1658,6 @@
         segment.handles = handles;
         refreshSegment(segment);
         applySegmentLockVisual(segment);
-        syncTakeoffHandleScale();
         window.bringTakeoffRulersToTop?.();
     }
 
@@ -1651,8 +1675,6 @@
     }
 
     function renderNodes() {
-        state.markers.forEach(createMarkerNode);
-        state.segments.forEach(createSegmentNode);
         setTakeoffPage(pageNum);
         window.bringTakeoffRulersToTop?.();
     }
@@ -1672,18 +1694,17 @@
             selectionRectDraft.node?.destroy();
             selectionRectDraft = null;
         }
-        const layerByKey = new Map();
-        state.layers.forEach(l => {
-            if (l.client_uid != null) layerByKey.set(String(l.client_uid), l);
-            if (l.integration_key) layerByKey.set(String(l.integration_key), l);
-            if (l.metadata_json?.project_layer_id) layerByKey.set(String(l.metadata_json.project_layer_id), l);
-        });
+        const layerByKey = buildTakeoffLayerLookup();
         state.markers.forEach(m => {
-            if (!m.node) createMarkerNode(m);
             const layer = layerByKey.get(String(m.layer_client_uid || ''));
             const isVisible = Number(m.page_number) === targetPage && Number(layer?.visible ?? 1) !== 0;
-            if (m.node) m.node.visible(isVisible);
-            const isSelected = isVisible && !isElementLocked(m) && state.selectedObjectUids.has(String(m.client_uid));
+            if (!isVisible) {
+                if (m.node) destroyMarkerNodes(m);
+                return;
+            }
+            if (!m.node) createMarkerNode(m);
+            m.node?.visible(true);
+            const isSelected = !isElementLocked(m, layerByKey) && state.selectedObjectUids.has(String(m.client_uid));
             m.transformer?.visible(isSelected);
             const ring = m.node?.findOne('.takeoff-selection-ring');
             if (ring) {
@@ -1691,16 +1712,21 @@
             }
         });
         state.segments.forEach(s => {
-            if (!s.node) createSegmentNode(s);
             const layer = layerByKey.get(String(s.layer_client_uid || ''));
             const isVisible = Number(s.page_number) === targetPage && Number(layer?.visible ?? 1) !== 0;
-            if (s.node) s.node.visible(isVisible);
+            if (!isVisible) {
+                if (s.node) destroySegmentNodes(s);
+                return;
+            }
+            if (!s.node) createSegmentNode(s);
+            s.node?.visible(true);
             if (s.labelNode) s.labelNode.visible(false);
-            const isSelected = isVisible && !isElementLocked(s) && state.selectedObjectUids.has(String(s.client_uid));
+            const isSelected = !isElementLocked(s, layerByKey) && state.selectedObjectUids.has(String(s.client_uid));
             (s.handles || []).forEach(h => {
                 h.visible(isSelected);
             });
         });
+        syncTakeoffHandleScale();
         applyObjectSelectionVisuals(true);
         flushKonvaCanvasDraw();
     }
@@ -1776,6 +1802,7 @@
     function applySingleSegmentSelectionVisual(segment, selected) {
         if (!segment?.node) return;
         const showHandles = selected && !isElementLocked(segment) && isElementVisibleOnPage(segment);
+        if (showHandles) scaleSegmentInteractionNodes(segment, lastTakeoffInverseScale, false);
         (segment.handles || []).forEach(handle => {
             handle.visible(showHandles);
             if (selected) handle.moveToTop();
@@ -2993,6 +3020,9 @@
 
     function setTool(tool) {
         if (tool === 'select') tool = 'smart';
+        if (['takeoff_count', 'takeoff_linear', 'takeoff_area'].includes(tool)
+            && typeof window.takeoffRequireWrite === 'function'
+            && !window.takeoffRequireWrite()) return false;
         if (tool === 'takeoff_linear' && !requirePlanScale('linear')) return false;
         window.releaseTakeoffPointerState?.();
         if (tool !== 'multi-select' && selectionRectDraft) {
@@ -4535,7 +4565,9 @@
                             ref.quantity = calculateCountQuantity(ref);
                         }
                         destroyMarkerNodes(ref);
-                        createMarkerNode(ref);
+                        if (Number(ref.page_number) === Number(pageNum) && Number(layer.visible ?? 1) !== 0) {
+                            createMarkerNode(ref);
+                        }
                     });
                     state.segments.filter(s => layerKeys.has(String(s.layer_client_uid || '')) || layerKeys.has(String(s.layer_id || ''))).forEach(ref => {
                         if (colorChanged) ref.color = data.color;
@@ -4549,8 +4581,10 @@
                         if (multiplierChanged) ref.multiplier = syncedMultiplier;
                         if (subtypeChanged) {
                             destroySegmentNodes(ref);
-                            createSegmentNode(ref);
-                        } else if (!ref.node) {
+                            if (Number(ref.page_number) === Number(pageNum) && Number(layer.visible ?? 1) !== 0) {
+                                createSegmentNode(ref);
+                            }
+                        } else if (!ref.node && Number(ref.page_number) === Number(pageNum) && Number(layer.visible ?? 1) !== 0) {
                             createSegmentNode(ref);
                         } else {
                             if (colorChanged) ref.node.stroke(String(ref.color || layer.color));

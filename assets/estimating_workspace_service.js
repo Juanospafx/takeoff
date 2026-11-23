@@ -81,6 +81,42 @@
         };
     }
 
+    function assemblyComponentSignature(row = {}) {
+        const volatileKeys = new Set([
+            'id', 'parentItemId', 'parent_item_id', 'assemblyParentId',
+            'createdAt', 'created_at', 'updatedAt', 'updated_at'
+        ]);
+        const canonicalize = (value, key = '') => {
+            if (volatileKeys.has(key)) return undefined;
+            if (Array.isArray(value)) return value.map(entry => canonicalize(entry));
+            if (value && typeof value === 'object') {
+                return Object.keys(value).sort().reduce((result, childKey) => {
+                    const normalized = canonicalize(value[childKey], childKey);
+                    if (normalized !== undefined) result[childKey] = normalized;
+                    return result;
+                }, {});
+            }
+            return value;
+        };
+        return JSON.stringify(canonicalize(row));
+    }
+
+    function uniqueAssemblyComponents(rows) {
+        const seen = new Set();
+        const result = [];
+        let removed = 0;
+        (Array.isArray(rows) ? rows : []).forEach(row => {
+            const signature = assemblyComponentSignature(row);
+            if (seen.has(signature)) {
+                removed += 1;
+                return;
+            }
+            seen.add(signature);
+            result.push(row);
+        });
+        return { rows: result, removed };
+    }
+
     function item(row = {}) {
         const takeoffLayerId = text(row.takeoffLayerId ?? row.takeoff_layer_id ?? row.sourceTakeoffId);
         const quantity = numeric(row.quantity ?? row.originalQuantity);
@@ -92,6 +128,16 @@
             (row.isAssembly || row.is_assembly) ? 'assembly' : 'part').toLowerCase();
         const childRows = row.children ?? row.assemblyItems ?? row.components
             ?? row.catalogSnapshot?.assemblyComponents ?? row.catalogMetadata?.assemblyComponents;
+        const uniqueChildren = uniqueAssemblyComponents(childRows);
+        const normalizedCatalogSnapshot = row.catalogSnapshot ? clone(row.catalogSnapshot) : null;
+        const normalizedCatalogMetadata = row.catalogMetadata ? clone(row.catalogMetadata) : null;
+        let removedDuplicateComponents = uniqueChildren.removed;
+        [normalizedCatalogSnapshot, normalizedCatalogMetadata].forEach(snapshot => {
+            if (!snapshot || !Array.isArray(snapshot.assemblyComponents)) return;
+            const unique = uniqueAssemblyComponents(snapshot.assemblyComponents);
+            snapshot.assemblyComponents = unique.rows;
+            removedDuplicateComponents += unique.removed;
+        });
         const snapPricing = (row.pricingSnapshot && typeof row.pricingSnapshot === 'object') ? row.pricingSnapshot : {};
         const explicitRate = nullableNumeric(row.laborRate ?? row.labor_rate);
         const hasManualZeroRate = row._manualFields?.laborRate === true || (row.overrides?.laborRate !== null && row.overrides?.laborRate !== undefined);
@@ -111,8 +157,8 @@
             copiedFromTakeoffLayerId: text(row.copiedFromTakeoffLayerId) || null,
             catalogItemId: row.catalogItemId ?? row.catalog_item_id ?? row.part_catalog_item_id ?? null,
             catalogRevision: row.catalogRevision ?? null,
-            catalogSnapshot: row.catalogSnapshot ? clone(row.catalogSnapshot) : null,
-            catalogMetadata: row.catalogMetadata ? clone(row.catalogMetadata) : null,
+            catalogSnapshot: normalizedCatalogSnapshot,
+            catalogMetadata: normalizedCatalogMetadata,
             overrides: row.overrides ? clone(row.overrides) : null,
             lastCatalogRefresh: row.lastCatalogRefresh ? clone(row.lastCatalogRefresh) : null,
             itemType,
@@ -120,7 +166,8 @@
                 || itemType === 'assembly' || (Array.isArray(childRows) && childRows.length > 0),
             parentItemId: text(row.parentItemId ?? row.parent_item_id ?? row.assemblyParentId) || null,
             assemblyComponentId: row.assemblyComponentId ?? row.assembly_component_id ?? null,
-            children: Array.isArray(childRows) ? childRows.map(item) : [],
+            children: uniqueChildren.rows.map(item),
+            _workspaceRepairFlags: removedDuplicateComponents > 0 ? ['duplicate-assembly-components'] : undefined,
             childrenQuantitiesExtended: row.childrenQuantitiesExtended === true,
             assemblyExpansionPolicy: String(row.assemblyExpansionPolicy ?? row.assembly_expansion_policy ?? 'LEGACY').toUpperCase() === 'CANONICAL'
                 ? 'CANONICAL' : 'LEGACY',
@@ -165,6 +212,18 @@
             updatedAt: text(row.updatedAt ?? row.updated_at, now())
         };
         return CatalogSnapshot ? CatalogSnapshot.normalizeItemCatalogState(normalized) : normalized;
+    }
+
+    function consumeRepairFlags(estimateRow = {}) {
+        const flags = new Set();
+        const visit = candidate => {
+            if (!candidate || typeof candidate !== 'object') return;
+            (candidate._workspaceRepairFlags || []).forEach(flag => flags.add(String(flag)));
+            delete candidate._workspaceRepairFlags;
+            (candidate.children || []).forEach(visit);
+        };
+        (estimateRow.groups || []).forEach(groupRow => (groupRow.items || []).forEach(visit));
+        return [...flags];
     }
 
     function category(value) {
@@ -376,6 +435,7 @@
     }
 
     const service = { now, uid, numeric, projectId, settings, item, group, estimate, workspace, empty, active, selectEstimate, touch,
+        consumeRepairFlags,
         audit, reconcileTakeoff, createEstimate, removeEstimate, clone };
     global.EstimatingWorkspaceService = service;
     if (typeof module !== 'undefined') module.exports = service;

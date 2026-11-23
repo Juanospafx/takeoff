@@ -2537,6 +2537,7 @@
             ...(layer.catalogSnapshot && !resolvedMeta ? { catalogSnapshot: window.CatalogMetadata.clone(layer.catalogSnapshot) } : {}),
             name: layer.name || 'Takeoff item',
             description: layer.description || '',
+            color: layer.color,
             type: itemType,
             itemType,
             isAssembly: isAsm,

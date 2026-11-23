@@ -418,6 +418,17 @@
         state.dirtyEstimateIds = [...dirtyEstimateIds];
         state.takeoffSyncDirtyIds = [...takeoffSyncDirtyIds];
     }
+    function consumeAndMarkWorkspaceRepairs() {
+        if (typeof Workspace.consumeRepairFlags !== 'function') return [];
+        const repairedIds = [];
+        (state.estimates || []).forEach(estimate => {
+            const flags = Workspace.consumeRepairFlags(estimate);
+            if (!flags.length) return;
+            markEstimateDirty(estimate.id);
+            repairedIds.push(String(estimate.id));
+        });
+        return repairedIds;
+    }
     function buildEstimateSummaryPayload(est) {
         if (!est) {
             return { subtotal: 0, directSales: 0, preTaxMarkup: 0, postTaxMarkup: 0, taxes: 0, total: 0, estimateTotal: 0, laborHours: 0 };
@@ -1038,12 +1049,14 @@
                     }
                 } catch (_) { }
                 restoreDirtyTracking();
+                const repairedIds = consumeAndMarkWorkspaceRepairs();
                 saveLocal();
                 ui.loadState = 'saved';
-                ui.message = 'Loaded from server';
+                ui.message = repairedIds.length ? 'Loaded and repaired duplicate assembly components' : 'Loaded from server';
                 render();
                 drainPendingTakeoff();
                 hydrateBrokenAssembliesInCurrentEstimate();
+                if (repairedIds.length) scheduleSave('workspace-repair', repairedIds[0]);
                 return;
             }
             // A newer local timestamp alone does not prove there are unsaved edits:
@@ -1093,9 +1106,14 @@
                     }
                 } catch (_) { }
                 restoreDirtyTracking();
+                const repairedIds = consumeAndMarkWorkspaceRepairs();
+                if (repairedIds.length) {
+                    ui.message = 'Loaded and repaired duplicate assembly components';
+                    scheduleSave('workspace-repair', repairedIds[0]);
+                }
             }
             ui.loadState = 'saved';
-            ui.message = 'Loaded from server';
+            if (!ui.message.includes('repaired duplicate assembly components')) ui.message = 'Loaded from server';
             saveLocal();
         } catch (error) {
             ui.loadState = 'error';

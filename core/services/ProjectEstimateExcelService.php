@@ -173,10 +173,12 @@ class ProjectEstimateExcelService
             $hasOrder = isset($apCols['sort_order']);
             $hasRatioType = isset($apCols['ratio_type']);
             $hasWaste = isset($apCols['waste_factor_percent']);
+            $hasDeletedAt = isset($apCols['deleted_at']);
             $apSql = "SELECT assembly_catalog_item_id, part_catalog_item_id, quantity"
                 . ($hasRatioType ? ", ratio_type" : ", 'per_unit' AS ratio_type")
                 . ($hasWaste ? ", waste_factor_percent" : ", 0 AS waste_factor_percent")
                 . " FROM assembly_parts"
+                . ($hasDeletedAt ? " WHERE deleted_at IS NULL" : "")
                 . ($hasOrder ? " ORDER BY sort_order ASC, id ASC" : " ORDER BY id ASC");
             foreach ($pdo->query($apSql)->fetchAll(PDO::FETCH_ASSOC) ?: [] as $ap) {
                 $aid = (int)$ap['assembly_catalog_item_id'];

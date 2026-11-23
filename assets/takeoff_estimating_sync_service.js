@@ -27,6 +27,10 @@
             catalogItemId: layer.catalogItemId ?? layer.catalog_item_id ?? previous?.catalogItemId ?? null,
             name: layer.name || 'Takeoff item',
             description: layer.description || '',
+            // Color is part of the persisted Takeoff identity. Dropping it at
+            // this boundary makes copied/reloaded items fall back to the same
+            // catalog default even when their canvas layers were distinct.
+            color: layer.color ?? previous?.color,
             quantity,
             originalQuantity: measuredQty,
             lastSyncedTakeoffQuantity: measuredQty,

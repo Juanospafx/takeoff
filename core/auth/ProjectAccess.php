@@ -15,6 +15,8 @@ final class ProjectAccess
         $memberRole = strtolower(trim($memberRole));
         if (!\Takeoff\Core\Auth\AuthorizationPolicy::allows($applicationRole, $capability)) return false;
         if ($applicationRole === 'admin') return true;
+        // Project hierarchy is not enabled yet: viewer is globally read-only.
+        if ($applicationRole === 'viewer' && $capability === self::READ) return true;
         if ($capability === self::READ) {
             return in_array($memberRole, ['owner', 'editor', 'viewer'], true);
         }
@@ -31,6 +33,7 @@ final class ProjectAccess
         $userId = (int)($user['user_id'] ?? 0);
         if ($role === 'admin' && $userId > 0) return true;
         if ($userId <= 0 || !\Takeoff\Core\Auth\AuthorizationPolicy::allows($role, $capability)) return false;
+        if ($role === 'viewer' && $capability === self::READ) return true;
 
         $memberRole = self::memberRole($pdo, $projectId, $userId);
         return $memberRole !== null && self::roleAllowsCapability($role, $memberRole, $capability);
@@ -40,7 +43,7 @@ final class ProjectAccess
     {
         $role = strtolower(trim((string)($user['role'] ?? '')));
         $userId = (int)($user['user_id'] ?? 0);
-        if ($role === 'admin' && $userId > 0) return null;
+        if (in_array($role, ['admin', 'viewer'], true) && $userId > 0) return null;
         if ($userId <= 0 || !\Takeoff\Core\Auth\AuthorizationPolicy::allows($role, self::READ)) return [];
 
         $ids = [];
