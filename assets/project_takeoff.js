@@ -657,20 +657,23 @@
     }
 
     async function ensurePageCount(doc) {
-        if (!doc || doc.pageCount) return doc?.pageCount || 0;
+        if (!doc) return 0;
+        // The embedded editor owns the authoritative PDF page count. Reconcile it
+        // even when an older database row still contains the provisional value 1.
+        if (doc.id === drawingState.selectedDocumentId) {
+            const info = callEditor('takeoffGetDocumentInfo');
+            if (info?.pageCount) {
+                syncResolvedPageCountToState(doc, Number(info.pageCount));
+                doc.sheets = buildSheets(doc);
+                return doc.pageCount;
+            }
+        }
+        if (doc.pageCount) return doc.pageCount;
         if (window.ProjectState?.documents) {
             const psDoc = window.ProjectState.documents.find(d => Number(d.id) === Number(doc.id));
             const knownCount = Number(psDoc?.pageCount || psDoc?.page_count || 0);
             if (knownCount > 0) {
                 doc.pageCount = knownCount;
-                doc.sheets = buildSheets(doc);
-                return doc.pageCount;
-            }
-        }
-        if (doc.id === drawingState.selectedDocumentId) {
-            const info = callEditor('takeoffGetDocumentInfo');
-            if (info?.pageCount) {
-                syncResolvedPageCountToState(doc, Number(info.pageCount));
                 doc.sheets = buildSheets(doc);
                 return doc.pageCount;
             }
@@ -8184,7 +8187,7 @@
             drawingState.previewPage = drawingState.selectedPage;
         }
         renderDrawingDropdown();
-        if (doc && !doc.pageCount && doc.extension === 'pdf') {
+        if (doc && doc.extension === 'pdf') {
             ensurePageCount(doc).then(() => {
                 if (!drawingState.dropdownOpen) return;
                 renderDrawingDropdown();
@@ -9174,7 +9177,7 @@
             const doc = activeDrawingDoc();
             if (doc && Number(event.data.fileId) === Number(doc.id)) {
                 const totalPages = Math.max(1, Number(event.data.pageCount || 1));
-                doc.pageCount = totalPages;
+                syncResolvedPageCountToState(doc, totalPages);
                 doc.sheets = buildSheets(doc);
                 const pendingTarget = drawingState.pendingPageJump
                     ? Math.max(1, Math.min(totalPages, Number(drawingState.pendingPageJump) || 1))

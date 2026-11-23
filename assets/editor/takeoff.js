@@ -1075,26 +1075,36 @@
         }
     }
 
-    function createMarkerNode(marker) {
+    function createMarkerNode(marker, resolvedLayer = null) {
         if (!ensureKonva()) return;
-        const markerLayer = state.layers.find(layer => String(layer.client_uid) === String(marker.layer_client_uid));
+        const markerLayer = resolvedLayer || state.layers.find(layer => String(layer.client_uid) === String(marker.layer_client_uid));
         const itemName = markerLayer?.name || marker.label || 'Takeoff item';
+        const markerLocked = isObjectIndividuallyLocked(marker) || Number(markerLayer?.locked || 0) === 1;
         const group = new Konva.Group({
             x: num(marker.x),
             y: num(marker.y),
-            draggable: !isElementLocked(marker),
+            draggable: !markerLocked,
             listening: !isTakeoffObjectInteractionBlocked(),
             visible: Number(marker.page_number) === Number(pageNum),
-            opacity: isElementLocked(marker) ? 0.55 : 0.70
+            opacity: markerLocked ? 0.55 : 0.70
         });
         
         const radius = symbolRadius(marker.symbol_size || marker.size);
-        const symbol = new Konva.Group({ name: 'takeoff-count-symbol' });
+        // A marker may contain several decorative paths. Keep only one node in
+        // Konva's hit graph; pointer events still bubble to the outer group.
+        group.add(new Konva.Circle({
+            name: 'takeoff-marker-hit',
+            radius: radius + 5,
+            fill: 'rgba(0,0,0,0.001)',
+            listening: true,
+            perfectDrawEnabled: false
+        }));
+        const symbol = new Konva.Group({ name: 'takeoff-count-symbol', listening: false });
         drawSymbol(symbol, marker.symbol || 'circle', marker.color || '#2563eb', marker.symbol_size || marker.size);
         group.add(symbol);
         // Quantity remains on the marker model and in layer roll-ups; it is not
         // a visual label. Only render text explicitly entered by the user.
-        group.add(new Konva.Text({ x: 12, y: -10, text: marker.label || '', fill: marker.color || '#2563eb', fontSize: 14, fontStyle: 'bold', listening: Boolean(marker.label) }));
+        group.add(new Konva.Text({ x: 12, y: -10, text: marker.label || '', fill: marker.color || '#2563eb', fontSize: 14, fontStyle: 'bold', listening: false, perfectDrawEnabled: false }));
         
         // Lazy hover tooltip allocated only on first mouseenter to keep rapid placement lightweight
         let tooltip = null;
@@ -1492,11 +1502,11 @@
         return true;
     }
 
-    function createSegmentNode(segment) {
+    function createSegmentNode(segment, resolvedLayer = null) {
         if (!ensureKonva()) return;
         const visible = Number(segment.page_number) === Number(pageNum);
         const isArea = String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area';
-        const segLayer = state.layers.find(row =>
+        const segLayer = resolvedLayer || state.layers.find(row =>
             String(row.client_uid) === String(segment.layer_client_uid || '')
             || String(row.id || '') === String(segment.layer_id || '')
         );
@@ -1702,7 +1712,7 @@
                 if (m.node) destroyMarkerNodes(m);
                 return;
             }
-            if (!m.node) createMarkerNode(m);
+            if (!m.node) createMarkerNode(m, layer);
             m.node?.visible(true);
             const isSelected = !isElementLocked(m, layerByKey) && state.selectedObjectUids.has(String(m.client_uid));
             m.transformer?.visible(isSelected);
@@ -1718,7 +1728,7 @@
                 if (s.node) destroySegmentNodes(s);
                 return;
             }
-            if (!s.node) createSegmentNode(s);
+            if (!s.node) createSegmentNode(s, layer);
             s.node?.visible(true);
             if (s.labelNode) s.labelNode.visible(false);
             const isSelected = !isElementLocked(s, layerByKey) && state.selectedObjectUids.has(String(s.client_uid));
@@ -4271,6 +4281,26 @@
                     seenSegmentIds.add(uidKey);
                     return true;
                 });
+                const repairResult = window.TakeoffObjectRepairService?.repair(state.markers, state.segments);
+                if (repairResult?.changed) {
+                    // The server merges dirty pages so merely omitting a duplicate
+                    // from this snapshot would leave it in the database. Register
+                    // every discarded object as an explicit tombstone first.
+                    const removedObjects = [
+                        ...repairResult.removedMarkers.map(ref => ({ type: 'marker', ref })),
+                        ...repairResult.removedSegments.map(ref => ({ type: 'segment', ref }))
+                    ];
+                    trackTakeoffObjects(removedObjects, true);
+                    state.markers = repairResult.markers;
+                    state.segments = repairResult.segments;
+                    repairResult.affectedPages.forEach(page => {
+                        const pageNumber = Math.max(1, Number(page || 1));
+                        dirtyTakeoffPages.add(pageNumber);
+                        dirtyTakeoffPageGenerations.set(pageNumber, ++takeoffDirtyGeneration);
+                    });
+                    state.dirty = true;
+                    scheduleTakeoffAutosave(200);
+                }
             }
             if (!state.selectedItemId && state.catalog.items[0]) state.selectedItemId = state.catalog.items[0].id;
             // An empty server snapshot is intentional. Never treat zero layers as

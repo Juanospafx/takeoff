@@ -35,8 +35,8 @@ test('page changes mount only visible geometry instead of retaining the whole pr
     assert.doesNotMatch(renderNodes, /state\.segments\.forEach\(createSegmentNode\)/);
     assert.match(setPage, /if \(!isVisible\)[\s\S]*destroyMarkerNodes/);
     assert.match(setPage, /if \(!isVisible\)[\s\S]*destroySegmentNodes/);
-    assert.match(setPage, /if \(!m\.node\) createMarkerNode\(m\)/);
-    assert.match(setPage, /if \(!s\.node\) createSegmentNode\(s\)/);
+    assert.match(setPage, /if \(!m\.node\) createMarkerNode\(m, layer\)/);
+    assert.match(setPage, /if \(!s\.node\) createSegmentNode\(s, layer\)/);
 });
 
 test('creating one segment never rescales every previously created segment', () => {
@@ -55,5 +55,16 @@ test('zoom and interaction updates skip unmounted and hidden controls', () => {
     assert.match(interactionSync, /buildTakeoffLayerLookup\(\)/);
     assert.match(interactionSync, /if \(!segment\.node\) return/);
     assert.match(interactionSync, /if \(!marker\.node\) return/);
+});
+
+test('count markers use one lightweight hit target and reuse the page layer lookup', () => {
+    const markerNode = bodyBetween(takeoff, 'function createMarkerNode', 'function refreshSegment');
+    const setPage = bodyBetween(takeoff, 'function setTakeoffPage', 'window.setTakeoffPage');
+
+    assert.match(markerNode, /takeoff-marker-hit/);
+    assert.match(markerNode, /takeoff-count-symbol', listening: false/);
+    assert.match(markerNode, /perfectDrawEnabled: false/);
+    assert.match(setPage, /createMarkerNode\(m, layer\)/);
+    assert.match(setPage, /createSegmentNode\(s, layer\)/);
 });
 
