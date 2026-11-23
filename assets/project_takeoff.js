@@ -325,7 +325,9 @@
         pdfDocs: new Map(),
         thumbnailCache: new Map(),
         thumbnailCacheLimit: 40,
-        thumbnailRequest: 0
+        thumbnailRequest: 0,
+        previewPendingKey: null,
+        previewRenderedKey: null
     };
 
     function drawingExtensions() {
@@ -494,13 +496,28 @@
     });
     const docSummaryMemo = new Map();
 
+    function invalidateTakeoffSheetSummary(docId = null) {
+        if (docId === null) {
+            docSummaryMemo.clear();
+            return;
+        }
+        const resolvedDocId = Number(docId || 0);
+        if (resolvedDocId > 0) docSummaryMemo.delete(resolvedDocId);
+    }
+
     function getDocTakeoffPageMap(docId) {
         const numDocId = Number(docId);
         const activeId = String(takeoffState.activeLayerId || selectionState.activeLayerId || '');
         const activeEst = typeof activeEstimateId === 'function' ? activeEstimateId() : '';
-        const now = performance.now();
+        const snapshotKey = `${activeEst}:${numDocId}`;
+        const liveSnapshot = (takeoffState.canvasSnapshots && takeoffState.canvasSnapshots[snapshotKey])
+            || Object.values(takeoffState.canvasSnapshots || {}).find(s => Number(s.drawingId || s.drawing_id) === numDocId);
+        const locationsRef = window.ProjectState?.takeoffLocations || null;
+        const sourceRef = liveSnapshot || locationsRef;
+        const sourceVersion = Number(liveSnapshot?.updatedAt || 0);
         const cached = docSummaryMemo.get(numDocId);
-        if (cached && cached.activeId === activeId && cached.activeEst === activeEst && (now - cached.ts) < 220) {
+        if (cached && cached.activeId === activeId && cached.activeEst === activeEst
+            && cached.sourceRef === sourceRef && cached.sourceVersion === sourceVersion) {
             return cached;
         }
 
@@ -509,10 +526,6 @@
             if (!pageLayerMaps.has(p)) pageLayerMaps.set(p, new Map());
             return pageLayerMaps.get(p);
         };
-
-        const snapshotKey = `${activeEst}:${numDocId}`;
-        const liveSnapshot = (takeoffState.canvasSnapshots && takeoffState.canvasSnapshots[snapshotKey])
-            || Object.values(takeoffState.canvasSnapshots || {}).find(s => Number(s.drawingId || s.drawing_id) === numDocId);
 
         if (liveSnapshot && Array.isArray(liveSnapshot.layers) && liveSnapshot.layers.length > 0) {
             liveSnapshot.layers.forEach(remote => {
@@ -599,9 +612,10 @@
         });
 
         const entry = {
-            ts: now,
             activeId,
             activeEst,
+            sourceRef,
+            sourceVersion,
             pages,
             docHasActiveItem,
             docHasAnyTakeoff
@@ -3721,7 +3735,7 @@
             needsTakeoffTypeChangeWarning, confirmTakeoffTypeChange,
             getLayerEstimatingOverride, ensureEstimateTakeoffWorkspace, catalogItemMeta,
             makeId, clearLayerCachedStateOnTypeChange, setActiveTakeoffLayer,
-            syncAllLayersToCanvas, syncTakeoffFromCanvasSnapshot, showPrepared
+            syncAllLayersToCanvas, syncTakeoffFromCanvasSnapshot, invalidateTakeoffSheetSummary, showPrepared
         },
         persistence: {
             canWrite, requireWrite, callEditor, pushTakeoffHistory, saveTakeoffState
@@ -7712,6 +7726,7 @@
             drawingId: rawDocId > 0 ? rawDocId : (snapshot.drawingId || null),
             updatedAt: Date.now()
         };
+        if (rawDocId > 0) docSummaryMemo.delete(rawDocId);
         if (snapshot.userDirty === true || snapshot.dirty === true) {
             takeoffIsDirty = true;
         }
@@ -8152,6 +8167,35 @@
     let activeSheetHoverTimer = null;
     let dropdownScrollBound = false;
 
+    function positionDrawingDropdown() {
+        const panel = $('takeoffDrawingDropdown');
+        const trigger = $('takeoffSheetSelect');
+        if (!panel || !trigger || !drawingState.dropdownOpen) return;
+        const triggerRect = trigger.getBoundingClientRect();
+        const margin = 12;
+        const gap = 6;
+        const width = Math.min(980, Math.max(1, window.innerWidth - (margin * 2)));
+        const maxViewportHeight = Math.max(1, window.innerHeight - (margin * 2));
+        const preferredHeight = Math.min(480, maxViewportHeight);
+        const below = window.innerHeight - triggerRect.bottom - margin - gap;
+        const above = triggerRect.top - margin - gap;
+        const openAbove = below < 280 && above > below;
+        const availableHeight = Math.max(1, openAbove ? above : below);
+        const height = Math.min(preferredHeight, availableHeight, maxViewportHeight);
+        const left = Math.min(Math.max(margin, triggerRect.left), Math.max(margin, window.innerWidth - width - margin));
+        const top = openAbove
+            ? Math.max(margin, triggerRect.top - height - gap)
+            : Math.min(triggerRect.bottom + gap, Math.max(margin, window.innerHeight - height - margin));
+        panel.style.left = `${Math.round(left)}px`;
+        panel.style.top = `${Math.round(top)}px`;
+        panel.style.width = `${Math.round(width)}px`;
+        panel.style.height = `${Math.round(height)}px`;
+        panel.style.maxHeight = `${Math.round(maxViewportHeight)}px`;
+    }
+
+    window.addEventListener('resize', positionDrawingDropdown, { passive: true });
+    window.visualViewport?.addEventListener('resize', positionDrawingDropdown, { passive: true });
+
     function bindDropdownScrollGuards() {
         if (dropdownScrollBound) return;
         const docBox = $('takeoffDocumentList');
@@ -8181,6 +8225,7 @@
         drawingState.dropdownOpen = true;
         panel.classList.add('open');
         trigger?.setAttribute('aria-expanded', 'true');
+        positionDrawingDropdown();
         bindDropdownScrollGuards();
         const doc = browsingDrawingDoc();
         if (doc && doc.id === drawingState.selectedDocumentId && drawingState.selectedPage) {
@@ -8193,7 +8238,6 @@
                 renderDrawingDropdown();
             });
         }
-        warmDrawingMetadata();
     }
 
     function closeDrawingDropdown() {
@@ -8522,10 +8566,15 @@
                         if (!targetDoc || Number(drawingState.previewAttachmentDocId) === Number(targetDoc.id)) return;
                         drawingState.previewAttachmentDocId = targetDoc.id;
                         renderSheetPreview(targetDoc, 1);
-                    }, 110);
+                    }, 280);
+                };
+                const cancelScheduledPreview = () => {
+                    if (activeSheetHoverTimer) clearTimeout(activeSheetHoverTimer);
+                    activeSheetHoverTimer = null;
                 };
                 button.addEventListener('mouseenter', updateHoverPreview);
                 button.addEventListener('focus', updateHoverPreview);
+                button.addEventListener('mouseleave', cancelScheduledPreview);
                 button.addEventListener('click', () => {
                     if (activeSheetHoverTimer) clearTimeout(activeSheetHoverTimer);
                     const targetDoc = getTargetDoc();
@@ -8600,10 +8649,15 @@
                     if (isDropdownScrolling) return;
                     if (drawingState.previewPage === pg && Number(drawingState.lastPreviewDocId) === Number(doc.id)) return;
                     renderSheetPreview(doc, pg);
-                }, 130);
+                }, 280);
+            };
+            const cancelScheduledPreview = () => {
+                if (activeSheetHoverTimer) clearTimeout(activeSheetHoverTimer);
+                activeSheetHoverTimer = null;
             };
             button.addEventListener('mouseenter', schedulePreview);
             button.addEventListener('focus', schedulePreview);
+            button.addEventListener('mouseleave', cancelScheduledPreview);
             button.addEventListener('click', () => {
                 if (activeSheetHoverTimer) clearTimeout(activeSheetHoverTimer);
                 const pg = Number(button.dataset.drawingPage);
@@ -8624,6 +8678,16 @@
     function showPreviewFallback(text) {
         const box = $('takeoffSheetPreview');
         if (box) box.innerHTML = `<span>${esc(text || 'Preview unavailable')}</span>`;
+    }
+
+    function waitForPreviewIdle() {
+        return new Promise(resolve => {
+            if (typeof window.requestIdleCallback === 'function') {
+                window.requestIdleCallback(() => resolve(), { timeout: 180 });
+            } else {
+                setTimeout(resolve, 32);
+            }
+        });
     }
 
     function storeTakeoffPreviewThumb(key, fileKey, url) {
@@ -8693,18 +8757,30 @@
         }
 
         // Render thumbnail
+        if (doc.extension !== 'pdf') {
+            const imageKey = `image:${doc.id}`;
+            if (drawingState.previewRenderedKey === imageKey && box.querySelector('img')) return;
+            ++drawingState.thumbnailRequest;
+            drawingState.lastPreviewDocId = doc.id;
+            if (drawingState.activePreviewRenderTask && typeof drawingState.activePreviewRenderTask.cancel === 'function') {
+                try { drawingState.activePreviewRenderTask.cancel(); } catch (_) {}
+                drawingState.activePreviewRenderTask = null;
+            }
+            box.innerHTML = `<img src="${esc(doc.fileUrl)}" alt="${esc(doc.name)}" loading="lazy" decoding="async">`;
+            drawingState.previewRenderedKey = imageKey;
+            return;
+        }
+        const key = `${doc.id}:${targetPage}`;
+        const fileKey = doc.fileUrl ? `${doc.fileUrl}:${targetPage}` : null;
+
+        if (drawingState.previewRenderedKey === key && box.querySelector('img')) return;
+        if (drawingState.previewPendingKey === key) return;
         const requestId = ++drawingState.thumbnailRequest;
         drawingState.lastPreviewDocId = doc.id;
         if (drawingState.activePreviewRenderTask && typeof drawingState.activePreviewRenderTask.cancel === 'function') {
             try { drawingState.activePreviewRenderTask.cancel(); } catch (_) {}
             drawingState.activePreviewRenderTask = null;
         }
-        if (doc.extension !== 'pdf') {
-            box.innerHTML = `<img src="${esc(doc.fileUrl)}" alt="${esc(doc.name)}" loading="lazy" decoding="async">`;
-            return;
-        }
-        const key = `${doc.id}:${targetPage}`;
-        const fileKey = doc.fileUrl ? `${doc.fileUrl}:${targetPage}` : null;
 
         // 1. Check in-memory caches (0ms)
         const cachedUrl = drawingState.thumbnailCache.get(key)
@@ -8714,9 +8790,11 @@
         if (cachedUrl) {
             drawingState.thumbnailCache.set(key, cachedUrl);
             box.innerHTML = `<img src="${cachedUrl}" alt="${esc(sheetName(doc, targetPage))}" loading="lazy" decoding="async">`;
+            drawingState.previewRenderedKey = key;
             return;
         }
 
+        drawingState.previewPendingKey = key;
         showPreviewLoading();
 
         try {
@@ -8727,6 +8805,7 @@
                 if (persistedUrl) {
                     storeTakeoffPreviewThumb(key, fileKey, persistedUrl);
                     box.innerHTML = `<img src="${persistedUrl}" alt="${esc(sheetName(doc, targetPage))}" loading="lazy" decoding="async">`;
+                    drawingState.previewRenderedKey = key;
                     return;
                 }
             }
@@ -8741,11 +8820,14 @@
                     }
                     storeTakeoffPreviewThumb(key, fileKey, workerRes.url);
                     box.innerHTML = `<img src="${workerRes.url}" alt="${esc(sheetName(doc, targetPage))}" loading="lazy" decoding="async">`;
+                    drawingState.previewRenderedKey = key;
                     return;
                 }
             }
 
             // 4. Fallback if OffscreenCanvas Worker is unavailable: idle callback + async toBlob
+            await waitForPreviewIdle();
+            if (requestId !== drawingState.thumbnailRequest || !drawingState.dropdownOpen) return;
             if (requestId !== drawingState.thumbnailRequest) return;
             const pdf = await getPdfDocument(doc);
             if (requestId !== drawingState.thumbnailRequest || !pdf) return;
@@ -8776,12 +8858,15 @@
             const blobUrl = URL.createObjectURL(blob);
             storeTakeoffPreviewThumb(key, fileKey, blobUrl);
             box.innerHTML = `<img src="${blobUrl}" alt="${esc(sheetName(doc, targetPage))}" loading="lazy" decoding="async">`;
+            drawingState.previewRenderedKey = key;
         } catch (e) {
             if (e && (e.name === 'RenderingCancelledException' || String(e.message || '').includes('Rendering cancelled'))) {
                 return;
             }
             console.warn('Thumbnail failed', e);
             if (requestId === drawingState.thumbnailRequest) showPreviewFallback('Preview unavailable');
+        } finally {
+            if (drawingState.previewPendingKey === key) drawingState.previewPendingKey = null;
         }
     }
 

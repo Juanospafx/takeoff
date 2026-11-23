@@ -3539,7 +3539,7 @@ body.theme-dark .pro-takeoff-viewer {
 }
 
 .pro-drawing-dropdown {
-    position: absolute;
+    position: fixed;
     top: calc(100% + 6px);
     left: 0;
     z-index: 85;
@@ -6882,9 +6882,7 @@ body.theme-dark .takeoff-subhead-nav-btn:hover {
 }
 
 .takeoff-subhead-drawing-wrap .pro-drawing-dropdown {
-    position: absolute;
-    top: calc(100% + 6px);
-    left: 0;
+    position: fixed;
     right: auto;
     z-index: 100000;
 }

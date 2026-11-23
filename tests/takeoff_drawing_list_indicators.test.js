@@ -29,7 +29,8 @@ test('project_takeoff.js implements getSheetTakeoffSummary and updates buildShee
     assert.match(parentJs, /function getSheetTakeoffSummary\(docId,\s*pageNumber\)/);
     assert.match(parentJs, /liveSnapshot\.layers\.forEach/);
     assert.match(parentJs, /window\.ProjectState\?\.takeoffLocations/);
-    assert.match(parentJs, /hasActiveItem:\s*activeItemMarks\s*>\s*0/);
+    assert.match(parentJs, /const hasActiveItem\s*=\s*activeItemMarks\s*>\s*0/);
+    assert.match(parentJs, /hasActiveItem,\s*hasAnyTakeoff/);
     assert.match(parentJs, /takeoffSummary:\s*summary/);
     assert.match(parentJs, /hasTakeoffs:\s*summary\.hasAnyTakeoff \|\| Boolean\(saved\.hasTakeoffs\)/);
 });
@@ -44,10 +45,9 @@ test('project_takeoff.js updates active item bar and provides List of Drawings s
     assert.match(parentJs, /takeoffPreviewItemsList/);
 });
 
-test('project_takeoff.css eliminates curved bracket borders and styles List of Drawings badges', () => {
-    // Flat vertical pill accent bar via ::before instead of border-left on rounded button
-    assert.match(parentCss, /\.pro-drawing-row::before,\s*\.pro-sheet-row::before\s*\{[\s\S]*width:\s*3\.5px;/);
-    assert.match(parentCss, /\.pro-drawing-row\.active::before,\s*\.pro-sheet-row\.active::before\s*\{\s*background:\s*#1f6fb2;\s*\}/);
+test('project_takeoff.css uses collision-safe active borders and styles List of Drawings badges', () => {
+    assert.match(parentCss, /\.pro-drawing-row::before,[\s\S]*?\.pro-drawing-filter-btn\.active::after\s*\{[\s\S]*?display:\s*none\s*!important;/);
+    assert.match(parentCss, /\.pro-drawing-row\.active,[\s\S]*?\.pro-sheet-row\.is-editor-open\.active\s*\{[\s\S]*?border:\s*1px solid var\(--tk-primary/);
     // Badges and active bar
     assert.match(parentCss, /\.pro-sheet-item-mark/);
     assert.match(parentCss, /\.pro-mark-dot/);

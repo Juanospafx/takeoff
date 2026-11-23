@@ -1266,6 +1266,7 @@
                 let minValidToken = 0;
                 const jobQueue = [];
                 let isProcessing = false;
+                let activeTakeoffRenderTask = null;
 
                 async function getWorkerPdf(docKey, url, buffer) {
                     if (pdfCache.has(docKey)) return pdfCache.get(docKey);
@@ -1340,8 +1341,14 @@
                                 const ctx = offscreen.getContext('2d', { alpha: false });
                                 ctx.fillStyle = '#ffffff';
                                 ctx.fillRect(0, 0, w, h);
-                                await page.render({ canvasContext: ctx, viewport, canvasFactory }).promise;
-                                try { page.cleanup(); } catch (_) {}
+                                const renderTask = page.render({ canvasContext: ctx, viewport, canvasFactory });
+                                if (isTakeoffJob) activeTakeoffRenderTask = renderTask;
+                                try {
+                                    await renderTask.promise;
+                                } finally {
+                                    if (activeTakeoffRenderTask === renderTask) activeTakeoffRenderTask = null;
+                                    try { page.cleanup(); } catch (_) {}
+                                }
                                 const blob = await offscreen.convertToBlob({ type: 'image/jpeg', quality: job.quality || 0.85 });
                                 self.postMessage({
                                     reqId: job.reqId,
@@ -1374,6 +1381,10 @@
                         return;
                     }
                     if (msg.type === 'clearTakeoff') {
+                        if (activeTakeoffRenderTask && typeof activeTakeoffRenderTask.cancel === 'function') {
+                            try { activeTakeoffRenderTask.cancel(); } catch (_) {}
+                            activeTakeoffRenderTask = null;
+                        }
                         for (let i = jobQueue.length - 1; i >= 0; i--) {
                             if (jobQueue[i].scope === 'takeoff') {
                                 const dropped = jobQueue.splice(i, 1)[0];
@@ -1403,6 +1414,10 @@
                     }
                     if (msg.type === 'renderThumb') {
                         if (msg.scope === 'takeoff') {
+                            if (activeTakeoffRenderTask && typeof activeTakeoffRenderTask.cancel === 'function') {
+                                try { activeTakeoffRenderTask.cancel(); } catch (_) {}
+                                activeTakeoffRenderTask = null;
+                            }
                             // Replace any queued takeoff preview render so only the latest hovered sheet renders
                             for (let i = jobQueue.length - 1; i >= 0; i--) {
                                 if (jobQueue[i].scope === 'takeoff' && jobQueue[i].type === 'renderThumb') {

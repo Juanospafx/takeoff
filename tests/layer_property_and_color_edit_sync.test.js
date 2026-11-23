@@ -32,6 +32,8 @@ test('Takeoff editor projectTakeoffUpdateLayerObjects resolves all layer keys to
 
 test('Takeoff dashboard submitLayerModal and changeLayerColor sync to canvas before saving', () => {
     assert.match(layerModal, /syncAllLayersToCanvas\(\{ immediate: true, suppressEstimatingSync: true \}\);\s*\/\/\s*Modal Save is a durable operation/);
+    assert.match(layerModal, /invalidateTakeoffSheetSummary\(\)/,
+        'saving metadata or visual edits must invalidate the warm sheet-summary cache');
     assert.match(takeoff, /function changeLayerColor[\s\S]*?callEditor\('projectTakeoffUpdateLayerObjects'/);
     assert.match(takeoff, /function changeLayerColor[\s\S]*?syncAllLayersToCanvas/);
     assert.match(takeoff, /function changeLayerColor[\s\S]*?callEditor\('projectTakeoffSave'\)/);

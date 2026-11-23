@@ -25,7 +25,8 @@
             ensureEstimateTakeoffWorkspace, setSelectValue, takeoffDisplaySymbol,
             takeoffDisplaySize, updateCatalogSelectionIndicator, notifyEditorVisible,
             catalogItemMeta, findGroup, makeId, clearLayerCachedStateOnTypeChange,
-            setActiveTakeoffLayer, syncAllLayersToCanvas, syncTakeoffFromCanvasSnapshot
+            setActiveTakeoffLayer, syncAllLayersToCanvas, syncTakeoffFromCanvasSnapshot,
+            invalidateTakeoffSheetSummary = () => {}
         } = legacy;
 
         let modal = null;
@@ -1112,6 +1113,7 @@
                 takeoffState.activeGroupId = group.id;
                 setActiveTakeoffLayer(layer.id, false);
             }
+            invalidateTakeoffSheetSummary();
             if (!editingLayerId || typeFamilyChanged || catalogChanged) {
                 syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true }); // Modal Save is a durable operation
             }

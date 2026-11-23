@@ -1147,6 +1147,25 @@ $state = [
                                             <div id="takeoffSheetPreview" class="pro-preview-box">
                                                 <span>Select a sheet</span>
                                             </div>
+                                            <div id="takeoffPreviewDetails" class="pro-preview-details">
+                                                <div class="pro-preview-sheet-header">
+                                                    <h4 id="takeoffPreviewTitle">Select a sheet</h4>
+                                                    <span id="takeoffPreviewSub" class="pro-preview-sheet-sub"></span>
+                                                </div>
+                                                <section class="pro-preview-takeoff-section" aria-label="Takeoff items on this sheet">
+                                                    <div class="pro-preview-section-title">
+                                                        <span>Takeoff Items</span>
+                                                        <span id="takeoffPreviewItemCount" class="pro-preview-item-count">0 items (0 marks)</span>
+                                                    </div>
+                                                    <div id="takeoffPreviewItemsList" class="pro-preview-items-list">
+                                                        <div class="pro-preview-empty-takeoff">Select a sheet to inspect its takeoff items.</div>
+                                                    </div>
+                                                </section>
+                                                <button id="takeoffOpenSheetBtn" class="pro-open-sheet-btn" type="button" disabled>
+                                                    <i class="fas fa-arrow-up-right-from-square" aria-hidden="true"></i>
+                                                    Open Sheet
+                                                </button>
+                                            </div>
                                         </div>
                                     </div>
                                 </div>
