@@ -657,7 +657,7 @@ class ProjectEstimateExcelService
                 'name' => $tplName . ' Baseline',
                 'status' => 'draft',
                 'creationMode' => 'template',
-                'takeoffSyncMode' => 'linked',
+                'takeoffSyncMode' => 'linked-only',
                 'createdAt' => gmdate('c'),
                 'updatedAt' => gmdate('c'),
                 'groups' => $groupsPayload,
@@ -1512,6 +1512,7 @@ class ProjectEstimateExcelService
         $refreshCatalogPrices = !empty($params['refresh_catalog_prices']);
         $makePrimary = ($existingCount === 0);
 
+        $warnings = [];
         $pdo->beginTransaction();
         try {
             $clientEstId = ProjectTemplateService::uid('estimate');
@@ -1562,7 +1563,7 @@ class ProjectEstimateExcelService
                 'name' => $tabName,
                 'status' => 'draft',
                 'creationMode' => 'excel_import',
-                'takeoffSyncMode' => 'linked',
+                'takeoffSyncMode' => 'linked-only',
                 'createdAt' => gmdate('c'),
                 'updatedAt' => gmdate('c'),
                 'groups' => $built['workspaceGroups'],
@@ -1582,25 +1583,41 @@ class ProjectEstimateExcelService
             $pdo->prepare("INSERT INTO estimate_workspace_states (estimate_id, project_id, client_estimate_id, state_json, revision) VALUES (?, ?, ?, ?, 1)")
                 ->execute([$estimateId, $projectId, $clientEstId, json_encode($workspace, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE)]);
 
-            ProjectTemplateService::ensureTakeoffLayersFromWorkspace($pdo, $projectId, $clientEstId);
             if ($makePrimary) {
                 ProjectTemplateService::syncPrimaryEstimateMetadata($pdo, $projectId, false);
             }
-
             $pdo->commit();
-            return [
-                'project_id' => $projectId,
-                'estimate_id' => $estimateId,
-                'client_estimate_id' => $clientEstId,
-                'name' => $tabName,
-                'groups' => count($built['workspaceGroups']),
-                'items_count' => $built['itemsCount'],
-                'estimate' => $workspace,
-            ];
         } catch (Throwable $e) {
             if ($pdo->inTransaction()) $pdo->rollBack();
             throw $e;
         }
+
+        // The Estimate workspace is the authoritative import. Takeoff layers
+        // are a derived projection and legacy schema/FK differences must never
+        // roll back an otherwise valid imported Estimate.
+        try {
+            $pdo->beginTransaction();
+            ProjectTemplateService::ensureTakeoffLayersFromWorkspace($pdo, $projectId, $clientEstId);
+            $pdo->commit();
+        } catch (Throwable $projectionError) {
+            if ($pdo->inTransaction()) $pdo->rollBack();
+            error_log('Direct Estimate import optional Takeoff projection failed: ' . get_class($projectionError));
+            $warnings[] = [
+                'code' => 'TAKEOFF_PROJECTION_FAILED',
+                'message' => 'The Estimate was imported, but its Takeoff layers could not be prepared.',
+            ];
+        }
+
+        return [
+            'project_id' => $projectId,
+            'estimate_id' => $estimateId,
+            'client_estimate_id' => $clientEstId,
+            'name' => $tabName,
+            'groups' => count($built['workspaceGroups']),
+            'items_count' => $built['itemsCount'],
+            'estimate' => $workspace,
+            'warnings' => $warnings,
+        ];
     }
 
     /**
@@ -1703,7 +1720,7 @@ class ProjectEstimateExcelService
                 'name' => 'Primary Estimate',
                 'status' => 'draft',
                 'creationMode' => 'excel_import',
-                'takeoffSyncMode' => 'linked',
+                'takeoffSyncMode' => 'linked-only',
                 'createdAt' => gmdate('c'),
                 'updatedAt' => gmdate('c'),
                 'groups' => $workspaceGroups,

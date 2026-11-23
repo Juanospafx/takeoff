@@ -6,13 +6,14 @@ header('Content-Type: application/json');
 
 require_once __DIR__ . '/../core/auth/session.php'; // Para obtener el ID del usuario creador
 
-// Solo Admins pueden crear (Fail-closed SessionGuard RBAC)
+// Admins and estimators may create projects; the creator becomes the owner.
 $readActions = [];
 $mutationActions = ['create_project'];
 $action = (string)($_POST['action'] ?? $_GET['action'] ?? 'create_project');
-$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'create_project');
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'create_project', null, true, 'project.write');
 
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/ProjectAccess.php';
 
 // 2. Recibir Datos
 try {
@@ -126,6 +127,7 @@ try {
     $stmt->execute($params);
 
     $projectId = $pdo->lastInsertId();
+    ProjectAccess::grantCreator($pdo, (int)$projectId, $creatorId);
 
     if (!empty($selectedIds)) {
         $stmtDir = $pdo->prepare("INSERT IGNORE INTO directory (project_id, user_id) VALUES (?, ?)");

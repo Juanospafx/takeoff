@@ -19,7 +19,7 @@ if (!is_array($body)) $body = array();
 $readActions = array('list', 'load');
 $mutationActions = array('save', 'create', 'delete');
 $action = (string)(isset($_GET['action']) ? $_GET['action'] : (isset($body['action']) ? $body['action'] : (isset($_POST['action']) ? $_POST['action'] : '')));
-$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'load');
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'load', null, true, 'estimating.write');
 $userId = (int)$user['user_id'];
 if ($action === '') {
     $action = 'load';
@@ -38,6 +38,8 @@ class PewCatalogUpdateStale extends RuntimeException {
         parent::__construct('The source estimate changed after the Cost Catalog preview.');
         $this->details = $details;
     }
+}
+class PewEmptyEstimateOverwrite extends RuntimeException {
 }
 
 function pew_json($data, $status = 200) {
@@ -90,6 +92,22 @@ function pew_project(PDO $pdo, $projectId) {
 function pew_decode($json, $fallback = array()) {
     $decoded = json_decode((string)$json, true);
     return is_array($decoded) ? $decoded : $fallback;
+}
+function pew_workspace_item_count($groups) {
+    if (!is_array($groups)) return 0;
+    $count = 0;
+    foreach ($groups as $group) {
+        if (!is_array($group)) continue;
+        $items = isset($group['items']) && is_array($group['items']) ? $group['items'] : array();
+        foreach ($items as $item) {
+            if (!is_array($item)) continue;
+            $count++;
+            $count += pew_workspace_item_count(array(array(
+                'items' => isset($item['children']) && is_array($item['children']) ? $item['children'] : array()
+            )));
+        }
+    }
+    return $count;
 }
 function pew_table_columns(PDO $pdo, $table) {
     static $cache = array();
@@ -870,6 +888,15 @@ function pew_save_estimate(PDO $pdo, $projectId, array $estimate, array $summary
             'current' => $serverEstimate
         )));
     }
+    $storedSnapshot = $current ? pew_decode($current['state_json']) : array();
+    $storedItemCount = pew_workspace_item_count(isset($storedSnapshot['groups']) ? $storedSnapshot['groups'] : array());
+    $incomingItemCount = pew_workspace_item_count(isset($estimate['groups']) ? $estimate['groups'] : array());
+    $allowEmptyGroupsReplace = isset($estimate['allowEmptyGroupsReplace'])
+        && $estimate['allowEmptyGroupsReplace'] === true;
+    unset($estimate['allowEmptyGroupsReplace']);
+    if ($storedItemCount > 0 && $incomingItemCount === 0 && !$allowEmptyGroupsReplace) {
+        throw new PewEmptyEstimateOverwrite('A non-empty estimate cannot be replaced by an empty synchronization snapshot.');
+    }
     if (isset($estimate['estimateSummary']) && is_array($estimate['estimateSummary'])) $summary = $estimate['estimateSummary'];
     $normalizedSummary = pew_extract_estimate_summary($summary, $estimate);
     if (!isset($estimate['estimateTotal'])) $estimate['estimateTotal'] = $normalizedSummary['total'];
@@ -912,11 +939,18 @@ function pew_save_estimate(PDO $pdo, $projectId, array $estimate, array $summary
 try {
     $pewStage = 'database_connection';
     require __DIR__ . '/../core/db/connection.php';
+    require_once __DIR__ . '/../core/auth/ProjectAccess.php';
     $pewStage = 'schema_validation';
     pew_assert_schema($pdo);
     $projectId = pew_request_project_id($_GET, $body);
     $pewStage = 'project_validation';
     pew_project($pdo, $projectId);
+    takeoff_guard_project_access(
+        $pdo,
+        $user,
+        $projectId,
+        in_array($action, array('list', 'load'), true) ? ProjectAccess::READ : ProjectAccess::WRITE
+    );
 
     if ($action === 'list' || $action === 'load') {
         $pewStage = 'workspace_load';
@@ -1130,6 +1164,12 @@ try {
         'code' => 'revision_conflict',
         'message' => 'The estimate was changed by another client.',
         'conflicts' => $e->conflicts
+    )), 409);
+} catch (PewEmptyEstimateOverwrite $e) {
+    if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();
+    pew_json(array('ok' => false, 'success' => false, 'error' => array(
+        'code' => 'empty_estimate_overwrite_blocked',
+        'message' => 'The server blocked an unexpected empty estimate update. Reload the estimate and retry the intended deletion.'
     )), 409);
 } catch (Throwable $e) {
     if (isset($pdo) && $pdo->inTransaction()) $pdo->rollBack();

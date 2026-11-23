@@ -555,7 +555,7 @@
         window.dispatchEvent(new CustomEvent('takeoff:estimate-summary-updated', { detail: total }));
     }
 
-    function changed(action) {
+    function changed(action, options = {}) {
         const activeId = String(state.activeEstimateId || '');
         if (action === 'Synchronized items from Takeoff') takeoffSyncDirtyIds.add(activeId);
         else takeoffSyncDirtyIds.delete(activeId);
@@ -565,6 +565,14 @@
         conflictedEstimateIds.delete(activeId);
         conflictRemoteEstimates.delete(activeId);
         Workspace.touch(state, action);
+        // Server-side persistence rejects non-empty -> empty replacements by
+        // default. Only a deliberate Estimating delete may carry the one-shot
+        // intent that authorizes clearing the final item; Takeoff hydration and
+        // synchronization never set this flag.
+        if (options.allowEmptyGroupsReplace === true
+            && !(current()?.groups || []).some(group => (group.items || []).length > 0)) {
+            current().allowEmptyGroupsReplace = true;
+        }
         saveLocal();
         scheduleSave(action === 'Synchronized items from Takeoff' ? 'takeoff' : 'manual');
         render();
@@ -1126,9 +1134,11 @@
         return remote;
     }
 
-    function reconcileExistingTakeoffBindings(existingGroups, incomingGroups, importNewLayers = false) {
+    function reconcileExistingTakeoffBindings(existingGroups, incomingGroups, importNewLayers = false, removeMissing = false) {
         if (importNewLayers && window.TakeoffEstimatingSyncService?.reconcileLinkedOnly) {
-            return window.TakeoffEstimatingSyncService.reconcileLinkedOnly(existingGroups, incomingGroups)
+            return window.TakeoffEstimatingSyncService.reconcileLinkedOnly(existingGroups, incomingGroups, {
+                removeMissing
+            })
                 .map(Workspace.group);
         }
         const incomingByLayer = new Map();
@@ -1150,7 +1160,10 @@
             const items = (group.items || []).flatMap(existing => {
                 if (!existing.takeoffLayerId) return [existing];
                 const incoming = incomingByLayer.get(String(existing.takeoffLayerId));
-                if (!incoming) return [];
+                // A drawing can publish before every sheet/layer has hydrated.
+                // Missing bindings are not deletion intent. Destructive removal
+                // must travel through an explicit Estimating delete operation.
+                if (!incoming) return removeMissing ? [] : [existing];
                 if (!matchedIncomingGroup && incoming.group) matchedIncomingGroup = incoming.group;
                 if (window.TakeoffEstimatingSyncService?.takeoffItem) {
                     return [window.TakeoffEstimatingSyncService.takeoffItem({
@@ -1297,10 +1310,14 @@
             takeoffSyncDirtyIds.add(activeId);
         }
         const currentEstimate = state.estimates[estimateIndex];
+        const currentHasItems = (currentEstimate.groups || []).some(group => (group.items || []).length > 0);
+        if (currentHasItems && groups.length === 0 && options.allowDestructiveReplacement !== true) {
+            return;
+        }
         let reconciled;
         if (currentEstimate.takeoffSyncMode === 'linked-only') {
             reconciled = reconcileExistingTakeoffBindings(currentEstimate.groups, groups,
-                options.importNewLayers === true);
+                options.importNewLayers === true, options.allowMissingRemoval === true);
         } else if (groups.some(group => Array.isArray(group.items))) {
             reconciled = groups.map(Workspace.group);
         } else if (window.TakeoffEstimatingSyncService?.reconcile) {
@@ -2168,6 +2185,33 @@
         });
     }
 
+    function zeroEstimatingItemQuantity(item) {
+        if (!item || typeof item !== 'object') return item;
+        const isTakeoffLinked = Boolean(item.takeoffLayerId);
+        const measuredTakeoffQuantity = isTakeoffLinked
+            ? Workspace.numeric(item.lastSyncedTakeoffQuantity ?? item.originalQuantity ?? item.quantity)
+            : null;
+        item.quantity = 0;
+        item._manualFields = item._manualFields && typeof item._manualFields === 'object'
+            ? item._manualFields : {};
+        item._manualFields.quantity = true;
+        if (isTakeoffLinked) {
+            // Zero is an intentional Estimating override. Keep the latest
+            // measured Takeoff value available for review/restore without
+            // allowing the next canvas snapshot to bounce the quantity back.
+            item.quantityOverride = true;
+            item.pendingTakeoffQuantity = measuredTakeoffQuantity;
+            item.quantitySyncStatus = 'overridden';
+            item.quantityOverrideSource = 'reset_zero';
+        } else {
+            item.quantityOverride = false;
+            item.pendingTakeoffQuantity = null;
+            item.quantitySyncStatus = 'manual';
+            delete item.quantityOverrideSource;
+        }
+        return item;
+    }
+
     function handleActionPopoverClick(event) {
         const target = event.target;
         const popGroupAction = target.closest('[data-popover-group-action]');
@@ -2180,13 +2224,7 @@
             } else if (act === 'reset-quantity') {
                 const grp = current().groups.find(g => String(g.id) === String(grpId));
                 if (grp) {
-                    grp.items.forEach(item => {
-                        item.quantity = item.takeoffLayerId ? Workspace.numeric(item.lastSyncedTakeoffQuantity ?? item.originalQuantity) : Workspace.numeric(item.originalQuantity);
-                        item.quantityOverride = false;
-                        item.pendingTakeoffQuantity = null;
-                        item.quantitySyncStatus = item.takeoffLayerId ? 'synced' : 'manual';
-                        delete item.quantityOverrideSource;
-                    });
+                    grp.items.forEach(item => zeroEstimatingItemQuantity(item));
                     changed(`Reset quantities for group "${grp.name}"`);
                 }
             } else if (act === 'rename-group') {
@@ -2215,7 +2253,7 @@
                     const removedItems = targetGroup?.items || [];
                     current().groups = current().groups.filter(row => String(row.id) !== String(grpId));
                     notifyTakeoffDeletedEstimatingItems(removedItems);
-                    changed('Deleted group');
+                    changed('Deleted group', { allowEmptyGroupsReplace: true });
                 }
             }
             return true;
@@ -2243,15 +2281,8 @@
                 renderModal();
             } else if (act === 'reset-quantity') {
                 const prevQty = found.item.quantity;
-                const nextQty = found.item.takeoffLayerId
-                    ? Workspace.numeric(found.item.lastSyncedTakeoffQuantity ?? found.item.originalQuantity)
-                    : Workspace.numeric(found.item.originalQuantity);
-                found.item.quantity = nextQty;
-                found.item.quantityOverride = false;
-                found.item.pendingTakeoffQuantity = null;
-                found.item.quantitySyncStatus = found.item.takeoffLayerId ? 'synced' : 'manual';
-                delete found.item.quantityOverrideSource;
-                changed(`Reset quantity for "${found.item.name}" (${formatAuditVal(prevQty, 'qty', found.item.uom)} -> ${formatAuditVal(nextQty, 'qty', found.item.uom)})`);
+                zeroEstimatingItemQuantity(found.item);
+                changed(`Reset quantity for "${found.item.name}" (${formatAuditVal(prevQty, 'qty', found.item.uom)} -> ${formatAuditVal(0, 'qty', found.item.uom)})`);
             } else if (act === 'reset-budget-code') {
                 found.item.costCode = '16-1...';
                 found.item.budgetCode = '16-1...';
@@ -2261,7 +2292,7 @@
                 found.group.items = found.group.items.filter(row => String(row.id) !== String(itId));
                 ui.expandedAssemblies.delete(String(itId));
                 notifyTakeoffDeletedEstimatingItems([removedItem]);
-                changed(`Deleted ${removedItem.name}`);
+                changed(`Deleted ${removedItem.name}`, { allowEmptyGroupsReplace: true });
             }
             return true;
         }
@@ -2845,7 +2876,7 @@
         });
         ui.selected.clear();
         notifyTakeoffDeletedEstimatingItems(removedItems);
-        changed('Deleted selected items');
+        changed('Deleted selected items', { allowEmptyGroupsReplace: true });
     }
 
     async function copySelectedEstimatingItemsToGroup(targetGroupId) {
@@ -5800,13 +5831,7 @@
             } else if (act === 'reset-quantity') {
                 const grp = current().groups.find(g => g.id === grpId);
                 if (grp) {
-                    grp.items.forEach(item => {
-                        item.quantity = item.takeoffLayerId ? Workspace.numeric(item.lastSyncedTakeoffQuantity ?? item.originalQuantity) : Workspace.numeric(item.originalQuantity);
-                        item.quantityOverride = false;
-                        item.pendingTakeoffQuantity = null;
-                        item.quantitySyncStatus = item.takeoffLayerId ? 'synced' : 'manual';
-                        delete item.quantityOverrideSource;
-                    });
+                    grp.items.forEach(item => zeroEstimatingItemQuantity(item));
                     changed(`Reset quantities for group "${grp.name}"`);
                 }
             } else if (act === 'rename-group') {
@@ -5835,7 +5860,7 @@
                     const removedItems = targetGroup?.items || [];
                     current().groups = current().groups.filter(row => row.id !== grpId);
                     notifyTakeoffDeletedEstimatingItems(removedItems);
-                    changed('Deleted group');
+                    changed('Deleted group', { allowEmptyGroupsReplace: true });
                 }
             }
             // Advanced actions: copy-other-est, move-other-est, copy-other-proj, move-items-to, reset-budget-codes
@@ -5865,14 +5890,8 @@
             } else if (act === 'reset-quantity') {
                 if (found) {
                     const prevQty = found.item.quantity;
-                    const nextQty = found.item.takeoffLayerId
-                        ? Workspace.numeric(found.item.lastSyncedTakeoffQuantity ?? found.item.originalQuantity)
-                        : Workspace.numeric(found.item.originalQuantity);
-                    found.item.quantity = nextQty;
-                    found.item.quantityOverride = false;
-                    found.item.pendingTakeoffQuantity = null;
-                    found.item.quantitySyncStatus = found.item.takeoffLayerId ? 'synced' : 'manual';
-                    changed(`Reset quantity for "${found.item.name}" (${formatAuditVal(prevQty, 'qty', found.item.uom)} -> ${formatAuditVal(nextQty, 'qty', found.item.uom)})`);
+                    zeroEstimatingItemQuantity(found.item);
+                    changed(`Reset quantity for "${found.item.name}" (${formatAuditVal(prevQty, 'qty', found.item.uom)} -> ${formatAuditVal(0, 'qty', found.item.uom)})`);
                 }
             } else if (act === 'delete-item') {
                 if (found) {
@@ -5880,7 +5899,7 @@
                     found.group.items = found.group.items.filter(row => row.id !== itId);
                     ui.expandedAssemblies.delete(String(itId));
                     notifyTakeoffDeletedEstimatingItems([removedItem]);
-                    changed(`Deleted ${removedItem.name}`);
+                    changed(`Deleted ${removedItem.name}`, { allowEmptyGroupsReplace: true });
                 }
             }
             // Advanced actions: replace-item, move-item, reset-budget-code
@@ -5894,16 +5913,7 @@
             deleteSelectedEstimatingItems();
         }
         if (action === 'reset-quantities') {
-            allItems().forEach(({ item }) => {
-                item.quantity = item.takeoffLayerId
-                    ? Workspace.numeric(item.lastSyncedTakeoffQuantity ?? item.originalQuantity)
-                    : Workspace.numeric(item.originalQuantity);
-                item.quantityOverride = false;
-                item.pendingTakeoffQuantity = null;
-                item.quantitySyncStatus = item.takeoffLayerId ? 'synced' : 'manual';
-                delete item.quantityOverrideSource;
-                if (item._manualFields) delete item._manualFields.quantity;
-            });
+            allItems().forEach(({ item }) => zeroEstimatingItemQuantity(item));
             changed('Reset quantities');
         }
         if (action === 'fullscreen') {
@@ -5973,7 +5983,7 @@
                 found.group.items = found.group.items.filter(row => row.id !== deleteItem);
                 ui.expandedAssemblies.delete(String(deleteItem));
                 notifyTakeoffDeletedEstimatingItems([removedItem]);
-                changed(`Deleted ${removedItem.name}`);
+                changed(`Deleted ${removedItem.name}`, { allowEmptyGroupsReplace: true });
             }
         }
         const duplicateItem = target.closest('[data-duplicate-item]')?.dataset.duplicateItem;
@@ -6020,7 +6030,7 @@
             const removedItems = targetGroup?.items || [];
             current().groups = current().groups.filter(row => row.id !== deleteGroup);
             notifyTakeoffDeletedEstimatingItems(removedItems);
-            changed('Deleted group');
+            changed('Deleted group', { allowEmptyGroupsReplace: true });
         }
         const toggleExclusions = target.closest('[data-toggle-exclusion-presets]');
         if (toggleExclusions) {
@@ -6263,7 +6273,10 @@
                 ui.importError = '';
                 ui.importing = false;
                 ui.loadState = 'saved';
-                ui.message = `Imported ${imported.name} (${payload.items_count || 0} items)`;
+                const importWarning = Array.isArray(payload.warnings) ? payload.warnings[0] : null;
+                ui.message = importWarning
+                    ? `Imported ${imported.name} (${payload.items_count || 0} items). Takeoff setup warning: ${importWarning.message || importWarning.code}`
+                    : `Imported ${imported.name} (${payload.items_count || 0} items)`;
                 saveLocal();
                 render();
                 if (window.ProjectState) {
@@ -6557,7 +6570,7 @@
         if (next.length === estimate.groups.length) return;
         const removedCount = estimate.groups.length - next.length;
         estimate.groups = next;
-        changed(`Deleted ${removedCount} Takeoff group(s)`);
+        changed(`Deleted ${removedCount} Takeoff group(s)`, { allowEmptyGroupsReplace: true });
     });
     window.addEventListener('takeoff:estimating-group-create-requested', event => {
         const detail = event.detail || {};
@@ -6666,10 +6679,61 @@
         publish();
     });
 
+    window.projectEstimatingPersistDraft = async function (targetProjectId) {
+        const persistedProjectId = Number(targetProjectId || 0);
+        if (!Number.isSafeInteger(persistedProjectId) || persistedProjectId <= 0) {
+            throw new Error('A persisted project ID is required before saving the Estimate workspace.');
+        }
+        const estimates = Workspace.clone(state.estimates || []).map(estimate => {
+            estimate.projectId = String(persistedProjectId);
+            estimate.revision = 0;
+            delete estimate.dbEstimateId;
+            delete estimate.estimateItemId;
+            return estimate;
+        });
+        if (!estimates.length) throw new Error('The draft Estimate workspace is empty.');
+        const activeEstimateId = estimates.some(row => String(row.id) === String(state.activeEstimateId || ''))
+            ? state.activeEstimateId : estimates[0].id;
+        estimates.forEach(row => { row.isActive = String(row.id) === String(activeEstimateId); });
+        const draftPayload = {
+            action: 'save', mode: 'replace', project_id: persistedProjectId,
+            state: {
+                schemaVersion: state.schemaVersion,
+                projectId: persistedProjectId,
+                activeEstimateId,
+                clientUiUpdatedAt: state.clientUiUpdatedAt,
+                estimates
+            },
+            summary: buildEstimateSummaryPayload(estimates.find(row => String(row.id) === String(activeEstimateId)) || estimates[0])
+        };
+        const response = await fetch(`${apiUrl}?action=create&project_id=${encodeURIComponent(persistedProjectId)}`, {
+            method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(draftPayload)
+        });
+        const result = await response.json().catch(() => null);
+        if (!response.ok || !result?.success) {
+            const error = new Error(result?.error?.message || result?.message || `Estimate persistence failed (HTTP ${response.status}).`);
+            error.code = result?.error?.code || result?.code || 'draft_persistence_failed';
+            throw error;
+        }
+        const acknowledged = result.state?.estimates || result.estimates || [];
+        if (!acknowledged.length) throw new Error('Estimate persistence returned no database acknowledgement.');
+        const persistedWorkspace = Workspace.workspace({
+            ...state,
+            projectId: persistedProjectId,
+            activeEstimateId: result.state?.activeEstimateId || activeEstimateId,
+            estimates: acknowledged
+        }, persistedProjectId);
+        delete persistedWorkspace.pendingProjectCreationSync;
+        safeSetLocalStorage(`takeoff.estimating.module.${persistedProjectId}`, JSON.stringify(persistedWorkspace));
+        estimatingHasUnsavedCheckpoint = false;
+        return { persisted: true, projectId: persistedProjectId, state: result.state };
+    };
+
     window.projectEstimatingSave = async function () {
         if (!projectId) {
-            estimatingHasUnsavedCheckpoint = false;
-            return true;
+            const persistedProjectId = Number(window.ProjectState?.projectId || 0);
+            if (persistedProjectId > 0) return window.projectEstimatingPersistDraft(persistedProjectId);
+            throw new Error('Save the project record before persisting its Estimate workspace.');
         }
         const started = Date.now();
         ui.saveRequested = true;

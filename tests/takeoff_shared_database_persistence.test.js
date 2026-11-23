@@ -29,6 +29,17 @@ test('one authoritative estimate and drawing snapshot survives relational mirror
     assert.match(overview, /await saveTakeoff\.call\(takeoffFrame\.contentWindow\)/);
 });
 
+test('dashboard Takeoff dirty state clears only after a database acknowledgement', () => {
+    const saveStart = parent.indexOf('window.projectTakeoffSaveState = async function');
+    const saveEnd = parent.indexOf('const viewerState', saveStart);
+    const saveBlock = parent.slice(saveStart, saveEnd);
+    assert.match(saveBlock, /const saveResult = await callEditor\('projectTakeoffSave'\)/);
+    assert.match(saveBlock, /if \(saveResult === false\) throw new Error/);
+    assert.ok(saveBlock.indexOf('takeoffIsDirty = false') > saveBlock.indexOf("await flushPendingDeletedEstimateLayers()"),
+        'dirty state must clear after the canvas and deletion acknowledgements');
+    assert.doesNotMatch(saveBlock, /catch \(e\)[\s\S]*ignored/);
+});
+
 test('sheet scale is shared by drawing and page while geometry remains estimate-scoped', () => {
     assert.match(api, /CREATE TABLE IF NOT EXISTS takeoff_sheet_scales/);
     assert.match(api, /UNIQUE KEY uq_takeoff_sheet_scale \(drawing_id, page_number\)/);
@@ -50,8 +61,9 @@ test('geometry tables exist and every saved layer belongs to a persisted takeoff
     assert.match(migration, /CREATE TABLE IF NOT EXISTS takeoff_measurement_summaries/);
     assert.match(api, /function ensure_takeoff_geometry_tables/);
     assert.match(api, /ensure_drawing_takeoff\(\$pdo, \$projectId, \$drawingId\)/);
-    assert.match(api, /\(takeoff_id, integration_key, drawing_id/);
-    assert.match(api, /\$takeoffId,\s*\$layerClientId/);
+    assert.match(api, /\(takeoff_id, (?:project_id, )?integration_key, drawing_id/);
+    assert.match(api, /\$layerParams = \[\$takeoffId\]/);
+    assert.match(api, /array_push\(\s*\$layerParams,\s*\$layerClientId/s);
 });
 
 test('editor loads and saves calibration through the shared API', () => {

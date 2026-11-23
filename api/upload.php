@@ -16,9 +16,13 @@ $user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'view'
 $userId = (int)$user['user_id'];
 
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/ProjectAccess.php';
 
-// Obtener Proyectos para el dropdown
-$projects = $pdo->query("SELECT id, name FROM projects ORDER BY created_at DESC")->fetchAll();
+// Show only projects where the current identity can upload documents.
+$visibleProjects = $pdo->query("SELECT id, name FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC")->fetchAll();
+$projects = array_values(array_filter($visibleProjects, static function (array $project) use ($pdo, $user): bool {
+    return ProjectAccess::can($pdo, $user, (int)($project['id'] ?? 0), ProjectAccess::WRITE);
+}));
 $project_id_pre = $_GET['project_id'] ?? '';
 ?>
 <!DOCTYPE html>

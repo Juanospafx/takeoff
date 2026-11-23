@@ -55,6 +55,8 @@ $result = [
     'users_timestamps' => false,
     'links_table' => false,
     'links_active_column' => false,
+    'project_members_table' => false,
+    'project_members_role_column' => false,
     'cleanup' => false,
 ];
 
@@ -105,6 +107,8 @@ try {
             'users_timestamps' => 'SELECT created_at, updated_at FROM users WHERE 1 = 0',
             'links_table' => 'SELECT 1 FROM sso_identity_links LIMIT 0',
             'links_active_column' => 'SELECT active FROM sso_identity_links WHERE 1 = 0',
+            'project_members_table' => 'SELECT 1 FROM project_members LIMIT 0',
+            'project_members_role_column' => 'SELECT member_role, active FROM project_members WHERE 1 = 0',
         ];
         foreach ($checks as $key => $sql) {
             try {
@@ -121,6 +125,16 @@ try {
 } catch (\Throwable) {
     $result['ok'] = false;
 } finally {
+    foreach ([
+        'php_runtime_supported', 'excel_runtime_supported', 'excel_export_template',
+        'config_loaded', 'database_connected', 'users_table', 'users_active_column',
+        'users_timestamps', 'links_table', 'links_active_column',
+        'project_members_table', 'project_members_role_column',
+    ] as $requiredCheck) {
+        if (($result[$requiredCheck] ?? false) !== true) {
+            $result['ok'] = false;
+        }
+    }
     $result['cleanup'] = @unlink(__FILE__);
 }
 

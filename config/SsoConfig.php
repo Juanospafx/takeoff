@@ -23,6 +23,7 @@ class SsoConfig
 {
     public const SSO_ENABLED = false;
     public const KEY_ENABLED = 'TAKEOFF_SSO_ENABLED';
+    public const KEY_LOCAL_LOGIN_ENABLED = 'TAKEOFF_SSO_LOCAL_LOGIN_ENABLED';
     public const KEY_HUB_BASE_URL = 'TAKEOFF_SSO_HUB_BASE_URL';
     public const KEY_CLIENT_ID = 'TAKEOFF_SSO_CLIENT_ID';
     public const KEY_CLIENT_SECRET = 'TAKEOFF_SSO_CLIENT_SECRET';
@@ -35,6 +36,7 @@ class SsoConfig
 
     public const APPROVED_VARIABLES = [
         self::KEY_ENABLED,
+        self::KEY_LOCAL_LOGIN_ENABLED,
         self::KEY_HUB_BASE_URL,
         self::KEY_CLIENT_ID,
         self::KEY_CLIENT_SECRET,
@@ -55,6 +57,7 @@ class SsoConfig
     public const DEFAULT_TIMEOUT = 10;
 
     private bool $enabled;
+    private bool $localLoginEnabled;
     private string $hubBaseUrl;
     private string $clientId;
     private string $clientSecret;
@@ -84,6 +87,12 @@ class SsoConfig
 
         $rawEnabled = $lookup([self::KEY_ENABLED, 'enabled', 'sso_enabled']);
         $this->enabled = $rawEnabled !== null ? self::castBool($rawEnabled) : false;
+        $rawLocalLogin = $lookup([self::KEY_LOCAL_LOGIN_ENABLED, 'local_login_enabled']);
+        // Local credentials are a development/rollback path when SSO is off.
+        // In SSO mode they require an explicit private break-glass opt-in.
+        $this->localLoginEnabled = $rawLocalLogin !== null
+            ? self::castBool($rawLocalLogin)
+            : !$this->enabled;
 
         $rawHubBaseUrl = $lookup([self::KEY_HUB_BASE_URL, 'hub_base_url', 'hub_url', 'sso_hub_base_url']);
         $this->hubBaseUrl = $rawHubBaseUrl !== null ? trim((string)$rawHubBaseUrl) : '';
@@ -184,6 +193,7 @@ class SsoConfig
 
         $keyAliases = [
             self::KEY_ENABLED => [self::KEY_ENABLED, 'enabled', 'sso_enabled'],
+            self::KEY_LOCAL_LOGIN_ENABLED => [self::KEY_LOCAL_LOGIN_ENABLED, 'local_login_enabled'],
             self::KEY_HUB_BASE_URL => [self::KEY_HUB_BASE_URL, 'hub_base_url', 'hub_url', 'sso_hub_base_url'],
             self::KEY_CLIENT_ID => [self::KEY_CLIENT_ID, 'client_id', 'sso_client_id'],
             self::KEY_CLIENT_SECRET => [self::KEY_CLIENT_SECRET, 'client_secret', 'sso_client_secret'],
@@ -294,6 +304,16 @@ class SsoConfig
         return $this->enabled;
     }
 
+    public function isLocalLoginEnabled(): bool
+    {
+        return $this->localLoginEnabled;
+    }
+
+    public function isSsoOnly(): bool
+    {
+        return $this->enabled && !$this->localLoginEnabled;
+    }
+
     public function getHubBaseUrl(): string
     {
         return $this->hubBaseUrl;
@@ -364,6 +384,7 @@ class SsoConfig
     {
         return [
             self::KEY_ENABLED => $this->isEnabled(),
+            self::KEY_LOCAL_LOGIN_ENABLED => $this->isLocalLoginEnabled(),
             self::KEY_HUB_BASE_URL => $this->getHubBaseUrl(),
             self::KEY_CLIENT_ID => $this->getClientId(),
             self::KEY_CLIENT_SECRET => $this->clientSecret !== '' ? '******' : '',

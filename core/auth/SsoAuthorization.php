@@ -14,7 +14,7 @@ require_once __DIR__ . '/FederatedIdentityRepository.php';
  *
  * Enforces strict authorization security invariants:
  * 1. Fail-closed: requires an explicitly active IdentityProfile with exactly one
- *    approved central role, admin or viewer.
+ *    approved central role: admin, estimator, or viewer.
  * 2. Identity matching uses only exact provider plus sub; username and email are never
  *    used for lookup, linking, or authorization.
  * 3. An existing exact active link synchronizes the local shadow user's role to the central
@@ -30,6 +30,7 @@ require_once __DIR__ . '/FederatedIdentityRepository.php';
 class SsoAuthorization
 {
     public const ROLE_ADMIN = 'admin';
+    public const ROLE_ESTIMATOR = 'estimator';
     public const ROLE_TECHNICIAN = 'technician';
     public const ROLE_VIEWER = 'viewer';
 
@@ -38,6 +39,7 @@ class SsoAuthorization
      */
     public const APPROVED_CENTRAL_ROLES = [
         self::ROLE_ADMIN,
+        self::ROLE_ESTIMATOR,
         self::ROLE_VIEWER,
     ];
 
@@ -46,6 +48,7 @@ class SsoAuthorization
      */
     public const ALLOWED_ROLES = [
         self::ROLE_ADMIN,
+        self::ROLE_ESTIMATOR,
         self::ROLE_VIEWER,
     ];
 
@@ -95,7 +98,7 @@ class SsoAuthorization
      *
      * Invariants enforced:
      * - Requires an explicitly active IdentityProfile (or valid claims array).
-     * - Requires exactly one approved central role ('admin' or 'viewer').
+     * - Requires exactly one approved central role ('admin', 'estimator', or 'viewer').
      * - Fails closed on unknown, empty, multiple, or malformed central roles.
      * - Uses exact provider plus sub for identity resolution and linking.
      * - Synchronizes local shadow user's role to the approved central role.
@@ -134,7 +137,7 @@ class SsoAuthorization
             throw new RuntimeException('SSO authorization failed: central user account is inactive or disabled.');
         }
 
-        // Invariant 2: Central identity must have exactly one approved role ('admin' or 'viewer')
+        // Invariant 2: Central identity must have exactly one approved application role.
         $roles = $identityProfile->getRoles();
         if (count($roles) !== 1) {
             throw new RuntimeException('SSO authorization failed: central identity must have exactly one approved role.');
@@ -274,7 +277,7 @@ class SsoAuthorization
     }
 
     /**
-     * Checks if a given role is an approved central role ('admin' or 'viewer').
+     * Checks if a given role is an approved central role.
      *
      * @param string $role
      * @return bool
@@ -285,7 +288,7 @@ class SsoAuthorization
     }
 
     /**
-     * Checks if a given role is one of the valid Takeoff SSO roles ('admin' or 'viewer').
+     * Checks if a given role is one of the valid Takeoff SSO roles.
      *
      * @param string $role
      * @return bool

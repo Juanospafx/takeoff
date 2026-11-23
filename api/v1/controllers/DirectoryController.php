@@ -15,6 +15,11 @@ class DirectoryController
 
     public function index(): void
     {
+        $user = SessionGuard::getAuthenticatedUser();
+        if ($user === null) error_response('UNAUTHORIZED', 'Authentication required', null, 401);
+        if ($user['role'] !== SessionGuard::ROLE_ADMIN) {
+            error_response('FORBIDDEN', 'Insufficient privileges', null, 403);
+        }
         try {
             $stmt = $this->pdo->query(
                 "SELECT

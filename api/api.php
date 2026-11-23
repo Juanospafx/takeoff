@@ -37,11 +37,14 @@ if (!is_array($input)) {
 }
 $action = (string)($_POST['action'] ?? $_GET['action'] ?? $input['action'] ?? '');
 
-$user = takeoff_guard_api_action($action, $readActions, $mutationActions);
+$projectMutationCapability = in_array($action, ['create_project', 'update_project_info', 'add_project_folders'], true)
+    ? 'project.write' : null;
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions, null, null, true, $projectMutationCapability);
 $userId = (int)$user['user_id'];
 $userRole = (string)$user['role'];
 
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/ProjectAccess.php';
 require_once __DIR__ . '/../funciones/file_names.php';
 
 
@@ -226,6 +229,7 @@ switch($action) {
             $stmt = $pdo->prepare("INSERT INTO projects (name, description, status, created_by, assigned_user_id) VALUES (?, ?, ?, ?, ?)");
             $stmt->execute([$name, $desc, $status, $creatorId, $assignedUserId]);
             $projectId = (int)$pdo->lastInsertId();
+            ProjectAccess::grantCreator($pdo, $projectId, $creatorId);
 
             if (!empty($selectedIds)) {
                 $stmtDir = $pdo->prepare("INSERT IGNORE INTO directory (project_id, user_id) VALUES (?, ?)");
@@ -247,6 +251,7 @@ switch($action) {
         if($userRole !== 'admin') { echo json_encode(['status'=>'error', 'msg'=>'Access Denied']); exit; }
         
         $id = $_POST['id'];
+        takeoff_guard_project_access($pdo, $user, (int)$id, ProjectAccess::WRITE);
         $name = $_POST['name'];
         $desc = $_POST['description'];
         $status = $_POST['status']; 
@@ -279,12 +284,11 @@ switch($action) {
         } catch(Exception $e) { echo json_encode(api_internal_error($e)); }
         break;
 
-    // --- 1.1.1 ACTUALIZAR INFO DE PROYECTO (ADMIN ONLY) ---
+    // --- 1.1.1 ACTUALIZAR INFO DE PROYECTO (PROJECT WRITER) ---
     case 'update_project_info':
-        if($userRole !== 'admin') { echo json_encode(['status'=>'error', 'msg'=>'Access Denied']); exit; }
-
         $id = (int)($_POST['id'] ?? 0);
         if ($id <= 0) { echo json_encode(['status'=>'error', 'msg'=>'Invalid project']); exit; }
+        takeoff_guard_project_access($pdo, $user, $id, ProjectAccess::WRITE);
 
         try {
             $cols = $pdo->query("DESCRIBE projects")->fetchAll(PDO::FETCH_COLUMN);
@@ -316,12 +320,12 @@ switch($action) {
         } catch(Exception $e) { echo json_encode(api_internal_error($e)); }
         break;
 
-    // --- 1.1.2 AGREGAR CARPETAS A PROYECTO (ADMIN ONLY) ---
+    // --- 1.1.2 AGREGAR CARPETAS A PROYECTO (PROJECT WRITER) ---
     case 'add_project_folders':
-        if($userRole !== 'admin') { echo json_encode(['status'=>'error', 'msg'=>'Access Denied']); exit; }
         $projectId = (int)($_POST['project_id'] ?? 0);
         $folders = $_POST['folders'] ?? [];
         if($projectId <= 0 || !is_array($folders)) { echo json_encode(['status'=>'error', 'msg'=>'Invalid data']); exit; }
+        takeoff_guard_project_access($pdo, $user, $projectId, ProjectAccess::WRITE);
 
         $folderNames = [
             'bom' => 'BoM',
@@ -906,7 +910,15 @@ switch($action) {
         // Quitamos la restricción estricta de 'viewer' para permitir cargar la lista, 
         // pero la acción de mover seguirá bloqueada para viewers en el frontend y backend.
         try {
-            $stmt = $pdo->query("SELECT id, name FROM projects WHERE deleted_at IS NULL ORDER BY created_at DESC");
+            $ids = ProjectAccess::accessibleProjectIds($pdo, $user);
+            $accessSql = '';
+            $params = [];
+            if (is_array($ids)) {
+                $accessSql = $ids ? ' AND id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')' : ' AND 1=0';
+                $params = $ids;
+            }
+            $stmt = $pdo->prepare("SELECT id, name FROM projects WHERE deleted_at IS NULL{$accessSql} ORDER BY created_at DESC");
+            $stmt->execute($params);
             $projects = $stmt->fetchAll(PDO::FETCH_ASSOC);
             echo json_encode(['status' => 'success', 'data' => $projects]);
         } catch (Exception $e) {
@@ -917,6 +929,7 @@ switch($action) {
     // --- 11. OBTENER CARPETAS (Reforzado) ---
     case 'get_folders_list':
         $pid = $_POST['project_id'] ?? 0;
+        takeoff_guard_project_access($pdo, $user, (int)$pid, ProjectAccess::READ);
         try {
             $stmt = $pdo->prepare("SELECT id, name FROM folders WHERE project_id = ? AND deleted_at IS NULL ORDER BY name ASC");
             $stmt->execute([$pid]);

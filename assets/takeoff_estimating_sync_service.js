@@ -171,7 +171,7 @@
         return groups;
     }
 
-    function reconcileLinkedOnly(existingGroups = [], incomingGroups = []) {
+    function reconcileLinkedOnly(existingGroups = [], incomingGroups = [], options = {}) {
         const incomingByLayer = new Map();
         const incomingGroupById = new Map();
         const incomingGroupByTakeoffId = new Map();
@@ -186,6 +186,7 @@
             });
         });
         const consumed = new Set();
+        const existingLayerIds = new Set();
         const result = (existingGroups || []).map((group, groupIndex) => {
             const gId = stringId(group.id);
             const tgId = stringId(group.takeoffGroupId);
@@ -195,8 +196,16 @@
             const items = (group.items || []).flatMap(existing => {
                 const layerId = stringId(existing.takeoffLayerId);
                 if (!layerId) return [{ ...existing }];
+                // A Takeoff layer has exactly one Estimating row. Legacy sync
+                // races could persist duplicates; retain the first canonical
+                // row deterministically and discard later aliases.
+                if (existingLayerIds.has(layerId)) return [];
+                existingLayerIds.add(layerId);
                 const incoming = incomingByLayer.get(layerId);
-                if (!incoming) return [];
+                // Loading one drawing is not proof that a linked item was
+                // deleted from the estimate. Keep unreported bindings unless
+                // the caller carries explicit destructive intent.
+                if (!incoming) return options.removeMissing === true ? [] : [{ ...existing }];
                 if (!matchedIncomingGroup && incoming.group) matchedIncomingGroup = incoming.group;
                 consumed.add(layerId);
                 return [takeoffItem({ ...incoming.layer, id: layerId }, incoming.group, existing)];

@@ -362,7 +362,7 @@ class FederatedIdentityRepository
      *
      * @param string $provider Identity provider identifier
      * @param string $sub Central user subject identifier
-     * @param string $role Approved central role ('admin' or 'viewer')
+     * @param string $role Approved central role ('admin', 'estimator', or 'viewer')
      * @return array{user_id: int, id: int, username: string, role: string, active: bool, provider: string, hub_user_id: string, sub: string, link_id: int, link_active: bool}
      * @throws InvalidArgumentException If arguments are empty
      * @throws RuntimeException If provisioning fails or inactive records encountered
@@ -491,7 +491,7 @@ class FederatedIdentityRepository
      *
      * @param string $provider Identity provider identifier
      * @param string $sub Central subject identifier
-     * @param string $role Approved central role ('admin' or 'viewer')
+     * @param string $role Approved central role ('admin', 'estimator', or 'viewer')
      * @return array{user_id: int, id: int, username: string, role: string, active: bool, provider: string, hub_user_id: string, sub: string, link_id: int, link_active: bool}
      * @throws InvalidArgumentException On empty arguments
      * @throws RuntimeException On inactive records or failure

@@ -14,10 +14,11 @@ if (!is_array($body)) {
 }
 $action = (string)($_POST['action'] ?? $_GET['action'] ?? ($body['action'] ?? ''));
 
-$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'prepare_takeoff');
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'prepare_takeoff', null, true, 'documents.write');
 $userId = (int)$user['user_id'];
 
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/ProjectAccess.php';
 require_once __DIR__ . '/../core/files/upload_storage.php';
 
 const MAX_DOCUMENT_BYTES = 10737418240;
@@ -68,6 +69,7 @@ try {
     $projectValue = $_POST['project_id'] ?? ($body['project_id'] ?? null);
     $projectId = is_numeric($projectValue) ? (int)$projectValue : 0;
     if ($projectId < 1) takeoff_json_error(422, 'INVALID_PROJECT', 'A valid project is required.');
+    takeoff_guard_project_access($pdo, $user, $projectId, ProjectAccess::WRITE);
 
     if (isset($_FILES['file']) && !empty($_FILES['file']['error']) && $_FILES['file']['error'] !== UPLOAD_ERR_OK) {
         $uploadErr = (int)$_FILES['file']['error'];

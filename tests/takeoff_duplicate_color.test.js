@@ -69,6 +69,18 @@ test('duplicate edits persist layer and geometry appearance before the modal clo
     assert.match(update, /markDirty\(\{ pageFallback: true, objectsTracked: true \}\)/);
 });
 
+test('a copied layer is registered and persisted before the Pro modal can rename it', () => {
+    const duplicate = dashboard.slice(dashboard.indexOf('function duplicateLayer'), dashboard.indexOf('function renameLayer'));
+    const insertIndex = duplicate.indexOf('insertCopiedLayerAfterSource(group, layer, copy)');
+    const syncIndex = duplicate.indexOf('syncAllLayersToCanvas', insertIndex);
+    const saveIndex = duplicate.indexOf("callEditor('projectTakeoffSave')", syncIndex);
+
+    assert.ok(insertIndex >= 0, 'the duplicate must first be inserted in the parent workspace');
+    assert.ok(syncIndex > insertIndex, 'the duplicate must then be registered in the canvas owner');
+    assert.ok(saveIndex > syncIndex, 'the registered duplicate must be sent to durable persistence');
+    assert.match(duplicate, /return copy;/, 'callers receive the exact copied layer identity');
+});
+
 test('reopened edit form normalizes persisted editor symbols and numeric sizes', () => {
     assert.match(dashboard, /const takeoffDisplaySize =/);
     assert.match(dashboard, /const takeoffDisplaySymbol =/);

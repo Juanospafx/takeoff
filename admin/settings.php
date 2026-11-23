@@ -1,6 +1,7 @@
 <?php
 // settings.php - Gestión de Usuarios y Seguridad V5.5 (Show Password Buttons)
 require_once __DIR__ . '/../core/auth/session.php';
+require_once __DIR__ . '/../config/SsoConfig.php';
 
 $authRedirect = takeoff_require_page_auth($_SESSION ?? null);
 if ($authRedirect !== null) return;
@@ -13,6 +14,15 @@ if ($authUser === null || $authUser['role'] !== SessionGuard::ROLE_ADMIN) {
 
 require_once __DIR__ . '/../core/db/connection.php';
 require_once __DIR__ . '/../core/time.php';
+
+// Hub is the identity authority in SSO deployments. This page becomes a
+// read-only directory; credentials and roles must be changed in Hub.
+$centralIdentityReadOnly = true;
+try {
+    $centralIdentityReadOnly = \Takeoff\Config\SsoConfig::load()->isEnabled();
+} catch (Throwable) {
+    // Fail closed if identity configuration cannot be validated.
+}
 
 // ---------------------------------------------------------
 // 1. DEFINICIÓN DE USUARIO Y ROLES
@@ -31,7 +41,7 @@ if (empty($_SESSION['csrf_token']) || !is_string($_SESSION['csrf_token'])) {
     $_SESSION['csrf_token'] = bin2hex(random_bytes(32));
 }
 $csrfToken = (string)$_SESSION['csrf_token'];
-$allowedRoles = [SessionGuard::ROLE_ADMIN, SessionGuard::ROLE_VIEWER];
+$allowedRoles = [SessionGuard::ROLE_ADMIN, SessionGuard::ROLE_ESTIMATOR, SessionGuard::ROLE_VIEWER];
 
 // --- NAVEGACIÓN DE PESTAÑAS ---
 $tab = $_GET['tab'] ?? 'users';
@@ -39,6 +49,10 @@ $tabLabel = ($tab === 'security') ? 'Security' : 'User Management'; // Etiqueta 
 
 // --- LÓGICA BACKEND ---
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && isset($_POST['action'])) {
+    if ($centralIdentityReadOnly) {
+        http_response_code(403);
+        exit('Users and credentials are managed centrally in Hub.');
+    }
     $submittedCsrf = (string)($_POST['csrf_token'] ?? '');
     if ($submittedCsrf === '' || !hash_equals($csrfToken, $submittedCsrf)) {
         http_response_code(403);
@@ -229,10 +243,14 @@ include __DIR__ . '/../views/header.php';
 
         <?php if($tab === 'users'): ?>
             <div class="d-flex justify-content-between align-items-center mb-4">
-                <p class="text-gray mb-0">Manage access and roles for team members.</p>
+                <p class="text-gray mb-0"><?= $centralIdentityReadOnly
+                    ? 'Users and application roles are synchronized from Hub.'
+                    : 'Manage access and roles for team members.' ?></p>
+                <?php if(!$centralIdentityReadOnly): ?>
                 <button class="btn-main" data-bs-toggle="modal" data-bs-target="#addUserModal">
                     <i class="fas fa-plus me-2"></i> Add User
                 </button>
+                <?php endif; ?>
             </div>
 
             <div class="table-responsive">
@@ -266,6 +284,7 @@ include __DIR__ . '/../views/header.php';
                             </td>
                             <td class="small text-gray"><?= date('M d, Y', strtotime($u['created_at'])) ?></td>
                             <td class="text-end">
+                                <?php if(!$centralIdentityReadOnly): ?>
                                 <button class="btn-action me-1" onclick='openEditModal(<?= (int)$u['id'] ?>, <?= json_encode((string)$u['username'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>, <?= json_encode((string)$u['role'], JSON_HEX_TAG | JSON_HEX_APOS | JSON_HEX_AMP | JSON_HEX_QUOT) ?>)'>
                                     <i class="fas fa-pen"></i>
                                 </button>
@@ -277,6 +296,9 @@ include __DIR__ . '/../views/header.php';
                                     <button type="submit" class="btn-action delete"><i class="fas fa-trash"></i></button>
                                 </form>
                                 <?php endif; ?>
+                                <?php else: ?>
+                                    <span class="small text-gray">Managed in Hub</span>
+                                <?php endif; ?>
                             </td>
                         </tr>
                         <?php endforeach; ?>
@@ -286,6 +308,12 @@ include __DIR__ . '/../views/header.php';
         <?php endif; ?>
 
         <?php if($tab === 'security'): ?>
+            <?php if($centralIdentityReadOnly): ?>
+                <div class="card-box">
+                    <h5 class="fw-bold mb-3"><i class="fas fa-shield-halved me-2"></i>Central identity</h5>
+                    <p class="text-gray mb-0">Passwords, activation and application roles are managed in Hub.</p>
+                </div>
+            <?php else: ?>
             <div class="row">
                 <div class="col-md-6">
                     <div class="card-box">
@@ -320,10 +348,12 @@ include __DIR__ . '/../views/header.php';
                     </div>
                 </div>
             </div>
+            <?php endif; ?>
         <?php endif; ?>
 
     </main>
 
+<?php if(!$centralIdentityReadOnly): ?>
 <div class="modal fade" id="addUserModal" tabindex="-1">
     <div class="modal-dialog modal-dialog-centered">
         <form class="modal-content p-3" method="POST">
@@ -349,6 +379,7 @@ include __DIR__ . '/../views/header.php';
                     <label class="form-label">Role</label>
                     <select name="role" class="form-select">
                         <option value="admin">Administrator</option>
+                        <option value="estimator">Estimator</option>
                         <option value="viewer">Viewer</option>
                     </select>
                 </div>
@@ -380,6 +411,7 @@ include __DIR__ . '/../views/header.php';
                     <label class="form-label">Role</label>
                     <select name="role" id="edit_role" class="form-select">
                         <option value="admin">Administrator</option>
+                        <option value="estimator">Estimator</option>
                         <option value="viewer">Viewer</option>
                     </select>
                 </div>
@@ -398,6 +430,7 @@ include __DIR__ . '/../views/header.php';
         </form>
     </div>
 </div>
+<?php endif; ?>
 
 <script>
     function openEditModal(id, name, role) {

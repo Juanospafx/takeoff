@@ -20,9 +20,13 @@ $mutationActions = [
     'delete_assembly',
 ];
 $action = (string) ($_GET['action'] ?? $_POST['action'] ?? ($input['action'] ?? ''));
-$user = takeoff_guard_api_action($action, $readActions, $mutationActions, null);
+$projectMutationCapability = in_array($action, ['save_scale', 'delete_scale', 'save_state', 'purge_deleted_layers'], true)
+    ? 'takeoff.write'
+    : null;
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions, null, null, true, $projectMutationCapability);
 $userId = (int) $user['user_id'];
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/ProjectAccess.php';
 
 class TakeoffObjectConflict extends RuntimeException
 {
@@ -381,13 +385,20 @@ function assemblies_payload(PDO $pdo): array
 
 function project_id_for_file(PDO $pdo, int $fileId, int $fallback = 0): int
 {
-    if ($fallback > 0)
-        return $fallback;
     if (!takeoff_table_exists($pdo, 'files'))
-        return 1;
-    $stmt = $pdo->prepare("SELECT project_id FROM files WHERE id = ?");
+        return 0;
+    $stmt = $pdo->prepare("SELECT project_id FROM files WHERE id = ? AND deleted_at IS NULL LIMIT 1");
     $stmt->execute([$fileId]);
-    return (int) ($stmt->fetchColumn() ?: 1);
+    $actual = (int)($stmt->fetchColumn() ?: 0);
+    if ($actual <= 0 || ($fallback > 0 && $fallback !== $actual)) return 0;
+    return $actual;
+}
+
+function takeoff_guard_drawing_access(PDO $pdo, array $user, int $drawingId, string $capability, int $claimedProjectId = 0): int
+{
+    $projectId = project_id_for_file($pdo, $drawingId, $claimedProjectId);
+    takeoff_guard_project_access($pdo, $user, $projectId, $capability);
+    return $projectId;
 }
 
 function ensure_project_estimate(PDO $pdo, int $projectId): int
@@ -1075,6 +1086,7 @@ try {
                 out_json(['status' => 'error', 'msg' => 'drawing_id is required'], 422);
             if ($estimateKey === '')
                 out_json(['status' => 'error', 'msg' => 'estimate_key is required'], 422);
+            takeoff_guard_drawing_access($pdo, $user, $drawingId, ProjectAccess::READ, i($_GET['project_id'] ?? $input['project_id'] ?? 0));
             out_json(['status' => 'success', 'data' => state_payload($pdo, $drawingId, $estimateKey, $inheritLegacy)]);
 
         case 'scale':
@@ -1085,6 +1097,7 @@ try {
                 out_json(['status' => 'error', 'msg' => 'drawing_id is required'], 422);
             if ($estimateKey === '')
                 out_json(['status' => 'error', 'msg' => 'estimate_key is required'], 422);
+            takeoff_guard_drawing_access($pdo, $user, $drawingId, ProjectAccess::READ, i($_GET['project_id'] ?? $input['project_id'] ?? 0));
             $stmt = $pdo->prepare("SELECT project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, updated_at FROM takeoff_sheet_scales WHERE drawing_id = ? AND page_number = ? LIMIT 1");
             $stmt->execute([$drawingId, $pageNumber]);
             $shared = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -1112,7 +1125,7 @@ try {
                 out_json(['status' => 'error', 'msg' => 'drawing_id and a positive pixels_per_unit are required'], 422);
             if ($estimateKey === '')
                 out_json(['status' => 'error', 'msg' => 'estimate_key is required'], 422);
-            $projectId = project_id_for_file($pdo, $drawingId, i($input['project_id'] ?? 0));
+            $projectId = takeoff_guard_drawing_access($pdo, $user, $drawingId, ProjectAccess::WRITE, i($input['project_id'] ?? 0));
             $userId = (int) $user['user_id'];
             $stmt = $pdo->prepare(
                 "INSERT INTO takeoff_sheet_scales (project_id, drawing_id, page_number, scale_name, pixels_per_unit, unit, calibration_json, created_by, updated_by)
@@ -1139,6 +1152,7 @@ try {
                 out_json(['status' => 'error', 'msg' => 'drawing_id is required'], 422);
             if ($estimateKey === '')
                 out_json(['status' => 'error', 'msg' => 'estimate_key is required'], 422);
+            takeoff_guard_drawing_access($pdo, $user, $drawingId, ProjectAccess::WRITE, i($input['project_id'] ?? 0));
             $stmt = $pdo->prepare("DELETE FROM takeoff_sheet_scales WHERE drawing_id = ? AND page_number = ?");
             $stmt->execute([$drawingId, $pageNumber]);
             out_json(['status' => 'success']);
@@ -1153,6 +1167,7 @@ try {
             if ($projectId <= 0 || $estimateKey === '') {
                 out_json(['status' => 'error', 'msg' => 'project_id and estimate_key are required'], 422);
             }
+            takeoff_guard_project_access($pdo, $user, $projectId, ProjectAccess::WRITE);
             if (!$deletedLayerIds) {
                 out_json(['status' => 'success', 'purged' => 0]);
             }
@@ -1175,7 +1190,7 @@ try {
             $estimateKey = trim((string) ($input['estimate_key'] ?? ''));
             if ($estimateKey === '')
                 out_json(['status' => 'error', 'msg' => 'estimate_key is required'], 422);
-            $projectId = project_id_for_file($pdo, $drawingId, i($input['project_id'] ?? 0));
+            $projectId = takeoff_guard_drawing_access($pdo, $user, $drawingId, ProjectAccess::WRITE, i($input['project_id'] ?? 0));
             $layers = is_array($input['layers'] ?? null) ? $input['layers'] : [];
             $markers = is_array($input['markers'] ?? null) ? $input['markers'] : [];
             $segments = is_array($input['segments'] ?? null) ? $input['segments'] : [];

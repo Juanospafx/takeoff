@@ -4,6 +4,7 @@ declare(strict_types=1);
 require_once __DIR__ . '/../helpers.php';
 require_once __DIR__ . '/../../funciones/file_names.php';
 require_once __DIR__ . '/../../../core/auth/session.php';
+require_once __DIR__ . '/../../../core/auth/ProjectAccess.php';
 
 class FilesController
 {
@@ -25,7 +26,7 @@ class FilesController
         if ($user === null) {
             error_response('UNAUTHORIZED', 'Authentication required', null, 401);
         }
-        if ($user['role'] !== SessionGuard::ROLE_ADMIN) {
+        if (!SessionGuard::hasCapability('documents.write')) {
             error_response('FORBIDDEN', 'Insufficient privileges', null, 403);
         }
 
@@ -36,6 +37,9 @@ class FilesController
         $projectId = require_int($_POST['project_id'] ?? null);
         if (!$projectId) {
             error_response('VALIDATION_ERROR', 'Invalid project_id', ['field' => 'project_id'], 422);
+        }
+        if (!ProjectAccess::can($this->pdo, $user, $projectId, ProjectAccess::WRITE)) {
+            error_response('FORBIDDEN', 'Project write membership is required', null, 403);
         }
 
         $folderId = !empty($_POST['folder_id']) ? require_int($_POST['folder_id']) : null;

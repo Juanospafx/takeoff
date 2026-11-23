@@ -12,7 +12,8 @@ if ($dashboard === false || $client === false || $layerModal === false || $scale
 $checks = [
     'dashboard derives identity through SessionGuard' => str_contains($dashboard, 'SessionGuard::getAuthenticatedUser'),
     'dashboard defaults unknown roles to viewer' => str_contains($dashboard, "SessionGuard::ROLE_VIEWER"),
-    'dashboard only grants write to admin role' => str_contains($dashboard, '$canWrite = $isAdminUser;'),
+    'dashboard grants project write through membership policy' => str_contains($dashboard, 'ProjectAccess::can($pdo, $authUser, $projectId, ProjectAccess::WRITE)'),
+    'dashboard validates project read before render' => str_contains($dashboard, 'takeoff_guard_project_access($pdo, $authUser, $projectId, ProjectAccess::READ)'),
     'dashboard publishes strict canWrite boolean' => str_contains($dashboard, 'canWrite: parsed.canWrite === true'),
     'dashboard publishes read-only state' => str_contains($dashboard, 'data-read-only='),
     'dashboard blocks non-read fetch for viewers' => str_contains($dashboard, "!['GET', 'HEAD', 'OPTIONS'].includes(method)"),

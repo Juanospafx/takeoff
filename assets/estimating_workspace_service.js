@@ -189,8 +189,12 @@
     function estimate(row = {}, currentProjectId = 0, index = 0) {
         const creationMode = ['primary', 'all', 'structure', 'blank'].includes(row.creationMode)
             ? row.creationMode : (index ? 'all' : 'primary');
-        const takeoffSyncMode = row.takeoffSyncMode === 'linked-only'
-            || row.takeoffSync?.mode === 'linked-only' ? 'linked-only' : 'mirror';
+        // Early Excel/template imports persisted `linked`. It has always meant
+        // the non-destructive linked-only policy; interpreting it as mirror
+        // lets an empty Takeoff hydration replace the imported estimate.
+        const rawTakeoffSyncMode = text(row.takeoffSyncMode ?? row.takeoffSync?.mode).toLowerCase();
+        const takeoffSyncMode = rawTakeoffSyncMode === 'linked-only' || rawTakeoffSyncMode === 'linked'
+            ? 'linked-only' : 'mirror';
         const explicitPrimaryId = String(row.primary_estimate_id || global.ProjectState?.projectMeta?.primary_estimate_id || '');
         const hasRowPrimaryFlag = typeof row.is_primary === 'boolean' || typeof row.isPrimary === 'boolean';
         const isPrimary = row.primary_estimate_id

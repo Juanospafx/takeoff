@@ -390,30 +390,33 @@ assertCondition($ssoAuth->getRepository() === $repository, 'getRepository return
 echo "\n2. Testing role whitelist constants, arrays, and role validation methods...\n";
 
 assertCondition(SsoAuthorization::ROLE_ADMIN === 'admin', 'ROLE_ADMIN constant is strictly admin');
+assertCondition(SsoAuthorization::ROLE_ESTIMATOR === 'estimator', 'ROLE_ESTIMATOR constant is strictly estimator');
 assertCondition(SsoAuthorization::ROLE_TECHNICIAN === 'technician', 'ROLE_TECHNICIAN constant is strictly technician (legacy constant only)');
 assertCondition(SsoAuthorization::ROLE_VIEWER === 'viewer', 'ROLE_VIEWER constant is strictly viewer');
 
-$expectedRoles = ['admin', 'viewer'];
-assertCondition(SsoAuthorization::ALLOWED_ROLES === $expectedRoles, 'ALLOWED_ROLES strictly contains admin and viewer only');
-assertCondition(SsoAuthorization::VALID_ROLES === $expectedRoles, 'VALID_ROLES alias matches ALLOWED_ROLES (admin, viewer)');
-assertCondition(SsoAuthorization::APPROVED_CENTRAL_ROLES === $expectedRoles, 'APPROVED_CENTRAL_ROLES strictly contains admin and viewer only');
+$expectedRoles = ['admin', 'estimator', 'viewer'];
+assertCondition(SsoAuthorization::ALLOWED_ROLES === $expectedRoles, 'ALLOWED_ROLES contains admin, estimator and viewer');
+assertCondition(SsoAuthorization::VALID_ROLES === $expectedRoles, 'VALID_ROLES alias matches ALLOWED_ROLES');
+assertCondition(SsoAuthorization::APPROVED_CENTRAL_ROLES === $expectedRoles, 'APPROVED_CENTRAL_ROLES contains application roles');
 assertCondition($ssoAuth->getValidRoles() === $expectedRoles, 'getValidRoles returns exact central whitelist');
 
 assertCondition(SsoAuthorization::isAllowedRole('admin') === true, 'isAllowedRole accepts admin');
+assertCondition(SsoAuthorization::isAllowedRole('estimator') === true, 'isAllowedRole accepts estimator');
 assertCondition(SsoAuthorization::isAllowedRole('viewer') === true, 'isAllowedRole accepts viewer');
 assertCondition(SsoAuthorization::isAllowedRole('technician') === false, 'isAllowedRole rejects technician (legacy local constant only, never from Hub)');
 
 assertCondition(SsoAuthorization::isValidRole('admin') === true, 'isValidRole alias accepts admin');
+assertCondition(SsoAuthorization::isValidRole('estimator') === true, 'isValidRole alias accepts estimator');
 assertCondition(SsoAuthorization::isValidRole('viewer') === true, 'isValidRole alias accepts viewer');
 assertCondition(SsoAuthorization::isValidRole('technician') === false, 'isValidRole alias rejects technician');
 
 assertCondition(SsoAuthorization::isApprovedCentralRole('admin') === true, 'isApprovedCentralRole accepts admin');
+assertCondition(SsoAuthorization::isApprovedCentralRole('estimator') === true, 'isApprovedCentralRole accepts estimator');
 assertCondition(SsoAuthorization::isApprovedCentralRole('viewer') === true, 'isApprovedCentralRole accepts viewer');
 assertCondition(SsoAuthorization::isApprovedCentralRole('technician') === false, 'isApprovedCentralRole rejects technician');
 
 assertCondition(SsoAuthorization::isAllowedRole('superadmin') === false, 'isAllowedRole rejects unknown superadmin');
 assertCondition(SsoAuthorization::isAllowedRole('root') === false, 'isAllowedRole rejects root');
-assertCondition(SsoAuthorization::isAllowedRole('estimator') === false, 'isAllowedRole rejects estimator');
 assertCondition(SsoAuthorization::isAllowedRole('Admin') === false, 'isAllowedRole is case-sensitive (rejects Admin)');
 assertCondition(SsoAuthorization::isAllowedRole('') === false, 'isAllowedRole rejects empty string');
 
@@ -749,17 +752,9 @@ assertCondition($superRoleCaught, 'Anti-elevation: central identity asserting "s
 // -----------------------------------------------------------------------------
 echo "\n7. Testing unknown-role rejection, empty role, and fail-closed default denial...\n";
 
-// Case A: Central identity has unknown role 'estimator'
-$estimatorCaught = false;
-$estimatorMsg = '';
-try {
-    $ssoAuth->authorize(new IdentityProfile('hub', 'hub_user_est', true, ['estimator']));
-} catch (RuntimeException $e) {
-    $estimatorCaught = true;
-    $estimatorMsg = $e->getMessage();
-}
-assertCondition($estimatorCaught, 'Central identity with unknown role "estimator" is rejected with RuntimeException');
-assertCondition(str_contains($estimatorMsg, 'unauthorized, unknown, or malformed'), 'Unknown role error message specifies unauthorized/unknown/malformed');
+// Case A: Central identity has the approved operational role 'estimator'
+$estimatorIdentity = $ssoAuth->authorize(new IdentityProfile('hub', 'hub_user_est', true, ['estimator']));
+assertCondition($estimatorIdentity['role'] === 'estimator', 'Central estimator role is provisioned exactly');
 
 // Case B: Central identity has empty role
 $emptyRoleCaught = false;

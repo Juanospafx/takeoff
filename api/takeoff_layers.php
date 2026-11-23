@@ -16,12 +16,13 @@ $mutationActions = array(
     'delete_estimate_item',
 );
 $action = (string)(isset($_GET['action']) ? $_GET['action'] : (isset($_POST['action']) ? $_POST['action'] : (isset($input['action']) ? $input['action'] : '')));
-$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'list');
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'list', null, true, 'takeoff.write');
 $userId = (int)$user['user_id'];
 if ($action === '') {
     $action = 'list';
 }
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/ProjectAccess.php';
 $requestedProjectId = tl_int(isset($_GET['project_id']) ? $_GET['project_id'] : (isset($_POST['project_id']) ? $_POST['project_id'] : (isset($input['project_id']) ? $input['project_id'] : 0)));
 
 function tl_json($payload, $status = 200)
@@ -82,18 +83,10 @@ function tl_first_project_id($pdo)
 
 function tl_ensure_project($pdo, $requestedProjectId)
 {
-    if ($requestedProjectId > 0) {
-        $stmt = $pdo->prepare("SELECT id FROM projects WHERE id = ? AND deleted_at IS NULL LIMIT 1");
-        $stmt->execute(array($requestedProjectId));
-        $id = (int)$stmt->fetchColumn();
-        if ($id > 0) return $id;
-    }
-
-    $id = tl_first_project_id($pdo);
-    if ($id > 0) return $id;
-
-    $pdo->exec("INSERT INTO projects (name, description, status) VALUES ('Uploads Test Project', 'Temporary project for takeoff module testing', 'active')");
-    return (int)$pdo->lastInsertId();
+    if ($requestedProjectId <= 0) return 0;
+    $stmt = $pdo->prepare("SELECT id FROM projects WHERE id = ? AND deleted_at IS NULL LIMIT 1");
+    $stmt->execute(array($requestedProjectId));
+    return (int)$stmt->fetchColumn();
 }
 
 function tl_ensure_takeoff($pdo, $projectId)
@@ -492,8 +485,18 @@ function tl_sync_layer_estimate($pdo, $layerId, $estimateId)
 }
 
 try {
+    if ($requestedProjectId <= 0) {
+        tl_json(array('status' => 'error', 'msg' => 'A valid project_id is required'), 422);
+    }
+    takeoff_guard_project_access(
+        $pdo,
+        $user,
+        $requestedProjectId,
+        in_array($action, $mutationActions, true) ? ProjectAccess::WRITE : ProjectAccess::READ
+    );
     tl_ensure_schema($pdo);
     $projectId = tl_ensure_project($pdo, $requestedProjectId);
+    if ($projectId <= 0) tl_json(array('status' => 'error', 'msg' => 'Project not found'), 404);
     $workspace = array(
         'project_id' => $projectId,
         'takeoff_id' => tl_ensure_takeoff($pdo, $projectId),

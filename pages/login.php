@@ -64,6 +64,9 @@ if ($ssoConfig === null) {
 
 // Feature flag conditioning for SSO button
 $ssoEnabled = ($ssoConfig instanceof \Takeoff\Config\SsoConfig) ? $ssoConfig->isEnabled() : (defined('SSO_ENABLED') && SSO_ENABLED);
+$localLoginEnabled = ($ssoConfig instanceof \Takeoff\Config\SsoConfig)
+    ? $ssoConfig->isLocalLoginEnabled()
+    : !$ssoEnabled;
 
 $error = null;
 $message = null;
@@ -87,7 +90,10 @@ if (isset($_GET['error'])) {
 }
 
 // Process local login POST
-if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
+if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST' && !$localLoginEnabled) {
+    http_response_code(403);
+    $error = 'El acceso local está deshabilitado. Inicie sesión mediante el Hub.';
+} elseif (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
     $submittedCsrf = $_POST['csrf_token'] ?? null;
     $sessionCsrf = $_SESSION['csrf_token'] ?? '';
 
@@ -342,6 +348,7 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
             </div>
         <?php endif; ?>
 
+        <?php if ($localLoginEnabled): ?>
         <form method="POST" action="/pages/login.php" autocomplete="off">
             <input type="hidden" name="csrf_token" value="<?= htmlspecialchars($_SESSION['csrf_token'] ?? '', ENT_QUOTES, 'UTF-8') ?>">
 
@@ -357,6 +364,9 @@ if (($_SERVER['REQUEST_METHOD'] ?? 'GET') === 'POST') {
 
             <button type="submit" class="btn btn-primary">Iniciar sesión</button>
         </form>
+        <?php elseif (!$ssoEnabled): ?>
+            <div class="alert alert-danger" role="alert">No hay un método de autenticación habilitado.</div>
+        <?php endif; ?>
 
         <?php if ($ssoEnabled): ?>
             <div class="sso-divider">

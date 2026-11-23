@@ -4,24 +4,82 @@ declare(strict_types=1);
 require_once __DIR__ . '/../core/auth/session.php';
 
 $action = strtolower(trim((string)($_GET['action'] ?? $_POST['action'] ?? '')));
-$readActions = ['export_estimate'];
-$mutationActions = ['export_estimate_live', 'import_project', 'import_estimate', 'sync_templates'];
+$readActions = ['export_estimate', 'export_estimate_live'];
+$mutationActions = ['import_project', 'import_estimate', 'sync_templates'];
 
 if ($_SERVER['REQUEST_METHOD'] === 'POST' && $action === 'export_estimate') {
     $action = 'export_estimate_live';
 }
 
-$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'export_estimate');
+$mutationCapability = $action === 'import_project'
+    ? 'project.write'
+    : ($action === 'import_estimate' ? 'estimating.write' : null);
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'export_estimate', null, true, $mutationCapability);
 
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/ProjectAccess.php';
 require_once __DIR__ . '/../core/services/ProjectEstimateExcelService.php';
 
-function excel_json_error(string $msg, int $status = 400): void
+function excel_json_error(
+    string $msg,
+    int $status = 400,
+    ?string $code = null,
+    ?string $incidentId = null
+): void
 {
     http_response_code($status);
     header('Content-Type: application/json; charset=utf-8');
-    echo json_encode(['status' => 'error', 'msg' => $msg], JSON_UNESCAPED_SLASHES);
+    $payload = ['status' => 'error', 'msg' => $msg];
+    if ($code !== null && $code !== '') {
+        $payload['code'] = $code;
+    }
+    if ($incidentId !== null && $incidentId !== '') {
+        $payload['incident_id'] = $incidentId;
+    }
+    echo json_encode($payload, JSON_UNESCAPED_SLASHES);
     exit;
+}
+
+function excel_log_failure(Throwable $error, string $incidentId): void
+{
+    $message = preg_replace('/\s+/', ' ', trim($error->getMessage())) ?? '';
+    $message = preg_replace(
+        '/\b(password|passwd|pwd|token|secret|api[_-]?key)\b\s*[:=]\s*("[^"]*"|\'[^\']*\'|[^\s;]+)/i',
+        '$1=[redacted]',
+        $message
+    ) ?? '';
+    $message = preg_replace('/(?:[A-Za-z]:[\\\\\/]|\/)[^\s]+/', '[path]', $message) ?? '';
+    $message = substr($message, 0, 500);
+    error_log(sprintf(
+        'ProjectEstimateExcelService failure incident=%s class=%s code=%s message=%s',
+        $incidentId,
+        get_class($error),
+        (string)$error->getCode(),
+        $message
+    ));
+}
+
+function excel_uploaded_workbook(array $upload, string $fallbackName): array
+{
+    if (($upload['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        excel_json_error('Please select a valid .xlsx Excel file to import.', 422, 'WORKBOOK_UPLOAD_INVALID');
+    }
+    $origName = (string)($upload['name'] ?? $fallbackName);
+    $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
+    if (!in_array($ext, ['xlsx', 'xlsm'], true)) {
+        excel_json_error('Only .xlsx Excel files generated from the project export template are supported.', 422, 'WORKBOOK_TYPE_UNSUPPORTED');
+    }
+    $tmpPath = (string)($upload['tmp_name'] ?? '');
+    $reportedSize = (int)($upload['size'] ?? 0);
+    $actualSize = $tmpPath !== '' && is_file($tmpPath) ? (int)filesize($tmpPath) : 0;
+    $maxBytes = 25 * 1024 * 1024;
+    if ($tmpPath === '' || !is_readable($tmpPath) || $actualSize <= 0) {
+        excel_json_error('The uploaded Excel workbook could not be read.', 422, 'WORKBOOK_UNREADABLE');
+    }
+    if ($reportedSize > $maxBytes || $actualSize > $maxBytes) {
+        excel_json_error('The Excel workbook exceeds the 25 MB import limit.', 413, 'WORKBOOK_TOO_LARGE');
+    }
+    return [$origName, $tmpPath];
 }
 
 try {
@@ -45,6 +103,9 @@ try {
         if ($projectId <= 0 && empty($livePayload['estimate'])) {
             excel_json_error('Valid project_id or estimate payload is required.', 422);
         }
+        if ($projectId > 0) {
+            takeoff_guard_project_access($pdo, $user, $projectId, ProjectAccess::READ);
+        }
 
         $result = ProjectEstimateExcelService::exportEstimateWorkbook(
             $pdo,
@@ -65,21 +126,20 @@ try {
         if ($_SERVER['REQUEST_METHOD'] !== 'POST') {
             excel_json_error('POST required.', 405);
         }
-        if (empty($_FILES['file']) || ($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        if (empty($_FILES['file'])) {
             excel_json_error('Please select a valid .xlsx Excel file to import.', 422);
         }
-        $origName = (string)($_FILES['file']['name'] ?? 'Imported_Project.xlsx');
-        $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
-        if (!in_array($ext, ['xlsx', 'xlsm'], true)) {
-            excel_json_error('Only .xlsx Excel files generated from the project export template are supported.', 422);
-        }
-        $tmpPath = (string)$_FILES['file']['tmp_name'];
+        [$origName, $tmpPath] = excel_uploaded_workbook($_FILES['file'], 'Imported_Project.xlsx');
         $params = [
             'name' => trim((string)($_POST['name'] ?? '')),
             'status' => trim((string)($_POST['status'] ?? 'to_do')) ?: 'to_do',
             'original_filename' => $origName,
         ];
         $res = ProjectEstimateExcelService::importProjectFromExportedExcel($pdo, $tmpPath, $params);
+        $createdProjectId = (int)($res['project_id'] ?? 0);
+        if ($createdProjectId > 0) {
+            ProjectAccess::grantCreator($pdo, $createdProjectId, (int)$user['user_id']);
+        }
         header('Content-Type: application/json; charset=utf-8');
         echo json_encode(['status' => 'success'] + $res, JSON_UNESCAPED_SLASHES);
         exit;
@@ -93,15 +153,11 @@ try {
         if ($projectId <= 0) {
             excel_json_error('Valid project_id is required.', 422);
         }
-        if (empty($_FILES['file']) || ($_FILES['file']['error'] ?? UPLOAD_ERR_NO_FILE) !== UPLOAD_ERR_OK) {
+        takeoff_guard_project_access($pdo, $user, $projectId, ProjectAccess::WRITE);
+        if (empty($_FILES['file'])) {
             excel_json_error('Please select a valid .xlsx Excel file to import.', 422);
         }
-        $origName = (string)($_FILES['file']['name'] ?? 'Imported_Estimate.xlsx');
-        $ext = strtolower(pathinfo($origName, PATHINFO_EXTENSION));
-        if (!in_array($ext, ['xlsx', 'xlsm'], true)) {
-            excel_json_error('Only .xlsx Excel files generated from the project export template are supported.', 422);
-        }
-        $tmpPath = (string)$_FILES['file']['tmp_name'];
+        [$origName, $tmpPath] = excel_uploaded_workbook($_FILES['file'], 'Imported_Estimate.xlsx');
         $mode = trim((string)($_POST['import_mode'] ?? 'keep_excel'));
         $params = [
             'estimate_name' => trim((string)($_POST['estimate_name'] ?? '')),
@@ -129,12 +185,12 @@ try {
     excel_json_error('Unsupported action.', 404);
 } catch (ExcelRuntimeException $e) {
     error_log('ProjectEstimateExcelService runtime prerequisite failed');
-    excel_json_error($e->getMessage(), 503);
+    excel_json_error($e->getMessage(), 503, 'EXCEL_RUNTIME_UNAVAILABLE');
 } catch (\PhpOffice\PhpSpreadsheet\Reader\Exception $e) {
     error_log('ProjectEstimateExcelService rejected an unreadable workbook');
-    excel_json_error('The uploaded Excel workbook could not be read.', 422);
+    excel_json_error('The uploaded Excel workbook could not be read.', 422, 'WORKBOOK_UNREADABLE');
 } catch (Throwable $e) {
     $incidentId = bin2hex(random_bytes(8));
-    error_log("ProjectEstimateExcelService failure: {$incidentId}");
-    excel_json_error('Excel operation failed.', 500);
+    excel_log_failure($e, $incidentId);
+    excel_json_error('Excel operation failed.', 500, 'EXCEL_OPERATION_FAILED', $incidentId);
 }

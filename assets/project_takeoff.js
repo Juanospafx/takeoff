@@ -78,6 +78,10 @@
         ].map(v => String(v || '').trim()).filter(Boolean))];
     }
 
+    function purgeableLayerTrackingKeys(layer, protectedKeys = new Set()) {
+        return collectLayerTrackingKeys(layer).filter(key => !protectedKeys.has(key));
+    }
+
     function queueDeletedLayersForEstimate(estimateId, keys) {
         const estKey = String(estimateId || '').trim();
         if (!estKey || !Array.isArray(keys) || !keys.length) return;
@@ -121,6 +125,7 @@
             }
         } catch (err) {
             console.warn('Could not purge deleted layers for estimate', targetEst, err);
+            throw new Error('Takeoff layer deletion could not be confirmed by the database.');
         }
     }
 
@@ -276,7 +281,9 @@
     };
     window.projectTakeoffFitToScreen = fitTakeoffToScreen;
     window.projectTakeoffSaveState = async function () {
-        takeoffIsDirty = false;
+        const requiresPersistence = window.isTakeoffDirty()
+            || pendingDeletedTakeoffLayersByEstimate.size > 0;
+        if (!requiresPersistence) return { persisted: false, skipped: true };
         const pId = String(window.ProjectState?.projectId || 0);
         safeSetTakeoffLocalStorage('takeoff_project_groups_' + pId, JSON.stringify(takeoffState.groups));
         syncTakeoffToEstimating();
@@ -286,13 +293,12 @@
             callEditor('projectTakeoffDeleteLayers', [...pendingDeletedTakeoffLayersByEstimate.get(loadedEst)], { force: true });
         }
         syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
-        try {
-            await callEditor('projectTakeoffSave');
-            getTakeoffEditorFrame()?.contentWindow?.clearEditorTakeoffDirtyCheckpoint?.();
-        } catch (e) {
-            console.warn('Canvas save ignored or complete:', e);
-        }
+        const saveResult = await callEditor('projectTakeoffSave');
+        if (saveResult === false) throw new Error('Takeoff canvas persistence is unavailable.');
         await flushPendingDeletedEstimateLayers();
+        takeoffIsDirty = false;
+        getTakeoffEditorFrame()?.contentWindow?.clearEditorTakeoffDirtyCheckpoint?.();
+        return { persisted: true, projectId: Number(pId) || 0 };
     };
 
     const viewerState = {
@@ -2268,6 +2274,21 @@
         return Boolean(layer) && String(layer.estimateId || '') === String(estimateId || '');
     }
 
+    function resolveEstimatingItemTakeoffColor(item = {}, fallback = '#2563eb') {
+        const candidates = [
+            item.color,
+            item.takeoffDefaults?.color,
+            item.catalogMetadata?.takeoffDefaults?.color,
+            item.catalogSnapshot?.takeoffDefaults?.color,
+            item.catalogMetadata?.color,
+            item.catalogSnapshot?.color
+        ];
+        const selected = candidates
+            .map(value => String(value || '').trim())
+            .find(value => /^#[0-9a-f]{3,8}$/i.test(value));
+        return selected || fallback;
+    }
+
     function syncEstimatingItemsToTakeoff(detail = {}) {
         if (detail.projectId && window.ProjectState?.projectId && String(detail.projectId) !== String(window.ProjectState.projectId)) return;
         scopeLegacyTakeoffGroupsOnce();
@@ -2282,6 +2303,7 @@
         }
         ensureEstimateTakeoffWorkspace(estimateId);
         const seen = new Set();
+        const seenLayerObjects = new Set();
         const pendingLinks = [];
         const orderedGroupIds = [];
         const orderedLayerIdsByGroup = new Map();
@@ -2322,28 +2344,28 @@
                 const itemId = String(item.id || '');
                 if (!itemId || item.parentItemId || item.parent_item_id || item.assemblyParentId) return;
                 const layerId = String(item.takeoffLayerId || `estitem_${estimateId}_${itemId}`);
-                const layerMatchesEstimatingItem = (row) => {
-                    if (String(row.estimatingItemId || '') === itemId) return true;
-                    const itemKeys = [
-                        String(item.takeoffLayerId || ''),
-                        item.takeoffLayerId && String(item.takeoffLayerId).startsWith('takeoff_') ? String(item.takeoffLayerId).slice(8) : '',
-                        itemId.startsWith('takeoff_') ? itemId.slice(8) : '',
-                        String(item.source_layer_key || '')
+                const itemKeys = [
+                    String(item.takeoffLayerId || ''),
+                    item.takeoffLayerId && String(item.takeoffLayerId).startsWith('takeoff_') ? String(item.takeoffLayerId).slice(8) : '',
+                    itemId.startsWith('takeoff_') ? itemId.slice(8) : '',
+                    String(item.source_layer_key || '')
+                ].filter(Boolean);
+                const scopedLayers = allLayers().filter(row => String(row.estimateId || '') === estimateId || !row.estimateId);
+                const matchesTakeoffIdentity = row => {
+                    const rowKeys = [
+                        String(row.id || ''),
+                        String(row.integration_key || ''),
+                        String(row.client_uid || ''),
+                        String(row.metadata_json?.project_layer_id || ''),
+                        String(row.metadata?.project_layer_id || '')
                     ].filter(Boolean);
-                    if (itemKeys.length) {
-                        const rowKeys = [
-                            String(row.id || ''),
-                            String(row.integration_key || ''),
-                            String(row.client_uid || ''),
-                            String(row.metadata_json?.project_layer_id || ''),
-                            String(row.metadata?.project_layer_id || '')
-                        ].filter(Boolean);
-                        if (itemKeys.some(k => rowKeys.includes(k))) return true;
-                    }
-                    return String(row.id) === layerId;
+                    return itemKeys.some(key => rowKeys.includes(key)) || String(row.id) === layerId;
                 };
-                let layer = allLayers().find(row => (String(row.estimateId || '') === estimateId || !row.estimateId)
-                    && layerMatchesEstimatingItem(row));
+                // The persisted Takeoff identity is authoritative. A shared
+                // estimatingItemId is only a fallback because legacy races may
+                // have left two aliases pointing at the same Estimating row.
+                let layer = scopedLayers.find(matchesTakeoffIdentity)
+                    || scopedLayers.find(row => String(row.estimatingItemId || '') === itemId);
                 const estQty = Number(item.quantity || 0);
                 const isItemAddedFromEst = Boolean(item.addedFromEstimating || item.origin === 'estimating' || item.origin === 'excel_import');
                 const hasTakeoffOrigin = Boolean(item.copiedFromTakeoffLayerId || item.takeoffLayerId || item.source_layer_key || String(item.quantitySource || '') === 'takeoff');
@@ -2359,7 +2381,8 @@
                     layer = {
                         id: layerId, groupId: group.id, estimateId, estimatingItemId: itemId,
                         name: item.name || 'Cost item', type: inferTakeoffTypeFromUom(item.uom) || 'Count',
-                        uom: item.uom || 'ea', symbol: 'Solid Circle', size: 'Medium', color: '#2563eb',
+                        uom: item.uom || 'ea', symbol: 'Solid Circle', size: 'Medium', color: resolveEstimatingItemTakeoffColor(item),
+                        colorSource: 'estimating',
                         visible: true, locked: false, quantity: initialTakeoffQty,
                         baseQuantity: initialTakeoffQty,
                         quantityOverride: isItemOverridden,
@@ -2380,6 +2403,19 @@
                         group.layers.push(layer); layer.groupId = group.id;
                         didMutateGroupMeta = true;
                     }
+                    const estimatingColor = resolveEstimatingItemTakeoffColor(item, '');
+                    const currentColor = String(layer.color || '').trim();
+                    const mayRestoreEstimatingColor = layer.colorSource === 'estimating'
+                        || (layer.colorSource !== 'takeoff-user' && (
+                            !/^#[0-9a-f]{3,8}$/i.test(currentColor)
+                            || currentColor.toLowerCase() === '#2563eb'
+                        ));
+                    const resolvedColor = mayRestoreEstimatingColor && estimatingColor
+                        ? estimatingColor : (currentColor || '#2563eb');
+                    if (resolvedColor !== layer.color) {
+                        didMutateGroupMeta = true;
+                        layer.colorSource = 'estimating';
+                    }
                     Object.assign(layer, {
                         estimateId, estimatingItemId: itemId, name: item.name || layer.name,
                         uom: item.uom || layer.uom, catalogItemId: item.catalogItemId || null,
@@ -2388,15 +2424,22 @@
                         labor_hours: Number(item.unitLabor || 0), description: item.description || '',
                         quantityOverride: isItemOverridden,
                         estimatingQuantity: Number(item.quantity || 0),
-                        addedFromEstimating: isItemAddedFromEst || layer.addedFromEstimating
+                        addedFromEstimating: isItemAddedFromEst || layer.addedFromEstimating,
+                        color: resolvedColor
                     });
                 }
                 seen.add(String(layer.id));
+                seenLayerObjects.add(layer);
                 unqueueDeletedLayerKeys(estimateId, layer);
                 groupOrderedLayerIds.push(String(layer.id));
-                if (!item.takeoffLayerId) pendingLinks.push({ itemId, layerId: String(layer.id) });
+                if (String(item.takeoffLayerId || '') !== String(layer.id)) {
+                    pendingLinks.push({ itemId, layerId: String(layer.id) });
+                }
             });
         });
+        const canonicalLayerKeys = new Set(
+            [...seenLayerObjects].flatMap(layer => collectLayerTrackingKeys(layer))
+        );
         const existingEstLayerCount = allLayers().filter(row => String(row.estimateId || '') === estimateId && (row.estimatingItemId || row.metadata_json?.estimating_item_id)).length;
         const removedLayerIds = [];
         const removedLayerKeys = [];
@@ -2404,15 +2447,16 @@
             group.layers = (group.layers || []).filter(layer => {
                 const linkedEstItemId = String(layer.estimatingItemId || layer.metadata_json?.estimating_item_id || layer.estimate_item_id || '');
                 const keep = String(layer.estimateId || '') !== estimateId
-                    || !linkedEstItemId || seen.has(String(layer.id));
+                    || !linkedEstItemId || seenLayerObjects.has(layer);
                 if (!keep && layer?.id) {
-                    removedLayerIds.push(String(layer.id));
-                    collectLayerTrackingKeys(layer).forEach(k => removedLayerKeys.push(k));
+                    const purgeableKeys = purgeableLayerTrackingKeys(layer, canonicalLayerKeys);
+                    if (!canonicalLayerKeys.has(String(layer.id))) removedLayerIds.push(String(layer.id));
+                    purgeableKeys.forEach(k => removedLayerKeys.push(k));
                 }
                 return keep;
             });
         });
-        if (removedLayerIds.length > 0) {
+        if (removedLayerKeys.length > 0) {
             removeLayersFromEditorAndQueue(estimateId, removedLayerKeys, { force: true });
             const removedIdSet = new Set(removedLayerIds.map(String));
             const removedKeySet = new Set(removedLayerKeys.map(String));
@@ -6317,9 +6361,23 @@
         copyAssemblyContextOntoLayer(layer, copy);
         insertCopiedLayerAfterSource(group, layer, copy);
         setActiveTakeoffLayer(copy.id, false);
-        saveTakeoffState();
+        // Register the duplicate in the canvas owner before it can be opened
+        // in the Pro modal. Otherwise a quick rename targets a layer that only
+        // exists in the parent panel and the next canvas save restores the
+        // duplicate's original name.
+        syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
+        saveTakeoffState({ skipEstimatingSync: true });
+        const persisted = callEditor('projectTakeoffSave');
+        if (persisted && typeof persisted.then === 'function') {
+            persisted.catch(error => {
+                console.warn('Takeoff duplicate save failed', error);
+                showPrepared('The copied Takeoff item could not be saved. Please try again.');
+            });
+        }
+        saveTakeoffState({ debounceEstimatingSync: true, suppressDirty: true });
         renderTakeoffPanel();
         updateSubheadSelectedItem();
+        return copy;
     }
 
     function renameLayer(layerId) {
@@ -6362,6 +6420,7 @@
         if (!color) return;
         pushTakeoffHistory('change-layer-color');
         layer.color = color.trim();
+        layer.colorSource = 'takeoff-user';
         callEditor('projectTakeoffUpdateLayerObjects', layer.id, { color: layer.color });
         syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
         callEditor('projectTakeoffSave');

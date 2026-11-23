@@ -7,7 +7,8 @@ const { JSDOM } = require('jsdom');
 const root = path.resolve(__dirname, '..');
 const sources = ['catalog_item_contract.js', 'catalog_service.js', 'quantity_format_service.js', 'estimate_calculation_service.js',
     'estimating_export_service.js', 'takeoff_estimating_sync_service.js', 'project_estimate_footer.js',
-    'estimating_workspace_service.js', 'estimating_catalog_adapter.js', 'project_estimating.js']
+    'estimating_workspace_service.js', 'estimating_catalog_adapter.js', 'project_estimating_modals.js',
+    'project_estimating.js']
     .map(file => fs.readFileSync(path.join(root, 'assets', file), 'utf8'));
 
 function runtime(preloaded = null) {
@@ -15,6 +16,7 @@ function runtime(preloaded = null) {
         url: 'https://takeoff.test/project/draft', runScripts: 'outside-only', pretendToBeVisual: true
     });
     dom.window.ProjectState = { projectId: 0, estimateItems: [], projectMeta: {} };
+    dom.window.HTMLElement.prototype.scrollIntoView = function () {};
     dom.window.fetch = async () => ({ ok: true, json: async () => ({ status: 'success', data: {
         items: [{ id: 77, name: 'Catalog Disconnect', item_type: 'part', unit_of_measure: 'ea',
             unit_cost: 25, labor_hours: 0.5, cost_code: '26-28-16', group_name: 'Devices', catalog_name: 'Electrical' }],
@@ -105,6 +107,40 @@ test('a versioned estimate-scoped Takeoff snapshot imports a new Part into linke
     const items = saved.estimates[0].groups.flatMap(group => group.items);
     assert.equal(items.find(item => item.takeoffLayerId === 'l2')?.quantity, 5);
     assert.ok(dom.window.document.querySelector('[data-item-id="takeoff_l2"]'));
+    dom.window.close();
+});
+
+test('an empty complete Takeoff hydration cannot erase a non-empty imported estimate', () => {
+    const dom = runtime({ activeEstimateId: 'imported', estimates: [{ id: 'imported', name: 'Imported',
+        creationMode: 'excel_import', takeoffSyncMode: 'linked', groups: [{ id: 'g1', name: 'Electrical', items: [
+            { id: 'excel-item', takeoffLayerId: 'layer-1', name: 'Imported fixture', quantity: 18 }
+        ] }] }] });
+    dom.window.dispatchEvent(new dom.window.CustomEvent('takeoff:estimating-lines-updated', { detail: {
+        version: 2, projectId: '', activeEstimateId: 'imported', authoritative: true, complete: true, groups: []
+    } }));
+    const saved = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.draft'));
+    assert.equal(saved.estimates[0].takeoffSyncMode, 'linked-only');
+    assert.equal(saved.estimates[0].groups[0].items.length, 1);
+    assert.equal(saved.estimates[0].groups[0].items[0].name, 'Imported fixture');
+    dom.window.close();
+});
+
+test('an incomplete Takeoff snapshot updates reported bindings without deleting unreported imports', () => {
+    const dom = runtime({ activeEstimateId: 'imported', estimates: [{ id: 'imported', name: 'Imported',
+        creationMode: 'excel_import', takeoffSyncMode: 'linked-only', groups: [{ id: 'g1', name: 'Electrical', items: [
+            { id: 'excel-a', takeoffLayerId: 'layer-a', name: 'A', quantity: 1 },
+            { id: 'excel-b', takeoffLayerId: 'layer-b', name: 'B', quantity: 2 }
+        ] }] }] });
+    dom.window.dispatchEvent(new dom.window.CustomEvent('takeoff:estimating-lines-updated', { detail: {
+        projectId: '', activeEstimateId: 'imported', authoritative: true,
+        groups: [{ id: 'g1', name: 'Electrical', items: [
+            { id: 'layer-a', takeoffLayerId: 'layer-a', name: 'A', quantity: 9 }
+        ] }]
+    } }));
+    const saved = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.draft'));
+    const items = saved.estimates[0].groups[0].items;
+    assert.equal(items.find(item => item.takeoffLayerId === 'layer-a').quantity, 9);
+    assert.equal(items.find(item => item.takeoffLayerId === 'layer-b').quantity, 2);
     dom.window.close();
 });
 

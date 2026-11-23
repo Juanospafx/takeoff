@@ -117,6 +117,22 @@ CREATE TABLE IF NOT EXISTS `projects` (
     CONSTRAINT `fk_projects_estimator` FOREIGN KEY (`estimator_id`) REFERENCES `estimators` (`id`) ON DELETE SET NULL
 ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
 
+CREATE TABLE IF NOT EXISTS `project_members` (
+    `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
+    `project_id` BIGINT UNSIGNED NOT NULL,
+    `user_id` BIGINT UNSIGNED NOT NULL,
+    `member_role` VARCHAR(32) NOT NULL DEFAULT 'viewer',
+    `active` TINYINT(1) NOT NULL DEFAULT 1,
+    `created_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP,
+    `updated_at` TIMESTAMP NOT NULL DEFAULT CURRENT_TIMESTAMP ON UPDATE CURRENT_TIMESTAMP,
+    PRIMARY KEY (`id`),
+    UNIQUE KEY `uq_project_members_project_user` (`project_id`, `user_id`),
+    KEY `idx_project_members_user_active` (`user_id`, `active`),
+    CONSTRAINT `fk_project_members_project` FOREIGN KEY (`project_id`) REFERENCES `projects` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `fk_project_members_user` FOREIGN KEY (`user_id`) REFERENCES `users` (`id`) ON DELETE CASCADE,
+    CONSTRAINT `chk_project_members_role` CHECK (`member_role` IN ('owner','editor','viewer'))
+) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci;
+
 CREATE TABLE IF NOT EXISTS `folders` (
     `id` BIGINT UNSIGNED NOT NULL AUTO_INCREMENT,
     `project_id` BIGINT UNSIGNED NOT NULL,

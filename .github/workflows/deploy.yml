@@ -167,6 +167,45 @@ jobs:
             > "deploy_artifact/$diagnostic_file"
           test "$(grep -c "$token_hash" "deploy_artifact/$diagnostic_file")" -eq 1
 
+          migration_token="$(openssl rand -hex 32)"
+          echo "::add-mask::$migration_token"
+          echo "TAKEOFF_MIGRATION_TOKEN=$migration_token" >> "$GITHUB_ENV"
+          migration_token_hash="$(printf '%s' "$migration_token" | sha256sum | cut -d ' ' -f 1)"
+          migration_file="project-members-migration-${GITHUB_RUN_ID}.php"
+          mkdir -p migration_artifact
+          sed "s/__MIGRATION_TOKEN_SHA256__/$migration_token_hash/g" \
+            harness/project-members-migration.php \
+            > "migration_artifact/$migration_file"
+          test "$(grep -c "$migration_token_hash" "migration_artifact/$migration_file")" -eq 1
+
+      - name: Upload one-shot project membership migration
+        uses: SamKirkland/FTP-Deploy-Action@v4.3.5
+        with:
+          server: ${{ secrets.FTP_SERVER }}
+          username: ${{ secrets.FTP_USERNAME }}
+          password: ${{ secrets.FTP_PASSWORD }}
+          port: 21
+          protocol: ftps
+          security: strict
+          local-dir: ./migration_artifact/
+          server-dir: ./
+          state-name: .ftp-deploy-migration-sync-state.json
+          dangerous-clean-slate: false
+
+      - name: Apply project membership migration
+        run: |
+          set -euo pipefail
+          response="$(curl --fail-with-body --silent --show-error \
+            --request POST \
+            --header "X-Takeoff-Migration-Token: $TAKEOFF_MIGRATION_TOKEN" \
+            "https://takeoff.brightronix.net/project-members-migration-${GITHUB_RUN_ID}.php")"
+          printf '%s' "$response" | jq -c '{ok,migration,database_connected,project_members_table,project_members_role_column,backfilled_rows,cleanup}'
+          printf '%s' "$response" | jq -e '.ok == true
+            and .database_connected == true
+            and .project_members_table == true
+            and .project_members_role_column == true
+            and .cleanup == true' >/dev/null
+
       - name: Deploy to FTPS server
         uses: SamKirkland/FTP-Deploy-Action@v4.3.5
         with:
@@ -187,5 +226,17 @@ jobs:
             --request POST \
             --header "X-Takeoff-Diagnostic-Token: $TAKEOFF_DIAGNOSTIC_TOKEN" \
             "https://takeoff.brightronix.net/sso-production-diagnostic-${GITHUB_RUN_ID}.php")"
-          printf '%s' "$response" | jq -c '{ok,php_version,php_runtime_supported,excel_runtime_supported,excel_missing_extensions,excel_export_template,config_loaded,oauth_client_accepted,oauth_classification,database_connected,users_table,users_active_column,users_timestamps,links_table,links_active_column,cleanup}'
-          printf '%s' "$response" | jq -e '.ok == true and .php_runtime_supported == true and .excel_runtime_supported == true and .excel_export_template == true and .cleanup == true' >/dev/null
+          printf '%s' "$response" | jq -c '{ok,php_version,php_runtime_supported,excel_runtime_supported,excel_missing_extensions,excel_export_template,config_loaded,oauth_client_accepted,oauth_classification,database_connected,users_table,users_active_column,users_timestamps,links_table,links_active_column,project_members_table,project_members_role_column,cleanup}'
+          printf '%s' "$response" | jq -e '.ok == true
+            and .php_runtime_supported == true
+            and .excel_runtime_supported == true
+            and .excel_export_template == true
+            and .database_connected == true
+            and .users_table == true
+            and .users_active_column == true
+            and .users_timestamps == true
+            and .links_table == true
+            and .links_active_column == true
+            and .project_members_table == true
+            and .project_members_role_column == true
+            and .cleanup == true' >/dev/null

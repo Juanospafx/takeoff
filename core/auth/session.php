@@ -7,13 +7,15 @@ declare(strict_types=1);
  * Invariants:
  * 1. Never invents user_id, username, or role; never defaults to admin or fallback identities.
  * 2. Authenticates sessions using strictly server-side session values.
- * 3. Exact role normalization: only 'admin' and 'viewer' are recognized, and only 'admin' may mutate.
+ * 3. Exact role normalization: only 'admin', 'estimator', and 'viewer' are recognized.
+ *    Mutations require either admin or an explicit capability checked by the project boundary.
  * 4. Fails closed on missing or malformed authentication (HTTP 401).
  * 5. Fails closed on viewer mutations, unknown actions, and missing actions without safe defaults (HTTP 403).
  * 6. Explicit read action allowlists admit authenticated viewers.
  */
 
 require_once __DIR__ . '/SsoSession.php';
+require_once __DIR__ . '/AuthorizationPolicy.php';
 
 // Configure session cookies and start session if not already active
 if (session_status() !== PHP_SESSION_ACTIVE && !headers_sent()) {
@@ -26,10 +28,12 @@ if (session_status() !== PHP_SESSION_ACTIVE && !headers_sent()) {
 class SessionGuard
 {
     public const ROLE_ADMIN = 'admin';
+    public const ROLE_ESTIMATOR = 'estimator';
     public const ROLE_VIEWER = 'viewer';
 
     public const ALLOWED_ROLES = [
         self::ROLE_ADMIN,
+        self::ROLE_ESTIMATOR,
         self::ROLE_VIEWER,
     ];
 
@@ -54,7 +58,7 @@ class SessionGuard
      * Invariants enforced:
      * - user_id must be a positive integer.
      * - username must be a non-empty string.
-     * - role must be exactly 'admin' or 'viewer' after normalization.
+     * - role must be exactly 'admin', 'estimator', or 'viewer' after normalization.
      * - Never trusts request-supplied parameters ($_GET, $_POST, headers).
      * - Never falls back to default user IDs or roles.
      *
@@ -142,6 +146,19 @@ class SessionGuard
         return $user !== null && $user['role'] === self::ROLE_VIEWER;
     }
 
+    public static function isEstimator(?array $session = null): bool
+    {
+        $user = self::getAuthenticatedUser($session);
+        return $user !== null && $user['role'] === self::ROLE_ESTIMATOR;
+    }
+
+    public static function hasCapability(string $capability, ?array $session = null): bool
+    {
+        $user = self::getAuthenticatedUser($session);
+        return $user !== null
+            && \Takeoff\Core\Auth\AuthorizationPolicy::allows($user['role'], $capability);
+    }
+
     /**
      * Verifies that the authenticated user matches the expected role(s).
      * Role comparison is exact after normalization.
@@ -196,7 +213,8 @@ class SessionGuard
         array $readActions = [],
         array $mutationActions = [],
         ?string $defaultAction = null,
-        ?array $session = null
+        ?array $session = null,
+        ?string $mutationCapability = null
     ): array {
         // Step 1: Authentication check (server-side session only)
         $user = self::getAuthenticatedUser($session);
@@ -263,21 +281,26 @@ class SessionGuard
             ];
         }
 
-        // Mutation actions require admin role; viewers are denied with HTTP 403
+        // Mutations default to admin-only; an endpoint may opt into one explicit capability.
         if ($isMutationAction) {
-            if ($user['role'] !== self::ROLE_ADMIN) {
+            $mutationAllowed = $mutationCapability !== null && trim($mutationCapability) !== ''
+                ? \Takeoff\Core\Auth\AuthorizationPolicy::allows($user['role'], $mutationCapability)
+                : $user['role'] === self::ROLE_ADMIN;
+            if (!$mutationAllowed) {
+                $denialReason = $user['role'] === self::ROLE_VIEWER
+                    ? 'viewer_mutation_denied' : 'mutation_capability_denied';
                 return [
                     'allowed' => false,
                     'status' => 403,
-                    'reason' => 'viewer_mutation_denied',
-                    'error' => 'Viewer role cannot perform mutations',
+                    'reason' => $denialReason,
+                    'error' => 'Role cannot perform this mutation',
                     'action' => $resolvedAction,
                     'user' => $user,
                     'is_mutation' => true,
                     'payload' => [
                         'status' => 'error',
-                        'msg' => 'Forbidden: Viewer role cannot perform mutations.',
-                        'message' => 'Forbidden: Viewer role cannot perform mutations.',
+                        'msg' => 'Forbidden: This role cannot perform the requested mutation.',
+                        'message' => 'Forbidden: This role cannot perform the requested mutation.',
                         'code' => 403,
                     ],
                 ];
@@ -333,9 +356,17 @@ class SessionGuard
         array $mutationActions = [],
         ?string $defaultAction = null,
         ?array $session = null,
-        bool $exitOnError = true
+        bool $exitOnError = true,
+        ?string $mutationCapability = null
     ): ?array {
-        $result = self::checkApiAccess($action, $readActions, $mutationActions, $defaultAction, $session);
+        $result = self::checkApiAccess(
+            $action,
+            $readActions,
+            $mutationActions,
+            $defaultAction,
+            $session,
+            $mutationCapability
+        );
 
         if (!$result['allowed']) {
             if (!headers_sent()) {
@@ -461,6 +492,16 @@ function takeoff_is_viewer(?array $session = null): bool
     return SessionGuard::isViewer($session);
 }
 
+function takeoff_is_estimator(?array $session = null): bool
+{
+    return SessionGuard::isEstimator($session);
+}
+
+function takeoff_has_capability(string $capability, ?array $session = null): bool
+{
+    return SessionGuard::hasCapability($capability, $session);
+}
+
 /**
  * Reusable helper: check if session has expected role.
  *
@@ -488,9 +529,17 @@ function takeoff_check_api_access(
     array $readActions = [],
     array $mutationActions = [],
     ?string $defaultAction = null,
-    ?array $session = null
+    ?array $session = null,
+    ?string $mutationCapability = null
 ): array {
-    return SessionGuard::checkApiAccess($action, $readActions, $mutationActions, $defaultAction, $session);
+    return SessionGuard::checkApiAccess(
+        $action,
+        $readActions,
+        $mutationActions,
+        $defaultAction,
+        $session,
+        $mutationCapability
+    );
 }
 
 /**
@@ -510,7 +559,16 @@ function takeoff_guard_api_action(
     array $mutationActions = [],
     ?string $defaultAction = null,
     ?array $session = null,
-    bool $exitOnError = true
+    bool $exitOnError = true,
+    ?string $mutationCapability = null
 ): ?array {
-    return SessionGuard::guardApiAction($action, $readActions, $mutationActions, $defaultAction, $session, $exitOnError);
+    return SessionGuard::guardApiAction(
+        $action,
+        $readActions,
+        $mutationActions,
+        $defaultAction,
+        $session,
+        $exitOnError,
+        $mutationCapability
+    );
 }

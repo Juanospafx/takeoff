@@ -4,9 +4,10 @@ require_once __DIR__ . '/../core/auth/session.php';
 $authRedirect = takeoff_require_page_auth($_SESSION ?? null);
 if ($authRedirect !== null) return;
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/ProjectAccess.php';
 
-// Solo administradores
-if (!SessionGuard::isAdmin($_SESSION ?? null)) {
+$authUser = SessionGuard::getAuthenticatedUser($_SESSION ?? null);
+if ($authUser === null || !takeoff_has_capability('project.write', $_SESSION ?? null)) {
     http_response_code(403);
     echo 'Forbidden';
     exit;
@@ -17,6 +18,11 @@ $isEdit = $editId > 0;
 
 $project = [];
 if ($isEdit) {
+    if (!ProjectAccess::can($pdo, $authUser, $editId, ProjectAccess::WRITE)) {
+        http_response_code(403);
+        echo 'Forbidden';
+        exit;
+    }
     $stmtProj = $pdo->prepare("SELECT * FROM projects WHERE id = ? AND deleted_at IS NULL");
     $stmtProj->execute([$editId]);
     $project = $stmtProj->fetch(PDO::FETCH_ASSOC) ?: [];
@@ -24,8 +30,10 @@ if ($isEdit) {
 }
 
 $createUsers = [];
-$stmtUsers = $pdo->query("SELECT id, username, role FROM users ORDER BY username ASC");
-$createUsers = $stmtUsers->fetchAll(PDO::FETCH_ASSOC);
+if (SessionGuard::isAdmin($_SESSION ?? null)) {
+    $stmtUsers = $pdo->query("SELECT id, username, role FROM users ORDER BY username ASC");
+    $createUsers = $stmtUsers->fetchAll(PDO::FETCH_ASSOC);
+}
 
 $existingFolders = [];
 if ($isEdit) {

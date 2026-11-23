@@ -637,7 +637,9 @@ class ProjectTemplateService
                             if (isset($decoded['groups']) && is_array($decoded['groups'])) {
                                 $seq = 0;
                                 $wsHasGroupsByEst[$newClientId] = true;
-                                $wsSyncModeByEst[$newClientId] = (string) ($decoded['takeoffSyncMode'] ?? 'mirror');
+                                $rawSyncMode = strtolower(trim((string) ($decoded['takeoffSyncMode'] ?? 'mirror')));
+                                $wsSyncModeByEst[$newClientId] = in_array($rawSyncMode, ['linked', 'linked-only'], true)
+                                    ? 'linked-only' : 'mirror';
                                 $wsLayerOrderByEst[$newClientId] = [];
                                 $wsLiveItemIdsByEst[$newClientId] = [];
                                 foreach ($decoded['groups'] as $grp) {

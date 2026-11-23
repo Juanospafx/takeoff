@@ -109,10 +109,11 @@ test('dashboard loads the extracted classic module before overview with filemtim
     assert.match(overview, /window\.TakeoffUsers = \{\s*getUsers: overviewNotesTasks\.getUsers,\s*setUsers: overviewNotesTasks\.setUsers,\s*load: loadSystemUsers/);
 });
 
-test('saveProject in project_overview.js isolates takeoffFrame errors gracefully', () => {
+test('saveProject propagates Takeoff and Estimating persistence failures', () => {
     const root = path.resolve(__dirname, '..');
     const overview = fs.readFileSync(path.join(root, 'assets/project_overview.js'), 'utf8');
-    assert.match(overview, /try\s*\{\s*const takeoffFrame = document\.getElementById\('takeoffFrame'\);/);
-    assert.match(overview, /catch\s*\(takeoffErr\)\s*\{\s*console\.warn\('Takeoff iframe save ignored or unavailable:', takeoffErr\);\s*\}/);
-    assert.match(overview, /window\.projectTakeoffSaveState\(\);/);
+    assert.match(overview, /await saveTakeoff\.call\(takeoffFrame\.contentWindow\)/);
+    assert.match(overview, /await window\.projectTakeoffSaveState\(\)/);
+    assert.match(overview, /await window\.projectEstimatingSave\(\)/);
+    assert.doesNotMatch(overview, /save ignored|save warning|save error/);
 });

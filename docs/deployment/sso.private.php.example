@@ -22,6 +22,8 @@ declare(strict_types=1);
 
 return [
     'TAKEOFF_SSO_ENABLED' => false,
+    // Break-glass only. Keep false in production; users are created in Hub.
+    'TAKEOFF_SSO_LOCAL_LOGIN_ENABLED' => false,
     'TAKEOFF_SSO_HUB_BASE_URL' => 'https://hub.example.internal',
     'TAKEOFF_SSO_CLIENT_ID' => 'takeoff-client-placeholder',
     'TAKEOFF_SSO_CLIENT_SECRET' => 'CHANGE_ME_IN_SECURE_DEPLOYMENT',

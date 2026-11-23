@@ -3,6 +3,7 @@ declare(strict_types=1);
 
 require_once __DIR__ . '/../helpers.php';
 require_once __DIR__ . '/../../../core/auth/session.php';
+require_once __DIR__ . '/../../../core/auth/ProjectAccess.php';
 
 class ProjectsController
 {
@@ -20,13 +21,23 @@ class ProjectsController
 
     public function index(): void
     {
+        $user = SessionGuard::getAuthenticatedUser();
+        if ($user === null) error_response('UNAUTHORIZED', 'Authentication required', null, 401);
         try {
-            $stmt = $this->pdo->query(
+            $ids = ProjectAccess::accessibleProjectIds($this->pdo, $user);
+            $accessSql = '';
+            $params = [];
+            if (is_array($ids)) {
+                $accessSql = $ids ? ' AND id IN (' . implode(',', array_fill(0, count($ids), '?')) . ')' : ' AND 1=0';
+                $params = $ids;
+            }
+            $stmt = $this->pdo->prepare(
                 "SELECT id, name, description, status, assigned_user_id, created_at, updated_at
                  FROM projects
-                 WHERE deleted_at IS NULL
+                 WHERE deleted_at IS NULL{$accessSql}
                  ORDER BY created_at DESC"
             );
+            $stmt->execute($params);
             $projects = $stmt->fetchAll(PDO::FETCH_ASSOC);
             ok_response($projects);
         } catch (Exception $e) {
@@ -57,6 +68,11 @@ class ProjectsController
         if (!$id) {
             error_response('VALIDATION_ERROR', 'Invalid id', ['field' => 'id'], 400);
         }
+        $user = SessionGuard::getAuthenticatedUser();
+        if ($user === null) error_response('UNAUTHORIZED', 'Authentication required', null, 401);
+        if (!ProjectAccess::can($this->pdo, $user, $id, ProjectAccess::READ)) {
+            error_response('FORBIDDEN', 'Project membership is required', null, 403);
+        }
 
         try {
             $stmt = $this->pdo->prepare(
@@ -83,6 +99,11 @@ class ProjectsController
         $id = require_int($params['id'] ?? null);
         if (!$id) {
             error_response('VALIDATION_ERROR', 'Invalid id', ['field' => 'id'], 400);
+        }
+        $user = SessionGuard::getAuthenticatedUser();
+        if ($user === null) error_response('UNAUTHORIZED', 'Authentication required', null, 401);
+        if (!ProjectAccess::can($this->pdo, $user, $id, ProjectAccess::READ)) {
+            error_response('FORBIDDEN', 'Project membership is required', null, 403);
         }
 
         try {
@@ -116,7 +137,7 @@ class ProjectsController
         if ($user === null) {
             error_response('UNAUTHORIZED', 'Authentication required', null, 401);
         }
-        if ($user['role'] !== SessionGuard::ROLE_ADMIN) {
+        if (!in_array($user['role'], ['admin', 'estimator'], true)) {
             error_response('FORBIDDEN', 'Insufficient privileges', null, 403);
         }
 
@@ -143,6 +164,7 @@ class ProjectsController
             $stmt->execute([$name, $desc, $status, $createdBy, $assignedUserId]);
 
             $projectId = (int)$this->pdo->lastInsertId();
+            ProjectAccess::grantCreator($this->pdo, $projectId, (int)$user['user_id']);
 
             // Also register in directory
             $dir = $this->pdo->prepare(
@@ -165,13 +187,12 @@ class ProjectsController
         if ($user === null) {
             error_response('UNAUTHORIZED', 'Authentication required', null, 401);
         }
-        if ($user['role'] !== SessionGuard::ROLE_ADMIN) {
-            error_response('FORBIDDEN', 'Insufficient privileges', null, 403);
-        }
-
         $id = require_int($params['id'] ?? null);
         if (!$id) {
             error_response('VALIDATION_ERROR', 'Invalid id', ['field' => 'id'], 422);
+        }
+        if (!ProjectAccess::can($this->pdo, $user, $id, ProjectAccess::WRITE)) {
+            error_response('FORBIDDEN', 'Project write membership is required', null, 403);
         }
 
         $data = read_json_body();

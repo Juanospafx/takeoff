@@ -3,6 +3,7 @@ require_once __DIR__ . '/../core/auth/session.php';
 $authRedirect = takeoff_require_page_auth($_SESSION ?? null);
 if ($authRedirect !== null) return;
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/ProjectAccess.php';
 require_once __DIR__ . '/../core/config/WonProjectIntegrationConfig.php';
 
 if (empty($_SESSION['won_project_csrf_token'])) {
@@ -48,6 +49,14 @@ try {
 
 $projectId = (int) ($_GET['id'] ?? $_GET['project_id'] ?? 0);
 $isDraftProject = $projectId <= 0 && isset($_GET['draft']);
+$canWrite = $isDraftProject
+    ? in_array($authRole, ['admin', 'estimator'], true)
+    : ($projectId > 0 && ProjectAccess::can($pdo, $authUser, $projectId, ProjectAccess::WRITE));
+if ($projectId > 0) {
+    takeoff_guard_project_access($pdo, $authUser, $projectId, ProjectAccess::READ);
+}
+$clientAuthMetadata['canWrite'] = $canWrite;
+$clientAuthMetadata['readOnly'] = !$canWrite;
 $activeTab = $_GET['tab'] ?? 'overview';
 $selectedDocumentId = (int) ($_GET['file_id'] ?? $_GET['document_id'] ?? 0);
 

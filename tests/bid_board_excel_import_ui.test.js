@@ -88,7 +88,9 @@ test('optional Takeoff projection cannot roll back the imported project workspac
 
 test('Excel import failures remain generic and never log raw database errors', () => {
     assert.match(endpoint, /bin2hex\(random_bytes\(8\)\)/);
-    assert.match(endpoint, /error_log\("ProjectEstimateExcelService failure: \{\$incidentId\}"\)/);
+    assert.match(endpoint, /function excel_log_failure\(Throwable \$error, string \$incidentId\)/);
+    assert.match(endpoint, /password\|passwd\|pwd\|token\|secret\|api/);
+    assert.match(endpoint, /excel_log_failure\(\$e, \$incidentId\)/);
     assert.doesNotMatch(endpoint, /error_log\([^)]*getMessage\(\)/);
-    assert.match(endpoint, /excel_json_error\('Excel operation failed\.', 500\)/);
+    assert.match(endpoint, /excel_json_error\('Excel operation failed\.', 500, 'EXCEL_OPERATION_FAILED', \$incidentId\)/);
 });

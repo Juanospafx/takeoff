@@ -166,46 +166,56 @@
             saveButton.textContent = 'Saving...';
         }
 
+        let persistedProjectId = Number(window.ProjectState?.projectId || 0);
+        const wasDraft = persistedProjectId === 0;
         try {
             if (typeof window.hasPendingTakeoffEstimatingSync === 'function' && window.hasPendingTakeoffEstimatingSync()
                 && typeof window.flushTakeoffEstimatingSync === 'function') {
-                try {
-                    await window.flushTakeoffEstimatingSync();
-                } catch (syncErr) {
-                    console.warn('Takeoff/Estimating sync flush warning:', syncErr);
-                }
+                await window.flushTakeoffEstimatingSync();
             }
-            try {
-                const takeoffFrame = document.getElementById('takeoffFrame');
-                const saveTakeoff = takeoffFrame?.contentWindow?.projectTakeoffSave;
-                if (typeof saveTakeoff === 'function') {
-                    await saveTakeoff.call(takeoffFrame.contentWindow);
-                    takeoffFrame?.contentWindow?.clearEditorTakeoffDirtyCheckpoint?.();
-                }
-            } catch (takeoffErr) {
-                console.warn('Takeoff iframe save ignored or unavailable:', takeoffErr);
-            }
-            if (typeof window.projectTakeoffSaveState === 'function') {
-                try {
+
+            // Existing projects must acknowledge every dirty module before the
+            // project row can be reported as saved. Draft workspaces are
+            // persisted after the server allocates their project ID below.
+            if (!wasDraft) {
+                const takeoffDirty = window.isTakeoffDirty?.() === true;
+                if (typeof window.projectTakeoffSaveState === 'function') {
                     await window.projectTakeoffSaveState();
-                } catch (stateErr) {
-                    console.warn('Takeoff state save warning:', stateErr);
+                } else {
+                    const takeoffFrame = document.getElementById('takeoffFrame');
+                    const saveTakeoff = takeoffFrame?.contentWindow?.projectTakeoffSave;
+                    if (typeof saveTakeoff === 'function') {
+                        await saveTakeoff.call(takeoffFrame.contentWindow);
+                        takeoffFrame?.contentWindow?.clearEditorTakeoffDirtyCheckpoint?.();
+                    } else if (takeoffDirty) {
+                        throw new Error('Takeoff has unsaved changes, but its database persistence service is unavailable.');
+                    }
                 }
-            }
-            if (typeof window.projectEstimatingSave === 'function') {
-                try {
+
+                if (typeof window.projectEstimatingSave === 'function') {
                     await window.projectEstimatingSave();
-                } catch (estErr) {
-                    console.warn('Estimating save error:', estErr);
+                } else if (window.isEstimatingDirty?.() === true) {
+                    throw new Error('Estimating has unsaved changes, but its database persistence service is unavailable.');
                 }
             }
-            const wasDraft = Number(window.ProjectState?.projectId || 0) === 0;
+
             const savePayload = collectProjectPayload();
             const result = await request('save', savePayload);
             const projectId = savedProjectId(result);
             if (!projectId) throw new Error('The project was saved without a valid project ID.');
+            persistedProjectId = projectId;
+            window.ProjectState.projectId = projectId;
+            window.ProjectState.projectInfo = result.project || result.data?.project || window.ProjectState.projectInfo;
+
+            if (wasDraft) {
+                if (typeof window.projectEstimatingPersistDraft !== 'function') {
+                    throw new Error('The project was created, but its Estimate workspace persistence service is unavailable.');
+                }
+                await window.projectEstimatingPersistDraft(projectId);
+            }
 
             const uploadResult = await persistPendingDocuments(projectId);
+            if (uploadResult.failed) throw new Error(`${uploadResult.failed} document(s) could not be persisted. Re-select them and retry Save.`);
 
             isDirty = false;
             window._historyDirtyGuarded = false;
@@ -216,7 +226,6 @@
                     title: 'Project Saved Successfully',
                     badge: 'PROJECT SAVED',
                     content: `<p>All changes to <strong>${escapeHtml(payload.name)}</strong> have been persisted.</p>` +
-                        (uploadResult.failed ? `<div class="g-announcement-highlight-box" style="border-left-color: #f59e0b;"><strong>Note:</strong> ${uploadResult.failed} document(s) still need to be re-selected.</div>` : '') +
                         `<div class="g-announcement-highlight-box">
                                 <strong>Stage:</strong> ${escapeHtml(statusLabel())}<br>
                                 <strong>Due Date:</strong> ${escapeHtml(dueLabel())}<br>
@@ -227,13 +236,11 @@
             }
 
             if (wasDraft) {
-                migrateDraftWorkspace(projectId);
+                migrateDraftWorkspace(projectId, { estimatingPersisted: true });
                 window.location.href = `project_dashboard.php?id=${encodeURIComponent(projectId)}&tab=overview`;
                 return;
             }
 
-            window.ProjectState.projectId = projectId;
-            window.ProjectState.projectInfo = result.project || result.data?.project || window.ProjectState.projectInfo;
             if ($('projectHeaderName')) $('projectHeaderName').textContent = payload.name;
             renderProjectHeaderMeta();
         } catch (error) {
@@ -242,7 +249,9 @@
                 window.TakeoffAnnouncement.error({
                     title: 'Project Save Error',
                     badge: 'SYSTEM ERROR',
-                    content: `<p>An unexpected error occurred while saving the project:</p><div class="g-announcement-highlight-box" style="border-left-color: #ef4444; color: #ef4444;"><strong>${escapeHtml(errText)}</strong></div><p>Please verify all required fields or check your database connection and try again.</p>`,
+                    content: `<p>${wasDraft && persistedProjectId > 0
+                        ? `Project #${persistedProjectId} was created, but its workspace is still pending persistence.`
+                        : 'The project was not fully persisted.'}</p><div class="g-announcement-highlight-box" style="border-left-color: #ef4444; color: #ef4444;"><strong>${escapeHtml(errText)}</strong></div><p>Your recovery draft was preserved. Resolve the error and retry Save.</p>`,
                     primaryText: 'Dismiss'
                 });
             }
@@ -913,7 +922,7 @@
         return `takeoff.projectDocumentFolders.${id || 'draft'}`;
     }
 
-    function migrateDraftWorkspace(projectId) {
+    function migrateDraftWorkspace(projectId, options = {}) {
         const numericProjectId = Number(projectId || 0);
         if (numericProjectId < 1) return;
         const prefixes = [
@@ -933,9 +942,22 @@
             localStorage.removeItem(draftKey);
         });
 
+        // Preserve the Takeoff group recovery cache under the allocated
+        // project identity. Geometry itself remains server-authoritative.
+        const draftTakeoffGroupsKey = 'takeoff_project_groups_0';
+        const draftTakeoffGroups = localStorage.getItem(draftTakeoffGroupsKey);
+        if (draftTakeoffGroups !== null) {
+            localStorage.setItem(`takeoff_project_groups_${numericProjectId}`, draftTakeoffGroups);
+            localStorage.removeItem(draftTakeoffGroupsKey);
+        }
+
         const estimatingDraftKey = 'takeoff.estimating.module.draft';
         const rawEstimate = localStorage.getItem(estimatingDraftKey);
         if (rawEstimate !== null) {
+            if (options.estimatingPersisted === true) {
+                localStorage.removeItem(estimatingDraftKey);
+                return;
+            }
             try {
                 const workspace = JSON.parse(rawEstimate);
                 const migratedAt = new Date().toISOString();

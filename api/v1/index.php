@@ -53,8 +53,14 @@ $routeAction = $rm . ' ' . $rp;
 $readRoutes = $isMutation ? [] : [$routeAction];
 $mutationRoutes = $isMutation ? [$routeAction] : [];
 
-// Enforce viewer mutation protection before DB or controller construction
-$user = takeoff_guard_api_action($routeAction, $readRoutes, $mutationRoutes);
+// Capabilities are opt-in per exact route; all other mutations remain admin-only.
+$routeMutationCapabilities = [
+    'POST /api/v1/projects' => 'project.write',
+    'PATCH /api/v1/projects/{id}' => 'project.write',
+    'POST /api/v1/files' => 'documents.write',
+];
+$mutationCapability = $routeMutationCapabilities[$routeAction] ?? null;
+$user = takeoff_guard_api_action($routeAction, $readRoutes, $mutationRoutes, null, null, true, $mutationCapability);
 $userId = (int)$user['user_id'];
 set_client_context((string)$userId, $user['role']);
 

@@ -1,8 +1,17 @@
 <?php
 // search.php - Buscador Global V1.0
 require_once __DIR__ . '/../core/auth/session.php';
+$authRedirect = takeoff_require_page_auth($_SESSION ?? null);
+if ($authRedirect !== null) return;
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/ProjectAccess.php';
 require_once __DIR__ . '/../core/time.php';
+
+$authUser = SessionGuard::getAuthenticatedUser($_SESSION ?? null);
+$canReadProject = static function (array $row) use ($pdo, $authUser): bool {
+    $projectId = (int)($row['project_id'] ?? $row['id'] ?? 0);
+    return ProjectAccess::can($pdo, $authUser ?: [], $projectId, ProjectAccess::READ);
+};
 
 $term = $_GET['q'] ?? '';
 $results = ['projects'=>[], 'folders'=>[], 'files'=>[]];
@@ -14,17 +23,17 @@ if (!empty($term)) {
     // 1. Buscar Proyectos (Solo activos)
     $stmtP = $pdo->prepare("SELECT * FROM projects WHERE (name LIKE ? OR description LIKE ?) AND deleted_at IS NULL LIMIT 5");
     $stmtP->execute([$searchTerm, $searchTerm]);
-    $results['projects'] = $stmtP->fetchAll(PDO::FETCH_ASSOC);
+    $results['projects'] = array_values(array_filter($stmtP->fetchAll(PDO::FETCH_ASSOC), $canReadProject));
 
     // 2. Buscar Carpetas
     $stmtF = $pdo->prepare("SELECT f.*, p.name as project_name FROM folders f LEFT JOIN projects p ON f.project_id = p.id WHERE f.name LIKE ? AND f.deleted_at IS NULL LIMIT 5");
     $stmtF->execute([$searchTerm]);
-    $results['folders'] = $stmtF->fetchAll(PDO::FETCH_ASSOC);
+    $results['folders'] = array_values(array_filter($stmtF->fetchAll(PDO::FETCH_ASSOC), $canReadProject));
 
     // 3. Buscar Archivos
     $stmtFi = $pdo->prepare("SELECT f.*, p.name as project_name, fo.name as folder_name FROM files f LEFT JOIN projects p ON f.project_id = p.id LEFT JOIN folders fo ON f.folder_id = fo.id WHERE f.filename LIKE ? AND f.deleted_at IS NULL LIMIT 20");
     $stmtFi->execute([$searchTerm]);
-    $results['files'] = $stmtFi->fetchAll(PDO::FETCH_ASSOC);
+    $results['files'] = array_values(array_filter($stmtFi->fetchAll(PDO::FETCH_ASSOC), $canReadProject));
 }
 
 $pageTitle = "Search: " . htmlspecialchars($term);

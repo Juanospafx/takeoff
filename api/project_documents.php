@@ -30,13 +30,14 @@ function pdoc_source($value) {
 $body = pdoc_body();
 $action = (string)($_GET['action'] ?? $body['action'] ?? $_POST['action'] ?? '');
 
-$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'get');
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'get', null, true, 'documents.write');
 $userId = (int)$user['user_id'];
 if ($action === '') {
     $action = 'get';
 }
 
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/ProjectAccess.php';
 
 function pdoc_row(PDO $pdo, $projectId, $documentId, $source, $includeDeleted = false) {
     $active = $includeDeleted ? '' : ' AND deleted_at IS NULL';
@@ -88,6 +89,12 @@ $projectId = pdoc_int($_GET['project_id'] ?? $body['project_id'] ?? $_POST['proj
 $documentId = pdoc_int($_GET['document_id'] ?? $body['document_id'] ?? $_POST['document_id'] ?? 0);
 $source = pdoc_source($_GET['source'] ?? $body['source'] ?? $_POST['source'] ?? '');
 if (!$projectId || !$documentId) pdoc_error('invalid_request', 'project_id and document_id are required.', 422);
+takeoff_guard_project_access(
+    $pdo,
+    $user,
+    $projectId,
+    in_array($action, $mutationActions, true) ? ProjectAccess::WRITE : ProjectAccess::READ
+);
 
 if ($action === 'get') pdoc_json(array('ok' => true, 'success' => true, 'document' => pdoc_row($pdo, $projectId, $documentId, $source)));
 

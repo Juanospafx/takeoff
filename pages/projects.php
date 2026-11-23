@@ -4,6 +4,7 @@ require_once __DIR__ . '/../core/auth/session.php';
 $authRedirect = takeoff_require_page_auth($_SESSION ?? null);
 if ($authRedirect !== null) return;
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/ProjectAccess.php';
 require_once __DIR__ . '/../core/time.php';
 require_once __DIR__ . '/../funciones/projects.php'; 
 
@@ -15,17 +16,36 @@ $userRole = strtolower($userRoleRaw);
 // Permiso Admin
 $isAdmin = ($userRole === 'admin');
 
-// Obtener todos los proyectos (FILTRADO POR NO BORRADOS)
-$stmt = $pdo->query("
+$authUser = SessionGuard::getAuthenticatedUser($_SESSION ?? null);
+$canCreateProject = takeoff_has_capability('project.write', $_SESSION ?? null);
+$accessibleIds = ProjectAccess::accessibleProjectIds($pdo, $authUser ?: []);
+$accessSql = '';
+$accessParams = [];
+if (is_array($accessibleIds)) {
+    $accessSql = $accessibleIds
+        ? ' AND p.id IN (' . implode(',', array_fill(0, count($accessibleIds), '?')) . ')'
+        : ' AND 1=0';
+    $accessParams = $accessibleIds;
+}
+// Obtener solo proyectos visibles para la identidad autenticada.
+$stmt = $pdo->prepare("
     SELECT p.*, u.username as creator_name, au.username as assigned_name,
     (SELECT COUNT(*) FROM files f WHERE f.project_id = p.id AND f.deleted_at IS NULL) as file_count
     FROM projects p 
     LEFT JOIN users u ON p.created_by = u.id 
     LEFT JOIN users au ON p.assigned_user_id = au.id
-    WHERE p.deleted_at IS NULL
+    WHERE p.deleted_at IS NULL{$accessSql}
     ORDER BY p.created_at DESC
 ");
+$stmt->execute($accessParams);
 $projects = $stmt->fetchAll(PDO::FETCH_ASSOC);
+$writableProjectIds = [];
+foreach ($projects as $visibleProject) {
+    $visibleProjectId = (int)($visibleProject['id'] ?? 0);
+    if ($visibleProjectId > 0 && ProjectAccess::can($pdo, $authUser ?: [], $visibleProjectId, ProjectAccess::WRITE)) {
+        $writableProjectIds[$visibleProjectId] = true;
+    }
+}
 
 $users = [];
 $assignedUsersByProject = [];
@@ -74,7 +94,7 @@ include __DIR__ . '/../views/header.php';
                 <p class="text-gray mb-0">Manage, edit or archive your ongoing projects.</p>
             </div>
             
-            <?php if($isAdmin): ?>
+            <?php if($canCreateProject): ?>
             <a href="project_create.php" class="btn-main text-decoration-none">
                 <i class="fas fa-plus me-2"></i> New Project
             </a>
@@ -145,7 +165,7 @@ include __DIR__ . '/../views/header.php';
                         <td class="text-end">
                             <a href="project_dashboard.php?id=<?= $p['id'] ?>" class="btn-action me-1" title="Open Dashboard"><i class="fas fa-columns"></i></a>
                             
-                            <?php if($isAdmin): ?>
+                            <?php if(isset($writableProjectIds[(int)$p['id']])): ?>
                                 <a class="btn-action me-1" href="project_create.php?id=<?= (int)$p['id'] ?>" title="Edit"><i class="fas fa-pen"></i></a>
                                 <button class="btn-action me-1" onclick="openAssignModal(<?= (int)$p['id'] ?>, '<?= addslashes($p['name']) ?>', <?= isset($p['assigned_user_id']) && $p['assigned_user_id'] !== null ? (int)$p['assigned_user_id'] : 'null' ?>)" title="Assign User"><i class="fas fa-user-plus"></i></button>
                                 <button class="btn-action delete" onclick="deleteProject(<?= $p['id'] ?>)" title="Move to Trash"><i class="fas fa-trash"></i></button>
@@ -189,7 +209,7 @@ include __DIR__ . '/../views/header.php';
                     <div class="proj-meta mb-3">Created: <?= date('M d, Y', strtotime($p['created_at'])) ?> ?? <?= $p['file_count'] ?> Files</div>
                     <div class="d-flex gap-2">
                         <a href="project_dashboard.php?id=<?= $p['id'] ?>" class="btn-action" title="Open"><i class="fas fa-external-link-alt"></i></a>
-                        <?php if($isAdmin): ?>
+                        <?php if(isset($writableProjectIds[(int)$p['id']])): ?>
                             <a class="btn-action" href="project_create.php?id=<?= (int)$p['id'] ?>" title="Edit"><i class="fas fa-pen"></i></a>
                             <button class="btn-action" onclick="openAssignModal(<?= (int)$p['id'] ?>, '<?= addslashes($p['name']) ?>', <?= isset($p['assigned_user_id']) && $p['assigned_user_id'] !== null ? (int)$p['assigned_user_id'] : 'null' ?>)" title="Assign User"><i class="fas fa-user-plus"></i></button>
                             <button class="btn-action delete" onclick="deleteProject(<?= $p['id'] ?>)" title="Move to Trash"><i class="fas fa-trash"></i></button>

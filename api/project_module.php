@@ -13,9 +13,13 @@ $action = $_GET['action'] ?? $_POST['action'] ?? $input['action'] ?? null;
 $readActions = ['list', 'detail', 'templates'];
 $mutationActions = ['save', 'copy', 'archive', 'delete', 'document_action', 'convert_to_template', 'apply_template'];
 
-$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'list');
+$projectMutationCapability = in_array($action, ['save', 'copy', 'document_action'], true)
+    ? 'project.write'
+    : null;
+$user = takeoff_guard_api_action($action, $readActions, $mutationActions, 'list', null, true, $projectMutationCapability);
 
 require_once __DIR__ . '/../core/db/connection.php';
+require_once __DIR__ . '/../core/auth/ProjectAccess.php';
 require_once __DIR__ . '/../core/services/ProjectTemplateService.php';
 
 function project_json(array $payload, int $status = 200): void
@@ -586,16 +590,29 @@ function project_enrich_primary_estimates(PDO $pdo, array $projects): array
     return $projects;
 }
 
-function project_payload(PDO $pdo, ?int $projectId = null): array
+function project_payload(PDO $pdo, array $user, ?int $projectId = null): array
 {
     $templates = ProjectTemplateService::listTemplates($pdo);
-    $projects = $pdo->query(
+    $accessibleIds = ProjectAccess::accessibleProjectIds($pdo, $user);
+    $accessSql = '';
+    $accessParams = [];
+    if (is_array($accessibleIds)) {
+        if (!$accessibleIds) {
+            $accessSql = ' AND 1=0';
+        } else {
+            $accessSql = ' AND p.id IN (' . implode(',', array_fill(0, count($accessibleIds), '?')) . ')';
+            $accessParams = $accessibleIds;
+        }
+    }
+    $projectsStmt = $pdo->prepare(
         "SELECT p.*, pt.name AS template_name
          FROM projects p
          LEFT JOIN project_templates pt ON pt.id = p.project_template_id
-         WHERE p.deleted_at IS NULL
+         WHERE p.deleted_at IS NULL{$accessSql}
          ORDER BY p.updated_at DESC, p.id DESC"
-    )->fetchAll(PDO::FETCH_ASSOC);
+    );
+    $projectsStmt->execute($accessParams);
+    $projects = $projectsStmt->fetchAll(PDO::FETCH_ASSOC);
     $projects = project_enrich_primary_estimates($pdo, $projects);
 
     $project = null;
@@ -604,9 +621,9 @@ function project_payload(PDO $pdo, ?int $projectId = null): array
             "SELECT p.*, pt.name AS template_name, pt.description AS template_description
              FROM projects p
              LEFT JOIN project_templates pt ON pt.id = p.project_template_id
-             WHERE p.id = ? AND p.deleted_at IS NULL"
+             WHERE p.id = ? AND p.deleted_at IS NULL{$accessSql}"
         );
-        $stmt->execute([$projectId]);
+        $stmt->execute(array_merge([$projectId], $accessParams));
         $fetched = $stmt->fetch(PDO::FETCH_ASSOC) ?: null;
         if ($fetched) {
             $enriched = project_enrich_primary_estimates($pdo, [$fetched]);
@@ -643,18 +660,20 @@ try {
 
     switch ($action) {
         case 'list':
-            project_json(['status' => 'success', 'data' => project_payload($pdo)]);
+            project_json(['status' => 'success', 'data' => project_payload($pdo, $user)]);
 
         case 'templates':
             project_json(['status' => 'success', 'templates' => ProjectTemplateService::listTemplates($pdo)]);
 
         case 'detail':
             $id = project_int($_GET['id'] ?? $input['id'] ?? 0);
-            project_json(['status' => 'success', 'data' => project_payload($pdo, $id)]);
+            takeoff_guard_project_access($pdo, $user, $id, ProjectAccess::READ);
+            project_json(['status' => 'success', 'data' => project_payload($pdo, $user, $id)]);
 
         case 'save':
             $id = project_int($input['id'] ?? 0);
             $isCreate = ($id <= 0);
+            if (!$isCreate) takeoff_guard_project_access($pdo, $user, $id, ProjectAccess::WRITE);
             $data = project_input_data($input);
             if ($data['name'] === '') project_json(['status' => 'error', 'msg' => 'Project name is required'], 422);
 
@@ -662,6 +681,12 @@ try {
             $filteredData = array_filter($data, function ($key) use ($existingCols) {
                 return in_array($key, $existingCols, true);
             }, ARRAY_FILTER_USE_KEY);
+            if ($isCreate && in_array('created_by', $existingCols, true)) {
+                $filteredData['created_by'] = (int)$user['user_id'];
+            }
+            if ($isCreate && in_array('assigned_user_id', $existingCols, true)) {
+                $filteredData['assigned_user_id'] = (int)$user['user_id'];
+            }
 
             $templateCreateTransaction = $isCreate
                 && !empty($filteredData['project_template_id'])
@@ -698,6 +723,7 @@ try {
                 $stmt = $pdo->prepare("INSERT INTO projects (" . implode(', ', $columns) . ") VALUES (" . implode(', ', array_fill(0, count($columns), '?')) . ")");
                 $stmt->execute(array_values($filteredData));
                 $id = (int)$pdo->lastInsertId();
+                ProjectAccess::grantCreator($pdo, $id, (int)$user['user_id']);
                 }
 
                 if ($isCreate && !empty($filteredData['project_template_id'])) {
@@ -719,7 +745,7 @@ try {
                 throw $e;
             }
 
-            $payload = project_payload($pdo, $id);
+            $payload = project_payload($pdo, $user, $id);
             if (empty($payload['project'])) project_json(['status' => 'error', 'msg' => 'Project could not be loaded after saving'], 500);
             project_json([
                 'status' => 'success',
@@ -732,16 +758,18 @@ try {
         case 'convert_to_template':
             $id = project_int($input['id'] ?? $input['project_id'] ?? 0);
             if ($id <= 0) project_json(['status' => 'error', 'msg' => 'Valid project id is required'], 422);
+            takeoff_guard_project_access($pdo, $user, $id, ProjectAccess::WRITE);
             $templateName = isset($input['name']) ? trim((string)$input['name']) : null;
             $result = ProjectTemplateService::convertProjectToTemplate($pdo, $id, $templateName ?: null);
             $newId = (int)$result['project_id'];
+            ProjectAccess::grantCreator($pdo, $newId, (int)$user['user_id']);
             project_json([
                 'status' => 'success',
                 'id' => $newId,
                 'project_id' => $newId,
                 'template_id' => $result['template_id'],
                 'name' => $result['name'],
-                'data' => project_payload($pdo, $newId),
+                'data' => project_payload($pdo, $user, $newId),
             ]);
 
         case 'apply_template':
@@ -750,17 +778,19 @@ try {
             if ($id <= 0 || $templateId <= 0) {
                 project_json(['status' => 'error', 'msg' => 'Project id and template id are required'], 422);
             }
+            takeoff_guard_project_access($pdo, $user, $id, ProjectAccess::WRITE);
             $applied = ProjectTemplateService::applyTemplateToProject($pdo, $id, $templateId);
             project_json([
                 'status' => 'success',
                 'id' => $id,
                 'project_id' => $id,
                 'estimate' => $applied,
-                'data' => project_payload($pdo, $id),
+                'data' => project_payload($pdo, $user, $id),
             ]);
 
         case 'copy':
             $id = project_int($input['id'] ?? 0);
+            takeoff_guard_project_access($pdo, $user, $id, ProjectAccess::WRITE);
             $stmt = $pdo->prepare("SELECT * FROM projects WHERE id = ? AND deleted_at IS NULL");
             $stmt->execute([$id]);
             $project = $stmt->fetch(PDO::FETCH_ASSOC);
@@ -772,20 +802,23 @@ try {
             $stmt = $pdo->prepare("INSERT INTO projects (" . implode(', ', $columns) . ") VALUES (" . implode(', ', array_fill(0, count($columns), '?')) . ")");
             $stmt->execute(array_values($project));
             $newId = (int)$pdo->lastInsertId();
+            ProjectAccess::grantCreator($pdo, $newId, (int)$user['user_id']);
             project_deep_clone($pdo, $id, $newId);
-            project_json(['status' => 'success', 'id' => $newId, 'data' => project_payload($pdo, $newId)]);
+            project_json(['status' => 'success', 'id' => $newId, 'data' => project_payload($pdo, $user, $newId)]);
 
         case 'archive':
             $id = project_int($input['id'] ?? 0);
+            takeoff_guard_project_access($pdo, $user, $id, ProjectAccess::WRITE);
             $stmt = $pdo->prepare("UPDATE projects SET status = 'archived' WHERE id = ?");
             $stmt->execute([$id]);
-            project_json(['status' => 'success', 'data' => project_payload($pdo, $id)]);
+            project_json(['status' => 'success', 'data' => project_payload($pdo, $user, $id)]);
 
         case 'delete':
             $id = project_int($input['id'] ?? 0);
+            takeoff_guard_project_access($pdo, $user, $id, ProjectAccess::WRITE);
             $stmt = $pdo->prepare("UPDATE projects SET deleted_at = CURRENT_TIMESTAMP WHERE id = ?");
             $stmt->execute([$id]);
-            project_json(['status' => 'success', 'data' => project_payload($pdo)]);
+            project_json(['status' => 'success', 'data' => project_payload($pdo, $user)]);
 
         case 'document_action':
             $projectId = project_int($input['project_id'] ?? 0);
@@ -793,6 +826,7 @@ try {
             $source = (string)($input['source'] ?? '');
             $operation = (string)($input['operation'] ?? '');
             if ($projectId < 1 || $documentId < 1) project_json(['status' => 'error', 'msg' => 'Invalid document reference'], 422);
+            takeoff_guard_project_access($pdo, $user, $projectId, ProjectAccess::WRITE);
             $sources = [
                 'legacy_file' => ['table' => 'files', 'name' => 'filename', 'folder' => 'folder_id'],
                 'project_document' => ['table' => 'project_documents', 'name' => 'title', 'folder' => 'document_folder_id'],

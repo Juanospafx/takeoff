@@ -67,3 +67,11 @@ test('a queued Takeoff snapshot rebases a legacy dirty conflict before schedulin
     assert.match(client, /conflictRemoteEstimates\.set\(id, Workspace\.clone\(remoteEstimate\)\)/);
     assert.match(client, /conflictedEstimateIds\.has\(activeId\)[\s\S]*rebaseTakeoffChanges[\s\S]*conflictedEstimateIds\.delete\(activeId\)/);
 });
+
+test('server rejects accidental non-empty to empty workspace replacement without an explicit user intent', () => {
+    assert.match(api, /class PewEmptyEstimateOverwrite extends RuntimeException/);
+    assert.match(api, /pew_workspace_item_count/);
+    assert.match(api, /empty_estimate_overwrite_blocked/);
+    assert.match(api, /allowEmptyGroupsReplace/);
+    assert.match(api, /\$estimate\['allowEmptyGroupsReplace'\]\s*===\s*true/);
+});

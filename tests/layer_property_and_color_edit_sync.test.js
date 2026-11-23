@@ -38,9 +38,9 @@ test('Takeoff dashboard submitLayerModal and changeLayerColor sync to canvas bef
 });
 
 test('Takeoff dashboard syncEstimatingItemsToTakeoff matches layers using multi-key resolution without creating duplicates', () => {
-    assert.match(takeoff, /const layerMatchesEstimatingItem =/);
-    assert.match(takeoff, /itemKeys\.some\(k => rowKeys\.includes\(k\)\)/);
-    assert.match(takeoff, /let layer = allLayers\(\)\.find\(row => \(String\(row\.estimateId \|\| ''\) === estimateId \|\| !row\.estimateId\)/);
+    assert.match(takeoff, /const matchesTakeoffIdentity =/);
+    assert.match(takeoff, /itemKeys\.some\(key => rowKeys\.includes\(key\)\)/);
+    assert.match(takeoff, /let layer = scopedLayers\.find\(matchesTakeoffIdentity\)[\s\S]*scopedLayers\.find\(row => String\(row\.estimatingItemId/);
 });
 
 test('Takeoff dashboard syncTakeoffToEstimating resolves layer aliases to find existing estimating items', () => {

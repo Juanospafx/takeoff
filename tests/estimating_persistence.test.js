@@ -82,6 +82,17 @@ test('workspace falls back safely when a persisted active id no longer exists', 
     assert.equal(state.estimates[0].isActive, true);
 });
 
+test('legacy imported linked mode migrates to linked-only instead of destructive mirror mode', () => {
+    const state = Service.workspace({ activeEstimateId: 'imported', estimates: [{
+        id: 'imported', name: 'Imported Estimate', creationMode: 'excel_import', takeoffSyncMode: 'linked',
+        groups: [{ id: 'g1', name: 'Imported', items: [
+            { id: 'i1', takeoffLayerId: 'layer-1', name: 'Imported item', quantity: 12 }
+        ] }]
+    }] }, 73);
+    assert.equal(state.estimates[0].takeoffSyncMode, 'linked-only');
+    assert.equal(state.estimates[0].groups[0].items.length, 1);
+});
+
 test('save API persists workspace activeEstimateId into snapshots and returns it unchanged', () => {
     assert.match(api, /\$requestedActiveId = \$workspace[\s\S]*?activeEstimateId/);
     assert.match(api, /\$estimate\['isActive'\][\s\S]*?\$requestedActiveId/);
