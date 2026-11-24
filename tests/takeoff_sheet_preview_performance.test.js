@@ -7,6 +7,7 @@ const root = path.join(__dirname, '..');
 const dashboard = fs.readFileSync(path.join(root, 'pages/project_dashboard.php'), 'utf8');
 const source = fs.readFileSync(path.join(root, 'assets/project_takeoff.js'), 'utf8');
 const overview = fs.readFileSync(path.join(root, 'assets/project_overview.js'), 'utf8');
+const editor = fs.readFileSync(path.join(root, 'assets/editor/runtime.js'), 'utf8');
 const css = fs.readFileSync(path.join(root, 'assets/project_takeoff.css'), 'utf8');
 
 test('sheet preview keeps its complete details and open-sheet action', () => {
@@ -26,12 +27,13 @@ test('drawing selector is portaled and centered against the viewport as a modal'
     assert.match(source, /addEventListener\('resize',\s*positionDrawingDropdown/);
 });
 
-test('sheet preview stays inside its panel and uses a legible high-resolution thumbnail', () => {
+test('sheet preview preserves the document colors on white and keeps Open Sheet visible', () => {
     assert.match(css, /\.pro-drawing-grid\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*3fr\)\s*minmax\(0,\s*4fr\)\s*minmax\(0,\s*3fr\);[\s\S]*?overflow:\s*hidden;/);
     assert.match(css, /\.pro-preview-container\s*\{[\s\S]*?grid-template-rows:\s*minmax\(170px,\s*1fr\)\s*auto;[\s\S]*?overflow-y:\s*auto;/);
-    assert.match(css, /\.pro-preview-box canvas,[\s\S]*?\.pro-preview-box img\s*\{[\s\S]*?width:\s*100%;[\s\S]*?height:\s*100%;[\s\S]*?object-fit:\s*contain;/);
-    assert.match(overview, /const THUMB_TARGET_WIDTH\s*=\s*640;/);
-    assert.match(source, /const targetWidth\s*=\s*Math\.min\(960,\s*Math\.max\(480,/);
+    assert.match(css, /\.pro-preview-box canvas,[\s\S]*?\.pro-preview-box img\s*\{[\s\S]*?object-fit:\s*contain;[\s\S]*?object-position:\s*center;[\s\S]*?background:\s*#ffffff\s*!important;[\s\S]*?filter:\s*none\s*!important;/);
+    assert.match(css, /\.pro-open-sheet-btn\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?bottom:\s*0;/);
+    assert.match(source, /page\.render\(\{\s*canvasContext:\s*ctx,\s*viewport,\s*background:\s*'#ffffff'\s*\}\)/);
+    assert.match(overview, /if \(isTakeoffJob\) renderParams\.background = '#ffffff';[\s\S]*?page\.render\(renderParams\)/);
 });
 
 test('opening the dropdown loads only the visible PDF and keeps takeoff summaries stable', () => {
@@ -43,13 +45,37 @@ test('opening the dropdown loads only the visible PDF and keeps takeoff summarie
         'metadata shared by multiple drawings must clear every warm summary when no document is specified');
 });
 
-test('hover preview is deliberately delayed, cancellable, and main-thread fallback waits for idle time', () => {
-    assert.match(source, /activeSheetHoverTimer\s*=\s*setTimeout\([\s\S]*?\},\s*280\);/);
+test('preview rendering is lazy, debounced, cancellable, and stale-safe', () => {
+    assert.match(source, /const PREVIEW_DEBOUNCE_MS\s*=\s*200;/);
+    assert.match(source, /activeSheetHoverTimer\s*=\s*setTimeout\([\s\S]*?\},\s*200\);/);
     assert.match(source, /addEventListener\('mouseout',[\s\S]*?cancelScheduledPreview\(\)/);
+    assert.match(source, /new IntersectionObserver\(/);
+    assert.match(source, /loading="lazy"\s+decoding="async"/);
     assert.match(source, /await waitForPreviewIdle\(\)/);
     assert.match(source, /requestId\s*!==\s*drawingState\.thumbnailRequest\s*\|\|\s*!drawingState\.dropdownOpen/);
+    assert.match(source, /function cancelPreviewRendering\(\)[\s\S]*?activePreviewRenderTask\.cancel\(\)[\s\S]*?takeoffCancelThumbnailRender[\s\S]*?cancelTakeoffJobs/);
     assert.match(source, /document\.elementFromPoint\(lastSheetPointer\.x, lastSheetPointer\.y\)/);
     assert.match(source, /sheetPreviewScheduler\?\.\(pointedRow\)/);
+});
+
+test('preview reuses the loaded viewer PDF and renders only one low-resolution page', () => {
+    assert.match(source, /getViewerPreviewThumb\(doc, targetPage, requestId\)/);
+    assert.match(source, /callEditor\('takeoffRenderThumbnail',\s*targetPage,\s*PREVIEW_THUMB_MAX_DIMENSION\)/);
+    assert.match(source, /const PREVIEW_THUMB_MAX_DIMENSION\s*=\s*800;/);
+    assert.match(overview, /const TAKEOFF_PREVIEW_MAX_DIMENSION\s*=\s*800;/);
+    assert.match(editor, /const THUMBNAIL_MAX_DIMENSION\s*=\s*800;/);
+    assert.match(editor, /const page = await pdfDoc\.getPage\(pg\)/);
+    assert.doesNotMatch(editor.slice(editor.indexOf('async function takeoffRenderThumbnail'), editor.indexOf('function takeoffGetDocumentInfo')), /for\s*\(/);
+});
+
+test('thumbnail caches are versioned LRU caches with bounded memory', () => {
+    assert.match(source, /const PREVIEW_THUMB_CACHE_VERSION\s*=\s*'white-v3'/);
+    assert.match(source, /doc\?\.version[\s\S]*Number\(pageNumber\)/);
+    assert.match(source, /thumbnailCacheLimit:\s*40/);
+    assert.match(source, /const oldestKey = drawingState\.thumbnailCache\.keys\(\)\.next\(\)\.value;[\s\S]*?thumbnailCache\.delete\(oldestKey\)/);
+    assert.match(overview, /const TAKEOFF_PREVIEW_CACHE_LIMIT\s*=\s*80;/);
+    assert.match(overview, /const TAKEOFF_PREVIEW_CACHE_VERSION\s*=\s*'white-v3'/);
+    assert.match(overview, /URL\.revokeObjectURL\(oldestUrl\)/);
 });
 
 test('large drawing sheet lists are virtualized and use delegated events', () => {

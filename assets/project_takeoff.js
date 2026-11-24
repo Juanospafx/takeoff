@@ -325,7 +325,12 @@
         pdfDocs: new Map(),
         thumbnailCache: new Map(),
         thumbnailCacheLimit: 40,
+        ownedPreviewObjectUrls: new Set(),
         thumbnailRequest: 0,
+        previewDebounceTimer: null,
+        previewDebounceResolve: null,
+        previewObserver: null,
+        previewObserverResolve: null,
         previewPendingKey: null,
         previewRenderedKey: null,
         previewDetailsSummary: null,
@@ -376,6 +381,7 @@
                 folder: doc.folder_name || 'Documents',
                 pageCount: Number(doc.pageCount || doc.page_count || 0) || null,
                 fileUrl: doc.path,
+                version: String(doc.version || doc.updated_at || doc.uploaded_at || doc.path || ''),
                 extension: String(doc.extension || '').toLowerCase(),
                 sheets: []
             }));
@@ -442,7 +448,6 @@
     window.__SharedPdfDocCache = window.__SharedPdfDocCache || new Map();
     window.__SharedPdfThumbCache = window.__SharedPdfThumbCache || new Map();
     const sharedPdfDocCache = window.__SharedPdfDocCache;
-    const sharedPdfThumbCache = window.__SharedPdfThumbCache;
     const pdfLoadingInFlight = new Map();
 
     async function getPdfDocument(doc) {
@@ -8340,8 +8345,8 @@
                     drawingState.previewAttachmentDocId = target.doc.id;
                 } else if (drawingState.previewPage === target.page
                     && Number(drawingState.lastPreviewDocId) === Number(target.doc.id)) return;
-                renderSheetPreview(target.doc, target.page);
-            }, 280);
+                renderSheetPreview(target.doc, target.page, { debounce: false });
+            }, 200);
         };
         sheetPreviewScheduler = schedulePreview;
         box.addEventListener('pointermove', event => {
@@ -8437,7 +8442,7 @@
             clearTimeout(activeSheetHoverTimer);
             activeSheetHoverTimer = null;
         }
-        window.__TakeoffThumbService?.cancelTakeoffJobs?.();
+        cancelPreviewRendering();
         sheetVirtualModel = null;
         if (sheetVirtualFrame !== null) cancelAnimationFrame(sheetVirtualFrame);
         sheetVirtualFrame = null;
@@ -8811,18 +8816,124 @@
         });
     }
 
-    function storeTakeoffPreviewThumb(key, fileKey, url) {
+    const PREVIEW_THUMB_CACHE_VERSION = 'white-v3';
+    const PREVIEW_THUMB_MAX_DIMENSION = 800;
+    const PREVIEW_DEBOUNCE_MS = 200;
+
+    function previewThumbKey(doc, pageNumber) {
+        const version = String(doc?.version || doc?.fileUrl || 'unknown');
+        return `${PREVIEW_THUMB_CACHE_VERSION}:${doc?.id || 0}:${version}:${Number(pageNumber) || 1}:${PREVIEW_THUMB_MAX_DIMENSION}`;
+    }
+
+    function previewImageHtml(url, label) {
+        return `<img class="pro-preview-image" src="${esc(url)}" alt="${esc(label)}" loading="lazy" decoding="async">`;
+    }
+
+    function showPreviewImage(box, url, label, key) {
+        if (!box || !url) return;
+        box.innerHTML = previewImageHtml(url, label);
+        drawingState.previewRenderedKey = key;
+    }
+
+    function cancelPreviewRendering() {
+        ++drawingState.thumbnailRequest;
+        if (drawingState.previewDebounceTimer) {
+            clearTimeout(drawingState.previewDebounceTimer);
+            drawingState.previewDebounceTimer = null;
+        }
+        drawingState.previewDebounceResolve?.(false);
+        drawingState.previewDebounceResolve = null;
+        if (drawingState.previewObserver) {
+            drawingState.previewObserver.disconnect();
+            drawingState.previewObserver = null;
+        }
+        drawingState.previewObserverResolve?.(false);
+        drawingState.previewObserverResolve = null;
+        if (drawingState.activePreviewRenderTask && typeof drawingState.activePreviewRenderTask.cancel === 'function') {
+            try { drawingState.activePreviewRenderTask.cancel(); } catch (_) {}
+            drawingState.activePreviewRenderTask = null;
+        }
+        callEditor('takeoffCancelThumbnailRender');
+        window.__TakeoffThumbService?.cancelTakeoffJobs?.();
+        drawingState.previewPendingKey = null;
+    }
+
+    function waitForPreviewDebounce(requestId) {
+        return new Promise(resolve => {
+            if (drawingState.previewDebounceTimer) {
+                clearTimeout(drawingState.previewDebounceTimer);
+                drawingState.previewDebounceResolve?.(false);
+            }
+            drawingState.previewDebounceResolve = resolve;
+            drawingState.previewDebounceTimer = setTimeout(() => {
+                drawingState.previewDebounceTimer = null;
+                drawingState.previewDebounceResolve = null;
+                resolve(requestId === drawingState.thumbnailRequest && drawingState.dropdownOpen);
+            }, PREVIEW_DEBOUNCE_MS);
+        });
+    }
+
+    function waitForPreviewVisibility(box, requestId) {
+        if (!box || !drawingState.dropdownOpen || requestId !== drawingState.thumbnailRequest) return Promise.resolve(false);
+        const rect = box.getBoundingClientRect();
+        const isVisible = rect.width > 0 && rect.height > 0
+            && rect.bottom > 0 && rect.right > 0
+            && rect.top < window.innerHeight && rect.left < window.innerWidth;
+        if (isVisible || typeof window.IntersectionObserver !== 'function') return Promise.resolve(true);
+        return new Promise(resolve => {
+            drawingState.previewObserver?.disconnect();
+            drawingState.previewObserverResolve?.(false);
+            drawingState.previewObserverResolve = resolve;
+            drawingState.previewObserver = new IntersectionObserver(entries => {
+                if (!entries.some(entry => entry.isIntersecting)) return;
+                drawingState.previewObserver?.disconnect();
+                drawingState.previewObserver = null;
+                drawingState.previewObserverResolve = null;
+                resolve(requestId === drawingState.thumbnailRequest && drawingState.dropdownOpen);
+            }, { root: null, threshold: 0.01 });
+            drawingState.previewObserver.observe(box);
+        });
+    }
+
+    function takePreviewCacheValue(cache, key) {
+        if (!cache?.has(key)) return null;
+        const value = cache.get(key);
+        cache.delete(key);
+        cache.set(key, value);
+        return value;
+    }
+
+    function storeTakeoffPreviewThumb(key, url, options = {}) {
         if (!url) return;
-        if (drawingState.thumbnailCache.has(key)) drawingState.thumbnailCache.delete(key);
+        if (drawingState.thumbnailCache.has(key)) {
+            const previousUrl = drawingState.thumbnailCache.get(key);
+            drawingState.thumbnailCache.delete(key);
+            if (previousUrl !== url && drawingState.ownedPreviewObjectUrls.delete(previousUrl)) {
+                try { URL.revokeObjectURL(previousUrl); } catch (_) {}
+            }
+        }
         drawingState.thumbnailCache.set(key, url);
-        sharedPdfThumbCache.set(key, url);
-        if (fileKey) sharedPdfThumbCache.set(fileKey, url);
+        if (options.ownedObjectUrl) drawingState.ownedPreviewObjectUrls.add(url);
         while (drawingState.thumbnailCache.size > drawingState.thumbnailCacheLimit) {
-            drawingState.thumbnailCache.delete(drawingState.thumbnailCache.keys().next().value);
+            const oldestKey = drawingState.thumbnailCache.keys().next().value;
+            const oldestUrl = drawingState.thumbnailCache.get(oldestKey);
+            drawingState.thumbnailCache.delete(oldestKey);
+            if (drawingState.ownedPreviewObjectUrls.delete(oldestUrl)) {
+                try { URL.revokeObjectURL(oldestUrl); } catch (_) {}
+            }
         }
     }
 
-    async function renderSheetPreview(doc, pageNumber) {
+    async function getViewerPreviewThumb(doc, targetPage, requestId) {
+        const info = callEditor('takeoffGetDocumentInfo');
+        if (!info || Number(info.fileId) !== Number(doc.id)) return null;
+        const result = callEditor('takeoffRenderThumbnail', targetPage, PREVIEW_THUMB_MAX_DIMENSION);
+        if (!result || typeof result.then !== 'function') return null;
+        const url = await result;
+        return requestId === drawingState.thumbnailRequest ? url : null;
+    }
+
+    async function renderSheetPreview(doc, pageNumber, options = {}) {
         const box = $('takeoffSheetPreview');
         if (!box || !doc) return;
         const targetPage = Math.max(1, Number(pageNumber) || 1);
@@ -8884,39 +8995,27 @@
 
         // Render thumbnail
         if (doc.extension !== 'pdf') {
-            const imageKey = `image:${doc.id}`;
+            const imageKey = `image:${doc.id}:${doc.version || doc.fileUrl || ''}`;
             if (drawingState.previewRenderedKey === imageKey && box.querySelector('img')) return;
-            ++drawingState.thumbnailRequest;
+            cancelPreviewRendering();
             drawingState.lastPreviewDocId = doc.id;
-            if (drawingState.activePreviewRenderTask && typeof drawingState.activePreviewRenderTask.cancel === 'function') {
-                try { drawingState.activePreviewRenderTask.cancel(); } catch (_) {}
-                drawingState.activePreviewRenderTask = null;
-            }
-            box.innerHTML = `<img src="${esc(doc.fileUrl)}" alt="${esc(doc.name)}" loading="lazy" decoding="async">`;
-            drawingState.previewRenderedKey = imageKey;
+            showPreviewImage(box, doc.fileUrl, doc.name, imageKey);
             return;
         }
-        const key = `${doc.id}:${targetPage}`;
-        const fileKey = doc.fileUrl ? `${doc.fileUrl}:${targetPage}` : null;
+        const key = previewThumbKey(doc, targetPage);
 
         if (drawingState.previewRenderedKey === key && box.querySelector('img')) return;
         if (drawingState.previewPendingKey === key) return;
-        const requestId = ++drawingState.thumbnailRequest;
+        cancelPreviewRendering();
+        const requestId = drawingState.thumbnailRequest;
         drawingState.lastPreviewDocId = doc.id;
-        if (drawingState.activePreviewRenderTask && typeof drawingState.activePreviewRenderTask.cancel === 'function') {
-            try { drawingState.activePreviewRenderTask.cancel(); } catch (_) {}
-            drawingState.activePreviewRenderTask = null;
-        }
 
         // 1. Check in-memory caches (0ms)
-        const cachedUrl = drawingState.thumbnailCache.get(key)
-            || sharedPdfThumbCache.get(key)
-            || (fileKey ? sharedPdfThumbCache.get(fileKey) : null)
+        const cachedUrl = takePreviewCacheValue(drawingState.thumbnailCache, key)
             || window.__TakeoffThumbService?.getCachedThumbUrl?.(doc, targetPage);
         if (cachedUrl) {
-            drawingState.thumbnailCache.set(key, cachedUrl);
-            box.innerHTML = `<img src="${cachedUrl}" alt="${esc(sheetName(doc, targetPage))}" loading="lazy" decoding="async">`;
-            drawingState.previewRenderedKey = key;
+            storeTakeoffPreviewThumb(key, cachedUrl);
+            showPreviewImage(box, cachedUrl, sheetName(doc, targetPage), key);
             return;
         }
 
@@ -8924,34 +9023,46 @@
         showPreviewLoading();
 
         try {
-            // 2. Check IndexedDB persistent cache (~1ms, zero CPU load)
+            const debounceReady = options.debounce === false
+                ? requestId === drawingState.thumbnailRequest && drawingState.dropdownOpen
+                : await waitForPreviewDebounce(requestId);
+            if (!debounceReady || !await waitForPreviewVisibility(box, requestId)) return;
+
+            // 2. Reuse the already-loaded PDF instance in the main Takeoff viewer.
+            const viewerUrl = await getViewerPreviewThumb(doc, targetPage, requestId);
+            if (requestId !== drawingState.thumbnailRequest || !drawingState.dropdownOpen) return;
+            if (viewerUrl) {
+                storeTakeoffPreviewThumb(key, viewerUrl);
+                showPreviewImage(box, viewerUrl, sheetName(doc, targetPage), key);
+                return;
+            }
+
+            // 3. Check versioned IndexedDB cache (~1ms, zero CPU load)
             if (window.__TakeoffThumbService?.getPersistedThumbUrl) {
                 const persistedUrl = await window.__TakeoffThumbService.getPersistedThumbUrl(doc, targetPage);
-                if (requestId !== drawingState.thumbnailRequest) return;
+                if (requestId !== drawingState.thumbnailRequest || !drawingState.dropdownOpen) return;
                 if (persistedUrl) {
-                    storeTakeoffPreviewThumb(key, fileKey, persistedUrl);
-                    box.innerHTML = `<img src="${persistedUrl}" alt="${esc(sheetName(doc, targetPage))}" loading="lazy" decoding="async">`;
-                    drawingState.previewRenderedKey = key;
+                    storeTakeoffPreviewThumb(key, persistedUrl);
+                    showPreviewImage(box, persistedUrl, sheetName(doc, targetPage), key);
                     return;
                 }
             }
 
-            // 3. Render in Dedicated Background Web Worker (OffscreenCanvas) so scrolling/navigation never lags
+            // 4. Render only the selected page in a background worker when it is not loaded in the viewer.
             if (window.__TakeoffThumbService?.renderPreviewThumb) {
                 const workerRes = await window.__TakeoffThumbService.renderPreviewThumb(doc, targetPage);
-                if (requestId !== drawingState.thumbnailRequest) return;
+                if (requestId !== drawingState.thumbnailRequest || !drawingState.dropdownOpen) return;
                 if (workerRes && workerRes.url) {
                     if (workerRes.numPages && !doc.pageCount) {
                         syncResolvedPageCountToState(doc, workerRes.numPages);
                     }
-                    storeTakeoffPreviewThumb(key, fileKey, workerRes.url);
-                    box.innerHTML = `<img src="${workerRes.url}" alt="${esc(sheetName(doc, targetPage))}" loading="lazy" decoding="async">`;
-                    drawingState.previewRenderedKey = key;
+                    storeTakeoffPreviewThumb(key, workerRes.url);
+                    showPreviewImage(box, workerRes.url, sheetName(doc, targetPage), key);
                     return;
                 }
             }
 
-            // 4. Fallback if OffscreenCanvas Worker is unavailable: idle callback + async toBlob
+            // 5. Fallback if OffscreenCanvas is unavailable: low-resolution idle render.
             await waitForPreviewIdle();
             if (requestId !== drawingState.thumbnailRequest || !drawingState.dropdownOpen) return;
             if (requestId !== drawingState.thumbnailRequest) return;
@@ -8963,30 +9074,36 @@
                 return;
             }
             const unscaled = page.getViewport({ scale: 1.0 });
-            const previewPixelRatio = Math.min(Number(window.devicePixelRatio) || 1, 2);
-            const targetWidth = Math.min(960, Math.max(480, Math.round((box.clientWidth || 320) * previewPixelRatio)));
-            const scale = Math.min(1, Math.max(0.2, targetWidth / (unscaled.width || 1000)));
+            const largestSide = Math.max(unscaled.width || 1, unscaled.height || 1);
+            const scale = Math.min(1, PREVIEW_THUMB_MAX_DIMENSION / largestSide);
             const viewport = page.getViewport({ scale });
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d', { alpha: false });
             canvas.width = Math.max(1, Math.floor(viewport.width));
             canvas.height = Math.max(1, Math.floor(viewport.height));
-            ctx.fillStyle = '#fff';
+            ctx.save();
+            ctx.globalCompositeOperation = 'copy';
+            ctx.fillStyle = '#ffffff';
             ctx.fillRect(0, 0, canvas.width, canvas.height);
-            const renderTask = page.render({ canvasContext: ctx, viewport });
+            ctx.restore();
+            const renderTask = page.render({ canvasContext: ctx, viewport, background: '#ffffff' });
             drawingState.activePreviewRenderTask = renderTask;
-            await renderTask.promise;
-            try { page.cleanup(); } catch (_) {}
-            if (drawingState.activePreviewRenderTask === renderTask) {
-                drawingState.activePreviewRenderTask = null;
+            try {
+                await renderTask.promise;
+            } finally {
+                try { page.cleanup(); } catch (_) {}
+                if (drawingState.activePreviewRenderTask === renderTask) {
+                    drawingState.activePreviewRenderTask = null;
+                }
             }
             if (requestId !== drawingState.thumbnailRequest) return;
-            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.80));
+            const blob = await new Promise(resolve => canvas.toBlob(resolve, 'image/jpeg', 0.86));
+            canvas.width = 0;
+            canvas.height = 0;
             if (!blob || requestId !== drawingState.thumbnailRequest) return;
             const blobUrl = URL.createObjectURL(blob);
-            storeTakeoffPreviewThumb(key, fileKey, blobUrl);
-            box.innerHTML = `<img src="${blobUrl}" alt="${esc(sheetName(doc, targetPage))}" loading="lazy" decoding="async">`;
-            drawingState.previewRenderedKey = key;
+            storeTakeoffPreviewThumb(key, blobUrl, { ownedObjectUrl: true });
+            showPreviewImage(box, blobUrl, sheetName(doc, targetPage), key);
         } catch (e) {
             if (e && (e.name === 'RenderingCancelledException' || String(e.message || '').includes('Rendering cancelled'))) {
                 return;

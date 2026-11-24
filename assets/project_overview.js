@@ -1145,8 +1145,9 @@
         return thumbIdbPromise;
     }
 
-    async function getPersistedThumbBlobUrl(doc, pageNumber = 1) {
-        const key = getPersistentThumbKey(doc, pageNumber);
+    async function getPersistedThumbBlobUrl(doc, pageNumber = 1, cacheKey = '') {
+        const storeInSharedCache = !cacheKey;
+        const key = cacheKey || getPersistentThumbKey(doc, pageNumber);
         if (!key) return null;
         const db = await openThumbIdb();
         if (!db) return null;
@@ -1159,10 +1160,10 @@
                     const val = req.result;
                     if (val instanceof Blob) {
                         const blobUrl = URL.createObjectURL(val);
-                        storeCachedSheetThumbUrl(doc, pageNumber, blobUrl);
+                        if (storeInSharedCache) storeCachedSheetThumbUrl(doc, pageNumber, blobUrl);
                         resolve(blobUrl);
                     } else if (typeof val === 'string' && val.startsWith('data:image/')) {
-                        storeCachedSheetThumbUrl(doc, pageNumber, val);
+                        if (storeInSharedCache) storeCachedSheetThumbUrl(doc, pageNumber, val);
                         resolve(val);
                     } else {
                         resolve(null);
@@ -1175,8 +1176,8 @@
         });
     }
 
-    async function savePersistedThumbBlob(doc, pageNumber, blobOrDataUrl) {
-        const key = getPersistentThumbKey(doc, pageNumber);
+    async function savePersistedThumbBlob(doc, pageNumber, blobOrDataUrl, cacheKey = '') {
+        const key = cacheKey || getPersistentThumbKey(doc, pageNumber);
         if (!key || !blobOrDataUrl) return;
         const db = await openThumbIdb();
         if (!db) return;
@@ -1333,15 +1334,24 @@
                                 }
                                 const unscaled = page.getViewport({ scale: 1.0 });
                                 const targetWidth = job.targetWidth || 320;
-                                const scale = Math.min(0.45, Math.max(0.15, targetWidth / (unscaled.width || 1000)));
+                                const scale = isTakeoffJob
+                                    ? Math.min(1, Math.min(800, targetWidth) / Math.max(unscaled.width || 1, unscaled.height || 1))
+                                    : Math.min(0.45, Math.max(0.15, targetWidth / (unscaled.width || 1000)));
                                 const viewport = page.getViewport({ scale });
                                 const w = Math.max(1, Math.round(viewport.width));
                                 const h = Math.max(1, Math.round(viewport.height));
                                 const offscreen = makeOffscreenCanvas(w, h);
                                 const ctx = offscreen.getContext('2d', { alpha: false });
+                                if (isTakeoffJob) {
+                                    ctx.save();
+                                    ctx.globalCompositeOperation = 'copy';
+                                }
                                 ctx.fillStyle = '#ffffff';
                                 ctx.fillRect(0, 0, w, h);
-                                const renderTask = page.render({ canvasContext: ctx, viewport, canvasFactory });
+                                if (isTakeoffJob) ctx.restore();
+                                const renderParams = { canvasContext: ctx, viewport, canvasFactory };
+                                if (isTakeoffJob) renderParams.background = '#ffffff';
+                                const renderTask = page.render(renderParams);
                                 if (isTakeoffJob) activeTakeoffRenderTask = renderTask;
                                 try {
                                     await renderTask.promise;
@@ -1498,18 +1508,56 @@
         return { docKey, url: absUrl, buffer };
     }
 
+    const TAKEOFF_PREVIEW_CACHE_VERSION = 'white-v3';
+    const TAKEOFF_PREVIEW_MAX_DIMENSION = 800;
+    const TAKEOFF_PREVIEW_CACHE_LIMIT = 80;
+    const takeoffPreviewThumbCache = new Map();
+
+    function getTakeoffPreviewCacheKey(doc, pageNumber = 1) {
+        const version = String(doc?.version || doc?.fileUrl || doc?.path || 'unknown');
+        return `${TAKEOFF_PREVIEW_CACHE_VERSION}:${doc?.id || 0}:${version}:p${Number(pageNumber) || 1}:max${TAKEOFF_PREVIEW_MAX_DIMENSION}`;
+    }
+
+    function getTakeoffPreviewCachedUrl(doc, pageNumber = 1) {
+        const key = getTakeoffPreviewCacheKey(doc, pageNumber);
+        if (!takeoffPreviewThumbCache.has(key)) return null;
+        const url = takeoffPreviewThumbCache.get(key);
+        takeoffPreviewThumbCache.delete(key);
+        takeoffPreviewThumbCache.set(key, url);
+        return url;
+    }
+
+    function storeTakeoffPreviewCachedUrl(doc, pageNumber, url) {
+        if (!url) return;
+        const key = getTakeoffPreviewCacheKey(doc, pageNumber);
+        if (takeoffPreviewThumbCache.has(key)) takeoffPreviewThumbCache.delete(key);
+        takeoffPreviewThumbCache.set(key, url);
+        while (takeoffPreviewThumbCache.size > TAKEOFF_PREVIEW_CACHE_LIMIT) {
+            const oldestKey = takeoffPreviewThumbCache.keys().next().value;
+            const oldestUrl = takeoffPreviewThumbCache.get(oldestKey);
+            takeoffPreviewThumbCache.delete(oldestKey);
+            if (typeof oldestUrl === 'string' && oldestUrl.startsWith('blob:')) {
+                try { URL.revokeObjectURL(oldestUrl); } catch (_) {}
+            }
+        }
+    }
+
     window.__TakeoffThumbService = {
         getCachedThumbUrl(doc, pageNumber = 1) {
             if (!doc) return null;
-            return getCachedSheetThumbUrl({ id: doc.id, backendId: doc.id, path: doc.fileUrl || doc.path }, pageNumber);
+            return getTakeoffPreviewCachedUrl(doc, pageNumber);
         },
         async getPersistedThumbUrl(doc, pageNumber = 1) {
             if (!doc) return null;
-            return getPersistedThumbBlobUrl({ id: doc.id, backendId: doc.id, path: doc.fileUrl || doc.path }, pageNumber);
+            const cacheKey = getTakeoffPreviewCacheKey(doc, pageNumber);
+            const url = await getPersistedThumbBlobUrl(doc, pageNumber, cacheKey);
+            if (url) storeTakeoffPreviewCachedUrl(doc, pageNumber, url);
+            return url;
         },
         async renderPreviewThumb(doc, pageNumber = 1) {
             if (!doc || pdfThumbWorkerUnsupported) return null;
-            const normDoc = { id: doc.id, backendId: doc.id, path: doc.fileUrl || doc.path };
+            const version = String(doc.version || doc.fileUrl || doc.path || 'unknown');
+            const normDoc = { id: doc.id, backendId: `${doc.id}:${version}`, path: doc.fileUrl || doc.path, version };
             const workerDoc = await buildWorkerDocPayload(normDoc);
             if (!workerDoc.url && !workerDoc.buffer) return null;
             const res = await callPdfThumbWorker({
@@ -1519,20 +1567,21 @@
                 url: workerDoc.url,
                 buffer: workerDoc.buffer,
                 pageNumber: Number(pageNumber) || 1,
-                targetWidth: THUMB_TARGET_WIDTH,
+                targetWidth: TAKEOFF_PREVIEW_MAX_DIMENSION,
                 quality: THUMB_JPEG_QUALITY
             });
             if (res && res.ok && res.blob) {
                 const blobUrl = URL.createObjectURL(res.blob);
-                storeCachedSheetThumbUrl(normDoc, pageNumber, blobUrl);
-                savePersistedThumbBlob(normDoc, pageNumber, res.blob);
+                storeTakeoffPreviewCachedUrl(doc, pageNumber, blobUrl);
+                savePersistedThumbBlob(doc, pageNumber, res.blob, getTakeoffPreviewCacheKey(doc, pageNumber));
                 return { url: blobUrl, numPages: res.numPages };
             }
             return null;
         },
         async getPageCount(doc) {
             if (!doc || pdfThumbWorkerUnsupported) return 0;
-            const normDoc = { id: doc.id, backendId: doc.id, path: doc.fileUrl || doc.path };
+            const version = String(doc.version || doc.fileUrl || doc.path || 'unknown');
+            const normDoc = { id: doc.id, backendId: `${doc.id}:${version}`, path: doc.fileUrl || doc.path, version };
             const workerDoc = await buildWorkerDocPayload(normDoc);
             if (!workerDoc.url && !workerDoc.buffer) return 0;
             const res = await callPdfThumbWorker({

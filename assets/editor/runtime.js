@@ -2871,6 +2871,9 @@
 
         const thumbnailCache = new Map();
         const THUMBNAIL_CACHE_LIMIT = 24;
+        const THUMBNAIL_MAX_DIMENSION = 800;
+        let activeThumbnailRenderTask = null;
+        let thumbnailRequestSequence = 0;
 
         function touchThumbnailCache(key, dataUrl) {
             if (thumbnailCache.has(key)) thumbnailCache.delete(key);
@@ -2880,21 +2883,56 @@
             }
         }
 
-        async function takeoffRenderThumbnail(targetPage = pageNum) {
+        function takeoffCancelThumbnailRender() {
+            ++thumbnailRequestSequence;
+            if (activeThumbnailRenderTask && typeof activeThumbnailRenderTask.cancel === 'function') {
+                try { activeThumbnailRenderTask.cancel(); } catch (_) { }
+            }
+            activeThumbnailRenderTask = null;
+        }
+
+        async function takeoffRenderThumbnail(targetPage = pageNum, requestedMaxDimension = THUMBNAIL_MAX_DIMENSION) {
             if (!pdfDoc) return null;
             const pg = Math.max(1, Math.min(pdfDoc.numPages, Number(targetPage) || 1));
-            const key = String(pg);
-            if (thumbnailCache.has(key)) return thumbnailCache.get(key);
+            const maxDimension = Math.min(THUMBNAIL_MAX_DIMENSION, Math.max(160, Number(requestedMaxDimension) || THUMBNAIL_MAX_DIMENSION));
+            const key = `white-v3:${pg}:${maxDimension}`;
+            if (thumbnailCache.has(key)) {
+                const cached = thumbnailCache.get(key);
+                thumbnailCache.delete(key);
+                thumbnailCache.set(key, cached);
+                return cached;
+            }
+            takeoffCancelThumbnailRender();
+            const requestId = thumbnailRequestSequence;
             const page = await pdfDoc.getPage(pg);
-            const viewport = page.getViewport({ scale: 0.18 });
+            if (requestId !== thumbnailRequestSequence) {
+                try { page.cleanup(); } catch (_) { }
+                return null;
+            }
+            const unscaled = page.getViewport({ scale: 1 });
+            const largestSide = Math.max(unscaled.width || 1, unscaled.height || 1);
+            const viewport = page.getViewport({ scale: Math.min(1, maxDimension / largestSide) });
             const thumbCanvas = document.createElement('canvas');
             const ctx = thumbCanvas.getContext('2d', { alpha: false });
             thumbCanvas.width = Math.max(1, Math.floor(viewport.width));
             thumbCanvas.height = Math.max(1, Math.floor(viewport.height));
+            ctx.save();
+            ctx.globalCompositeOperation = 'copy';
             ctx.fillStyle = '#ffffff';
             ctx.fillRect(0, 0, thumbCanvas.width, thumbCanvas.height);
-            await page.render({ canvasContext: ctx, viewport }).promise;
-            const dataUrl = thumbCanvas.toDataURL('image/jpeg', 0.68);
+            ctx.restore();
+            const renderTask = page.render({ canvasContext: ctx, viewport, background: '#ffffff' });
+            activeThumbnailRenderTask = renderTask;
+            try {
+                await renderTask.promise;
+            } finally {
+                if (activeThumbnailRenderTask === renderTask) activeThumbnailRenderTask = null;
+                try { page.cleanup(); } catch (_) { }
+            }
+            if (requestId !== thumbnailRequestSequence) return null;
+            const dataUrl = thumbCanvas.toDataURL('image/jpeg', 0.86);
+            thumbCanvas.width = 0;
+            thumbCanvas.height = 0;
             touchThumbnailCache(key, dataUrl);
             return dataUrl;
         }
@@ -2924,6 +2962,7 @@
         window.takeoffGetDocumentInfo = takeoffGetDocumentInfo;
         window.takeoffJumpToPage = takeoffJumpToPage;
         window.takeoffRenderThumbnail = takeoffRenderThumbnail;
+        window.takeoffCancelThumbnailRender = takeoffCancelThumbnailRender;
 
         function loadPageAnnotations(pg) {
             historyProcessing = true;

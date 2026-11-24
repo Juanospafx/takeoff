@@ -4126,8 +4126,11 @@ body.theme-dark .pro-drawing-group-count {
     max-height: 100%;
     object-fit: contain;
     object-position: center;
-    background: var(--tk-bg-panel);
+    background: #ffffff !important;
     margin: auto;
+    filter: none !important;
+    mix-blend-mode: normal !important;
+    color-scheme: light;
 }
 
 .pro-preview-details {
@@ -4271,6 +4274,9 @@ body.theme-dark .pro-drawing-group-count {
 }
 
 .pro-open-sheet-btn {
+    position: sticky;
+    bottom: 0;
+    z-index: 2;
     width: 100%;
     padding: 4px 10px;
     border-radius: 5px;
