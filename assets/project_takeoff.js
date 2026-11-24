@@ -8199,8 +8199,10 @@
     let sheetListDelegationBound = false;
     let sheetVirtualModel = null;
     let sheetVirtualFrame = null;
+    let sheetPreviewScheduler = null;
+    let lastSheetPointer = null;
     const SHEET_VIRTUAL_THRESHOLD = 60;
-    const SHEET_VIRTUAL_ROW_HEIGHT = 37;
+    const SHEET_VIRTUAL_ROW_HEIGHT = 33;
     const SHEET_VIRTUAL_OVERSCAN = 8;
 
     function positionDrawingDropdown() {
@@ -8210,9 +8212,9 @@
         const triggerRect = trigger.getBoundingClientRect();
         const margin = 12;
         const gap = 6;
-        const width = Math.min(980, Math.max(1, window.innerWidth - (margin * 2)));
+        const width = Math.min(840, Math.max(1, window.innerWidth - (margin * 2)));
         const maxViewportHeight = Math.max(1, window.innerHeight - (margin * 2));
-        const preferredHeight = Math.min(480, maxViewportHeight);
+        const preferredHeight = Math.min(400, maxViewportHeight);
         const below = window.innerHeight - triggerRect.bottom - margin - gap;
         const above = triggerRect.top - margin - gap;
         const openAbove = below < 280 && above > below;
@@ -8248,6 +8250,11 @@
             if (dropdownScrollTimer) clearTimeout(dropdownScrollTimer);
             dropdownScrollTimer = setTimeout(() => {
                 isDropdownScrolling = false;
+                renderVirtualSheetWindow(true);
+                if (lastSheetPointer && typeof document.elementFromPoint === 'function') {
+                    const pointedRow = document.elementFromPoint(lastSheetPointer.x, lastSheetPointer.y)?.closest?.('.pro-sheet-row');
+                    if (pointedRow) sheetPreviewScheduler?.(pointedRow);
+                }
             }, 150);
         };
         docBox?.addEventListener('scroll', onScroll, { passive: true });
@@ -8331,9 +8338,14 @@
                 renderSheetPreview(target.doc, target.page);
             }, 280);
         };
+        sheetPreviewScheduler = schedulePreview;
+        box.addEventListener('pointermove', event => {
+            lastSheetPointer = { x: event.clientX, y: event.clientY };
+        }, { passive: true });
         box.addEventListener('mouseover', event => {
             const row = event.target.closest('.pro-sheet-row');
             if (!row || row.contains(event.relatedTarget)) return;
+            lastSheetPointer = { x: event.clientX, y: event.clientY };
             schedulePreview(row);
         });
         box.addEventListener('mouseout', event => {
