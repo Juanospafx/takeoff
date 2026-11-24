@@ -180,6 +180,7 @@
         const dpr = window.devicePixelRatio || 1;
         const PDF_PADDING = isMobileViewport ? 18 : 36;
         const MAX_PDF_RENDER_SCALE = 2.5;
+        const PAGE_SWITCH_MAX_DIMENSION = 3072;
         const initialRequestedPage = Math.max(1, Number.parseInt(new URLSearchParams(window.location.search).get('page') || '1', 10) || 1);
         let pdfDoc = null, pageNum = initialRequestedPage;
         let pdfWorldWidth = 0;
@@ -194,7 +195,9 @@
         let pendingZoomNotification = null;
         let currentPdfBgImage = null;
         const pdfBitmapCache = new Map();
-        const PDF_BITMAP_CACHE_LIMIT = 4;
+        const PDF_BITMAP_CACHE_LIMIT = 2;
+        const pageSwitchLatencySamples = [];
+        let activePageSwitch = null;
         const drawingLoading = document.getElementById('drawingLoading');
 
         function notifyTakeoffZoomChanged(source = 'editor') {
@@ -2520,6 +2523,10 @@
                 if (useKonvaRuler) setKonvaPage(pageNum);
                 document.getElementById('p-total').textContent = pdf.numPages;
                 renderPageList(pdf.numPages);
+                activePageSwitch = {
+                    page: pageNum,
+                    startedAt: typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now()
+                };
                 notifyTakeoffReady();
                 renderPage(pageNum);
             }).catch(error => {
@@ -2658,13 +2665,13 @@
             canvas.requestRenderAll();
         }
 
-        function pdfRenderScaleForZoom(zoom) {
-            // Fixed optimal resolution (150%): avoids repeated re-rasterization during zoom
-            return MAX_PDF_RENDER_SCALE;
+        function pdfRenderScaleForViewport(baseViewport) {
+            const largestSide = Math.max(baseViewport?.width || 1, baseViewport?.height || 1);
+            return Math.min(MAX_PDF_RENDER_SCALE, Math.max(0.5, PAGE_SWITCH_MAX_DIMENSION / largestSide));
         }
 
-        function pdfBitmapCacheKey(num, zoom) {
-            return `${num}@${MAX_PDF_RENDER_SCALE}`;
+        function pdfBitmapCacheKey(num, renderScale) {
+            return `${num}@${Number(renderScale || 1).toFixed(3)}`;
         }
 
         function touchPdfBitmapCache(key, bitmap) {
@@ -2673,8 +2680,12 @@
             while (pdfBitmapCache.size > PDF_BITMAP_CACHE_LIMIT) {
                 const firstKey = pdfBitmapCache.keys().next().value;
                 const old = pdfBitmapCache.get(firstKey);
-                if (old?.url) URL.revokeObjectURL(old.url);
                 pdfBitmapCache.delete(firstKey);
+                if (old?.url) URL.revokeObjectURL(old.url);
+                if (old?.canvas && old.canvas !== canvas.backgroundImage?.getElement?.()) {
+                    old.canvas.width = 0;
+                    old.canvas.height = 0;
+                }
             }
         }
 
@@ -2687,21 +2698,18 @@
 
 
 
-        async function renderPageToBitmap(num, zoom, token) {
-            const cacheKey = pdfBitmapCacheKey(num, zoom);
+        async function renderPageToBitmap(num, renderScale, token, page, baseViewport) {
+            const cacheKey = pdfBitmapCacheKey(num, renderScale);
             const cached = pdfBitmapCache.get(cacheKey);
             if (cached) {
                 touchPdfBitmapCache(cacheKey, cached);
                 return cached;
             }
-            const page = await pdfDoc.getPage(num);
             if (token !== renderToken) return null;
-            const baseViewport = page.getViewport({ scale: 1 });
             pdfWorldWidth = baseViewport.width;
             pdfWorldHeight = baseViewport.height;
 
-            const viewportScale = pdfRenderScaleForZoom(zoom);
-            const viewport = page.getViewport({ scale: viewportScale });
+            const viewport = page.getViewport({ scale: renderScale });
             const renderCanvas = document.createElement('canvas');
             const renderCtx = renderCanvas.getContext('2d', { alpha: false });
 
@@ -2712,33 +2720,53 @@
             cancelActivePdfRender();
             const renderTask = page.render({ canvasContext: renderCtx, viewport });
             activePdfRenderTask = renderTask;
-            await renderTask.promise;
-            if (activePdfRenderTask === renderTask) activePdfRenderTask = null;
+            try {
+                await renderTask.promise;
+            } finally {
+                if (activePdfRenderTask === renderTask) activePdfRenderTask = null;
+            }
             if (token !== renderToken) return null;
 
-            const bitmap = await new Promise(resolve => {
-                renderCanvas.toBlob(blob => {
-                    if (!blob) {
-                        resolve(null);
-                        return;
-                    }
-                    resolve({
-                        url: URL.createObjectURL(blob),
-                        bitmapWidth: renderCanvas.width,
-                        bitmapHeight: renderCanvas.height,
-                        worldWidth: baseViewport.width,
-                        worldHeight: baseViewport.height,
-                        renderScale: viewportScale,
-                        requestedZoom: Number(zoom) || 1
-                    });
-                }, 'image/png');
-            });
+            const bitmap = {
+                canvas: renderCanvas,
+                bitmapWidth: renderCanvas.width,
+                bitmapHeight: renderCanvas.height,
+                worldWidth: baseViewport.width,
+                worldHeight: baseViewport.height,
+                renderScale,
+                requestedZoom: Number(canvas.getZoom()) || 1
+            };
             if (bitmap) touchPdfBitmapCache(cacheKey, bitmap);
             return bitmap;
         }
 
+        function pageSwitchPercentile(percentile) {
+            if (!pageSwitchLatencySamples.length) return 0;
+            const sorted = [...pageSwitchLatencySamples].sort((a, b) => a - b);
+            return sorted[Math.min(sorted.length - 1, Math.max(0, Math.ceil(sorted.length * percentile) - 1))];
+        }
+
+        function notifyPageSwitchRendered(renderedPage, token) {
+            if (!activePageSwitch || activePageSwitch.page !== renderedPage || token !== renderToken) return;
+            const now = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+            const durationMs = Math.max(0, now - activePageSwitch.startedAt);
+            pageSwitchLatencySamples.push(durationMs);
+            if (pageSwitchLatencySamples.length > 30) pageSwitchLatencySamples.shift();
+            const metrics = {
+                page: renderedPage,
+                durationMs: Math.round(durationMs),
+                p50: Math.round(pageSwitchPercentile(0.5)),
+                p95: Math.round(pageSwitchPercentile(0.95)),
+                p99: Math.round(pageSwitchPercentile(0.99)),
+                sampleCount: pageSwitchLatencySamples.length
+            };
+            window.__takeoffPageSwitchMetrics = metrics;
+            activePageSwitch = null;
+            try { window.parent?.postMessage({ type: 'takeoff-page-rendered', fileId, ...metrics }, '*'); } catch (_) { }
+        }
+
         function applyPdfBackground(bitmap, token, loadAnnotations) {
-            fabric.Image.fromURL(bitmap.url, img => {
+            const commit = img => {
                 if (token !== renderToken) return;
                 setBg(img, bitmap.worldWidth, bitmap.worldHeight);
                 currentPdfRenderZoom = bitmap.requestedZoom;
@@ -2747,7 +2775,13 @@
                 if (typeof window.setTakeoffPage === 'function') window.setTakeoffPage(pageNum);
                 if (typeof window.syncKonvaToFabric === 'function') window.syncKonvaToFabric();
                 if (loadAnnotations) loadPageAnnotations(pageNum);
-            });
+                notifyPageSwitchRendered(pageNum, token);
+            };
+            if (bitmap.canvas) {
+                commit(new fabric.Image(bitmap.canvas));
+                return;
+            }
+            fabric.Image.fromURL(bitmap.url, commit);
         }
 
         let isRenderingPage = false;
@@ -2756,8 +2790,12 @@
             if (isRenderingPage) {
                 pendingRenderRequest = {
                     num: Math.max(1, Number(num) || 1),
-                    loadAnnotations: Boolean(loadAnnotations || pendingRenderRequest?.loadAnnotations)
+                    loadAnnotations: Boolean(loadAnnotations)
                 };
+                // Page navigation is latest-wins: abort the old raster immediately
+                // instead of making the newly selected sheet wait behind it.
+                renderToken++;
+                cancelActivePdfRender();
                 return;
             }
             isRenderingPage = true;
@@ -2779,7 +2817,8 @@
                 pdfWorldWidth = baseViewport.width;
                 pdfWorldHeight = baseViewport.height;
                 fitPdfToView(loadAnnotations);
-                const bitmap = await renderPageToBitmap(num, canvas.getZoom(), token);
+                const renderScale = pdfRenderScaleForViewport(baseViewport);
+                const bitmap = await renderPageToBitmap(num, renderScale, token, page, baseViewport);
                 if (token !== renderToken) return;
                 if (!bitmap) throw new Error('PDF bitmap generation failed');
                 applyPdfBackground(bitmap, token, loadAnnotations);
@@ -2808,6 +2847,7 @@
         function setBg(img, worldWidth = img.width, worldHeight = img.height) {
             currentPdfBgImage = img;
             img.excludeFromHistory = true;
+            img.excludeFromExport = true;
             img.set({
                 originX: 'left',
                 originY: 'top',
@@ -2832,13 +2872,17 @@
         }
 
         function jumpToPage(targetPage) {
+            const nextPage = Math.max(1, Number(targetPage) || 1);
+            if (nextPage === pageNum && canvas.backgroundImage && !isRenderingPage) return;
+            const startedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
+            activePageSwitch = { page: nextPage, startedAt };
             saveCurrentPageAnnotations();
             currentPdfBgImage = null;
             pendingRenderRequest = null;
             renderToken++;
             cancelActivePdfRender();
             canvas.clear(); undoStack = []; historyIndex = -1;
-            pageNum = Math.max(1, Number(targetPage) || 1);
+            pageNum = nextPage;
             loadCalibrationForPage(false);
             if (typeof window.setTakeoffPage === 'function') window.setTakeoffPage(pageNum);
             if (useKonvaRuler) setKonvaPage(pageNum);
@@ -4340,7 +4384,13 @@
 
         window.addEventListener('beforeunload', () => {
             saveCurrentPageAnnotations();
-            pdfBitmapCache.forEach(bitmap => { if (bitmap?.url) URL.revokeObjectURL(bitmap.url); });
+            pdfBitmapCache.forEach(bitmap => {
+                if (bitmap?.url) URL.revokeObjectURL(bitmap.url);
+                if (bitmap?.canvas) {
+                    bitmap.canvas.width = 0;
+                    bitmap.canvas.height = 0;
+                }
+            });
             pdfBitmapCache.clear();
         });
         window.addEventListener('pagehide', () => {

@@ -334,7 +334,9 @@
         previewPendingKey: null,
         previewRenderedKey: null,
         previewDetailsSummary: null,
-        previewDetailsActiveId: null
+        previewDetailsActiveId: null,
+        pendingCanvasPage: null,
+        canvasSwitchFallbackTimer: null
     };
 
     function drawingExtensions() {
@@ -8372,7 +8374,6 @@
             const target = resolveTarget(row);
             if (!target.doc) return;
             if (target.attachment) drawingState.previewAttachmentDocId = target.doc.id;
-            renderSheetPreview(target.doc, target.page);
             selectDrawingSheet(target.doc, target.page);
         });
     }
@@ -9154,7 +9155,20 @@
     }
 
     function hideTakeoffCanvasLoader() {
+        if (drawingState.canvasSwitchFallbackTimer) {
+            clearTimeout(drawingState.canvasSwitchFallbackTimer);
+            drawingState.canvasSwitchFallbackTimer = null;
+        }
         document.getElementById('takeoffCanvasLoadingOverlay')?.classList.remove('is-active');
+    }
+
+    function armTakeoffCanvasLoaderFallback(timeoutMs = 12000) {
+        if (drawingState.canvasSwitchFallbackTimer) clearTimeout(drawingState.canvasSwitchFallbackTimer);
+        drawingState.canvasSwitchFallbackTimer = setTimeout(() => {
+            drawingState.canvasSwitchFallbackTimer = null;
+            drawingState.pendingCanvasPage = null;
+            document.getElementById('takeoffCanvasLoadingOverlay')?.classList.remove('is-active');
+        }, timeoutMs);
     }
     window.showTakeoffCanvasLoader = showTakeoffCanvasLoader;
     window.hideTakeoffCanvasLoader = hideTakeoffCanvasLoader;
@@ -9175,10 +9189,19 @@
             const currentUrl = new URL(frame.getAttribute('src') || '', window.location.href);
             currentFrameId = Number(currentUrl.searchParams.get('id') || 0);
         } catch (e) { }
+        const currentInfo = currentFrameId === Number(doc.id) ? callEditor('takeoffGetDocumentInfo') : null;
+        if (currentFrameId === Number(doc.id)
+            && Number(currentInfo?.pageNum || 0) === targetPage
+            && !drawingState.pendingCanvasPage) {
+            hideTakeoffCanvasLoader();
+            return;
+        }
+        drawingState.pendingCanvasPage = targetPage;
+        showTakeoffCanvasLoader(`Cargando hoja ${targetPage}...`);
+        armTakeoffCanvasLoaderFallback();
         if (currentFrameId !== Number(doc.id)) {
             drawingState.pendingPageJump = targetPage;
             frame.style.display = 'block';
-            showTakeoffCanvasLoader(`Renderizando y cargando plano (${doc.name || 'plano'}) en Takeoff...`);
             const switchFrame = async () => {
                 try {
                     if (frame.contentWindow?.isEditorTakeoffDirty?.() && typeof frame.contentWindow?.projectTakeoffSave === 'function') {
@@ -9188,24 +9211,12 @@
                         ]);
                     }
                 } catch (_) { }
-                const fallbackTimer = setTimeout(hideTakeoffCanvasLoader, 6000);
-                const onLoad = () => {
-                    clearTimeout(fallbackTimer);
-                    frame.removeEventListener('load', onLoad);
-                    setTimeout(() => {
-                        callEditor('takeoffJumpToPage', targetPage);
-                        if (!drawingState.pendingPageJump) syncEditorInfo();
-                        hideTakeoffCanvasLoader();
-                    }, 80);
-                };
-                frame.addEventListener('load', onLoad);
                 frame.src = nextSrc;
             };
             switchFrame();
         } else {
             drawingState.pendingPageJump = null;
             callEditor('takeoffJumpToPage', targetPage);
-            syncEditorInfo();
         }
         $('takeoffEmpty')?.style.setProperty('display', 'none');
     }
@@ -9307,10 +9318,6 @@
             $('takeoffFilterItemSheets')?.classList.add('active');
             $('takeoffFilterAllSheets')?.classList.remove('active');
             renderSheetList();
-        });
-        $('takeoffOpenSheetBtn')?.addEventListener('click', () => {
-            const doc = browsingDrawingDoc();
-            if (doc) selectDrawingSheet(doc, drawingState.previewPage || 1);
         });
         $('takeoffDrawingSearch')?.addEventListener('input', event => {
             clearTimeout(event.target._takeoffSearchTimer);
@@ -9502,8 +9509,27 @@
                 if (active) applyLayerToCanvas(active, { skipLayerSync: true });
                 return;
             }
+            if (event.data?.type === 'takeoff-page-rendered') {
+                if (event.source !== takeoffWindow()) return;
+                const doc = activeDrawingDoc();
+                const renderedPage = Number(event.data.page || 0);
+                if (!doc || Number(event.data.fileId) !== Number(doc.id)) return;
+                if (renderedPage !== Number(drawingState.selectedPage || 1)) return;
+                drawingState.pendingCanvasPage = null;
+                drawingState.selectedPage = renderedPage;
+                window.__takeoffPageSwitchMetrics = {
+                    durationMs: Number(event.data.durationMs || 0),
+                    p50: Number(event.data.p50 || 0),
+                    p95: Number(event.data.p95 || 0),
+                    p99: Number(event.data.p99 || 0),
+                    sampleCount: Number(event.data.sampleCount || 0)
+                };
+                hideTakeoffCanvasLoader();
+                setDrawingLabel();
+                syncScaleStatus(true);
+                return;
+            }
             if (event.data?.type !== 'takeoff-editor-ready') return;
-            hideTakeoffCanvasLoader();
             const doc = activeDrawingDoc();
             if (doc && Number(event.data.fileId) === Number(doc.id)) {
                 const totalPages = Math.max(1, Number(event.data.pageCount || 1));
@@ -9524,6 +9550,7 @@
                 syncScalePresets();
                 syncScaleStatus(true);
             }
+            if (!drawingState.pendingCanvasPage) hideTakeoffCanvasLoader();
             const readyRulers = callEditor('getKonvaRulersSummary');
             if (Array.isArray(readyRulers)) {
                 takeoffRulersState.page = Number(drawingState.selectedPage || 1);

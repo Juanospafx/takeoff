@@ -13,17 +13,43 @@ test('PDF zoom refresh remains silent while the existing background is visible',
     assert.match(source, /if \(isBackgroundRefresh\) return/);
 });
 
-test('PDF quality tracks rendered resolution rather than a later canvas zoom', () => {
-    assert.match(source, /Math\.ceil\(\(Number\(zoom\) \|\| 1\) \* 4\) \/ 4/);
-    assert.match(source, /renderScale: viewportScale/);
+test('page switching uses a bounded screen-resolution raster without PNG transcoding', () => {
+    assert.match(source, /const PAGE_SWITCH_MAX_DIMENSION = 3072/);
+    assert.match(source, /function pdfRenderScaleForViewport\(baseViewport\)[\s\S]*?PAGE_SWITCH_MAX_DIMENSION \/ largestSide/);
+    assert.match(source, /renderScale,/);
     assert.match(source, /currentPdfRenderScale = bitmap\.renderScale/);
-    assert.match(source, /pdfRenderScaleForZoom\(canvas\.getZoom\(\)\) > currentPdfRenderScale/);
+    const raster = source.slice(source.indexOf('async function renderPageToBitmap'), source.indexOf('function pageSwitchPercentile'));
+    assert.doesNotMatch(raster, /toBlob|toDataURL|image\/png/);
+    assert.match(raster, /canvas:\s*renderCanvas/);
+    assert.match(source, /commit\(new fabric\.Image\(bitmap\.canvas\)\)/);
+    assert.match(source, /img\.excludeFromExport = true/);
 });
 
 test('stale PDF renders are cancelled or rejected before replacing the background', () => {
     assert.match(source, /cancelActivePdfRender\(\)/);
     assert.match(source, /if \(token !== renderToken\) return/);
     assert.match(source, /if \(error\?\.name === 'RenderingCancelledException'\) return/);
+    assert.match(source, /if \(isRenderingPage\)[\s\S]*?renderToken\+\+;[\s\S]*?cancelActivePdfRender\(\)/);
+});
+
+test('page-switch completion reports latency and the parent hides its loader only for the latest sheet', () => {
+    assert.match(source, /type:\s*'takeoff-page-rendered'/);
+    assert.match(source, /p50:[\s\S]*?p95:[\s\S]*?p99:/);
+    assert.match(parentSource, /type === 'takeoff-page-rendered'[\s\S]*?renderedPage !== Number\(drawingState\.selectedPage/);
+    assert.match(parentSource, /drawingState\.pendingCanvasPage = null;[\s\S]*?hideTakeoffCanvasLoader\(\)/);
+    const selection = parentSource.slice(parentSource.indexOf('function selectDrawingSheet'), parentSource.indexOf('function orderedDirectoryDocuments'));
+    assert.doesNotMatch(selection, /frame\.addEventListener\('load'/);
+    assert.doesNotMatch(selection, /syncEditorInfo\(\)/);
+});
+
+test('entering a sheet triggers exactly one navigation path and skips discarded preview work', () => {
+    const sheetDelegation = parentSource.slice(parentSource.indexOf('function bindSheetListDelegation'), parentSource.indexOf('function bindDocumentListDelegation'));
+    const clickPath = sheetDelegation.slice(sheetDelegation.indexOf("box.addEventListener('click'"));
+    assert.match(clickPath, /selectDrawingSheet\(target\.doc, target\.page\)/);
+    assert.doesNotMatch(clickPath, /renderSheetPreview\(target\.doc, target\.page\)/);
+    const bindings = parentSource.slice(parentSource.indexOf('function bindDrawingDropdown'), parentSource.indexOf('window.cloneTakeoffWorkspaceForEstimate'));
+    assert.doesNotMatch(bindings, /takeoffOpenSheetBtn[\s\S]*?addEventListener\('click'/);
+    assert.match(parentSource, /openBtn\.onclick = \(\) => selectDrawingSheet\(doc, targetPage\)/);
 });
 
 test('all editor zoom paths publish one authoritative zoom-change event', () => {

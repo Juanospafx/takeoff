@@ -19,7 +19,7 @@ function bodyAfter(source, marker, endMarker) {
 test('wheel, trackpad pinch, fit, and the parent API report the resulting zoom', () => {
     assert.match(bodyAfter(editor, "addEventListener('wheel'", "}, { passive: false })"), /notifyTakeoffZoomChanged\('wheel'\)/);
     assert.match(bodyAfter(editor, "addEventListener('touchmove'", "}, { passive: false })"), /notifyTakeoffZoomChanged\('pinch'\)/);
-    assert.match(bodyAfter(editor, 'function centerPdfAtZoom', 'function pdfRenderScaleForZoom'), /notifyTakeoffZoomChanged\('fit'\)/);
+    assert.match(bodyAfter(editor, 'function centerPdfAtZoom', 'function pdfRenderScaleForViewport'), /notifyTakeoffZoomChanged\('fit'\)/);
     assert.match(bodyAfter(editor, "canvas.on('mouse:wheel'", "window.addEventListener('beforeunload'"), /notifyTakeoffZoomChanged\('wheel'\)/);
     assert.match(bodyAfter(editor, 'function computeWheelZoomFactor', "addEventListener('wheel'"), /e\?\.ctrlKey && Math\.abs\(delta\) < 40/);
     assert.match(bodyAfter(editor, "canvas.on('mouse:wheel'", 'schedulePdfRerender'), /evt\?\.ctrlKey && Math\.abs\(delta\) < 40/);
