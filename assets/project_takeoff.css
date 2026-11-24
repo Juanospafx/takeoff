@@ -3542,13 +3542,15 @@ body.theme-dark .pro-takeoff-viewer {
 
 .pro-drawing-dropdown {
     position: fixed;
-    top: calc(100% + 6px);
-    left: 0;
-    z-index: 85;
+    top: 50%;
+    left: 50%;
+    z-index: 100000;
     display: none;
-    width: min(840px, calc(100vw - 24px));
-    height: min(400px, calc(100vh - 96px));
-    max-height: min(420px, calc(100vh - 48px));
+    width: min(840px, calc(100vw - 32px));
+    height: min(400px, calc(100vh - 32px));
+    max-width: calc(100vw - 32px);
+    max-height: calc(100vh - 32px);
+    transform: translate(-50%, -50%);
     overflow: hidden;
     background: var(--tk-bg-panel);
     border: 1px solid var(--tk-border);
@@ -6909,7 +6911,6 @@ body.theme-dark .takeoff-subhead-nav-btn:hover {
 
 .takeoff-subhead-drawing-wrap .pro-drawing-dropdown {
     position: fixed;
-    right: auto;
     z-index: 100000;
 }
 

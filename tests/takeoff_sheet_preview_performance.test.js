@@ -15,10 +15,14 @@ test('sheet preview keeps its complete details and open-sheet action', () => {
     assert.match(dashboard, /id="takeoffOpenSheetBtn"/);
 });
 
-test('drawing dropdown is positioned against the viewport instead of a clipped workspace ancestor', () => {
+test('drawing selector is portaled and centered against the viewport as a modal', () => {
     assert.match(css, /\.pro-drawing-dropdown\s*\{[\s\S]*?position:\s*fixed;/);
+    assert.match(css, /\.pro-drawing-dropdown\s*\{[\s\S]*?top:\s*50%;[\s\S]*?left:\s*50%;[\s\S]*?transform:\s*translate\(-50%,\s*-50%\);/);
+    assert.match(source, /function ensureDrawingDropdownPortal\(\)[\s\S]*?document\.body\.appendChild\(panel\)/);
     assert.match(source, /function positionDrawingDropdown\(\)/);
-    assert.match(source, /Math\.min\(840,\s*Math\.max\(1,\s*window\.innerWidth\s*-\s*\(margin\s*\*\s*2\)\)\)/);
+    assert.match(source, /viewportLeft \+ \(viewportWidth \/ 2\)/);
+    assert.match(source, /viewportTop \+ \(viewportHeight \/ 2\)/);
+    assert.doesNotMatch(source.slice(source.indexOf('function positionDrawingDropdown()'), source.indexOf("window.addEventListener('resize'")), /getBoundingClientRect|triggerRect|openAbove/);
     assert.match(source, /addEventListener\('resize',\s*positionDrawingDropdown/);
 });
 

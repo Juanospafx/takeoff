@@ -8205,34 +8205,39 @@
     const SHEET_VIRTUAL_ROW_HEIGHT = 33;
     const SHEET_VIRTUAL_OVERSCAN = 8;
 
-    function positionDrawingDropdown() {
+    function ensureDrawingDropdownPortal() {
         const panel = $('takeoffDrawingDropdown');
-        const trigger = $('takeoffSheetSelect');
-        if (!panel || !trigger || !drawingState.dropdownOpen) return;
-        const triggerRect = trigger.getBoundingClientRect();
-        const margin = 12;
-        const gap = 6;
-        const width = Math.min(840, Math.max(1, window.innerWidth - (margin * 2)));
-        const maxViewportHeight = Math.max(1, window.innerHeight - (margin * 2));
-        const preferredHeight = Math.min(400, maxViewportHeight);
-        const below = window.innerHeight - triggerRect.bottom - margin - gap;
-        const above = triggerRect.top - margin - gap;
-        const openAbove = below < 280 && above > below;
-        const availableHeight = Math.max(1, openAbove ? above : below);
-        const height = Math.min(preferredHeight, availableHeight, maxViewportHeight);
-        const left = Math.min(Math.max(margin, triggerRect.left), Math.max(margin, window.innerWidth - width - margin));
-        const top = openAbove
-            ? Math.max(margin, triggerRect.top - height - gap)
-            : Math.min(triggerRect.bottom + gap, Math.max(margin, window.innerHeight - height - margin));
-        panel.style.left = `${Math.round(left)}px`;
-        panel.style.top = `${Math.round(top)}px`;
+        if (!panel) return null;
+        if (panel.parentElement !== document.body) document.body.appendChild(panel);
+        panel.setAttribute('role', 'dialog');
+        panel.setAttribute('aria-modal', 'true');
+        panel.setAttribute('aria-labelledby', 'takeoffDrawingDialogTitle');
+        return panel;
+    }
+
+    function positionDrawingDropdown() {
+        const panel = ensureDrawingDropdownPortal();
+        if (!panel || !drawingState.dropdownOpen) return;
+        const viewport = window.visualViewport;
+        const viewportWidth = Math.max(1, viewport?.width || window.innerWidth || document.documentElement.clientWidth);
+        const viewportHeight = Math.max(1, viewport?.height || window.innerHeight || document.documentElement.clientHeight);
+        const viewportLeft = Number(viewport?.offsetLeft || 0);
+        const viewportTop = Number(viewport?.offsetTop || 0);
+        const margin = Math.min(16, Math.max(8, Math.floor(Math.min(viewportWidth, viewportHeight) * 0.025)));
+        const width = Math.min(840, Math.max(1, viewportWidth - (margin * 2)));
+        const height = Math.min(400, Math.max(1, viewportHeight - (margin * 2)));
+        panel.style.left = `${Math.round(viewportLeft + (viewportWidth / 2))}px`;
+        panel.style.top = `${Math.round(viewportTop + (viewportHeight / 2))}px`;
         panel.style.width = `${Math.round(width)}px`;
         panel.style.height = `${Math.round(height)}px`;
-        panel.style.maxHeight = `${Math.round(maxViewportHeight)}px`;
+        panel.style.maxWidth = `${Math.round(viewportWidth - (margin * 2))}px`;
+        panel.style.maxHeight = `${Math.round(viewportHeight - (margin * 2))}px`;
+        panel.style.transform = 'translate(-50%, -50%)';
     }
 
     window.addEventListener('resize', positionDrawingDropdown, { passive: true });
     window.visualViewport?.addEventListener('resize', positionDrawingDropdown, { passive: true });
+    window.visualViewport?.addEventListener('scroll', positionDrawingDropdown, { passive: true });
 
     function bindDropdownScrollGuards() {
         if (dropdownScrollBound) return;
@@ -8402,7 +8407,7 @@
     }
 
     function openDrawingDropdown() {
-        const panel = $('takeoffDrawingDropdown');
+        const panel = ensureDrawingDropdownPortal();
         const trigger = $('takeoffSheetSelect');
         if (!panel) return;
         drawingState.documents = drawingDocs();

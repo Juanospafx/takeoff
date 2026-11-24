@@ -1098,10 +1098,11 @@ $state = [
                                     id="takeoffSheetLabel"><?= htmlspecialchars($selectedDoc['filename'] ?? 'No drawing selected') ?></span>
                                 <i class="fas fa-chevron-down"></i>
                             </button>
-                            <div class="pro-drawing-dropdown" id="takeoffDrawingDropdown" aria-label="Drawing selector">
+                            <div class="pro-drawing-dropdown" id="takeoffDrawingDropdown" aria-label="Drawing selector"
+                                role="dialog" aria-modal="true" aria-labelledby="takeoffDrawingDialogTitle">
                                 <div class="pro-drawing-dropdown-head">
                                     <div>
-                                        <strong>Drawings &amp; Sheets</strong>
+                                        <strong id="takeoffDrawingDialogTitle">Drawings &amp; Sheets</strong>
                                     </div>
                                     <button class="pro-icon-btn" type="button" data-drawing-close
                                         aria-label="Close drawing selector"><i class="fas fa-times"></i></button>
