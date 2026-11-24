@@ -22,6 +22,14 @@ test('drawing dropdown is positioned against the viewport instead of a clipped w
     assert.match(source, /addEventListener\('resize',\s*positionDrawingDropdown/);
 });
 
+test('sheet preview stays inside its panel and uses a legible high-resolution thumbnail', () => {
+    assert.match(css, /\.pro-drawing-grid\s*\{[\s\S]*?grid-template-columns:\s*minmax\(170px,\s*\.75fr\)\s*minmax\(210px,\s*1fr\)\s*minmax\(300px,\s*1\.4fr\);[\s\S]*?overflow:\s*hidden;/);
+    assert.match(css, /\.pro-preview-container\s*\{[\s\S]*?grid-template-rows:\s*minmax\(150px,\s*1fr\)\s*auto;[\s\S]*?overflow:\s*hidden;/);
+    assert.match(css, /\.pro-preview-box canvas,[\s\S]*?\.pro-preview-box img\s*\{[\s\S]*?width:\s*100%;[\s\S]*?height:\s*100%;[\s\S]*?object-fit:\s*contain;/);
+    assert.match(overview, /const THUMB_TARGET_WIDTH\s*=\s*640;/);
+    assert.match(source, /const targetWidth\s*=\s*Math\.min\(960,\s*Math\.max\(480,/);
+});
+
 test('opening the dropdown loads only the visible PDF and keeps takeoff summaries stable', () => {
     const openBlock = source.slice(source.indexOf('function openDrawingDropdown()'), source.indexOf('function closeDrawingDropdown()'));
     assert.doesNotMatch(openBlock, /warmDrawingMetadata\(\)/);
@@ -33,9 +41,23 @@ test('opening the dropdown loads only the visible PDF and keeps takeoff summarie
 
 test('hover preview is deliberately delayed, cancellable, and main-thread fallback waits for idle time', () => {
     assert.match(source, /activeSheetHoverTimer\s*=\s*setTimeout\([\s\S]*?\},\s*280\);/);
-    assert.match(source, /addEventListener\('mouseleave',\s*cancelScheduledPreview\)/);
+    assert.match(source, /addEventListener\('mouseout',[\s\S]*?cancelScheduledPreview\(\)/);
     assert.match(source, /await waitForPreviewIdle\(\)/);
     assert.match(source, /requestId\s*!==\s*drawingState\.thumbnailRequest\s*\|\|\s*!drawingState\.dropdownOpen/);
+});
+
+test('large drawing sheet lists are virtualized and use delegated events', () => {
+    assert.match(source, /const SHEET_VIRTUAL_THRESHOLD\s*=\s*60;/);
+    assert.match(source, /function renderVirtualSheetWindow\(force = false\)/);
+    assert.match(source, /model\.items\.slice\(start, end\)/);
+    assert.match(source, /function bindSheetListDelegation\(\)/);
+    assert.doesNotMatch(source, /querySelectorAll\('\[data-drawing-page\]'\)\.forEach/);
+    assert.match(css, /\.pro-drawing-list\.is-virtualized\s*\{[\s\S]*?overflow-anchor:\s*none;/);
+});
+
+test('sheet preview details are not rebuilt when only the virtual window changes', () => {
+    assert.match(source, /drawingState\.previewDetailsSummary !== summary/);
+    assert.match(source, /drawingState\.previewDetailsActiveId !== previewActiveId/);
 });
 
 test('duplicate thumbnail requests are coalesced and active worker renders can be cancelled', () => {

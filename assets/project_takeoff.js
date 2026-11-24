@@ -327,7 +327,9 @@
         thumbnailCacheLimit: 40,
         thumbnailRequest: 0,
         previewPendingKey: null,
-        previewRenderedKey: null
+        previewRenderedKey: null,
+        previewDetailsSummary: null,
+        previewDetailsActiveId: null
     };
 
     function drawingExtensions() {
@@ -2924,50 +2926,70 @@
         return `${formatted} ${uom}`;
     }
 
-    function getLayerEstimatingOverride(layer, estimateId = activeEstimateId()) {
-        if (!layer) return { overridden: false, estimatingQuantity: 0, addedFromEstimating: false };
+    function buildEstimatingOverrideIndex(estimateId = activeEstimateId()) {
+        const index = new Map();
         try {
             const estState = loadEstimatingStateForSync();
             const est = Array.isArray(estState?.estimates)
                 ? (estState.estimates.find(row => String(row.id) === String(estimateId)) || estState.estimates[0])
                 : null;
             const groups = est?.groups || estState?.groups || [];
+            const addFirst = (key, item) => {
+                if (key && !index.has(key)) index.set(key, item);
+            };
+            for (const group of groups) {
+                for (const item of (group.items || [])) {
+                    const itemId = String(item.id || '');
+                    const itemLayerId = String(item.takeoffLayerId || item.takeoff_layer_id || item.layerId || '');
+                    const cleanLayerId = itemLayerId.replace(/^takeoff_/, '');
+                    const cleanItemId = itemId.replace(/^takeoff_/, '');
+                    addFirst(`estimating:${itemId}`, item);
+                    addFirst(`layer:${itemLayerId}`, item);
+                    addFirst(`layer:${cleanLayerId}`, item);
+                    addFirst(`layer:${cleanItemId}`, item);
+                }
+            }
+        } catch (_) { }
+        return index;
+    }
+
+    function getLayerEstimatingOverride(layer, estimateId = activeEstimateId(), overrideIndex = null) {
+        if (!layer) return { overridden: false, estimatingQuantity: 0, addedFromEstimating: false };
+        try {
+            const index = overrideIndex || buildEstimatingOverrideIndex(estimateId);
             const lid = String(layer.id || '');
             const estItemId = String(layer.estimatingItemId || layer.metadata_json?.estimating_item_id || '');
-            const layerKeys = new Set([
+            const layerKeys = [
                 lid,
                 String(layer.client_uid || ''),
                 String(layer.integration_key || ''),
                 String(layer.metadata_json?.project_layer_id || '')
-            ].filter(Boolean));
-            const tkQty = Number(layer.quantity || 0);
-            for (const grp of groups) {
-                for (const it of (grp.items || [])) {
-                    const itId = String(it.id || '');
-                    const itLayerId = String(it.takeoffLayerId || it.takeoff_layer_id || it.layerId || '');
-                    const cleanLayerId = itLayerId.replace(/^takeoff_/, '');
-                    const cleanItemId = itId.replace(/^takeoff_/, '');
-                    if ((estItemId && itId === estItemId)
-                        || (itLayerId && (layerKeys.has(itLayerId) || layerKeys.has(cleanLayerId)))
-                        || (itId && layerKeys.has(cleanItemId))) {
-                        const estQty = Number(it.quantity ?? 0);
-                        const isSame = Math.abs(tkQty - estQty) < 0.0001;
-                        const overridden = !isSame && (
-                            it.quantityOverride === true
-                            || String(it.quantitySyncStatus || '') === 'overridden'
-                            || String(it.origin || '') === 'excel_import'
-                            || (Boolean(layer.quantityOverride) && String(it.quantitySyncStatus || '') !== 'synced')
-                        );
-                        const addedFromEstimating = Boolean(it.addedFromEstimating === true || it.origin === 'estimating' || it.origin === 'excel_import' || layer.addedFromEstimating === true);
-                        return {
-                            overridden,
-                            estimatingQuantity: estQty,
-                            addedFromEstimating,
-                            quantityOverrideSource: String(it.quantityOverrideSource || ''),
-                            lastSyncedTakeoffQuantity: Number(it.lastSyncedTakeoffQuantity ?? it.originalQuantity ?? 0)
-                        };
-                    }
+            ].filter(Boolean);
+            let item = estItemId ? index.get(`estimating:${estItemId}`) : null;
+            if (!item) {
+                for (const key of layerKeys) {
+                    item = index.get(`layer:${key}`);
+                    if (item) break;
                 }
+            }
+            const tkQty = Number(layer.quantity || 0);
+            if (item) {
+                const estQty = Number(item.quantity ?? 0);
+                const isSame = Math.abs(tkQty - estQty) < 0.0001;
+                const overridden = !isSame && (
+                    item.quantityOverride === true
+                    || String(item.quantitySyncStatus || '') === 'overridden'
+                    || String(item.origin || '') === 'excel_import'
+                    || (Boolean(layer.quantityOverride) && String(item.quantitySyncStatus || '') !== 'synced')
+                );
+                const addedFromEstimating = Boolean(item.addedFromEstimating === true || item.origin === 'estimating' || item.origin === 'excel_import' || layer.addedFromEstimating === true);
+                return {
+                    overridden,
+                    estimatingQuantity: estQty,
+                    addedFromEstimating,
+                    quantityOverrideSource: String(item.quantityOverrideSource || ''),
+                    lastSyncedTakeoffQuantity: Number(item.lastSyncedTakeoffQuantity ?? item.originalQuantity ?? 0)
+                };
             }
         } catch (_) { }
         return {
@@ -3026,7 +3048,17 @@
         const q = takeoffState.query;
         const estimateId = activeEstimateId();
         ensureEstimateTakeoffWorkspace(estimateId, true);
-        const layersCount = allLayers().filter(layer => layerBelongsToEstimate(layer, estimateId)).length;
+        const renderLayers = allLayers().filter(layer => layerBelongsToEstimate(layer, estimateId));
+        const layersCount = renderLayers.length;
+        const estimatingOverrideIndex = buildEstimatingOverrideIndex(estimateId);
+        const editorLockStates = callEditor('projectTakeoffGetAllLayerLockStates') || {};
+        const layerLockStateById = new Map(renderLayers.map(layer => {
+            const editorLockState = editorLockStates[String(layer.id)]
+                || editorLockStates[String(layer.client_uid || '')]
+                || editorLockStates[String(layer.metadata_json?.project_layer_id || '')]
+                || {};
+            return [String(layer.id), Boolean(layer.locked || editorLockState.locked)];
+        }));
         if (title) title.textContent = `Takeoffs (${layersCount})`;
         const activeLayer = findLayer(takeoffState.activeLayerId);
         if (activeLabel) activeLabel.textContent = activeLayer ? activeLayer.name : 'None';
@@ -3042,10 +3074,8 @@
             if (!groupVisible) return '';
             const expanded = q ? true : group.isExpanded !== false;
             const groupSelected = selectionState.selectedGroupIds.includes(String(group.id));
-            const groupLocked = (group.layers || []).length > 0 && (group.layers || []).every(layer => {
-                const editorLockState = callEditor('projectTakeoffGetLayerLockState', layer.id) || {};
-                return Boolean(layer.locked || editorLockState.locked);
-            });
+            const groupLocked = (group.layers || []).length > 0
+                && (group.layers || []).every(layer => layerLockStateById.get(String(layer.id)) === true);
             const hasVisibleChild = visibleLayers.some(layer => layer.visible !== false);
 
             const isFolderActive = groupSelected;
@@ -3066,10 +3096,9 @@
                 <div class="pro-tree-children" ${expanded ? '' : 'hidden'}>
                     ${visibleLayers.map(layer => {
                 const isVisible = layer.visible !== false;
-                const editorLockState = callEditor('projectTakeoffGetLayerLockState', layer.id) || {};
-                const isLocked = Boolean(layer.locked || editorLockState.locked);
+                const isLocked = layerLockStateById.get(String(layer.id)) === true;
                 const subText = itemQuantitySubtitle(layer);
-                const overrideInfo = getLayerEstimatingOverride(layer, estimateId);
+                const overrideInfo = getLayerEstimatingOverride(layer, estimateId, estimatingOverrideIndex);
                 const uom = layer.uom || typeToUom(layer.type) || 'ea';
                 const estQtyNum = Number(overrideInfo.estimatingQuantity || 0);
                 const estQtyFormatted = estQtyNum % 1 === 0 ? estQtyNum.toFixed(0) : estQtyNum.toFixed(2);
@@ -8166,6 +8195,13 @@
     let dropdownScrollTimer = null;
     let activeSheetHoverTimer = null;
     let dropdownScrollBound = false;
+    let documentListDelegationBound = false;
+    let sheetListDelegationBound = false;
+    let sheetVirtualModel = null;
+    let sheetVirtualFrame = null;
+    const SHEET_VIRTUAL_THRESHOLD = 60;
+    const SHEET_VIRTUAL_ROW_HEIGHT = 37;
+    const SHEET_VIRTUAL_OVERSCAN = 8;
 
     function positionDrawingDropdown() {
         const panel = $('takeoffDrawingDropdown');
@@ -8204,6 +8240,7 @@
         dropdownScrollBound = true;
         const onScroll = () => {
             isDropdownScrolling = true;
+            scheduleVirtualSheetWindow();
             if (activeSheetHoverTimer) {
                 clearTimeout(activeSheetHoverTimer);
                 activeSheetHoverTimer = null;
@@ -8217,6 +8254,141 @@
         sheetBox?.addEventListener('scroll', onScroll, { passive: true });
     }
 
+    function scheduleVirtualSheetWindow() {
+        if (!sheetVirtualModel || sheetVirtualFrame !== null) return;
+        sheetVirtualFrame = requestAnimationFrame(() => {
+            sheetVirtualFrame = null;
+            renderVirtualSheetWindow();
+        });
+    }
+
+    function renderVirtualSheetWindow(force = false) {
+        const model = sheetVirtualModel;
+        const box = $('takeoffSheetList');
+        if (!model || !box || model.box !== box || !drawingState.dropdownOpen) return;
+        const viewportHeight = Math.max(box.clientHeight || 0, SHEET_VIRTUAL_ROW_HEIGHT * 8);
+        const start = Math.max(0, Math.floor(box.scrollTop / SHEET_VIRTUAL_ROW_HEIGHT) - SHEET_VIRTUAL_OVERSCAN);
+        const visibleCount = Math.ceil(viewportHeight / SHEET_VIRTUAL_ROW_HEIGHT) + (SHEET_VIRTUAL_OVERSCAN * 2);
+        const end = Math.min(model.items.length, start + visibleCount);
+        if (!force && start === model.start && end === model.end) return;
+        model.start = start;
+        model.end = end;
+        const topHeight = start * SHEET_VIRTUAL_ROW_HEIGHT;
+        const bottomHeight = Math.max(0, (model.items.length - end) * SHEET_VIRTUAL_ROW_HEIGHT);
+        box.innerHTML = `<div class="pro-sheet-virtual-spacer" style="height:${topHeight}px"></div>`
+            + model.items.slice(start, end).map((item, offset) => model.renderRow(item, start + offset)).join('')
+            + `<div class="pro-sheet-virtual-spacer" style="height:${bottomHeight}px"></div>`;
+    }
+
+    function renderSheetRows(box, items, renderRow, key) {
+        if (items.length <= SHEET_VIRTUAL_THRESHOLD) {
+            sheetVirtualModel = null;
+            box.classList.remove('is-virtualized');
+            box.innerHTML = items.map(renderRow).join('');
+            return;
+        }
+        const previousKey = sheetVirtualModel?.key;
+        if (previousKey !== key) box.scrollTop = 0;
+        box.classList.add('is-virtualized');
+        sheetVirtualModel = { box, items, renderRow, key, start: -1, end: -1 };
+        renderVirtualSheetWindow(true);
+    }
+
+    function clearSheetRows(box, html) {
+        sheetVirtualModel = null;
+        box?.classList.remove('is-virtualized');
+        if (box) box.innerHTML = html;
+    }
+
+    function bindSheetListDelegation() {
+        if (sheetListDelegationBound) return;
+        const box = $('takeoffSheetList');
+        if (!box) return;
+        sheetListDelegationBound = true;
+        const cancelScheduledPreview = () => {
+            if (activeSheetHoverTimer) clearTimeout(activeSheetHoverTimer);
+            activeSheetHoverTimer = null;
+        };
+        const resolveTarget = row => {
+            const attachmentId = Number(row?.dataset.attachmentDocId || 0);
+            if (attachmentId > 0) {
+                return { doc: attachmentImageDocs().find(item => Number(item.id) === attachmentId), page: 1, attachment: true };
+            }
+            return { doc: browsingDrawingDoc(), page: Number(row?.dataset.drawingPage || 1), attachment: false };
+        };
+        const schedulePreview = row => {
+            if (!row || isDropdownScrolling) return;
+            cancelScheduledPreview();
+            activeSheetHoverTimer = setTimeout(() => {
+                if (isDropdownScrolling || !row.isConnected) return;
+                const target = resolveTarget(row);
+                if (!target.doc) return;
+                if (target.attachment) {
+                    if (Number(drawingState.previewAttachmentDocId) === Number(target.doc.id)) return;
+                    drawingState.previewAttachmentDocId = target.doc.id;
+                } else if (drawingState.previewPage === target.page
+                    && Number(drawingState.lastPreviewDocId) === Number(target.doc.id)) return;
+                renderSheetPreview(target.doc, target.page);
+            }, 280);
+        };
+        box.addEventListener('mouseover', event => {
+            const row = event.target.closest('.pro-sheet-row');
+            if (!row || row.contains(event.relatedTarget)) return;
+            schedulePreview(row);
+        });
+        box.addEventListener('mouseout', event => {
+            const row = event.target.closest('.pro-sheet-row');
+            if (!row || row.contains(event.relatedTarget)) return;
+            cancelScheduledPreview();
+        });
+        box.addEventListener('focusin', event => schedulePreview(event.target.closest('.pro-sheet-row')));
+        box.addEventListener('focusout', cancelScheduledPreview);
+        box.addEventListener('click', event => {
+            const row = event.target.closest('.pro-sheet-row');
+            if (!row) return;
+            cancelScheduledPreview();
+            const target = resolveTarget(row);
+            if (!target.doc) return;
+            if (target.attachment) drawingState.previewAttachmentDocId = target.doc.id;
+            renderSheetPreview(target.doc, target.page);
+            selectDrawingSheet(target.doc, target.page);
+        });
+    }
+
+    function bindDocumentListDelegation() {
+        if (documentListDelegationBound) return;
+        const box = $('takeoffDocumentList');
+        if (!box) return;
+        documentListDelegationBound = true;
+        box.addEventListener('click', event => {
+            const button = event.target.closest('[data-drawing-doc]');
+            if (!button) return;
+            const rawTarget = button.dataset.drawingDoc;
+            if (rawTarget === 'attachment') {
+                drawingState.browseDocumentId = 'attachment';
+                const images = attachmentImageDocs();
+                if (!images.some(doc => Number(doc.id) === Number(drawingState.previewAttachmentDocId))) {
+                    drawingState.previewAttachmentDocId = images[0]?.id || null;
+                }
+                renderDrawingDropdown();
+                return;
+            }
+            drawingState.browseDocumentId = Number(rawTarget);
+            drawingState.previewPage = 1;
+            const doc = browsingDrawingDoc();
+            if (doc && !doc.pageCount && doc.extension === 'pdf') {
+                renderDrawingDropdown();
+                showPreviewLoading();
+                ensurePageCount(doc).then(() => {
+                    if (!drawingState.dropdownOpen || Number(drawingState.browseDocumentId) !== Number(doc.id)) return;
+                    renderDrawingDropdown();
+                });
+            } else {
+                renderDrawingDropdown();
+            }
+        });
+    }
+
     function openDrawingDropdown() {
         const panel = $('takeoffDrawingDropdown');
         const trigger = $('takeoffSheetSelect');
@@ -8227,6 +8399,8 @@
         trigger?.setAttribute('aria-expanded', 'true');
         positionDrawingDropdown();
         bindDropdownScrollGuards();
+        bindDocumentListDelegation();
+        bindSheetListDelegation();
         const doc = browsingDrawingDoc();
         if (doc && doc.id === drawingState.selectedDocumentId && drawingState.selectedPage) {
             drawingState.previewPage = drawingState.selectedPage;
@@ -8247,6 +8421,9 @@
             activeSheetHoverTimer = null;
         }
         window.__TakeoffThumbService?.cancelTakeoffJobs?.();
+        sheetVirtualModel = null;
+        if (sheetVirtualFrame !== null) cancelAnimationFrame(sheetVirtualFrame);
+        sheetVirtualFrame = null;
         $('takeoffDrawingDropdown')?.classList.remove('open');
         $('takeoffSheetSelect')?.setAttribute('aria-expanded', 'false');
     }
@@ -8363,6 +8540,7 @@
     function renderDocumentList() {
         const box = $('takeoffDocumentList');
         if (!box) return;
+        bindDocumentListDelegation();
         const allPdfs = pdfDrawingDocs();
         const allImages = attachmentImageDocs();
         const directoryTotal = allPdfs.length + (allImages.length > 0 ? 1 : 0);
@@ -8467,39 +8645,13 @@
 
         box.innerHTML = (pdfRowsHtml + attachmentFolderHtml) || '<div class="pro-drawing-empty">No drawings match your search.</div>';
 
-        box.querySelectorAll('[data-drawing-doc]').forEach(button => {
-            button.addEventListener('click', () => {
-                const rawTarget = button.dataset.drawingDoc;
-                if (rawTarget === 'attachment') {
-                    drawingState.browseDocumentId = 'attachment';
-                    const imgs = attachmentImageDocs();
-                    if (!imgs.some(d => Number(d.id) === Number(drawingState.previewAttachmentDocId))) {
-                        drawingState.previewAttachmentDocId = imgs[0]?.id || null;
-                    }
-                    renderDrawingDropdown();
-                    return;
-                }
-                drawingState.browseDocumentId = Number(rawTarget);
-                drawingState.previewPage = 1;
-                const doc = browsingDrawingDoc();
-                if (doc && !doc.pageCount && doc.extension === 'pdf') {
-                    renderDrawingDropdown();
-                    showPreviewLoading();
-                    ensurePageCount(doc).then(() => {
-                        if (!drawingState.dropdownOpen || Number(drawingState.browseDocumentId) !== Number(doc.id)) return;
-                        renderDrawingDropdown();
-                    });
-                } else {
-                    renderDrawingDropdown();
-                }
-            });
-        });
     }
 
     function renderSheetList() {
         const box = $('takeoffSheetList');
         if (!box) return;
         bindDropdownScrollGuards();
+        bindSheetListDelegation();
 
         const activeLayer = typeof findLayer === 'function' ? findLayer(takeoffState.activeLayerId || selectionState.activeLayerId) : null;
 
@@ -8517,7 +8669,7 @@
             }
 
             if (!imgDocs.length) {
-                box.innerHTML = `<div class="pro-drawing-empty">${drawingState.filterMode === 'item' ? 'Ninguna imagen contiene marcas del item activo.' : 'No attachments match your search.'}</div>`;
+                clearSheetRows(box, `<div class="pro-drawing-empty">${drawingState.filterMode === 'item' ? 'Ninguna imagen contiene marcas del item activo.' : 'No attachments match your search.'}</div>`);
                 showPreviewFallback('Select an attachment');
                 return;
             }
@@ -8527,7 +8679,7 @@
                                      imgDocs[0];
             drawingState.previewAttachmentDocId = activePreviewDoc?.id || null;
 
-            box.innerHTML = imgDocs.map((imgDoc, idx) => {
+            const renderAttachmentRow = (imgDoc, idx) => {
                 const isCurrentEditorSheet = Number(imgDoc.id) === Number(drawingState.selectedDocumentId);
                 const isPreviewActive = Number(imgDoc.id) === Number(drawingState.previewAttachmentDocId);
                 const summary = getSheetTakeoffSummary(imgDoc.id, 1);
@@ -8553,37 +8705,9 @@
                         ${isCurrentEditorSheet ? '<span class="pro-sheet-current-tag" title="Imagen abierta en el visor"><i class="fas fa-eye"></i></span>' : ''}
                     </span>
                 </button>`;
-            }).join('');
-
-            box.querySelectorAll('[data-attachment-doc-id]').forEach(button => {
-                const getTargetDoc = () => imgDocs.find(d => Number(d.id) === Number(button.dataset.attachmentDocId));
-                const updateHoverPreview = () => {
-                    if (isDropdownScrolling) return;
-                    if (activeSheetHoverTimer) clearTimeout(activeSheetHoverTimer);
-                    activeSheetHoverTimer = setTimeout(() => {
-                        if (isDropdownScrolling) return;
-                        const targetDoc = getTargetDoc();
-                        if (!targetDoc || Number(drawingState.previewAttachmentDocId) === Number(targetDoc.id)) return;
-                        drawingState.previewAttachmentDocId = targetDoc.id;
-                        renderSheetPreview(targetDoc, 1);
-                    }, 280);
-                };
-                const cancelScheduledPreview = () => {
-                    if (activeSheetHoverTimer) clearTimeout(activeSheetHoverTimer);
-                    activeSheetHoverTimer = null;
-                };
-                button.addEventListener('mouseenter', updateHoverPreview);
-                button.addEventListener('focus', updateHoverPreview);
-                button.addEventListener('mouseleave', cancelScheduledPreview);
-                button.addEventListener('click', () => {
-                    if (activeSheetHoverTimer) clearTimeout(activeSheetHoverTimer);
-                    const targetDoc = getTargetDoc();
-                    if (!targetDoc) return;
-                    drawingState.previewAttachmentDocId = targetDoc.id;
-                    renderSheetPreview(targetDoc, 1);
-                    selectDrawingSheet(targetDoc, 1);
-                });
-            });
+            };
+            renderSheetRows(box, imgDocs, renderAttachmentRow,
+                `attachments:${drawingState.query}:${drawingState.filterMode}`);
 
             if (activePreviewDoc) {
                 renderSheetPreview(activePreviewDoc, 1);
@@ -8593,12 +8717,12 @@
 
         const doc = browsingDrawingDoc();
         if (!doc) {
-            box.innerHTML = '<div class="pro-drawing-empty">No drawing selected.</div>';
+            clearSheetRows(box, '<div class="pro-drawing-empty">No drawing selected.</div>');
             showPreviewFallback('Select a drawing');
             return;
         }
         if (!doc.pageCount && doc.extension === 'pdf') {
-            box.innerHTML = '<div class="pro-drawing-empty">Loading sheet list...</div>';
+            clearSheetRows(box, '<div class="pro-drawing-empty">Loading sheet list...</div>');
             return;
         }
 
@@ -8611,7 +8735,7 @@
             sheets = sheets.filter(sheet => sheet.takeoffSummary?.hasActiveItem);
         }
 
-        box.innerHTML = sheets.map(sheet => {
+        const renderPdfSheetRow = sheet => {
             const isCurrentEditorSheet = doc.id === drawingState.selectedDocumentId && sheet.pageNumber === drawingState.selectedPage;
             const isPreviewActive = sheet.pageNumber === (drawingState.previewPage || 1);
             const summary = sheet.takeoffSummary || EMPTY_SHEET_SUMMARY;
@@ -8638,33 +8762,13 @@
                     ${isCurrentEditorSheet ? '<span class="pro-sheet-current-tag" title="Hoja abierta en el visor"><i class="fas fa-eye"></i></span>' : ''}
                 </span>
             </button>`;
-        }).join('') || `<div class="pro-drawing-empty">${drawingState.filterMode === 'item' ? 'Ninguna hoja contiene marcas del item activo.' : 'No sheets match your search.'}</div>`;
-
-        box.querySelectorAll('[data-drawing-page]').forEach(button => {
-            const schedulePreview = () => {
-                if (isDropdownScrolling) return;
-                const pg = Number(button.dataset.drawingPage);
-                if (activeSheetHoverTimer) clearTimeout(activeSheetHoverTimer);
-                activeSheetHoverTimer = setTimeout(() => {
-                    if (isDropdownScrolling) return;
-                    if (drawingState.previewPage === pg && Number(drawingState.lastPreviewDocId) === Number(doc.id)) return;
-                    renderSheetPreview(doc, pg);
-                }, 280);
-            };
-            const cancelScheduledPreview = () => {
-                if (activeSheetHoverTimer) clearTimeout(activeSheetHoverTimer);
-                activeSheetHoverTimer = null;
-            };
-            button.addEventListener('mouseenter', schedulePreview);
-            button.addEventListener('focus', schedulePreview);
-            button.addEventListener('mouseleave', cancelScheduledPreview);
-            button.addEventListener('click', () => {
-                if (activeSheetHoverTimer) clearTimeout(activeSheetHoverTimer);
-                const pg = Number(button.dataset.drawingPage);
-                renderSheetPreview(doc, pg);
-                selectDrawingSheet(doc, pg);
-            });
-        });
+        };
+        if (sheets.length) {
+            renderSheetRows(box, sheets, renderPdfSheetRow,
+                `pdf:${doc.id}:${doc.pageCount}:${drawingState.query}:${drawingState.filterMode}`);
+        } else {
+            clearSheetRows(box, `<div class="pro-drawing-empty">${drawingState.filterMode === 'item' ? 'Ninguna hoja contiene marcas del item activo.' : 'No sheets match your search.'}</div>`);
+        }
 
         const previewPage = drawingState.previewPage || (doc.id === drawingState.selectedDocumentId ? drawingState.selectedPage : 1);
         renderSheetPreview(doc, previewPage);
@@ -8728,7 +8832,10 @@
         const openBtn = $('takeoffOpenSheetBtn');
 
         if (countEl) countEl.textContent = `${summary.layers.length} ${summary.layers.length === 1 ? 'item' : 'items'} (${summary.totalMarks} marcas)`;
-        if (listEl) {
+        const previewActiveId = String(takeoffState.activeLayerId || selectionState.activeLayerId || '');
+        const shouldRefreshDetails = drawingState.previewDetailsSummary !== summary
+            || drawingState.previewDetailsActiveId !== previewActiveId;
+        if (listEl && shouldRefreshDetails) {
             if (!summary.layers.length) {
                 listEl.innerHTML = '<div class="pro-preview-empty-takeoff"><i class="fas fa-circle-info"></i> Sin marcas de cotización en esta hoja</div>';
             } else {
@@ -8749,6 +8856,8 @@
                     </div>
                 `).join('');
             }
+            drawingState.previewDetailsSummary = summary;
+            drawingState.previewDetailsActiveId = previewActiveId;
         }
 
         if (openBtn) {
@@ -8837,7 +8946,9 @@
                 return;
             }
             const unscaled = page.getViewport({ scale: 1.0 });
-            const scale = Math.min(0.32, Math.max(0.12, 240 / (unscaled.width || 1000)));
+            const previewPixelRatio = Math.min(Number(window.devicePixelRatio) || 1, 2);
+            const targetWidth = Math.min(960, Math.max(480, Math.round((box.clientWidth || 320) * previewPixelRatio)));
+            const scale = Math.min(1, Math.max(0.2, targetWidth / (unscaled.width || 1000)));
             const viewport = page.getViewport({ scale });
             const canvas = document.createElement('canvas');
             const ctx = canvas.getContext('2d', { alpha: false });

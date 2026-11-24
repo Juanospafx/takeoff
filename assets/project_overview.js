@@ -1062,8 +1062,8 @@
     const imageThumbnailUrlCache = new Map();
     const imageThumbnailPromises = new Map();
     const MAX_SHARED_THUMB_URLS = 240;
-    const THUMB_TARGET_WIDTH = 320;
-    const THUMB_JPEG_QUALITY = 0.85;
+    const THUMB_TARGET_WIDTH = 640;
+    const THUMB_JPEG_QUALITY = 0.9;
     const pdfLoadingPromises = new Map();
     let activePriorityThumbRenders = 0;
     let documentsNeedsRenderOnTabEnter = false;

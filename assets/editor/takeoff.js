@@ -5020,6 +5020,34 @@
         };
     };
 
+    window.projectTakeoffGetAllLayerLockStates = function () {
+        const result = Object.create(null);
+        const byClientUid = new Map();
+        state.layers.forEach(layer => {
+            const entry = {
+                locked: Number(layer.locked || 0) === 1,
+                layerLocked: Number(layer.locked || 0) === 1,
+                objectCount: 0
+            };
+            const keys = [layer.client_uid, layer.metadata_json?.project_layer_id, layer.id]
+                .filter(value => value !== undefined && value !== null && String(value) !== '')
+                .map(String);
+            keys.forEach(key => { result[key] = entry; });
+            if (layer.client_uid !== undefined && layer.client_uid !== null) {
+                byClientUid.set(String(layer.client_uid), entry);
+            }
+        });
+        const countObject = object => {
+            const entry = byClientUid.get(String(object.layer_client_uid || ''));
+            if (!entry) return;
+            entry.objectCount += 1;
+            if (isObjectIndividuallyLocked(object)) entry.locked = true;
+        };
+        state.markers.forEach(countObject);
+        state.segments.forEach(countObject);
+        return result;
+    };
+
     window.projectTakeoffGetSelectionLockState = function () {
         const targets = selectedTakeoffObjectIds().map(findTakeoffObjectByUid).filter(Boolean);
         return {
