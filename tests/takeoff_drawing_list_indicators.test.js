@@ -45,9 +45,10 @@ test('project_takeoff.js updates active item bar and provides List of Drawings s
     assert.match(parentJs, /takeoffPreviewItemsList/);
 });
 
-test('project_takeoff.css uses collision-safe active borders and styles List of Drawings badges', () => {
+test('project_takeoff.css uses flat rows with an orange selection accent and styles List of Drawings badges', () => {
     assert.match(parentCss, /\.pro-drawing-row::before,[\s\S]*?\.pro-drawing-filter-btn\.active::after\s*\{[\s\S]*?display:\s*none\s*!important;/);
-    assert.match(parentCss, /\.pro-drawing-row\.active,[\s\S]*?\.pro-sheet-row\.is-editor-open\.active\s*\{[\s\S]*?border:\s*1px solid var\(--tk-primary/);
+    assert.match(parentCss, /\.pro-drawing-row,[\s\S]*?\.pro-sheet-row\s*\{[\s\S]*?border:\s*0\s*!important;/);
+    assert.match(parentCss, /\.pro-drawing-row\.active,[\s\S]*?\.pro-sheet-row\.is-editor-open\.active\s*\{[\s\S]*?box-shadow:\s*inset 3px 0 0 var\(--tk-primary/);
     // Badges and active bar
     assert.match(parentCss, /\.pro-sheet-item-mark/);
     assert.match(parentCss, /\.pro-mark-dot/);

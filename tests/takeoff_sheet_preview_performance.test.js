@@ -23,8 +23,8 @@ test('drawing dropdown is positioned against the viewport instead of a clipped w
 });
 
 test('sheet preview stays inside its panel and uses a legible high-resolution thumbnail', () => {
-    assert.match(css, /\.pro-drawing-grid\s*\{[\s\S]*?grid-template-columns:\s*minmax\(145px,\s*\.72fr\)\s*minmax\(180px,\s*\.9fr\)\s*minmax\(280px,\s*1\.45fr\);[\s\S]*?overflow:\s*hidden;/);
-    assert.match(css, /\.pro-preview-container\s*\{[\s\S]*?grid-template-rows:\s*minmax\(170px,\s*1fr\)\s*auto;[\s\S]*?overflow:\s*hidden;/);
+    assert.match(css, /\.pro-drawing-grid\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*3fr\)\s*minmax\(0,\s*4fr\)\s*minmax\(0,\s*3fr\);[\s\S]*?overflow:\s*hidden;/);
+    assert.match(css, /\.pro-preview-container\s*\{[\s\S]*?grid-template-rows:\s*minmax\(170px,\s*1fr\)\s*auto;[\s\S]*?overflow-y:\s*auto;/);
     assert.match(css, /\.pro-preview-box canvas,[\s\S]*?\.pro-preview-box img\s*\{[\s\S]*?width:\s*100%;[\s\S]*?height:\s*100%;[\s\S]*?object-fit:\s*contain;/);
     assert.match(overview, /const THUMB_TARGET_WIDTH\s*=\s*640;/);
     assert.match(source, /const targetWidth\s*=\s*Math\.min\(960,\s*Math\.max\(480,/);
