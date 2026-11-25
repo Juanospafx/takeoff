@@ -4118,7 +4118,7 @@ body.theme-dark .pro-drawing-group-count {
     display: grid;
 }
 
-.pro-takeoff-viewer > .pro-drawing-modal-overlay > .pro-drawing-dropdown {
+.pro-canvas-shell > .pro-drawing-modal-overlay > .pro-drawing-dropdown {
     position: relative;
     inset: auto;
     top: auto;

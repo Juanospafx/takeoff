@@ -35,7 +35,7 @@ const html = `<!doctype html><html style="height:100%"><head><meta charset="utf-
 <body style="margin:0;height:100%"><section id="tab-takeoff" style="display:block;width:100vw;height:100vh">
 <div class="takeoff-workspace pro-takeoff-workspace" id="takeoffWorkspace">
 <aside class="pro-takeoff-items"></aside><div class="pro-sidebar-resizer"></div><aside class="pro-layer-drawer" hidden></aside>
-<section class="pro-takeoff-viewer"><div class="pro-drawing-modal-overlay open" aria-hidden="false">
+<section class="pro-takeoff-viewer"><div class="pro-canvas-shell" id="takeoffCanvasShell"><div class="pro-drawing-modal-overlay open" aria-hidden="false">
 <div class="pro-drawing-dropdown open" id="takeoffDrawingDropdown">
 <div class="pro-drawing-dropdown-head"><strong>Drawings &amp; Sheets</strong><button>×</button></div>
 <div class="pro-drawing-search"><div class="pro-drawing-search-wrap"><input></div></div>
@@ -46,7 +46,7 @@ const html = `<!doctype html><html style="height:100%"><head><meta charset="utf-
 <div class="pro-preview-box"><canvas width="200" height="120"></canvas></div>
 <div class="pro-preview-details"><div class="pro-preview-sheet-header"><h4>Sheet</h4></div>
 <section class="pro-preview-takeoff-section"></section><button id="takeoffOpenSheetBtn" class="pro-open-sheet-btn">Open Sheet</button></div>
-</div></div></div></div></div></section></div></section></body></html>`;
+</div></div></div></div></div></div></section></div></section></body></html>`;
 
 await cdp('Page.enable');
 await cdp('Runtime.enable');

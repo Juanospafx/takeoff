@@ -17,10 +17,11 @@ test('sheet preview keeps its complete details and open-sheet action', () => {
 });
 
 test('drawing selector is centered by CSS inside the live Takeoff viewer', () => {
-    assert.match(css, /\.pro-takeoff-viewer\s*\{[\s\S]*?position:\s*relative;/);
+    assert.match(dashboard, /id="takeoffCanvasShell"[\s\S]*?id="takeoffDrawingModalOverlay"/);
+    assert.match(css, /\.pro-canvas-shell\s*\{[\s\S]*?position:\s*relative;/);
     assert.match(css, /\.pro-drawing-modal-overlay\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?inset:\s*0;[\s\S]*?place-items:\s*center;/);
-    assert.match(css, /\.pro-takeoff-viewer\s*>\s*\.pro-drawing-modal-overlay[\s\S]*?\.pro-drawing-dropdown\s*\{[\s\S]*?position:\s*relative;[\s\S]*?width:\s*min\(840px,\s*100%\);[\s\S]*?height:\s*min\(400px,\s*100%\);/);
-    assert.match(source, /function ensureDrawingDropdownPortal\(\)[\s\S]*?querySelector\('\.pro-takeoff-viewer'\)[\s\S]*?overlay\.appendChild\(panel\)/);
+    assert.match(css, /\.pro-canvas-shell\s*>\s*\.pro-drawing-modal-overlay[\s\S]*?\.pro-drawing-dropdown\s*\{[\s\S]*?position:\s*relative;[\s\S]*?width:\s*min\(840px,\s*100%\);[\s\S]*?height:\s*min\(400px,\s*100%\);/);
+    assert.match(source, /function ensureDrawingDropdownPortal\(\)[\s\S]*?takeoffCanvasShell[\s\S]*?takeoffDrawingModalOverlay[\s\S]*?overlay\.appendChild\(panel\)/);
     assert.doesNotMatch(source, /document\.body\.appendChild\(panel\)/);
     assert.doesNotMatch(source, /visualViewport|viewportLeft|viewportTop/);
     assert.doesNotMatch(source, /panel\.style\.(left|top|width|height|transform)/);

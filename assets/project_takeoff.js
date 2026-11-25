@@ -8222,17 +8222,23 @@
     function ensureDrawingDropdownPortal() {
         const panel = $('takeoffDrawingDropdown');
         if (!panel) return null;
-        const viewer = document.querySelector('.pro-takeoff-viewer');
-        if (!viewer) return null;
-        let overlay = viewer.querySelector(':scope > .pro-drawing-modal-overlay');
+        const canvasShell = $('takeoffCanvasShell') || document.querySelector('.pro-canvas-shell');
+        if (!canvasShell) return null;
+        let overlay = $('takeoffDrawingModalOverlay');
         if (!overlay) {
             overlay = document.createElement('div');
+            overlay.id = 'takeoffDrawingModalOverlay';
             overlay.className = 'pro-drawing-modal-overlay';
             overlay.setAttribute('aria-hidden', 'true');
+            canvasShell.appendChild(overlay);
+        } else if (overlay.parentElement !== canvasShell) {
+            canvasShell.appendChild(overlay);
+        }
+        if (overlay.dataset.closeBound !== 'true') {
+            overlay.dataset.closeBound = 'true';
             overlay.addEventListener('click', event => {
                 if (event.target === overlay) closeDrawingDropdown();
             });
-            viewer.appendChild(overlay);
         }
         if (panel.parentElement !== overlay) overlay.appendChild(panel);
         panel.setAttribute('role', 'dialog');
@@ -8458,8 +8464,8 @@
         if (sheetVirtualFrame !== null) cancelAnimationFrame(sheetVirtualFrame);
         sheetVirtualFrame = null;
         $('takeoffDrawingDropdown')?.classList.remove('open');
-        document.querySelector('.pro-drawing-modal-overlay')?.classList.remove('open');
-        document.querySelector('.pro-drawing-modal-overlay')?.setAttribute('aria-hidden', 'true');
+        $('takeoffDrawingModalOverlay')?.classList.remove('open');
+        $('takeoffDrawingModalOverlay')?.setAttribute('aria-hidden', 'true');
         $('takeoffSheetSelect')?.setAttribute('aria-expanded', 'false');
     }
 

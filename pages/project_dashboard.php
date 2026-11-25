@@ -1749,10 +1749,12 @@ $state = [
                     <aside class="pro-layer-drawer" id="takeoffLayerModal" aria-label="Takeoff Layer Details" hidden>
                     </aside>
 
-                    <section class="pro-takeoff-viewer">
+                    <section class="pro-takeoff-viewer" id="takeoffViewer">
                         <div class="pro-viewer-toolbar" style="display:none;"></div>
 
-                        <div class="pro-canvas-shell">
+                        <div class="pro-canvas-shell" id="takeoffCanvasShell">
+                            <div class="pro-drawing-modal-overlay" id="takeoffDrawingModalOverlay"
+                                aria-hidden="true"></div>
                             <!-- Floating tool buttons inside canvas (Point 5) -->
                             <div class="pro-floating-tools" id="takeoffFloatingTools" aria-label="Takeoff tools">
                                 <button class="pro-tool-btn active" type="button" data-tool-command="smart"
