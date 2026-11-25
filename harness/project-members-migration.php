@@ -34,6 +34,7 @@ $result = [
     'database_connected' => false,
     'project_members_table' => false,
     'project_members_role_column' => false,
+    'project_presence_table' => false,
     'backfilled_rows' => 0,
     'cleanup' => false,
 ];
@@ -70,6 +71,25 @@ try {
         throw new RuntimeException('Project membership schema is incomplete.');
     }
 
+    $pdo->exec(
+        "CREATE TABLE IF NOT EXISTS project_presence (
+            project_id BIGINT UNSIGNED NOT NULL,
+            user_id BIGINT UNSIGNED NOT NULL,
+            client_id VARCHAR(96) NOT NULL,
+            display_name VARCHAR(191) NOT NULL,
+            user_role VARCHAR(32) NOT NULL,
+            last_seen DATETIME(6) NOT NULL,
+            PRIMARY KEY (project_id, user_id, client_id),
+            KEY idx_project_presence_active (project_id, last_seen),
+            CONSTRAINT fk_project_presence_project FOREIGN KEY (project_id) REFERENCES projects (id) ON DELETE CASCADE,
+            CONSTRAINT fk_project_presence_user FOREIGN KEY (user_id) REFERENCES users (id) ON DELETE CASCADE
+        ) ENGINE=InnoDB DEFAULT CHARSET=utf8mb4 COLLATE=utf8mb4_unicode_ci"
+    );
+    $presenceTableExists = $pdo->query("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='project_presence' LIMIT 1")->fetchColumn();
+    if (!$presenceTableExists) {
+        throw new RuntimeException('Project presence schema is incomplete.');
+    }
+
     $backfilledRows = 0;
     $directoryExists = $pdo->query("SELECT 1 FROM information_schema.tables WHERE table_schema=DATABASE() AND table_name='directory' LIMIT 1")->fetchColumn();
     if ($directoryExists) {
@@ -95,6 +115,7 @@ try {
 
     $result['project_members_table'] = true;
     $result['project_members_role_column'] = true;
+    $result['project_presence_table'] = true;
     $result['backfilled_rows'] = $backfilledRows;
     $result['ok'] = true;
 } catch (Throwable) {

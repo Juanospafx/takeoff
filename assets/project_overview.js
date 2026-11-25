@@ -4656,22 +4656,7 @@
             document.querySelector('.project-subhead-wrapper')?.classList.remove('has-open-menu');
         });
 
-        // Multi-User Real-Time Presence System
-        const FAKE_PRESENCE_NAMES = [
-            'sarah jenkins', 'marcus vance', 'carlos rodriguez',
-            'elena rostova', 'michael chang', 'david miller',
-            'amanda brooks', 'ana lopez', 'sarah connor'
-        ];
-
-        try {
-            for (let i = localStorage.length - 1; i >= 0; i--) {
-                const k = localStorage.key(i);
-                if (k && (k.startsWith('takeoff_presence_') || k.startsWith('takeoff_active_presence_'))) {
-                    localStorage.removeItem(k);
-                }
-            }
-        } catch (e) { }
-
+        // Server-backed project presence shared across browsers, devices, and sessions.
         const currentUserPresence = window.ProjectPresenceUser || {
             id: 1,
             name: 'User (You)',
@@ -4681,93 +4666,66 @@
             isSelf: true
         };
         const currentPresenceProjId = window.ProjectState?.id || window.WonProjectConfig?.projectId || 0;
-        const PRESENCE_STORAGE_KEY = 'takeoff_active_presence_p_' + currentPresenceProjId;
-        const presenceClientId = 'client_' + Math.random().toString(36).substring(2, 9);
-
-        function updatePresenceHeartbeat() {
+        const presenceClientId = (() => {
             try {
-                let data = {};
-                const raw = localStorage.getItem(PRESENCE_STORAGE_KEY);
-                if (raw) data = JSON.parse(raw);
-                const now = Date.now();
-                // Expire users unseen for > 8s and prune fake legacy names
-                Object.keys(data).forEach(k => {
-                    const u = data[k];
-                    const isOld = !u || (now - (u.lastSeen || 0)) > 8000;
-                    const isFake = u && FAKE_PRESENCE_NAMES.some(f => (u.name || '').toLowerCase().includes(f));
-                    if (isOld || isFake) {
-                        delete data[k];
-                    }
-                });
-                data[presenceClientId] = {
-                    id: currentUserPresence.id,
-                    name: currentUserPresence.name,
-                    initials: currentUserPresence.initials,
-                    color: currentUserPresence.color,
-                    role: currentUserPresence.role,
-                    lastSeen: now
-                };
-                localStorage.setItem(PRESENCE_STORAGE_KEY, JSON.stringify(data));
-            } catch (e) { }
-        }
-
-        function getActivePresenceList() {
-            try {
-                const raw = localStorage.getItem(PRESENCE_STORAGE_KEY);
-                if (!raw) return [{ ...currentUserPresence, isSelf: true }];
-                const data = JSON.parse(raw);
-                const now = Date.now();
-                const list = [];
-                const seenUserIds = new Set();
-
-                // Add self first
-                list.push({ ...currentUserPresence, isSelf: true });
-                seenUserIds.add(String(currentUserPresence.id));
-
-                Object.keys(data).forEach(k => {
-                    if (k === presenceClientId) return;
-                    const u = data[k];
-                    if (!u) return;
-                    const isFake = FAKE_PRESENCE_NAMES.some(f => (u.name || '').toLowerCase().includes(f));
-                    if (isFake) return;
-                    if ((now - (u.lastSeen || 0)) <= 8000) {
-                        const uid = String(u.id);
-                        if (!seenUserIds.has(uid)) {
-                            seenUserIds.add(uid);
-                            list.push({
-                                ...u,
-                                isSelf: false
-                            });
-                        }
-                    }
-                });
-                return list;
-            } catch (e) {
-                return [{ ...currentUserPresence, isSelf: true }];
+                const key = 'takeoff.presence.client';
+                const existing = sessionStorage.getItem(key);
+                if (existing) return existing;
+                const created = 'presence_' + (window.crypto?.randomUUID?.() || Math.random().toString(36).slice(2) + Date.now().toString(36));
+                sessionStorage.setItem(key, created);
+                return created;
+            } catch (error) {
+                return 'presence_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
             }
+        })();
+        const presenceEndpoint = '../api/project_presence.php';
+
+        async function fetchProjectPresence(action = 'heartbeat') {
+            if (!currentPresenceProjId) return [{ ...currentUserPresence, isSelf: true }];
+            const response = await fetch(presenceEndpoint, {
+                method: 'POST',
+                credentials: 'same-origin',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ action, project_id: currentPresenceProjId, client_id: presenceClientId })
+            });
+            if (!response.ok) throw new Error(`Presence request failed (${response.status})`);
+            const payload = await response.json();
+            if (payload?.status !== 'success' || !Array.isArray(payload.users)) {
+                throw new Error(payload?.message || 'Presence response is invalid');
+            }
+            return payload.users.map(user => ({
+                ...user,
+                name: user.isSelf ? `${String(user.name || '').replace(/\s*\(You\)\s*$/, '')} (You)` : user.name,
+                color: user.color || '#5b4364'
+            }));
         }
 
         function removePresenceClient() {
-            try {
-                const raw = localStorage.getItem(PRESENCE_STORAGE_KEY);
-                if (raw) {
-                    const data = JSON.parse(raw);
-                    delete data[presenceClientId];
-                    localStorage.setItem(PRESENCE_STORAGE_KEY, JSON.stringify(data));
-                }
-            } catch (e) { }
+            if (!currentPresenceProjId || typeof navigator.sendBeacon !== 'function') return;
+            const body = new Blob([JSON.stringify({
+                action: 'leave', project_id: currentPresenceProjId, client_id: presenceClientId
+            })], { type: 'application/json' });
+            navigator.sendBeacon(presenceEndpoint, body);
         }
 
         window.ProjectPresence = {
-            users: getActivePresenceList(),
+            users: [{ ...currentUserPresence, isSelf: true }],
+            syncing: false,
             getUsers() { return this.users; },
             setUsers(newUsers) {
                 this.users = Array.isArray(newUsers) ? newUsers : [];
                 this.render();
             },
-            syncRealtime() {
-                updatePresenceHeartbeat();
-                this.users = getActivePresenceList();
+            async syncRealtime() {
+                if (this.syncing) return;
+                this.syncing = true;
+                try {
+                    this.users = await fetchProjectPresence('heartbeat');
+                } catch (error) {
+                    this.users = [{ ...currentUserPresence, isSelf: true }];
+                } finally {
+                    this.syncing = false;
+                }
                 this.render();
             },
             addUser(user) {
@@ -4829,12 +4787,6 @@
 
         window.ProjectPresence.syncRealtime();
         setInterval(() => window.ProjectPresence.syncRealtime(), 5000);
-        window.addEventListener('storage', (e) => {
-            if (e.key === PRESENCE_STORAGE_KEY) {
-                window.ProjectPresence.users = getActivePresenceList();
-                window.ProjectPresence.render();
-            }
-        });
         window.addEventListener('beforeunload', removePresenceClient);
 
         $('pdPresenceStack')?.addEventListener('click', (e) => {

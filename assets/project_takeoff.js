@@ -7826,6 +7826,7 @@
         const activeEst = activeEstimateId();
         const snapshots = Object.entries(takeoffState.canvasSnapshots || {});
         const seenDocKeys = new Set();
+        const seenObjectIdsAcrossSnapshots = new Set();
         const hasNumericDocSnapshot = snapshots.some(([, s]) =>
             String(s?.estimateId || s?.estimateKey || '') === activeEst && Number(s?.drawingId || s?.drawing_id || 0) > 0
         );
@@ -7871,9 +7872,15 @@
                 let hasObjects = false;
                 rawObjects.forEach((obj, idx) => {
                     if (!obj || typeof obj !== 'object') return;
-                    const oid = String(obj.id || obj.client_uid || `idx_${idx}`);
+                    const explicitObjectId = obj.id || obj.client_uid || '';
+                    const oid = String(explicitObjectId || `idx_${idx}`);
                     if (seenObjIds.has(oid)) return;
                     seenObjIds.add(oid);
+                    if (explicitObjectId) {
+                        const globalObjectId = String(explicitObjectId);
+                        if (seenObjectIdsAcrossSnapshots.has(globalObjectId)) return;
+                        seenObjectIdsAcrossSnapshots.add(globalObjectId);
+                    }
                     hasObjects = true;
                     if (isAvgDrop) {
                         const stats = avgStats.get(canonId) || {
@@ -9504,7 +9511,9 @@
                 if (pendingDel && pendingDel.size > 0) {
                     callEditor('projectTakeoffDeleteLayers', [...pendingDel], { force: true });
                 }
-                syncAllLayersToCanvas({ suppressEstimatingSync: true });
+                if (event.data?.payload?.remoteSync !== true) {
+                    syncAllLayersToCanvas({ suppressEstimatingSync: true });
+                }
                 const active = findLayer(takeoffState.activeLayerId);
                 if (active) applyLayerToCanvas(active, { skipLayerSync: true });
                 return;

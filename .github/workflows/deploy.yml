@@ -199,11 +199,12 @@ jobs:
             --request POST \
             --header "X-Takeoff-Migration-Token: $TAKEOFF_MIGRATION_TOKEN" \
             "https://takeoff.brightronix.net/project-members-migration-${GITHUB_RUN_ID}.php")"
-          printf '%s' "$response" | jq -c '{ok,migration,database_connected,project_members_table,project_members_role_column,backfilled_rows,cleanup}'
+          printf '%s' "$response" | jq -c '{ok,migration,database_connected,project_members_table,project_members_role_column,project_presence_table,backfilled_rows,cleanup}'
           printf '%s' "$response" | jq -e '.ok == true
             and .database_connected == true
             and .project_members_table == true
             and .project_members_role_column == true
+            and .project_presence_table == true
             and .cleanup == true' >/dev/null
 
       - name: Deploy to FTPS server

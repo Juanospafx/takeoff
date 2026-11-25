@@ -8,7 +8,7 @@ header('Content-Type: application/json; charset=utf-8');
 $input = json_decode(file_get_contents('php://input'), true);
 if (!is_array($input))
     $input = [];
-$readActions = ['bootstrap', 'state', 'scale'];
+$readActions = ['bootstrap', 'state', 'revision', 'scale'];
 $mutationActions = [
     'save_scale',
     'delete_scale',
@@ -617,6 +617,79 @@ function merge_takeoff_objects(array $current, array $incoming, array $dirtyIds,
     return $current;
 }
 
+function normalize_takeoff_snapshot_objects(array $snapshot): array
+{
+    $seenObjectIds = [];
+    $seenOperationIds = [];
+    $seenGeometrySignatures = [];
+    foreach (['markers', 'segments'] as $kind) {
+        $normalized = [];
+        foreach (is_array($snapshot[$kind] ?? null) ? $snapshot[$kind] : [] as $row) {
+            if (!is_array($row))
+                continue;
+            $metadata = is_array($row['metadata_json'] ?? null)
+                ? $row['metadata_json']
+                : (json_decode((string) ($row['metadata_json'] ?? '{}'), true) ?: []);
+            $objectId = trim((string) ($row['client_uid'] ?? $row['object_uid'] ?? ''));
+            $operationId = trim((string) ($row['placement_operation_id'] ?? $metadata['placement_operation_id'] ?? ''));
+            if ($kind === 'markers') {
+                $geometrySignature = json_encode([
+                    (string) ($row['layer_client_uid'] ?? $row['layer_id'] ?? ''),
+                    max(1, i($row['page_number'] ?? 1, 1)),
+                    n($row['x'] ?? 0), n($row['y'] ?? 0),
+                    (string) ($row['symbol'] ?? 'circle'), (string) ($row['color'] ?? ''),
+                    (string) ($row['label'] ?? ''), n($row['multiplier'] ?? 1, 1),
+                    n($row['quantity'] ?? $row['multiplier'] ?? 1, 1),
+                    (string) ($row['notes'] ?? ''), n($row['symbol_size'] ?? $row['size'] ?? 0),
+                    i($row['locked'] ?? $metadata['element_locked'] ?? 0),
+                    (string) ($row['catalog_item_id'] ?? ''), (string) ($row['assembly_id'] ?? '')
+                ], JSON_UNESCAPED_SLASHES);
+            } else {
+                $points = is_array($row['points_json'] ?? null)
+                    ? $row['points_json']
+                    : (json_decode((string) ($row['points_json'] ?? '[]'), true) ?: []);
+                $normalizedPoints = array_map(static fn($point) => [
+                    n(is_array($point) ? ($point['x'] ?? 0) : 0),
+                    n(is_array($point) ? ($point['y'] ?? 0) : 0)
+                ], $points);
+                $geometrySignature = json_encode([
+                    (string) ($row['layer_client_uid'] ?? $row['layer_id'] ?? ''),
+                    max(1, i($row['page_number'] ?? 1, 1)),
+                    $normalizedPoints,
+                    n($row['measured_length'] ?? 0), n($row['multiplier'] ?? 1, 1),
+                    n($row['total_length'] ?? 0), n($row['total_area'] ?? 0),
+                    (string) ($row['unit'] ?? ''), (string) ($row['color'] ?? ''),
+                    n($row['stroke_width'] ?? 0), (string) ($row['label'] ?? ''),
+                    (string) ($row['notes'] ?? ''),
+                    (string) ($row['takeoff_subtype'] ?? $row['takeoff_type'] ?? $row['type'] ?? ''),
+                    n($row['drop_length'] ?? $row['dropLength'] ?? 0),
+                    n($row['spacing'] ?? $metadata['spacing'] ?? 0),
+                    i($row['locked'] ?? $metadata['element_locked'] ?? 0),
+                    (string) ($row['catalog_item_id'] ?? ''), (string) ($row['assembly_id'] ?? '')
+                ], JSON_UNESCAPED_SLASHES);
+            }
+            if (($objectId !== '' && isset($seenObjectIds[$objectId]))
+                || ($operationId !== '' && isset($seenOperationIds[$operationId]))
+                || ($geometrySignature !== false && isset($seenGeometrySignatures[$kind][$geometrySignature]))) {
+                continue;
+            }
+            if ($objectId !== '')
+                $seenObjectIds[$objectId] = true;
+            if ($operationId !== '') {
+                $seenOperationIds[$operationId] = true;
+                $row['placement_operation_id'] = $operationId;
+                $metadata['placement_operation_id'] = $operationId;
+                $row['metadata_json'] = $metadata;
+            }
+            if ($geometrySignature !== false)
+                $seenGeometrySignatures[$kind][$geometrySignature] = true;
+            $normalized[] = $row;
+        }
+        $snapshot[$kind] = $normalized;
+    }
+    return $snapshot;
+}
+
 /**
  * Removes deleted layer entries and their associated objects/summary rows from a snapshot.
  */
@@ -1089,6 +1162,18 @@ try {
             takeoff_guard_drawing_access($pdo, $user, $drawingId, ProjectAccess::READ, i($_GET['project_id'] ?? $input['project_id'] ?? 0));
             out_json(['status' => 'success', 'data' => state_payload($pdo, $drawingId, $estimateKey, $inheritLegacy)]);
 
+        case 'revision':
+            $drawingId = i($_GET['drawing_id'] ?? $input['drawing_id'] ?? 0);
+            $estimateKey = trim((string) ($_GET['estimate_key'] ?? $input['estimate_key'] ?? ''));
+            if ($drawingId <= 0)
+                out_json(['status' => 'error', 'msg' => 'drawing_id is required'], 422);
+            if ($estimateKey === '')
+                out_json(['status' => 'error', 'msg' => 'estimate_key is required'], 422);
+            takeoff_guard_drawing_access($pdo, $user, $drawingId, ProjectAccess::READ, i($_GET['project_id'] ?? $input['project_id'] ?? 0));
+            $revisionStmt = $pdo->prepare("SELECT revision FROM takeoff_estimate_states WHERE estimate_key = ? AND drawing_id = ? LIMIT 1");
+            $revisionStmt->execute([$estimateKey, $drawingId]);
+            out_json(['status' => 'success', 'revision' => (int) ($revisionStmt->fetchColumn() ?: 0)]);
+
         case 'scale':
             $drawingId = i($_GET['drawing_id'] ?? $input['drawing_id'] ?? 0);
             $pageNumber = max(1, i($_GET['page_number'] ?? $input['page_number'] ?? 1, 1));
@@ -1223,7 +1308,12 @@ try {
                 $currentSnapshot = json_decode((string) ($currentStmt->fetchColumn() ?: '{}'), true);
                 $isPartialKeepalive = !empty($input['partial_keepalive']);
                 $replaceLayers = !$isPartialKeepalive && !empty($input['replace_layers']);
-                $snapshot = ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary];
+                $snapshot = normalize_takeoff_snapshot_objects([
+                    'layers' => $layers,
+                    'markers' => $markers,
+                    'segments' => $segments,
+                    'summary' => $summary
+                ]);
                 if (is_array($currentSnapshot) && isset($currentSnapshot['layers'], $currentSnapshot['markers'], $currentSnapshot['segments'])) {
                     assert_takeoff_object_versions($currentSnapshot, $dirtyObjectIds, $deletedObjectIds, $objectBaseVersions);
                     if ($deletedLayerIds) {
@@ -1246,12 +1336,13 @@ try {
                             $snapshot['layers'] = $layers;
                         }
                     }
-                    $snapshot = recalculate_takeoff_snapshot_quantities($snapshot);
-                    $layers = $snapshot['layers'];
-                    $markers = $snapshot['markers'];
-                    $segments = $snapshot['segments'];
-                    $summary = $snapshot['summary'];
                 }
+                $snapshot = normalize_takeoff_snapshot_objects($snapshot);
+                $snapshot = recalculate_takeoff_snapshot_quantities($snapshot);
+                $layers = $snapshot['layers'];
+                $markers = $snapshot['markers'];
+                $segments = $snapshot['segments'];
+                $summary = $snapshot['summary'];
                 $snapshot = apply_layer_name_updates_to_snapshot($snapshot, $canonicalLayerNames);
                 $snapshot = apply_layer_name_updates_to_snapshot($snapshot, $layerNameUpdates);
                 $layers = $snapshot['layers'];
@@ -1419,7 +1510,12 @@ try {
                 $retryState = $pdo->prepare("SELECT state_json FROM takeoff_estimate_states WHERE estimate_key = ? AND drawing_id = ? LIMIT 1 FOR UPDATE");
                 $retryState->execute([$estimateKey, $drawingId]);
                 $latestSnapshot = json_decode((string) ($retryState->fetchColumn() ?: '{}'), true);
-                $retrySnapshot = ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary];
+                $retrySnapshot = normalize_takeoff_snapshot_objects([
+                    'layers' => $layers,
+                    'markers' => $markers,
+                    'segments' => $segments,
+                    'summary' => $summary
+                ]);
                 if (is_array($latestSnapshot) && isset($latestSnapshot['layers'], $latestSnapshot['markers'], $latestSnapshot['segments'])) {
                     assert_takeoff_object_versions($latestSnapshot, $dirtyObjectIds, $deletedObjectIds, $objectBaseVersions);
                     if ($deletedLayerIds) {
@@ -1434,8 +1530,9 @@ try {
                         $retrySnapshot = merge_takeoff_pages($latestSnapshot, $retrySnapshot, $dirtyPages);
                     if ($dirtyObjectIds || $deletedObjectIds)
                         $retrySnapshot = merge_takeoff_objects($retrySnapshot, ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary], $dirtyObjectIds, $deletedObjectIds);
-                    $retrySnapshot = recalculate_takeoff_snapshot_quantities($retrySnapshot);
                 }
+                $retrySnapshot = normalize_takeoff_snapshot_objects($retrySnapshot);
+                $retrySnapshot = recalculate_takeoff_snapshot_quantities($retrySnapshot);
                 $retrySnapshot = apply_layer_name_updates_to_snapshot($retrySnapshot, $canonicalLayerNames ?? []);
                 $retrySnapshot = apply_layer_name_updates_to_snapshot($retrySnapshot, $layerNameUpdates);
                 $retrySave = $pdo->prepare(

@@ -475,7 +475,7 @@ if (!empty($takeoffLayers)) {
     if (dash_table_exists($pdo, 'takeoff_count_markers')) {
         try {
             $stmtM = $pdo->prepare("
-                SELECT layer_id, page_number, COUNT(id) AS mark_count, SUM(quantity * COALESCE(multiplier, 1)) AS total_qty
+                SELECT layer_id, page_number, COUNT(id) AS mark_count, SUM(quantity) AS total_qty
                 FROM takeoff_count_markers
                 WHERE layer_id IN ($inPlaceholders)
                 GROUP BY layer_id, page_number
@@ -510,7 +510,7 @@ if (!empty($takeoffLayers)) {
     if (dash_table_exists($pdo, 'takeoff_linear_segments')) {
         try {
             $stmtS = $pdo->prepare("
-                SELECT layer_id, page_number, COUNT(id) AS mark_count, SUM(total_length * COALESCE(multiplier, 1)) AS total_qty
+                SELECT layer_id, page_number, COUNT(id) AS mark_count, SUM(total_length) AS total_qty
                 FROM takeoff_linear_segments
                 WHERE layer_id IN ($inPlaceholders)
                 GROUP BY layer_id, page_number
@@ -2307,7 +2307,7 @@ $state = [
 
         window.ProjectState = <?= json_encode($state, JSON_UNESCAPED_SLASHES | JSON_UNESCAPED_UNICODE) ?>;
         window.ProjectPresenceUser = {
-            id: <?= json_encode((int) ($authUser['id'] ?? 1)) ?>,
+            id: <?= json_encode((int) ($authUser['user_id'] ?? 0)) ?>,
             name: <?= json_encode($selfName . ' (You)') ?>,
             role: <?= json_encode($selfRole) ?>,
             initials: <?= json_encode($selfInitials) ?>,

@@ -35,6 +35,10 @@
     };
 
     const uid = () => 'tf_' + Math.random().toString(16).slice(2) + '_' + Date.now().toString(16);
+    const countPlacementGuard = window.TakeoffPlacementGuard?.createPlacementGuard({
+        windowMs: 500,
+        coordinateTolerance: 0.5
+    }) || null;
     const num = (v) => Number.isFinite(Number(v)) ? Number(v) : 0;
     const money = (v) => '$' + num(v).toFixed(2);
     let takeoffAutosaveTimer = null;
@@ -52,6 +56,9 @@
     let selectionRectDraft = null;
     let linearPointerWorld = null;
     let linearShiftPressed = false;
+    let takeoffServerRevision = 0;
+    let takeoffRemoteSyncInFlight = false;
+    let takeoffRemotePollTimer = null;
 
     function layerTrackingKeys(layer) {
         if (!layer) return [];
@@ -131,6 +138,17 @@
 
     function timestamp() {
         return new Date().toISOString();
+    }
+
+    function assignNewPlacementIdentity(marker, preferredOperationId = null) {
+        if (!marker || typeof marker !== 'object') return marker;
+        const placementOperationId = preferredOperationId || uid();
+        marker.placement_operation_id = placementOperationId;
+        marker.metadata_json = {
+            ...(marker.metadata_json || {}),
+            placement_operation_id: placementOperationId
+        };
+        return marker;
     }
     function serializeTakeoffState() {
         return {
@@ -1856,7 +1874,7 @@
         return null;
     }
 
-    function addMarker(pos) {
+    function addMarker(pos, placementOperationId = null) {
         const layer = activeLayer();
         if (!layer) {
             showToast('Select a takeoff layer before drawing.', 'error');
@@ -1868,7 +1886,7 @@
             return;
         }
         const markerMultiplier = layerMultiplier(layer);
-        const marker = {
+        const marker = assignNewPlacementIdentity({
             client_uid: uid(),
             layer_client_uid: layer.client_uid,
             catalog_item_id: layer.catalog_item_id || state.selectedItemId,
@@ -1892,7 +1910,7 @@
             createdAt: timestamp(),
             updatedAt: timestamp(),
             metadata_json: {},
-        };
+        }, placementOperationId);
         marker.created_at = marker.createdAt;
         marker.updated_at = marker.updatedAt;
         marker.quantity = calculateCountQuantity(marker);
@@ -3252,7 +3270,19 @@
             const world = screenToWorld(pos);
             if (layerType(layer) === 'linear') addLinearPoint(linearPointForPointer(world, evt.evt?.shiftKey || linearShiftPressed));
             else if (layerType(layer) === 'area') addAreaPoint(world);
-            else addMarker(world);
+            else {
+                const placementOperationId = countPlacementGuard?.begin({
+                    layerId: layer.client_uid,
+                    pageNumber: pageNum,
+                    pointerId: evt.evt?.pointerId ?? evt.evt?.changedTouches?.[0]?.identifier ?? '',
+                    eventType: evt.type || evt.evt?.type || 'click',
+                    eventTimestamp: evt.evt?.timeStamp ?? Date.now(),
+                    x: world.x,
+                    y: world.y
+                }) || null;
+                if (countPlacementGuard && !placementOperationId) return;
+                addMarker(world, placementOperationId);
+            }
         });
         konvaStage.on('dblclick dbltap', () => {
             if (state.tool === 'takeoff_linear') finishLinear();
@@ -4181,6 +4211,7 @@
         const { sentPages, sentGenerations, sentObjectIds, sentObjectGenerations, sentDeletedLayerIds, sentLayerNameUpdates, body } = buildSaveTakeoffPayload();
         return request('save_state', body).then(res => {
             if (res.status !== 'success') throw new Error(res.msg || 'Save failed');
+            takeoffServerRevision = Math.max(takeoffServerRevision, Number(res.data?.revision || 0));
             sentPages.forEach(page => {
                 if ((dirtyTakeoffPageGenerations.get(page) || 0) !== sentGenerations.get(page)) return;
                 dirtyTakeoffPages.delete(page);
@@ -4216,7 +4247,7 @@
         });
     }
 
-    function loadTakeoff() {
+    function loadTakeoff(options = {}) {
         return Promise.all([
             request('bootstrap', {}, 'GET'),
             request('state', { drawing_id: fileId, estimate_key: currentEstimateKey(),
@@ -4228,6 +4259,10 @@
             }
             if (loaded.status === 'success') {
                 const data = loaded.data || {};
+                takeoffServerRevision = Math.max(takeoffServerRevision, Number(data.revision || 0));
+                clearNodes();
+                state.selectedObjectUids.clear();
+                state.selectedElement = null;
                 window.sheetScales = window.sheetScales || {};
                 (data.scales || []).forEach(scale => {
                     const page = Number(scale.page_number ?? scale.page ?? 1);
@@ -4312,7 +4347,8 @@
                     type: 'takeoff-editor-state-loaded',
                     payload: {
                         drawingId: typeof fileId !== 'undefined' ? fileId : null,
-                        estimateKey: currentEstimateKey()
+                        estimateKey: currentEstimateKey(),
+                        remoteSync: options.remoteSync === true
                     }
                 }, '*');
             } catch (_) {}
@@ -4321,6 +4357,44 @@
             showToast(err?.message || 'Takeoff could not load. Please retry or contact an administrator.', 'error');
             renderAll();
         });
+    }
+
+    function hasPendingTakeoffMutation() {
+        return state.dirty
+            || dirtyTakeoffPages.size > 0
+            || dirtyTakeoffObjects.size > 0
+            || deletedTakeoffObjects.size > 0
+            || deletedTakeoffLayers.size > 0
+            || pendingLayerNameUpdates.size > 0
+            || !!state.draftLine
+            || !!state.draftArea
+            || !!state.selectionDrag;
+    }
+
+    async function pollTakeoffRemoteRevision() {
+        if (takeoffRemoteSyncInFlight || document.hidden || hasPendingTakeoffMutation()) return;
+        if (typeof fileId === 'undefined' || !fileId || !currentEstimateKey()) return;
+        takeoffRemoteSyncInFlight = true;
+        try {
+            const response = await request('revision', {
+                drawing_id: fileId,
+                project_id: typeof projectId !== 'undefined' ? projectId : 0,
+                estimate_key: currentEstimateKey()
+            }, 'GET');
+            const remoteRevision = Number(response?.revision || 0);
+            if (response?.status === 'success' && remoteRevision > takeoffServerRevision && !hasPendingTakeoffMutation()) {
+                await loadTakeoff({ remoteSync: true });
+            }
+        } catch (error) {
+            console.warn('Takeoff collaboration sync failed', error);
+        } finally {
+            takeoffRemoteSyncInFlight = false;
+        }
+    }
+
+    function startTakeoffRemoteSync() {
+        if (takeoffRemotePollTimer) clearInterval(takeoffRemotePollTimer);
+        takeoffRemotePollTimer = setInterval(pollTakeoffRemoteRevision, 2500);
     }
 
     function patchEditor() {
@@ -4371,6 +4445,7 @@
                 const { type, data } = window.__takeoffClipboard;
                 const copy = { ...data, client_uid: uid(), page_number: pageNum };
                 if (type === 'marker') {
+                    assignNewPlacementIdentity(copy);
                     copy.x = num(copy.x) + 18;
                     copy.y = num(copy.y) + 18;
                     state.markers.push(copy);
@@ -5304,6 +5379,7 @@
             copy.created_at = copy.createdAt;
             copy.updated_at = copy.updatedAt;
             if (target.type === 'marker') {
+                assignNewPlacementIdentity(copy);
                 copy.x = num(target.ref.x) + 16;
                 copy.y = num(target.ref.y) + 16;
                 state.markers.push(copy);
@@ -5368,8 +5444,12 @@
         renderShell();
         patchEditor();
         bindKonva();
-        loadTakeoff();
+        loadTakeoff().finally(startTakeoffRemoteSync);
     }
+
+    window.addEventListener('beforeunload', () => {
+        if (takeoffRemotePollTimer) clearInterval(takeoffRemotePollTimer);
+    });
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);
     else init();

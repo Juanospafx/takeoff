@@ -26,6 +26,8 @@ function projectTakeoffInternals() {
         console,
         setTimeout: () => 0,
         clearTimeout: () => {},
+        addEventListener: () => {},
+        dispatchEvent: () => {},
         requestAnimationFrame: () => 0,
         URLSearchParams,
         CustomEvent: class CustomEvent {},
@@ -40,6 +42,11 @@ function projectTakeoffInternals() {
     };
     sandbox.window = sandbox;
     sandbox.CatalogMetadata = CatalogMetadata;
+    const controller = new Proxy({}, { get: () => () => false });
+    sandbox.TakeoffLayerModalController = { create: () => controller };
+    sandbox.TakeoffCatalogBrowser = { create: () => controller };
+    sandbox.TakeoffViewerController = { create: () => controller };
+    sandbox.TakeoffScaleController = { create: () => controller };
     sandbox.window.ProjectState = { projectId: 2, documents: [] };
     vm.runInNewContext(instrumented, sandbox, { filename: sourcePath });
     return sandbox.__takeoffTest;
@@ -47,12 +54,17 @@ function projectTakeoffInternals() {
 
 test('group and layer checkboxes activate from their change event without bubbling the click', () => {
     assert.match(source, /\[data-group-select\][\s\S]*?addEventListener\('click',\s*event\s*=>\s*event\.stopPropagation\(\)\)[\s\S]*?addEventListener\('change',\s*\(\)\s*=>\s*setGroupSelection\(box\.dataset\.groupSelect,\s*box\.checked\)\)/);
-    assert.match(source, /\[data-layer-select\][\s\S]*?addEventListener\('click',\s*event\s*=>\s*event\.stopPropagation\(\)\)[\s\S]*?addEventListener\('change',\s*\(\)\s*=>\s*toggleLayerSelection\(box\.dataset\.layerSelect,\s*box\.checked\)\)/);
+    const layerBindings = source.slice(source.indexOf("document.querySelectorAll('[data-layer-select]')"),
+        source.indexOf("document.querySelectorAll('[data-layer-lock]')"));
+    assert.match(layerBindings, /addEventListener\('click'/);
+    assert.match(layerBindings, /event\.stopPropagation\(\)/);
+    assert.match(layerBindings, /addEventListener\('change'/);
+    assert.match(layerBindings, /toggleLayerSelection\(layerId, checked\)/);
 });
 
 test('unchecking the active dashboard item clears both parent and editor placement state', () => {
     const toggle = viewerController.slice(viewerController.indexOf('function toggleLayerSelection'), viewerController.indexOf('function toggleLayerLock'));
-    assert.match(toggle, /if \(selected\) setActiveTakeoffLayer\(layer\.id, false\)/);
+    assert.match(toggle, /if \(selected\) setActiveTakeoffLayer\(layer\.id, false,/);
     assert.match(toggle, /else if \(String\(takeoffState\.activeLayerId/);
     assert.match(toggle, /clearActiveTakeoffLayer\(false\)/);
     assert.match(toggle, /setActiveTool\('smart'\)/);
@@ -60,11 +72,12 @@ test('unchecking the active dashboard item clears both parent and editor placeme
 
 test('groups support additive selection, persistent bulk deletion, and drag reorder from the chevron', () => {
     assert.match(source, /selectedGroupIds:\s*\[\]/);
-    assert.match(source, /groupIds\.add\(String\(group\.id\)\)/);
-    assert.match(source, /callEditor\('projectTakeoffDeleteLayers', layerIds\)/);
+    assert.match(viewerController, /groupIds\.add\(String\(group\.id\)\)/);
+    assert.match(source, /function removeLayersFromEditorAndQueue/);
+    assert.match(source, /callEditor\('projectTakeoffDeleteLayers', keys,/);
     assert.match(source, /takeoff:estimating-groups-delete-requested/);
-    assert.match(source, /draggable="true" data-group-toggle/);
-    assert.match(source, /function reorderTakeoffGroup\(sourceId, targetId\)/);
+    assert.match(source, /draggable="true"[^>]*data-group-toggle/);
+    assert.match(source, /function reorderTakeoffGroup\(sourceId, targetId(?:, insertAfter = false)?\)/);
     assert.match(source, /takeoff:estimating-groups-reorder-requested/);
 });
 
@@ -73,9 +86,7 @@ test('an intentionally empty Takeoff stays empty and exposes visible group creat
     assert.match(source, /return groups;[\s\S]*?function normalizeSavedGroups/);
     assert.doesNotMatch(source, /if \(!result\.length\) result\.push\(defaultGroup/);
     assert.match(source, /estimating-group-create-requested/);
-    assert.match(dashboard, /class="pro-create-group-btn"[^>]*data-takeoff-action="create-group"/);
-    const actionsMenu = dashboard.slice(dashboard.indexOf('id="takeoffItemsActions"'), dashboard.indexOf('class="pro-create-group-btn"'));
-    assert.doesNotMatch(actionsMenu, /data-takeoff-action="create-group"/);
+    assert.match(dashboard, /class="pro-row-action-btn"[^>]*data-takeoff-action="create-group"/);
 });
 
 test('quantities update in real time by aggregating every document snapshot once', () => {
@@ -88,8 +99,8 @@ test('quantities update in real time by aggregating every document snapshot once
         ]
     }];
     takeoffState.canvasSnapshots = {
-        doc1: { estimateId: 'est_primary', layers: [{ id: 'copper', shapes: [{ quantityValue: 3 }, { quantity: 4 }] }] },
-        doc2: { estimateId: 'est_primary', layers: [
+        doc1: { estimateId: 'est_primary', drawingId: 1, layers: [{ id: 'copper', shapes: [{ quantityValue: 3 }, { quantity: 4 }] }] },
+        doc2: { estimateId: 'est_primary', drawingId: 2, layers: [
             { layerId: 'copper', takeoffObjects: [{ quantityValue: 5 }] },
             { id: 'receptacle', shapes: [{ quantity: 7 }] }
         ] }
@@ -99,6 +110,22 @@ test('quantities update in real time by aggregating every document snapshot once
 
     assert.equal(takeoffState.groups[0].layers[0].quantity, 14, 'base 2 + document totals 7 and 5');
     assert.equal(takeoffState.groups[0].layers[1].quantity, 7);
+});
+
+test('the same persisted object is counted only once across aliased snapshots', () => {
+    const { takeoffState, applyAggregatedCanvasQuantities } = projectTakeoffInternals();
+    takeoffState.groups = [{ id: 'default', layers: [
+        { id: 'fixture', client_uid: 'fixture', baseQuantity: 0, quantity: 0 }
+    ] }];
+    const repeated = { id: 'object-1', client_uid: 'object-1', quantityValue: 1 };
+    takeoffState.canvasSnapshots = {
+        first: { estimateId: 'est_primary', drawingId: 10, layers: [{ id: 'fixture', shapes: [repeated] }] },
+        staleAlias: { estimateId: 'est_primary', drawingId: 11, layers: [{ id: 'fixture', shapes: [{ ...repeated }] }] }
+    };
+
+    applyAggregatedCanvasQuantities();
+
+    assert.equal(takeoffState.groups[0].layers[0].quantity, 1);
 });
 
 test('Count Part quantities survive iframe hydration and use an aggregate fallback without double counting', () => {
@@ -136,6 +163,8 @@ test('a persisted calculated quantity is not reused as an additive base quantity
         console,
         setTimeout: () => 0,
         clearTimeout: () => {},
+        addEventListener: () => {},
+        dispatchEvent: () => {},
         requestAnimationFrame: () => 0,
         URLSearchParams,
         CustomEvent: class CustomEvent {},
@@ -147,6 +176,11 @@ test('a persisted calculated quantity is not reused as an additive base quantity
     };
     sandbox.window = sandbox;
     sandbox.CatalogMetadata = CatalogMetadata;
+    const controller = new Proxy({}, { get: () => () => false });
+    sandbox.TakeoffLayerModalController = { create: () => controller };
+    sandbox.TakeoffCatalogBrowser = { create: () => controller };
+    sandbox.TakeoffViewerController = { create: () => controller };
+    sandbox.TakeoffScaleController = { create: () => controller };
     sandbox.ProjectState = {
         projectId: 2,
         documents: [],
@@ -157,4 +191,11 @@ test('a persisted calculated quantity is not reused as an additive base quantity
     const layer = sandbox.__takeoffTest.seedGroupsFromProjectLayers()[0].layers[0];
     assert.equal(layer.quantity, 12, 'the API aggregate remains available for initial display');
     assert.equal(layer.baseQuantity, 0, 'the API aggregate is not added to measured shapes again');
+});
+
+test('dashboard quantities never apply an already persisted multiplier twice', () => {
+    assert.match(dashboard, /SUM\(quantity\) AS total_qty/);
+    assert.doesNotMatch(dashboard, /SUM\(quantity \* COALESCE\(multiplier, 1\)\)/);
+    assert.match(dashboard, /SUM\(total_length\) AS total_qty/);
+    assert.doesNotMatch(dashboard, /SUM\(total_length \* COALESCE\(multiplier, 1\)\)/);
 });

@@ -1846,8 +1846,12 @@
             if (!w) return;
             konvaStage = new Konva.Stage({
                 container: 'konva-overlay',
-                width: w.clientWidth,
-                height: w.clientHeight
+                // Hidden project tabs report 0x0 during initialization. Konva's
+                // internal scene compositor cannot draw from a zero-sized canvas.
+                // Keep a harmless backing surface until `takeoff-visible`/resize
+                // applies the real viewport dimensions.
+                width: Math.max(1, w.clientWidth),
+                height: Math.max(1, w.clientHeight)
             });
             konvaLayer = new Konva.Layer();
             konvaStage.add(konvaLayer);

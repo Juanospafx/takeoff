@@ -27,5 +27,19 @@ test('same-page saves merge by stable object id and detect same-object conflicts
     assert.match(api, /function merge_takeoff_objects/);
     assert.match(api, /function assert_takeoff_object_versions/);
     assert.match(api, /code' => 'object_conflict'/);
-    assert.match(api, /if \(\$dirtyObjectIds \|\| \$deletedObjectIds\) \$snapshot = merge_takeoff_objects/);
+    assert.match(api, /if \(\$dirtyObjectIds \|\| \$deletedObjectIds\)[\s\S]{0,120}merge_takeoff_objects/);
+});
+
+test('server makes placement retries idempotent before calculating quantities', () => {
+    assert.match(api, /function normalize_takeoff_snapshot_objects/);
+    assert.match(api, /placement_operation_id/);
+    assert.match(api, /seenGeometrySignatures/);
+    assert.match(api, /geometrySignature/);
+    assert.match(api, /\$row\['points_json'\]/);
+    assert.match(api, /\$snapshot = normalize_takeoff_snapshot_objects\(\$snapshot\)/);
+    assert.ok(
+        api.indexOf('$snapshot = normalize_takeoff_snapshot_objects($snapshot)')
+            < api.indexOf('$snapshot = recalculate_takeoff_snapshot_quantities($snapshot)'),
+        'duplicate operations must be removed before quantity calculation'
+    );
 });

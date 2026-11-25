@@ -11,7 +11,7 @@ test('Point remains active after each count while its item is selected', () => {
     const finish = editor.slice(editor.indexOf('function finishToolUse'), editor.indexOf('function addLinearPoint'));
     assert.match(finish, /state\.tool === 'takeoff_count' && activeLayer\(\)/);
     assert.match(finish, /emitToolState\(\);\s*return;/);
-    assert.match(editor, /function addMarker\(pos\)[\s\S]*state\.markers\.push\(marker\)[\s\S]*finishToolUse\(\)/);
+    assert.match(editor, /function addMarker\(pos(?:,\s*placementOperationId\s*=\s*null)?\)[\s\S]*state\.markers\.push\(marker\)[\s\S]*finishToolUse\(\)/);
 });
 
 test('deselecting the count item clears persistence and returns to Smart', () => {
@@ -21,7 +21,7 @@ test('deselecting the count item clears persistence and returns to Smart', () =>
     assert.match(deactivate, /state\.selectedLayerUid = null/);
     assert.match(deactivate, /state\.continuousTool = false/);
     assert.match(deactivate, /setTool\('smart'\)/);
-    assert.match(page, /editor\/takeoff\.js\?v=[a-z0-9-]+/i);
+    assert.match(page, /editor\/takeoff\.js\?v=<\?=\s*filemtime\(/i);
 });
 
 test('canvas placement requires matching drawing mode, active layer, and no pan state', () => {
