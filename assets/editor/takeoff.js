@@ -56,9 +56,11 @@
     let selectionRectDraft = null;
     let linearPointerWorld = null;
     let linearShiftPressed = false;
-    let takeoffServerRevision = 0;
+    let takeoffKnownServerRevision = 0;
+    let takeoffAppliedServerRevision = 0;
     let takeoffRemoteSyncInFlight = false;
     let takeoffRemotePollTimer = null;
+    let takeoffSaveQueue = Promise.resolve();
 
     function layerTrackingKeys(layer) {
         if (!layer) return [];
@@ -4098,6 +4100,182 @@
             .map(p => ({ x: num(p.x), y: num(p.y) }));
     }
 
+    function normalizeServerTakeoffState(data) {
+        const dbLayerIdMap = new Map();
+        const dedupedLayers = [];
+        const seenLayerIdx = new Map();
+        (data.layers || []).forEach(layer => {
+            const metadata = layer.metadata_json || {};
+            const stableUid = String(metadata.project_layer_id || layer.client_uid || layer.integration_key || layer.id);
+            [layer.id, layer.client_uid, layer.integration_key, metadata.project_layer_id].forEach(key => {
+                if (key !== undefined && key !== null && String(key) !== '') dbLayerIdMap.set(String(key), stableUid);
+            });
+            const normalizedLayer = restoreLayerCostSnapshot({
+                ...layer,
+                client_uid: stableUid,
+                metadata_json: { ...metadata, project_layer_id: stableUid }
+            });
+            if (seenLayerIdx.has(stableUid)) {
+                const index = seenLayerIdx.get(stableUid);
+                const previous = dedupedLayers[index];
+                dedupedLayers[index] = {
+                    ...previous,
+                    ...normalizedLayer,
+                    quantity: Math.max(num(previous?.quantity), num(normalizedLayer.quantity))
+                };
+            } else {
+                seenLayerIdx.set(stableUid, dedupedLayers.length);
+                dedupedLayers.push(normalizedLayer);
+            }
+        });
+
+        const seenMarkerIds = new Set();
+        const markers = (data.markers || []).map(marker => {
+            const rawLayerKey = String(marker.layer_client_uid || dbLayerIdMap.get(String(marker.layer_id)) || marker.layer_id || '');
+            const resolvedLayerUid = dbLayerIdMap.get(rawLayerKey) || rawLayerKey;
+            return {
+                ...marker,
+                client_uid: marker.client_uid || String(marker.id),
+                layer_client_uid: resolvedLayerUid,
+                metadata_json: marker.metadata_json || {},
+                symbol_size: marker.symbol_size ?? marker.metadata_json?.symbol_size ?? marker.size,
+                size: marker.symbol_size ?? marker.metadata_json?.symbol_size ?? marker.size,
+                locked: Number(marker.locked ?? marker.metadata_json?.element_locked ?? 0),
+                _serverUpdatedAt: marker.updated_at || marker.updatedAt || null
+            };
+        }).filter(marker => {
+            const id = String(marker.client_uid || '');
+            if (!id || seenMarkerIds.has(id)) return false;
+            seenMarkerIds.add(id);
+            return true;
+        });
+
+        const seenSegmentIds = new Set();
+        const segments = (data.segments || []).map(segment => {
+            const rawLayerKey = String(segment.layer_client_uid || dbLayerIdMap.get(String(segment.layer_id)) || segment.layer_id || '');
+            const resolvedLayerUid = dbLayerIdMap.get(rawLayerKey) || rawLayerKey;
+            return {
+                ...segment,
+                client_uid: segment.client_uid || String(segment.id),
+                layer_client_uid: resolvedLayerUid,
+                page_number: Math.max(1, Number(segment.page_number || 1)),
+                points_json: normalizePointsJson(segment.points_json),
+                metadata_json: segment.metadata_json || {},
+                takeoff_subtype: segment.takeoff_subtype || segment.metadata_json?.takeoff_subtype || 'linear',
+                drop_length: Math.max(0, num(segment.drop_length ?? segment.metadata_json?.drop_length)),
+                spacing: Math.max(0, num(segment.spacing ?? segment.metadata_json?.spacing)),
+                locked: Number(segment.locked ?? segment.metadata_json?.element_locked ?? 0),
+                _serverUpdatedAt: segment.updated_at || segment.updatedAt || null
+            };
+        }).filter(segment => {
+            const id = String(segment.client_uid || '');
+            if (!id || seenSegmentIds.has(id)) return false;
+            seenSegmentIds.add(id);
+            return true;
+        });
+
+        return { layers: dedupedLayers, markers, segments };
+    }
+
+    function applyTakeoffScales(scales) {
+        window.sheetScales = window.sheetScales || {};
+        (scales || []).forEach(scale => {
+            const page = Number(scale.page_number ?? scale.page ?? 1);
+            const pixelsPerUnit = Number(scale.pixels_per_unit ?? scale.pixelsPerUnit ?? 0);
+            if (page > 0 && pixelsPerUnit > 0) window.sheetScales[page] = pixelsPerUnit;
+        });
+    }
+
+    function applyRemoteTakeoffSnapshot(data, options = {}) {
+        const reconciler = window.TakeoffCollaborationReconciler;
+        const incomingRevision = Number(data?.revision || 0);
+        takeoffKnownServerRevision = Math.max(takeoffKnownServerRevision, incomingRevision);
+        if (!reconciler || !reconciler.shouldApplyRevision(takeoffAppliedServerRevision, incomingRevision)) return false;
+
+        const normalized = normalizeServerTakeoffState(data || {});
+        const dirtyObjectIds = new Set(dirtyTakeoffObjects.keys());
+        const deletedObjectIds = new Set(deletedTakeoffObjects.keys());
+        const protectedPages = new Set(Array.from(dirtyTakeoffPages, page => Number(page)));
+        if (protectedPages.size) {
+            [...state.markers, ...state.segments].forEach(object => {
+                if (protectedPages.has(Number(object.page_number || 1))) {
+                    dirtyObjectIds.add(String(object.client_uid || ''));
+                }
+            });
+            const localObjectIds = new Set([...state.markers, ...state.segments].map(object => String(object.client_uid || '')));
+            normalized.markers = normalized.markers.filter(object =>
+                !protectedPages.has(Number(object.page_number || 1)) || localObjectIds.has(String(object.client_uid || ''))
+            );
+            normalized.segments = normalized.segments.filter(object =>
+                !protectedPages.has(Number(object.page_number || 1)) || localObjectIds.has(String(object.client_uid || ''))
+            );
+        }
+        const protectedLayerIds = new Set();
+        dirtyTakeoffObjects.forEach(record => {
+            if (record?.layerId) protectedLayerIds.add(String(record.layerId));
+        });
+        pendingLayerNameUpdates.forEach(update => {
+            if (update?.integration_key) protectedLayerIds.add(String(update.integration_key));
+        });
+        if (state.dirty) {
+            state.layers.forEach(layer => protectedLayerIds.add(String(layer.client_uid || layer.id || '')));
+        }
+
+        const markerResult = reconciler.reconcileCollection(state.markers, normalized.markers, {
+            dirtyIds: dirtyObjectIds,
+            deletedIds: deletedObjectIds
+        });
+        const segmentResult = reconciler.reconcileCollection(state.segments, normalized.segments, {
+            dirtyIds: dirtyObjectIds,
+            deletedIds: deletedObjectIds
+        });
+        const layerResult = reconciler.reconcileCollection(state.layers, normalized.layers, {
+            dirtyIds: protectedLayerIds,
+            deletedIds: deletedTakeoffLayers
+        });
+
+        const nextObjectRefs = new Set([...markerResult.rows, ...segmentResult.rows]);
+        state.markers.forEach(marker => {
+            if (!nextObjectRefs.has(marker)) destroyMarkerNodes(marker);
+        });
+        state.segments.forEach(segment => {
+            if (!nextObjectRefs.has(segment)) destroySegmentNodes(segment);
+        });
+
+        state.layers = layerResult.rows;
+        state.markers = markerResult.rows;
+        state.segments = segmentResult.rows;
+        applyTakeoffScales(data?.scales);
+
+        const selectedUid = String(state.selectedElement?.ref?.client_uid || '');
+        if (selectedUid) {
+            const selected = findTakeoffObjectByUid(selectedUid);
+            state.selectedElement = selected ? { type: selected.type, ref: selected.ref } : null;
+            if (!selected) state.selectedObjectUids.delete(selectedUid);
+        }
+
+        [...state.markers, ...state.segments].forEach(object => {
+            const id = String(object.client_uid || '');
+            if (!id || dirtyObjectIds.has(id)) return;
+            takeoffObjectBaseVersions.set(id, object._serverUpdatedAt ?? object.updated_at ?? object.updatedAt ?? null);
+        });
+        takeoffAppliedServerRevision = incomingRevision;
+        renderNodes();
+        renderAll();
+        try {
+            window.parent?.postMessage({
+                type: 'takeoff-editor-state-loaded',
+                payload: {
+                    drawingId: typeof fileId !== 'undefined' ? fileId : null,
+                    estimateKey: currentEstimateKey(),
+                    remoteSync: options.remoteSync === true,
+                    revision: incomingRevision
+                }
+            }, '*');
+        } catch (_) {}
+        return true;
+    }
+
     function buildSaveTakeoffPayload() {
         state.layers.forEach(persistLayerCostSnapshot);
         const sentPages = dirtyTakeoffPages.size ? [...dirtyTakeoffPages] : [Number(pageNum || 1)];
@@ -4207,11 +4385,11 @@
         } catch (_) {}
     }
 
-    function saveTakeoff(silent = false, rejectOnError = false) {
+    function performSaveTakeoff(silent = false, rejectOnError = false) {
         const { sentPages, sentGenerations, sentObjectIds, sentObjectGenerations, sentDeletedLayerIds, sentLayerNameUpdates, body } = buildSaveTakeoffPayload();
         return request('save_state', body).then(res => {
             if (res.status !== 'success') throw new Error(res.msg || 'Save failed');
-            takeoffServerRevision = Math.max(takeoffServerRevision, Number(res.data?.revision || 0));
+            takeoffKnownServerRevision = Math.max(takeoffKnownServerRevision, Number(res.data?.revision || 0));
             sentPages.forEach(page => {
                 if ((dirtyTakeoffPageGenerations.get(page) || 0) !== sentGenerations.get(page)) return;
                 dirtyTakeoffPages.delete(page);
@@ -4235,6 +4413,7 @@
             });
             state.dirty = dirtyTakeoffPages.size > 0 || dirtyTakeoffObjects.size > 0 || deletedTakeoffObjects.size > 0
                 || deletedTakeoffLayers.size > 0 || pendingLayerNameUpdates.size > 0;
+            if (res.data) applyRemoteTakeoffSnapshot(res.data, { remoteSync: true, saveAck: true });
             if (!silent) {
                 hasPendingManualCanvasCheckpoint = false;
                 showToast('Takeoff saved', 'success');
@@ -4245,6 +4424,12 @@
             else console.warn('Takeoff autosave failed', err);
             if (rejectOnError) throw err;
         });
+    }
+
+    function saveTakeoff(silent = false, rejectOnError = false) {
+        const queuedSave = () => performSaveTakeoff(silent, rejectOnError);
+        takeoffSaveQueue = takeoffSaveQueue.catch(() => {}).then(queuedSave);
+        return takeoffSaveQueue;
     }
 
     function loadTakeoff(options = {}) {
@@ -4259,7 +4444,8 @@
             }
             if (loaded.status === 'success') {
                 const data = loaded.data || {};
-                takeoffServerRevision = Math.max(takeoffServerRevision, Number(data.revision || 0));
+                takeoffKnownServerRevision = Math.max(takeoffKnownServerRevision, Number(data.revision || 0));
+                takeoffAppliedServerRevision = Math.max(takeoffAppliedServerRevision, Number(data.revision || 0));
                 clearNodes();
                 state.selectedObjectUids.clear();
                 state.selectedElement = null;
@@ -4372,7 +4558,7 @@
     }
 
     async function pollTakeoffRemoteRevision() {
-        if (takeoffRemoteSyncInFlight || document.hidden || hasPendingTakeoffMutation()) return;
+        if (takeoffRemoteSyncInFlight || document.hidden) return;
         if (typeof fileId === 'undefined' || !fileId || !currentEstimateKey()) return;
         takeoffRemoteSyncInFlight = true;
         try {
@@ -4382,8 +4568,15 @@
                 estimate_key: currentEstimateKey()
             }, 'GET');
             const remoteRevision = Number(response?.revision || 0);
-            if (response?.status === 'success' && remoteRevision > takeoffServerRevision && !hasPendingTakeoffMutation()) {
-                await loadTakeoff({ remoteSync: true });
+            if (response?.status === 'success') {
+                takeoffKnownServerRevision = Math.max(takeoffKnownServerRevision, remoteRevision);
+            }
+            if (response?.status === 'success' && remoteRevision > takeoffAppliedServerRevision) {
+                const loaded = await request('state', {
+                    drawing_id: fileId,
+                    estimate_key: currentEstimateKey()
+                }, 'GET');
+                if (loaded?.status === 'success') applyRemoteTakeoffSnapshot(loaded.data || {}, { remoteSync: true });
             }
         } catch (error) {
             console.warn('Takeoff collaboration sync failed', error);

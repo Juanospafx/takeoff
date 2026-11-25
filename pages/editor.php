@@ -447,6 +447,7 @@ $editorRuntimeConfig = [
     <script src="../assets/takeoff_color_palette.js?v=<?= filemtime(__DIR__ . '/../assets/takeoff_color_palette.js') ?>"></script>
     <script src="../assets/takeoff_placement_guard.js?v=<?= filemtime(__DIR__ . '/../assets/takeoff_placement_guard.js') ?>"></script>
     <script src="../assets/takeoff_object_repair_service.js?v=<?= filemtime(__DIR__ . '/../assets/takeoff_object_repair_service.js') ?>"></script>
+    <script src="../assets/takeoff_collaboration_reconciler.js?v=<?= filemtime(__DIR__ . '/../assets/takeoff_collaboration_reconciler.js') ?>"></script>
     <script src="../assets/editor/takeoff.js?v=<?= filemtime(__DIR__ . '/../assets/editor/takeoff.js') ?>"></script>
 </body>
 

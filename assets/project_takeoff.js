@@ -8222,36 +8222,39 @@
     function ensureDrawingDropdownPortal() {
         const panel = $('takeoffDrawingDropdown');
         if (!panel) return null;
-        if (panel.parentElement !== document.body) document.body.appendChild(panel);
+        const viewer = document.querySelector('.pro-takeoff-viewer');
+        if (!viewer) return null;
+        let overlay = viewer.querySelector(':scope > .pro-drawing-modal-overlay');
+        if (!overlay) {
+            overlay = document.createElement('div');
+            overlay.className = 'pro-drawing-modal-overlay';
+            overlay.setAttribute('aria-hidden', 'true');
+            overlay.addEventListener('click', event => {
+                if (event.target === overlay) closeDrawingDropdown();
+            });
+            viewer.appendChild(overlay);
+        }
+        if (panel.parentElement !== overlay) overlay.appendChild(panel);
         panel.setAttribute('role', 'dialog');
         panel.setAttribute('aria-modal', 'true');
         panel.setAttribute('aria-labelledby', 'takeoffDrawingDialogTitle');
+        panel.style.removeProperty('left');
+        panel.style.removeProperty('top');
+        panel.style.removeProperty('width');
+        panel.style.removeProperty('height');
+        panel.style.removeProperty('max-width');
+        panel.style.removeProperty('max-height');
+        panel.style.removeProperty('transform');
         return panel;
     }
 
-    function positionDrawingDropdown() {
+    function syncDrawingDropdownOverlay() {
         const panel = ensureDrawingDropdownPortal();
-        if (!panel || !drawingState.dropdownOpen) return;
-        const viewport = window.visualViewport;
-        const viewportWidth = Math.max(1, viewport?.width || window.innerWidth || document.documentElement.clientWidth);
-        const viewportHeight = Math.max(1, viewport?.height || window.innerHeight || document.documentElement.clientHeight);
-        const viewportLeft = Number(viewport?.offsetLeft || 0);
-        const viewportTop = Number(viewport?.offsetTop || 0);
-        const margin = Math.min(16, Math.max(8, Math.floor(Math.min(viewportWidth, viewportHeight) * 0.025)));
-        const width = Math.min(840, Math.max(1, viewportWidth - (margin * 2)));
-        const height = Math.min(400, Math.max(1, viewportHeight - (margin * 2)));
-        panel.style.left = `${Math.round(viewportLeft + (viewportWidth / 2))}px`;
-        panel.style.top = `${Math.round(viewportTop + (viewportHeight / 2))}px`;
-        panel.style.width = `${Math.round(width)}px`;
-        panel.style.height = `${Math.round(height)}px`;
-        panel.style.maxWidth = `${Math.round(viewportWidth - (margin * 2))}px`;
-        panel.style.maxHeight = `${Math.round(viewportHeight - (margin * 2))}px`;
-        panel.style.transform = 'translate(-50%, -50%)';
+        const overlay = panel?.parentElement;
+        if (!panel || !overlay?.classList.contains('pro-drawing-modal-overlay')) return;
+        overlay.classList.toggle('open', drawingState.dropdownOpen);
+        overlay.setAttribute('aria-hidden', drawingState.dropdownOpen ? 'false' : 'true');
     }
-
-    window.addEventListener('resize', positionDrawingDropdown, { passive: true });
-    window.visualViewport?.addEventListener('resize', positionDrawingDropdown, { passive: true });
-    window.visualViewport?.addEventListener('scroll', positionDrawingDropdown, { passive: true });
 
     function bindDropdownScrollGuards() {
         if (dropdownScrollBound) return;
@@ -8427,7 +8430,7 @@
         drawingState.dropdownOpen = true;
         panel.classList.add('open');
         trigger?.setAttribute('aria-expanded', 'true');
-        positionDrawingDropdown();
+        syncDrawingDropdownOverlay();
         bindDropdownScrollGuards();
         bindDocumentListDelegation();
         bindSheetListDelegation();
@@ -8455,6 +8458,8 @@
         if (sheetVirtualFrame !== null) cancelAnimationFrame(sheetVirtualFrame);
         sheetVirtualFrame = null;
         $('takeoffDrawingDropdown')?.classList.remove('open');
+        document.querySelector('.pro-drawing-modal-overlay')?.classList.remove('open');
+        document.querySelector('.pro-drawing-modal-overlay')?.setAttribute('aria-hidden', 'true');
         $('takeoffSheetSelect')?.setAttribute('aria-expanded', 'false');
     }
 

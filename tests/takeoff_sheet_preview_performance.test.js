@@ -16,20 +16,19 @@ test('sheet preview keeps its complete details and open-sheet action', () => {
     assert.match(dashboard, /id="takeoffOpenSheetBtn"/);
 });
 
-test('drawing selector is portaled and centered against the viewport as a modal', () => {
-    assert.match(css, /\.pro-drawing-dropdown\s*\{[\s\S]*?position:\s*fixed;/);
-    assert.match(css, /\.pro-drawing-dropdown\s*\{[\s\S]*?top:\s*50%;[\s\S]*?left:\s*50%;[\s\S]*?transform:\s*translate\(-50%,\s*-50%\);/);
-    assert.match(source, /function ensureDrawingDropdownPortal\(\)[\s\S]*?document\.body\.appendChild\(panel\)/);
-    assert.match(source, /function positionDrawingDropdown\(\)/);
-    assert.match(source, /viewportLeft \+ \(viewportWidth \/ 2\)/);
-    assert.match(source, /viewportTop \+ \(viewportHeight \/ 2\)/);
-    assert.doesNotMatch(source.slice(source.indexOf('function positionDrawingDropdown()'), source.indexOf("window.addEventListener('resize'")), /getBoundingClientRect|triggerRect|openAbove/);
-    assert.match(source, /addEventListener\('resize',\s*positionDrawingDropdown/);
+test('drawing selector is centered by CSS inside the live Takeoff viewer', () => {
+    assert.match(css, /\.pro-takeoff-viewer\s*\{[\s\S]*?position:\s*relative;/);
+    assert.match(css, /\.pro-drawing-modal-overlay\s*\{[\s\S]*?position:\s*absolute;[\s\S]*?inset:\s*0;[\s\S]*?place-items:\s*center;/);
+    assert.match(css, /\.pro-takeoff-viewer\s*>\s*\.pro-drawing-modal-overlay[\s\S]*?\.pro-drawing-dropdown\s*\{[\s\S]*?position:\s*relative;[\s\S]*?width:\s*min\(840px,\s*100%\);[\s\S]*?height:\s*min\(400px,\s*100%\);/);
+    assert.match(source, /function ensureDrawingDropdownPortal\(\)[\s\S]*?querySelector\('\.pro-takeoff-viewer'\)[\s\S]*?overlay\.appendChild\(panel\)/);
+    assert.doesNotMatch(source, /document\.body\.appendChild\(panel\)/);
+    assert.doesNotMatch(source, /visualViewport|viewportLeft|viewportTop/);
+    assert.doesNotMatch(source, /panel\.style\.(left|top|width|height|transform)/);
 });
 
 test('sheet preview preserves the document colors on white and keeps Open Sheet visible', () => {
     assert.match(css, /\.pro-drawing-grid\s*\{[\s\S]*?grid-template-columns:\s*minmax\(0,\s*3fr\)\s*minmax\(0,\s*4fr\)\s*minmax\(0,\s*3fr\);[\s\S]*?overflow:\s*hidden;/);
-    assert.match(css, /\.pro-preview-container\s*\{[\s\S]*?grid-template-rows:\s*minmax\(170px,\s*1fr\)\s*auto;[\s\S]*?overflow-y:\s*auto;/);
+    assert.match(css, /\.pro-preview-container\s*\{[\s\S]*?grid-template-rows:\s*minmax\(0,\s*1fr\)\s*auto;[\s\S]*?overflow-y:\s*auto;/);
     assert.match(css, /\.pro-preview-box canvas,[\s\S]*?\.pro-preview-box img\s*\{[\s\S]*?object-fit:\s*contain;[\s\S]*?object-position:\s*center;[\s\S]*?background:\s*#ffffff\s*!important;[\s\S]*?filter:\s*none\s*!important;/);
     assert.match(css, /\.pro-open-sheet-btn\s*\{[\s\S]*?position:\s*sticky;[\s\S]*?bottom:\s*0;/);
     assert.match(source, /page\.render\(\{\s*canvasContext:\s*ctx,\s*viewport,\s*background:\s*'#ffffff'\s*\}\)/);

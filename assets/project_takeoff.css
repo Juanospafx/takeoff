@@ -4087,7 +4087,7 @@ body.theme-dark .pro-drawing-group-count {
 
 .pro-preview-container {
     display: grid;
-    grid-template-rows: minmax(170px, 1fr) auto;
+    grid-template-rows: minmax(0, 1fr) auto;
     height: 100%;
     min-height: 0;
     min-width: 0;
@@ -4097,6 +4097,38 @@ body.theme-dark .pro-drawing-group-count {
     gap: 6px;
     box-sizing: border-box;
     scrollbar-gutter: stable;
+}
+
+/* Drawings & Sheets is anchored to the live viewer, so browser zoom and
+   sidebar resizing are handled by native layout instead of viewport math. */
+.pro-drawing-modal-overlay {
+    position: absolute;
+    inset: 0;
+    z-index: 100000;
+    display: none;
+    place-items: center;
+    min-width: 0;
+    min-height: 0;
+    padding: clamp(8px, 2%, 16px);
+    overflow: hidden;
+    box-sizing: border-box;
+}
+
+.pro-drawing-modal-overlay.open {
+    display: grid;
+}
+
+.pro-takeoff-viewer > .pro-drawing-modal-overlay > .pro-drawing-dropdown {
+    position: relative;
+    inset: auto;
+    top: auto;
+    left: auto;
+    width: min(840px, 100%);
+    height: min(400px, 100%);
+    max-width: 100%;
+    max-height: 100%;
+    transform: none;
+    box-sizing: border-box;
 }
 
 .pro-preview-box {
