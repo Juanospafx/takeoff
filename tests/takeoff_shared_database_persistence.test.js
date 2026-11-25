@@ -34,10 +34,37 @@ test('dashboard Takeoff dirty state clears only after a database acknowledgement
     const saveEnd = parent.indexOf('const viewerState', saveStart);
     const saveBlock = parent.slice(saveStart, saveEnd);
     assert.match(saveBlock, /const saveResult = await callEditor\('projectTakeoffSave'\)/);
-    assert.match(saveBlock, /if \(saveResult === false\) throw new Error/);
+    assert.match(saveBlock, /saveResult\?\.persisted !== true/);
+    assert.match(saveBlock, /saveResult\.dirtyRemaining === true/);
     assert.ok(saveBlock.indexOf('takeoffIsDirty = false') > saveBlock.indexOf("await flushPendingDeletedEstimateLayers()"),
         'dirty state must clear after the canvas and deletion acknowledgements');
+    assert.doesNotMatch(saveBlock, /syncAllLayersToCanvas/,
+        'manual save must not overwrite the authoritative iframe with a potentially stale parent snapshot');
     assert.doesNotMatch(saveBlock, /catch \(e\)[\s\S]*ignored/);
+});
+
+test('project Save has one awaited persistence owner and no speculative pointerdown save', () => {
+    const bindingStart = parent.indexOf("document.querySelectorAll('[data-tab=\"estimating\"]");
+    const bindingEnd = parent.indexOf("window.addEventListener('pagehide'", bindingStart);
+    const bindingBlock = parent.slice(bindingStart, bindingEnd);
+    assert.doesNotMatch(bindingBlock, /#saveProjectBtn/);
+    assert.doesNotMatch(bindingBlock, /projectTakeoffSave/);
+    assert.match(overview, /await window\.projectTakeoffSaveState\(\)/);
+});
+
+test('editor verifies the canonical save acknowledgement before clearing dirty objects', () => {
+    const saveStart = editor.indexOf('function performSaveTakeoff');
+    const saveEnd = editor.indexOf('function saveTakeoff', saveStart);
+    const saveBlock = editor.slice(saveStart, saveEnd);
+    assert.match(editor, /function validateTakeoffSaveAcknowledgement/);
+    assert.match(saveBlock, /validateTakeoffSaveAcknowledgement/);
+    assert.ok(saveBlock.indexOf('validateTakeoffSaveAcknowledgement') < saveBlock.indexOf('dirtyTakeoffObjects.delete'),
+        'canonical acknowledgement must be verified before local dirty tracking is cleared');
+    assert.match(saveBlock, /persisted:\s*true/);
+    assert.match(saveBlock, /dirtyRemaining/);
+    assert.match(saveBlock, /acknowledgedObjects/);
+    assert.match(saveBlock, /takeoffObjectBaseVersions\.set\(id, acknowledgedVersion\)/,
+        'a newer local edit must advance to the acknowledged base before the drain save');
 });
 
 test('sheet scale is shared by drawing and page while geometry remains estimate-scoped', () => {

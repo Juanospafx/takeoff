@@ -292,13 +292,16 @@
         if (loadedEst && pendingDeletedTakeoffLayersByEstimate.get(loadedEst)?.size) {
             callEditor('projectTakeoffDeleteLayers', [...pendingDeletedTakeoffLayersByEstimate.get(loadedEst)], { force: true });
         }
-        syncAllLayersToCanvas({ immediate: true, suppressEstimatingSync: true });
         const saveResult = await callEditor('projectTakeoffSave');
-        if (saveResult === false) throw new Error('Takeoff canvas persistence is unavailable.');
+        if (saveResult?.persisted !== true || !Number.isInteger(Number(saveResult.revision))) {
+            throw new Error('Takeoff canvas persistence was not acknowledged by the server.');
+        }
+        if (saveResult.dirtyRemaining === true) {
+            throw new Error('Takeoff changed while it was being saved. Please save again before reloading.');
+        }
         await flushPendingDeletedEstimateLayers();
         takeoffIsDirty = false;
-        getTakeoffEditorFrame()?.contentWindow?.clearEditorTakeoffDirtyCheckpoint?.();
-        return { persisted: true, projectId: Number(pId) || 0 };
+        return { ...saveResult, projectId: Number(pId) || 0 };
     };
 
     const viewerState = {
@@ -10157,9 +10160,8 @@
             setTimeout(() => syncTakeoffSubheadAlignment(true), 50);
             updateSubheadSelectedItem();
         });
-        document.querySelectorAll('[data-tab="estimating"], [data-tab="proposal"], #saveProjectBtn, [data-takeoff-estimating-action]').forEach(el => {
+        document.querySelectorAll('[data-tab="estimating"], [data-tab="proposal"], [data-takeoff-estimating-action]').forEach(el => {
             el.addEventListener('pointerdown', () => {
-                try { callEditor('projectTakeoffSave'); } catch (_) { }
                 flushEstimatingSyncFromCanvas();
             }, true);
         });

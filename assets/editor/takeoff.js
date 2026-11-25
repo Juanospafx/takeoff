@@ -4280,18 +4280,25 @@
         state.layers.forEach(persistLayerCostSnapshot);
         const sentPages = dirtyTakeoffPages.size ? [...dirtyTakeoffPages] : [Number(pageNum || 1)];
         const sentGenerations = new Map(sentPages.map(page => [page, dirtyTakeoffPageGenerations.get(page) || 0]));
-        const sentObjectIds = Array.from(new Set([...dirtyTakeoffObjects.keys(), ...deletedTakeoffObjects.keys()]));
+        const sentDirtyObjectIds = [...dirtyTakeoffObjects.keys()].map(String);
+        const sentDeletedObjectIds = [...deletedTakeoffObjects.keys()].map(String);
+        const sentObjectIds = Array.from(new Set([...sentDirtyObjectIds, ...sentDeletedObjectIds]));
         const sentObjectGenerations = new Map(sentObjectIds.map(id => [id, dirtyTakeoffObjectGenerations.get(id) || 0]));
         const objectBaseVersions = Object.fromEntries(sentObjectIds.map(id => [id, takeoffObjectBaseVersions.get(id) ?? null]));
         const fallbackPages = dirtyTakeoffPages.size ? [...dirtyTakeoffPages] : (sentObjectIds.length ? [] : sentPages);
         const sentDeletedLayerIds = [...deletedTakeoffLayers];
+        const sentLayerIds = state.layers.map(layer => String(layer?.client_uid || layer?.integration_key
+            || layer?.metadata_json?.project_layer_id || layer?.id || '')).filter(Boolean);
         const sentLayerNameUpdates = [...pendingLayerNameUpdates.values()].map(update => ({ ...update }));
         return {
             sentPages,
             sentGenerations,
             sentObjectIds,
+            sentDirtyObjectIds,
+            sentDeletedObjectIds,
             sentObjectGenerations,
             sentDeletedLayerIds,
+            sentLayerIds,
             sentLayerNameUpdates,
             body: {
                 drawing_id: fileId,
@@ -4320,6 +4327,46 @@
                 object_base_versions: objectBaseVersions,
             }
         };
+    }
+
+    function validateTakeoffSaveAcknowledgement(data, sentDirtyObjectIds, sentDeletedObjectIds,
+        sentLayerIds, sentDeletedLayerIds) {
+        if (!data || !Array.isArray(data.layers) || !Array.isArray(data.markers)
+            || !Array.isArray(data.segments) || !Number.isInteger(Number(data.revision))
+            || Number(data.revision) < 1) {
+            throw new Error('The server did not return a verifiable Takeoff save acknowledgement.');
+        }
+        const storedObjectIds = new Set([...data.markers, ...data.segments]
+            .map(row => String(row?.client_uid || '')).filter(Boolean));
+        const missingObjectIds = (sentDirtyObjectIds || []).filter(id => !storedObjectIds.has(String(id)));
+        const restoredDeletedObjectIds = (sentDeletedObjectIds || []).filter(id => storedObjectIds.has(String(id)));
+
+        const storedLayerKeys = new Set();
+        data.layers.forEach(layer => [layer?.client_uid, layer?.integration_key,
+            layer?.metadata_json?.project_layer_id, layer?.id]
+            .filter(value => value !== undefined && value !== null && String(value) !== '')
+            .forEach(value => storedLayerKeys.add(String(value))));
+        const missingLayerIds = (sentLayerIds || []).filter(id => !storedLayerKeys.has(String(id)));
+        const restoredDeletedLayerIds = (sentDeletedLayerIds || []).filter(id => storedLayerKeys.has(String(id)));
+
+        if (missingObjectIds.length || restoredDeletedObjectIds.length || missingLayerIds.length
+            || restoredDeletedLayerIds.length) {
+            throw new Error('The server acknowledgement does not contain the complete Takeoff state. Changes remain unsaved.');
+        }
+        return {
+            revision: Number(data.revision),
+            layerCount: data.layers.length,
+            markerCount: data.markers.length,
+            segmentCount: data.segments.length,
+        };
+    }
+
+    function hasPendingTakeoffMutations() {
+        return dirtyTakeoffPages.size > 0
+            || dirtyTakeoffObjects.size > 0
+            || deletedTakeoffObjects.size > 0
+            || deletedTakeoffLayers.size > 0
+            || pendingLayerNameUpdates.size > 0;
     }
 
     function compactLayerForKeepalive(layer) {
@@ -4386,9 +4433,14 @@
     }
 
     function performSaveTakeoff(silent = false, rejectOnError = false) {
-        const { sentPages, sentGenerations, sentObjectIds, sentObjectGenerations, sentDeletedLayerIds, sentLayerNameUpdates, body } = buildSaveTakeoffPayload();
+        const { sentPages, sentGenerations, sentObjectIds, sentDirtyObjectIds, sentDeletedObjectIds,
+            sentObjectGenerations, sentDeletedLayerIds, sentLayerIds, sentLayerNameUpdates, body } = buildSaveTakeoffPayload();
         return request('save_state', body).then(res => {
             if (res.status !== 'success') throw new Error(res.msg || 'Save failed');
+            const acknowledgement = validateTakeoffSaveAcknowledgement(res.data, sentDirtyObjectIds,
+                sentDeletedObjectIds, sentLayerIds, sentDeletedLayerIds);
+            const acknowledgedObjects = new Map([...res.data.markers, ...res.data.segments]
+                .map(row => [String(row?.client_uid || ''), row]).filter(([id]) => id));
             takeoffKnownServerRevision = Math.max(takeoffKnownServerRevision, Number(res.data?.revision || 0));
             sentPages.forEach(page => {
                 if ((dirtyTakeoffPageGenerations.get(page) || 0) !== sentGenerations.get(page)) return;
@@ -4396,13 +4448,22 @@
                 dirtyTakeoffPageGenerations.delete(page);
             });
             sentObjectIds.forEach(id => {
-                if ((dirtyTakeoffObjectGenerations.get(id) || 0) !== sentObjectGenerations.get(id)) return;
+                const acknowledged = acknowledgedObjects.get(String(id));
+                const acknowledgedVersion = acknowledged?.updated_at ?? acknowledged?.updatedAt ?? null;
+                if ((dirtyTakeoffObjectGenerations.get(id) || 0) !== sentObjectGenerations.get(id)) {
+                    // A newer local edit was made while this request was in flight.
+                    // Keep it dirty, but advance its base to the revision that was
+                    // just acknowledged so the drain save does not conflict with
+                    // this client's own preceding write.
+                    if (acknowledgedVersion) takeoffObjectBaseVersions.set(id, acknowledgedVersion);
+                    return;
+                }
                 dirtyTakeoffObjects.delete(id);
                 deletedTakeoffObjects.delete(id);
                 dirtyTakeoffObjectGenerations.delete(id);
                 const current = findTakeoffObjectByUid(id)?.ref;
                 if (current) {
-                    current._serverUpdatedAt = current.updated_at || current.updatedAt || timestamp();
+                    current._serverUpdatedAt = acknowledgedVersion || current.updated_at || current.updatedAt || timestamp();
                     takeoffObjectBaseVersions.set(id, current._serverUpdatedAt);
                 } else takeoffObjectBaseVersions.delete(id);
             });
@@ -4411,14 +4472,18 @@
                 const pending = pendingLayerNameUpdates.get(sent.integration_key);
                 if (pending?.generation === sent.generation) pendingLayerNameUpdates.delete(sent.integration_key);
             });
-            state.dirty = dirtyTakeoffPages.size > 0 || dirtyTakeoffObjects.size > 0 || deletedTakeoffObjects.size > 0
-                || deletedTakeoffLayers.size > 0 || pendingLayerNameUpdates.size > 0;
+            state.dirty = hasPendingTakeoffMutations();
             if (res.data) applyRemoteTakeoffSnapshot(res.data, { remoteSync: true, saveAck: true });
             if (!silent) {
                 hasPendingManualCanvasCheckpoint = false;
                 showToast('Takeoff saved', 'success');
             }
             renderSummary();
+            return {
+                persisted: true,
+                ...acknowledgement,
+                dirtyRemaining: hasPendingTakeoffMutations()
+            };
         }).catch(err => {
             if (!silent) showToast(err.message, 'error');
             else console.warn('Takeoff autosave failed', err);
@@ -5532,10 +5597,17 @@
 
     window.projectTakeoffSave = function () {
         flushPendingProjectStateEmit();
-        return saveTakeoff(true, true).then(result => {
-            hasPendingManualCanvasCheckpoint = false;
-            return result;
-        });
+        return (async () => {
+            let result = null;
+            for (let attempt = 0; attempt < 4; attempt += 1) {
+                result = await saveTakeoff(true, true);
+                if (!hasPendingTakeoffMutations()) {
+                    hasPendingManualCanvasCheckpoint = false;
+                    return { ...result, dirtyRemaining: false };
+                }
+            }
+            throw new Error('Takeoff changed while it was being saved. Please save again before reloading.');
+        })();
     };
 
     window.projectTakeoffDeleteCurrentSelection = function () {

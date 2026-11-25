@@ -30,6 +30,13 @@ test('same-page saves merge by stable object id and detect same-object conflicts
     assert.match(api, /if \(\$dirtyObjectIds \|\| \$deletedObjectIds\)[\s\S]{0,120}merge_takeoff_objects/);
 });
 
+test('object-only saves merge into the locked server snapshot instead of a stale browser snapshot', () => {
+    const saveCase = api.slice(api.indexOf("case 'save_state':"), api.indexOf("case 'save_catalog_item':"));
+    assert.match(saveCase, /if \(!\$dirtyPages && \(\$dirtyObjectIds \|\| \$deletedObjectIds\)\)[\s\S]{0,500}\$snapshot = \$currentSnapshot;/);
+    assert.match(saveCase, /merge_takeoff_objects\(\$snapshot, \['layers' => \$layers/);
+    assert.match(saveCase, /if \(!\$dirtyPages && \(\$dirtyObjectIds \|\| \$deletedObjectIds\)\)[\s\S]{0,120}\$retrySnapshot = \$latestSnapshot;/);
+});
+
 test('server makes placement retries idempotent before calculating quantities', () => {
     assert.match(api, /function normalize_takeoff_snapshot_objects/);
     assert.match(api, /placement_operation_id/);

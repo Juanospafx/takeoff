@@ -1330,11 +1330,21 @@ try {
                             $snapshot['layers'] = $layers;
                         }
                     }
+                    if (!$dirtyPages && ($dirtyObjectIds || $deletedObjectIds)) {
+                        // Object patches are incremental. Start from the row-locked
+                        // server snapshot so an older tab cannot replace unrelated
+                        // objects with its stale full-browser snapshot. Preserve
+                        // canonical existing layers while admitting a newly-created
+                        // layer referenced by the incoming object.
+                        $snapshot = $currentSnapshot;
+                        $snapshot['layers'] = merge_takeoff_layers(
+                            is_array($layers) ? $layers : [],
+                            is_array($currentSnapshot['layers'] ?? null) ? $currentSnapshot['layers'] : [],
+                            true
+                        );
+                    }
                     if ($dirtyObjectIds || $deletedObjectIds) {
                         $snapshot = merge_takeoff_objects($snapshot, ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary], $dirtyObjectIds, $deletedObjectIds);
-                        if ($replaceLayers) {
-                            $snapshot['layers'] = $layers;
-                        }
                     }
                 }
                 $snapshot = normalize_takeoff_snapshot_objects($snapshot);
@@ -1528,6 +1538,14 @@ try {
                     }
                     if ($dirtyPages)
                         $retrySnapshot = merge_takeoff_pages($latestSnapshot, $retrySnapshot, $dirtyPages);
+                    if (!$dirtyPages && ($dirtyObjectIds || $deletedObjectIds)) {
+                        $retrySnapshot = $latestSnapshot;
+                        $retrySnapshot['layers'] = merge_takeoff_layers(
+                            is_array($layers) ? $layers : [],
+                            is_array($latestSnapshot['layers'] ?? null) ? $latestSnapshot['layers'] : [],
+                            true
+                        );
+                    }
                     if ($dirtyObjectIds || $deletedObjectIds)
                         $retrySnapshot = merge_takeoff_objects($retrySnapshot, ['layers' => $layers, 'markers' => $markers, 'segments' => $segments, 'summary' => $summary], $dirtyObjectIds, $deletedObjectIds);
                 }
