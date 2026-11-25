@@ -33,7 +33,7 @@ test('dashboard Takeoff dirty state clears only after a database acknowledgement
     const saveStart = parent.indexOf('window.projectTakeoffSaveState = async function');
     const saveEnd = parent.indexOf('const viewerState', saveStart);
     const saveBlock = parent.slice(saveStart, saveEnd);
-    assert.match(saveBlock, /const saveResult = await callEditor\('projectTakeoffSave'\)/);
+    assert.match(saveBlock, /saveResult = await editor\.projectTakeoffSave\(\)/);
     assert.match(saveBlock, /saveResult\?\.persisted !== true/);
     assert.match(saveBlock, /saveResult\.dirtyRemaining === true/);
     assert.ok(saveBlock.indexOf('takeoffIsDirty = false') > saveBlock.indexOf("await flushPendingDeletedEstimateLayers()"),
@@ -65,6 +65,31 @@ test('editor verifies the canonical save acknowledgement before clearing dirty o
     assert.match(saveBlock, /acknowledgedObjects/);
     assert.match(saveBlock, /takeoffObjectBaseVersions\.set\(id, acknowledgedVersion\)/,
         'a newer local edit must advance to the acknowledged base before the drain save');
+});
+
+test('manual Save waits for the active Takeoff editor instead of reporting it unavailable immediately', () => {
+    const saveStart = parent.indexOf('window.projectTakeoffSaveState = async function');
+    const saveEnd = parent.indexOf('const viewerState', saveStart);
+    const saveBlock = parent.slice(saveStart, saveEnd);
+    assert.match(parent, /async function waitForTakeoffSaveService/);
+    assert.match(saveBlock, /await waitForTakeoffSaveService/);
+    assert.match(parent, /Takeoff editor is still loading/);
+    assert.doesNotMatch(saveBlock, /Takeoff canvas persistence is unavailable/);
+});
+
+test('Takeoff autosave publishes pending, saving, saved and error states to the project shell', () => {
+    assert.match(editor, /postTakeoffSaveStatus\('pending'/);
+    assert.match(editor, /postTakeoffSaveStatus\('saving'/);
+    assert.match(editor, /postTakeoffSaveStatus\(receipt\.dirtyRemaining \? 'pending' : 'saved'/);
+    assert.match(editor, /postTakeoffSaveStatus\('error'/);
+    assert.match(parent, /takeoff-editor-save-status/);
+    assert.match(parent, /All changes saved/);
+    assert.match(parent, /Save failed — Retry/);
+    assert.match(editor, /TAKEOFF_AUTOSAVE_RETRY_DELAYS = \[2000, 5000, 15000, 30000, 60000\]/);
+    assert.match(editor, /0\.8 \+ Math\.random\(\) \* 0\.4/);
+    assert.match(editor, /navigator\.onLine === false \|\| document\.hidden/);
+    assert.match(editor, /window\.addEventListener\('online'/);
+    assert.match(editor, /document\.addEventListener\('visibilitychange'/);
 });
 
 test('sheet scale is shared by drawing and page while geometry remains estimate-scoped', () => {

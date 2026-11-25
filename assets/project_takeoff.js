@@ -31,6 +31,57 @@
         }
     }
 
+    async function waitForTakeoffSaveService(timeoutMs = 12000) {
+        const frame = $('takeoffFrame');
+        if (!frame) {
+            throw new Error('Takeoff could not be saved because its editor frame is missing. Your changes remain pending.');
+        }
+        if (!frame.getAttribute('src')) {
+            const documentId = activeDrawingDoc()?.id || window.ProjectState?.selectedDocumentId;
+            if (!documentId) {
+                throw new Error('Takeoff could not be saved because no drawing is loaded. Your changes remain pending.');
+            }
+            frame.src = takeoffEditorUrl(documentId, activeEstimateId(), Number(drawingState?.selectedPage || 1));
+        }
+        const deadline = Date.now() + Math.max(1000, Number(timeoutMs) || 12000);
+        while (Date.now() < deadline) {
+            const win = takeoffWindow();
+            if (win && typeof win.projectTakeoffSave === 'function') return win;
+            await new Promise(resolve => setTimeout(resolve, 100));
+        }
+        throw new Error('Takeoff editor is still loading and could not confirm persistence. Your recovery draft was preserved; wait for the drawing to finish loading and retry Save.');
+    }
+
+    function ensureTakeoffSaveStatusElement() {
+        let status = $('takeoffAutosaveStatus');
+        if (status) return status;
+        const saveButton = $('saveProjectBtn');
+        if (!saveButton?.parentElement) return null;
+        status = document.createElement('span');
+        status.id = 'takeoffAutosaveStatus';
+        status.className = 'takeoff-autosave-status is-idle';
+        status.setAttribute('role', 'status');
+        status.setAttribute('aria-live', 'polite');
+        status.textContent = 'Autosave ready';
+        saveButton.insertAdjacentElement('afterend', status);
+        return status;
+    }
+
+    function setTakeoffSaveStatus(state, message = '') {
+        const status = ensureTakeoffSaveStatusElement();
+        if (!status) return;
+        const labels = {
+            idle: 'Autosave ready',
+            pending: 'Changes pending',
+            saving: 'Saving…',
+            saved: 'All changes saved',
+            error: 'Save failed — Retry'
+        };
+        status.className = `takeoff-autosave-status is-${state}`;
+        status.textContent = labels[state] || labels.idle;
+        status.title = message || status.textContent;
+    }
+
     function editorCanvas() {
         const win = takeoffWindow();
         return win && win.canvas ? win.canvas : null;
@@ -292,7 +343,18 @@
         if (loadedEst && pendingDeletedTakeoffLayersByEstimate.get(loadedEst)?.size) {
             callEditor('projectTakeoffDeleteLayers', [...pendingDeletedTakeoffLayersByEstimate.get(loadedEst)], { force: true });
         }
-        const saveResult = await callEditor('projectTakeoffSave');
+        let editor = await waitForTakeoffSaveService();
+        let saveResult;
+        try {
+            saveResult = await editor.projectTakeoffSave();
+        } catch (error) {
+            // A sheet/estimate switch can replace the iframe between readiness
+            // and invocation. Resolve the current service once more; database
+            // errors from the same editor are propagated without a blind retry.
+            if (editor === takeoffWindow() && typeof editor?.projectTakeoffSave === 'function') throw error;
+            editor = await waitForTakeoffSaveService(5000);
+            saveResult = await editor.projectTakeoffSave();
+        }
         if (saveResult?.persisted !== true || !Number.isInteger(Number(saveResult.revision))) {
             throw new Error('Takeoff canvas persistence was not acknowledged by the server.');
         }
@@ -9367,6 +9429,24 @@
                 if (event.source !== takeoffWindow()) return;
                 openScalePanel();
                 showPrepared(event.data?.payload?.message || 'Set the drawing scale before adding linear items.');
+                return;
+            }
+            if (event.data?.type === 'takeoff-editor-save-status') {
+                if (event.source !== takeoffWindow()) return;
+                const payload = event.data?.payload || {};
+                const status = String(payload.status || 'idle');
+                if (status === 'pending' || status === 'saving' || status === 'error') {
+                    takeoffIsDirty = true;
+                } else if (status === 'saved' && payload.dirty !== true
+                    && pendingDeletedTakeoffLayersByEstimate.size === 0) {
+                    const activeDocId = Number(activeDrawingDoc()?.id || window.ProjectState?.selectedDocumentId || 0);
+                    const activeEstKey = String(activeEstimateId() || '');
+                    if ((!payload.drawingId || Number(payload.drawingId) === activeDocId)
+                        && (!payload.estimateKey || String(payload.estimateKey) === activeEstKey)) {
+                        takeoffIsDirty = false;
+                    }
+                }
+                setTakeoffSaveStatus(status, payload.message || '');
                 return;
             }
             if (event.data?.type === 'project-takeoff-layer-qty') {

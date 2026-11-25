@@ -168,21 +168,64 @@
 
     let takeoffAutosaveInFlight = false;
     let takeoffAutosaveQueued = false;
+    const TAKEOFF_AUTOSAVE_RETRY_DELAYS = [2000, 5000, 15000, 30000, 60000];
+    let takeoffAutosaveRetryAttempt = 0;
+
+    function nextTakeoffAutosaveRetryDelay() {
+        const base = TAKEOFF_AUTOSAVE_RETRY_DELAYS[Math.min(
+            takeoffAutosaveRetryAttempt,
+            TAKEOFF_AUTOSAVE_RETRY_DELAYS.length - 1
+        )];
+        takeoffAutosaveRetryAttempt += 1;
+        // Jitter prevents many affected tabs from retrying in the same instant.
+        return Math.round(base * (0.8 + Math.random() * 0.4));
+    }
+
+    function postTakeoffSaveStatus(status, detail = {}) {
+        if (!window.parent || window.parent === window) return;
+        try {
+            window.parent.postMessage({
+                type: 'takeoff-editor-save-status',
+                payload: {
+                    status,
+                    drawingId: typeof fileId !== 'undefined' ? Number(fileId) : null,
+                    estimateKey: currentEstimateKey(),
+                    dirty: isEditorTakeoffDirty(),
+                    ...detail
+                }
+            }, '*');
+        } catch (_) {}
+    }
 
     function scheduleTakeoffAutosave(delayMs = 1800) {
         const waitMs = Math.max(100, Number(delayMs) || 1800);
         clearTimeout(takeoffAutosaveTimer);
+        if (navigator.onLine === false || document.hidden) {
+            takeoffAutosaveTimer = null;
+            return;
+        }
         takeoffAutosaveTimer = setTimeout(() => {
+            if (navigator.onLine === false || document.hidden) {
+                takeoffAutosaveTimer = null;
+                return;
+            }
             if (takeoffAutosaveInFlight) {
                 takeoffAutosaveQueued = true;
                 return;
             }
             takeoffAutosaveInFlight = true;
-            Promise.resolve(saveTakeoff(true)).finally(() => {
+            let saveSucceeded = false;
+            Promise.resolve(saveTakeoff(true)).then(result => {
+                saveSucceeded = result?.persisted === true;
+                if (saveSucceeded) takeoffAutosaveRetryAttempt = 0;
+            }).finally(() => {
                 takeoffAutosaveInFlight = false;
-                if (takeoffAutosaveQueued) {
+                const pendingMutations = hasPendingTakeoffMutations();
+                if (takeoffAutosaveQueued || (saveSucceeded && pendingMutations)) {
                     takeoffAutosaveQueued = false;
                     scheduleTakeoffAutosave(250);
+                } else if (!saveSucceeded && pendingMutations) {
+                    scheduleTakeoffAutosave(nextTakeoffAutosaveRetryDelay());
                 }
             });
         }, waitMs);
@@ -2397,6 +2440,7 @@
     function markDirty(options = {}) {
         state.dirty = true;
         hasPendingManualCanvasCheckpoint = true;
+        postTakeoffSaveStatus('pending');
         if (options.pageFallback) {
             dirtyTakeoffPages.add(Number(pageNum || 1));
             dirtyTakeoffPageGenerations.set(Number(pageNum || 1), ++takeoffDirtyGeneration);
@@ -4435,6 +4479,7 @@
     function performSaveTakeoff(silent = false, rejectOnError = false) {
         const { sentPages, sentGenerations, sentObjectIds, sentDirtyObjectIds, sentDeletedObjectIds,
             sentObjectGenerations, sentDeletedLayerIds, sentLayerIds, sentLayerNameUpdates, body } = buildSaveTakeoffPayload();
+        postTakeoffSaveStatus('saving');
         return request('save_state', body).then(res => {
             if (res.status !== 'success') throw new Error(res.msg || 'Save failed');
             const acknowledgement = validateTakeoffSaveAcknowledgement(res.data, sentDirtyObjectIds,
@@ -4479,12 +4524,16 @@
                 showToast('Takeoff saved', 'success');
             }
             renderSummary();
-            return {
+            const receipt = {
                 persisted: true,
                 ...acknowledgement,
                 dirtyRemaining: hasPendingTakeoffMutations()
             };
+            if (!receipt.dirtyRemaining) hasPendingManualCanvasCheckpoint = false;
+            postTakeoffSaveStatus(receipt.dirtyRemaining ? 'pending' : 'saved', receipt);
+            return receipt;
         }).catch(err => {
+            postTakeoffSaveStatus('error', { message: err?.message || 'Takeoff autosave failed.' });
             if (!silent) showToast(err.message, 'error');
             else console.warn('Takeoff autosave failed', err);
             if (rejectOnError) throw err;
@@ -5714,6 +5763,12 @@
 
     window.addEventListener('beforeunload', () => {
         if (takeoffRemotePollTimer) clearInterval(takeoffRemotePollTimer);
+    });
+    window.addEventListener('online', () => {
+        if (hasPendingTakeoffMutations()) scheduleTakeoffAutosave(100);
+    });
+    document.addEventListener('visibilitychange', () => {
+        if (!document.hidden && hasPendingTakeoffMutations()) scheduleTakeoffAutosave(250);
     });
 
     if (document.readyState === 'loading') document.addEventListener('DOMContentLoaded', init);

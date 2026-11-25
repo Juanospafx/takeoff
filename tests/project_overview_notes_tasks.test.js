@@ -117,3 +117,12 @@ test('saveProject propagates Takeoff and Estimating persistence failures', () =>
     assert.match(overview, /await window\.projectEstimatingSave\(\)/);
     assert.doesNotMatch(overview, /save ignored|save warning|save error/);
 });
+
+test('project navigation warns while Takeoff autosave is pending or failed', () => {
+    const overview = fs.readFileSync(path.join(__dirname, '..', 'assets/project_overview.js'), 'utf8');
+    assert.match(overview, /window\.isProjectDirty = checkIsDirty/);
+    assert.match(overview, /window\.addEventListener\('beforeunload'[\s\S]*checkIsDirty\(\)/);
+    assert.match(overview, /Unsaved Changes in Project/);
+    assert.match(overview, /Save & Exit/);
+    assert.match(overview, /Discard & Exit/);
+});
