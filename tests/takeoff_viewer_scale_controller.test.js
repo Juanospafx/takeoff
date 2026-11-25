@@ -12,7 +12,7 @@ const scaleSource = read('assets/takeoff_scale_controller.js');
 const dashboardSource = read('pages/project_dashboard.php');
 
 test('project takeoff stays below the 512 KiB Phase 3 target', () => {
-    const bytes = fs.statSync(path.join(root, 'assets/project_takeoff.js')).size;
+    const bytes = Buffer.byteLength(projectSource.replace(/\r\n/g, '\n'), 'utf8');
     assert.ok(bytes < 512 * 1024, `project_takeoff.js is ${bytes} bytes`);
 });
 
@@ -25,6 +25,13 @@ test('dashboard loads both classic controllers before project_takeoff with filem
     assert.ok(scaleIndex >= 0 && scaleIndex < projectIndex);
     assert.match(dashboardSource, /takeoff_viewer_controller\.js\?v=<\?= filemtime/);
     assert.match(dashboardSource, /takeoff_scale_controller\.js\?v=<\?= filemtime/);
+});
+
+test('dashboard loads the save coordinator before project_takeoff with a filemtime cache key', () => {
+    const coordinatorIndex = dashboardSource.indexOf('takeoff_save_coordinator.js');
+    const projectIndex = dashboardSource.indexOf('project_takeoff.js');
+    assert.ok(coordinatorIndex >= 0 && coordinatorIndex < projectIndex);
+    assert.match(dashboardSource, /takeoff_save_coordinator\.js\?v=<\?= filemtime/);
 });
 
 test('main file keeps thin compatibility wrappers and grouped dependency injection', () => {

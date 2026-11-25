@@ -6,6 +6,7 @@ const path = require('node:path');
 const root = path.resolve(__dirname, '..');
 const editor = fs.readFileSync(path.join(root, 'assets/editor/takeoff.js'), 'utf8');
 const parent = fs.readFileSync(path.join(root, 'assets/project_takeoff.js'), 'utf8');
+const saveCoordinator = fs.readFileSync(path.join(root, 'assets/takeoff_save_coordinator.js'), 'utf8');
 const overview = fs.readFileSync(path.join(root, 'assets/project_overview.js'), 'utf8');
 const shell = fs.readFileSync(path.join(root, 'assets/editor/runtime.js'), 'utf8');
 const api = fs.readFileSync(path.join(root, 'api/takeoff.php'), 'utf8');
@@ -33,7 +34,7 @@ test('dashboard Takeoff dirty state clears only after a database acknowledgement
     const saveStart = parent.indexOf('window.projectTakeoffSaveState = async function');
     const saveEnd = parent.indexOf('const viewerState', saveStart);
     const saveBlock = parent.slice(saveStart, saveEnd);
-    assert.match(saveBlock, /saveResult = await editor\.projectTakeoffSave\(\)/);
+    assert.match(saveBlock, /const saveResult = await takeoffSaveCoordinator\.saveWithService\(\)/);
     assert.match(saveBlock, /saveResult\?\.persisted !== true/);
     assert.match(saveBlock, /saveResult\.dirtyRemaining === true/);
     assert.ok(saveBlock.indexOf('takeoffIsDirty = false') > saveBlock.indexOf("await flushPendingDeletedEstimateLayers()"),
@@ -71,9 +72,9 @@ test('manual Save waits for the active Takeoff editor instead of reporting it un
     const saveStart = parent.indexOf('window.projectTakeoffSaveState = async function');
     const saveEnd = parent.indexOf('const viewerState', saveStart);
     const saveBlock = parent.slice(saveStart, saveEnd);
-    assert.match(parent, /async function waitForTakeoffSaveService/);
-    assert.match(saveBlock, /await waitForTakeoffSaveService/);
-    assert.match(parent, /Takeoff editor is still loading/);
+    assert.match(saveCoordinator, /async function waitForService/);
+    assert.match(saveBlock, /await takeoffSaveCoordinator\.saveWithService\(\)/);
+    assert.match(saveCoordinator, /Takeoff editor is still loading/);
     assert.doesNotMatch(saveBlock, /Takeoff canvas persistence is unavailable/);
 });
 
@@ -83,8 +84,8 @@ test('Takeoff autosave publishes pending, saving, saved and error states to the 
     assert.match(editor, /postTakeoffSaveStatus\(receipt\.dirtyRemaining \? 'pending' : 'saved'/);
     assert.match(editor, /postTakeoffSaveStatus\('error'/);
     assert.match(parent, /takeoff-editor-save-status/);
-    assert.match(parent, /All changes saved/);
-    assert.match(parent, /Save failed — Retry/);
+    assert.match(saveCoordinator, /All changes saved/);
+    assert.match(saveCoordinator, /Save failed — Retry/);
     assert.match(editor, /TAKEOFF_AUTOSAVE_RETRY_DELAYS = \[2000, 5000, 15000, 30000, 60000\]/);
     assert.match(editor, /0\.8 \+ Math\.random\(\) \* 0\.4/);
     assert.match(editor, /navigator\.onLine === false \|\| document\.hidden/);

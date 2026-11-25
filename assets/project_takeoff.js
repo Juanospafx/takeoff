@@ -31,56 +31,15 @@
         }
     }
 
-    async function waitForTakeoffSaveService(timeoutMs = 12000) {
-        const frame = $('takeoffFrame');
-        if (!frame) {
-            throw new Error('Takeoff could not be saved because its editor frame is missing. Your changes remain pending.');
-        }
-        if (!frame.getAttribute('src')) {
-            const documentId = activeDrawingDoc()?.id || window.ProjectState?.selectedDocumentId;
-            if (!documentId) {
-                throw new Error('Takeoff could not be saved because no drawing is loaded. Your changes remain pending.');
-            }
-            frame.src = takeoffEditorUrl(documentId, activeEstimateId(), Number(drawingState?.selectedPage || 1));
-        }
-        const deadline = Date.now() + Math.max(1000, Number(timeoutMs) || 12000);
-        while (Date.now() < deadline) {
-            const win = takeoffWindow();
-            if (win && typeof win.projectTakeoffSave === 'function') return win;
-            await new Promise(resolve => setTimeout(resolve, 100));
-        }
-        throw new Error('Takeoff editor is still loading and could not confirm persistence. Your recovery draft was preserved; wait for the drawing to finish loading and retry Save.');
-    }
-
-    function ensureTakeoffSaveStatusElement() {
-        let status = $('takeoffAutosaveStatus');
-        if (status) return status;
-        const saveButton = $('saveProjectBtn');
-        if (!saveButton?.parentElement) return null;
-        status = document.createElement('span');
-        status.id = 'takeoffAutosaveStatus';
-        status.className = 'takeoff-autosave-status is-idle';
-        status.setAttribute('role', 'status');
-        status.setAttribute('aria-live', 'polite');
-        status.textContent = 'Autosave ready';
-        saveButton.insertAdjacentElement('afterend', status);
-        return status;
-    }
-
-    function setTakeoffSaveStatus(state, message = '') {
-        const status = ensureTakeoffSaveStatusElement();
-        if (!status) return;
-        const labels = {
-            idle: 'Autosave ready',
-            pending: 'Changes pending',
-            saving: 'Saving…',
-            saved: 'All changes saved',
-            error: 'Save failed — Retry'
-        };
-        status.className = `takeoff-autosave-status is-${state}`;
-        status.textContent = labels[state] || labels.idle;
-        status.title = message || status.textContent;
-    }
+    const takeoffSaveCoordinator = window.TakeoffSaveCoordinator.create({
+        getElement: $,
+        getEditorWindow: takeoffWindow,
+        getDocumentId: () => activeDrawingDoc()?.id || window.ProjectState?.selectedDocumentId,
+        getEstimateId: () => activeEstimateId(),
+        getPage: () => Number(drawingState?.selectedPage || 1),
+        buildEditorUrl: takeoffEditorUrl,
+        hasPendingDeletes: () => pendingDeletedTakeoffLayersByEstimate.size > 0
+    });
 
     function editorCanvas() {
         const win = takeoffWindow();
@@ -343,18 +302,7 @@
         if (loadedEst && pendingDeletedTakeoffLayersByEstimate.get(loadedEst)?.size) {
             callEditor('projectTakeoffDeleteLayers', [...pendingDeletedTakeoffLayersByEstimate.get(loadedEst)], { force: true });
         }
-        let editor = await waitForTakeoffSaveService();
-        let saveResult;
-        try {
-            saveResult = await editor.projectTakeoffSave();
-        } catch (error) {
-            // A sheet/estimate switch can replace the iframe between readiness
-            // and invocation. Resolve the current service once more; database
-            // errors from the same editor are propagated without a blind retry.
-            if (editor === takeoffWindow() && typeof editor?.projectTakeoffSave === 'function') throw error;
-            editor = await waitForTakeoffSaveService(5000);
-            saveResult = await editor.projectTakeoffSave();
-        }
+        const saveResult = await takeoffSaveCoordinator.saveWithService();
         if (saveResult?.persisted !== true || !Number.isInteger(Number(saveResult.revision))) {
             throw new Error('Takeoff canvas persistence was not acknowledged by the server.');
         }
@@ -3206,7 +3154,6 @@
             </div>`;
         }).join('');
 
-        // Sidebar-only Measurements group (isolated from Estimating)
         const allRulers = Array.isArray(takeoffRulersState.items) ? takeoffRulersState.items : [];
         const visibleRulers = allRulers.filter((r, idx) => {
             if (!q) return true;
@@ -3483,7 +3430,6 @@
             });
         });
 
-        // Measurements sidebar-only group bindings
         document.querySelector('[data-measurements-toggle]')?.addEventListener('click', event => {
             event.stopPropagation();
             takeoffRulersState.isExpanded = takeoffRulersState.isExpanded === false;
@@ -3618,7 +3564,6 @@
                     clearAllSelections();
                     return;
                 }
-                // Single item selection: deselect others, select only this one
                 selectSingleLayer(layerId);
                 const drawerModal = $('takeoffLayerModal');
                 const drawerWorkspace = $('takeoffWorkspace');
@@ -4219,7 +4164,6 @@
         }
         if (!Array.isArray(group.layers)) group.layers = [];
 
-        // If items are selected from catalog, create a layer for EACH item!
         if (items.length > 0) {
             updateActiveAddedItemFromForm();
 
@@ -4475,7 +4419,6 @@
         }
         updateColorDropdownTrigger('createLayer', color);
 
-        // Update active classes on rows
         const wrap = $('createLayerAddedItemsWrap');
         if (wrap) {
             wrap.querySelectorAll('.pro-create-added-item-row').forEach(row => {
@@ -5353,12 +5296,10 @@
         const pageItems = filtered.slice(start, start + pageSize);
         const end = Math.min(start + pageItems.length, total);
 
-        // Update items count
         if ($('proBrowseCountLabel')) {
             $('proBrowseCountLabel').textContent = `${total.toLocaleString()} ${total === 1 ? 'item found' : 'items found'}`;
         }
 
-        // Cost Catalog-identical pagination bar
         const pageStartEl = $('ccPageStart');
         const pageEndEl = $('ccPageEnd');
         const pageTotalEl = $('ccPageTotal');
@@ -5477,7 +5418,6 @@
             requestAnimationFrame(resetBrowseCatalogScrollTop);
         }
 
-        // Wire click handlers
         list.querySelectorAll('[data-browse-item]').forEach(card => {
             const id = String(card.dataset.browseItem);
             card.addEventListener('click', (e) => {
@@ -5863,17 +5803,14 @@
         let left = isSubhead ? rect.left : rect.right + gap;
         let top = isSubhead ? rect.bottom + 4 : rect.top;
 
-        // Detect if footer exists and calculate bottom limit so menu never touches or overlaps the footer or boundary
         const footer = document.querySelector('.est-version-bar') || $('takeoffEstimateTypesFooter');
         const footerRect = footer ? footer.getBoundingClientRect() : null;
         const bottomLimit = (footerRect && footerRect.top > 0) ? Math.min(footerRect.top - margin, bounds.bottom) : bounds.bottom;
 
-        // If it overflows the right edge of the boundary, flip to the left of the button
         if (left + menuRect.width > (isSubhead ? window.innerWidth - 12 : bounds.right)) {
             left = isSubhead ? window.innerWidth - menuRect.width - 12 : rect.left - menuRect.width - gap;
         }
 
-        // If it overflows the bottom limit (or touches the footer), align bottom with button bottom or flip upwards
         if (top + menuRect.height > (isSubhead ? window.innerHeight - 12 : bottomLimit)) {
             top = isSubhead ? rect.top - menuRect.height - 4 : Math.max(bounds.top, rect.bottom - menuRect.height);
         }
@@ -6777,7 +6714,6 @@
         const createdLayers = [];
         const srcDocId = Number(activeDrawingDoc()?.id || 0);
 
-        // Ensure current editor drawing is saved when copying shapes from current drawing
         if (copyShapes && dstDrawingId > 0 && srcDocId > 0) {
             try {
                 if (typeof takeoffWindow()?.projectTakeoffSave === 'function') {
@@ -6811,7 +6747,6 @@
             return existing;
         };
 
-        // Load source & destination drawing states from API if copying to a specific drawing
         let srcServerState = null;
         let dstServerState = null;
         if (dstDrawingId > 0) {
@@ -6844,7 +6779,6 @@
             ].filter(Boolean));
             const srcQty = Number(srcLayer.quantity || 0);
 
-            // Match canvas shapes for this layer in source drawing if copyShapes requested
             let copiedMarkersForLayer = [];
             let copiedSegmentsForLayer = [];
             if (copyShapes && srcServerState) {
@@ -6873,7 +6807,6 @@
             }
 
             const hasCopiedCanvasGeometry = copiedMarkersForLayer.length > 0 || copiedSegmentsForLayer.length > 0;
-            // Only assign baseQuantity if geometry wasn't copied (prevents double counting!)
             const baseQtyToPersist = hasCopiedCanvasGeometry ? Number(srcLayer.baseQuantity || 0) : srcQty;
 
             const existingColors = (targetGroup.layers || []).map(item => item.color);
@@ -6927,7 +6860,6 @@
             }
         });
 
-        // Persist into target drawing's takeoff_estimate_states row
         if (dstDrawingId > 0) {
             try {
                 await fetch('../api/takeoff.php', {
@@ -7344,13 +7276,11 @@
     let cachedSaveBtnMetrics = null;
 
     function syncTakeoffSubheadAlignment(forceResetCache = false) {
-        // 5: takeoffSubheadItemInfo is centered horizontally via CSS
         const itemInfo = document.getElementById('takeoffSubheadItemInfo');
         if (itemInfo) {
             itemInfo.style.marginLeft = '';
         }
 
-        // Align #takeoffScaleStatus directly underneath #saveProjectBtn without flickering or jumping on click
         const saveBtn = document.getElementById('saveProjectBtn');
         const scaleBtn = document.getElementById('takeoffScaleStatus');
         const scaleSlot = document.getElementById('takeoffSubheadScaleSlot');
@@ -7388,7 +7318,6 @@
                     scaleBtn.style.whiteSpace = 'nowrap';
                 }
 
-                // Read current position and infer unshifted right edge without resetting marginRight to '0px'
                 const appliedMarginCss = parseFloat(scaleSlot.style.marginRight) || 0;
                 const slotRect = scaleSlot.getBoundingClientRect();
                 if (slotRect.width > 0) {
@@ -9023,7 +8952,6 @@
         const targetPage = Math.max(1, Number(pageNumber) || 1);
         drawingState.previewPage = targetPage;
 
-        // Update sheet row active state in list
         const prevActive = document.querySelector('#takeoffSheetList .pro-sheet-row.active');
         const nextActive = doc.extension !== 'pdf'
             ? document.querySelector(`#takeoffSheetList .pro-sheet-row[data-attachment-doc-id="${doc.id}"]`)
@@ -9031,13 +8959,11 @@
         if (prevActive && prevActive !== nextActive) prevActive.classList.remove('active');
         if (nextActive && !nextActive.classList.contains('active')) nextActive.classList.add('active');
 
-        // Update preview headers
         const titleEl = $('takeoffPreviewTitle');
         const subEl = $('takeoffPreviewSub');
         if (titleEl) titleEl.textContent = sheetName(doc, targetPage);
         if (subEl) subEl.textContent = `Hoja ${targetPage} de ${doc.pageCount || 1} • ${doc.name || ''}`;
 
-        // Update Takeoff Items breakdown on this sheet
         const summary = getSheetTakeoffSummary(doc.id, targetPage);
         const countEl = $('takeoffPreviewItemCount');
         const listEl = $('takeoffPreviewItemsList');
@@ -9077,7 +9003,6 @@
             openBtn.onclick = () => selectDrawingSheet(doc, targetPage);
         }
 
-        // Render thumbnail
         if (doc.extension !== 'pdf') {
             const imageKey = `image:${doc.id}:${doc.version || doc.fileUrl || ''}`;
             if (drawingState.previewRenderedKey === imageKey && box.querySelector('img')) return;
@@ -9094,7 +9019,6 @@
         const requestId = drawingState.thumbnailRequest;
         drawingState.lastPreviewDocId = doc.id;
 
-        // 1. Check in-memory caches (0ms)
         const cachedUrl = takePreviewCacheValue(drawingState.thumbnailCache, key)
             || window.__TakeoffThumbService?.getCachedThumbUrl?.(doc, targetPage);
         if (cachedUrl) {
@@ -9112,7 +9036,6 @@
                 : await waitForPreviewDebounce(requestId);
             if (!debounceReady || !await waitForPreviewVisibility(box, requestId)) return;
 
-            // 2. Reuse the already-loaded PDF instance in the main Takeoff viewer.
             const viewerUrl = await getViewerPreviewThumb(doc, targetPage, requestId);
             if (requestId !== drawingState.thumbnailRequest || !drawingState.dropdownOpen) return;
             if (viewerUrl) {
@@ -9121,7 +9044,6 @@
                 return;
             }
 
-            // 3. Check versioned IndexedDB cache (~1ms, zero CPU load)
             if (window.__TakeoffThumbService?.getPersistedThumbUrl) {
                 const persistedUrl = await window.__TakeoffThumbService.getPersistedThumbUrl(doc, targetPage);
                 if (requestId !== drawingState.thumbnailRequest || !drawingState.dropdownOpen) return;
@@ -9132,7 +9054,6 @@
                 }
             }
 
-            // 4. Render only the selected page in a background worker when it is not loaded in the viewer.
             if (window.__TakeoffThumbService?.renderPreviewThumb) {
                 const workerRes = await window.__TakeoffThumbService.renderPreviewThumb(doc, targetPage);
                 if (requestId !== drawingState.thumbnailRequest || !drawingState.dropdownOpen) return;
@@ -9146,7 +9067,6 @@
                 }
             }
 
-            // 5. Fallback if OffscreenCanvas is unavailable: low-resolution idle render.
             await waitForPreviewIdle();
             if (requestId !== drawingState.thumbnailRequest || !drawingState.dropdownOpen) return;
             if (requestId !== drawingState.thumbnailRequest) return;
@@ -9434,24 +9354,8 @@
             if (event.data?.type === 'takeoff-editor-save-status') {
                 if (event.source !== takeoffWindow()) return;
                 const payload = event.data?.payload || {};
-                const status = String(payload.status || 'idle');
-                if (status === 'pending' || status === 'saving' || status === 'error') {
-                    takeoffIsDirty = true;
-                } else if (status === 'saved' && payload.dirty !== true
-                    && pendingDeletedTakeoffLayersByEstimate.size === 0) {
-                    const activeDocId = Number(activeDrawingDoc()?.id || window.ProjectState?.selectedDocumentId || 0);
-                    const activeEstKey = String(activeEstimateId() || '');
-                    if ((!payload.drawingId || Number(payload.drawingId) === activeDocId)
-                        && (!payload.estimateKey || String(payload.estimateKey) === activeEstKey)) {
-                        takeoffIsDirty = false;
-                    }
-                }
-                setTakeoffSaveStatus(status, payload.message || '');
-                return;
-            }
-            if (event.data?.type === 'project-takeoff-layer-qty') {
-                if (event.source !== takeoffWindow()) return;
-                handleFastLayerQtyUpdate(event.data.payload);
+                const result = takeoffSaveCoordinator.handleStatus(payload);
+                if (result.dirty !== null) takeoffIsDirty = result.dirty;
                 return;
             }
             if (event.data?.type === 'project-takeoff-layer-qty') {

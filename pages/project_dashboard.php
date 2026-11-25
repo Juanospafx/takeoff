@@ -2776,6 +2776,7 @@ $state = [
     <script src="../assets/takeoff_catalog_browser.js?v=<?= filemtime(__DIR__ . '/../assets/takeoff_catalog_browser.js') ?>"></script>
     <script src="../assets/takeoff_viewer_controller.js?v=<?= filemtime(__DIR__ . '/../assets/takeoff_viewer_controller.js') ?>"></script>
     <script src="../assets/takeoff_scale_controller.js?v=<?= filemtime(__DIR__ . '/../assets/takeoff_scale_controller.js') ?>"></script>
+    <script src="../assets/takeoff_save_coordinator.js?v=<?= filemtime(__DIR__ . '/../assets/takeoff_save_coordinator.js') ?>"></script>
     <script src="../assets/project_takeoff.js?v=<?= filemtime(__DIR__ . '/../assets/project_takeoff.js') ?>"></script>
     <script src="../assets/assembly_expansion_service.js?v=assembly-expansion-20260828-1"></script>
     <script src="../assets/estimating_assembly_expansion_adapter.js?v=estimating-assembly-adapter-20260828-1"></script>
