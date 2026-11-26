@@ -8231,18 +8231,15 @@
     function ensureDrawingDropdownPortal() {
         const panel = $('takeoffDrawingDropdown');
         if (!panel) return null;
-        const canvasShell = $('takeoffCanvasShell') || document.querySelector('.pro-canvas-shell');
-        if (!canvasShell) return null;
+        const portal = document.fullscreenElement || document.body;
         let overlay = $('takeoffDrawingModalOverlay');
         if (!overlay) {
             overlay = document.createElement('div');
             overlay.id = 'takeoffDrawingModalOverlay';
             overlay.className = 'pro-drawing-modal-overlay';
             overlay.setAttribute('aria-hidden', 'true');
-            canvasShell.appendChild(overlay);
-        } else if (overlay.parentElement !== canvasShell) {
-            canvasShell.appendChild(overlay);
         }
+        if (overlay.parentElement !== portal) portal.appendChild(overlay);
         if (overlay.dataset.closeBound !== 'true') {
             overlay.dataset.closeBound = 'true';
             overlay.addEventListener('click', event => {
@@ -8253,22 +8250,20 @@
         panel.setAttribute('role', 'dialog');
         panel.setAttribute('aria-modal', 'true');
         panel.setAttribute('aria-labelledby', 'takeoffDrawingDialogTitle');
-        panel.style.removeProperty('left');
-        panel.style.removeProperty('top');
-        panel.style.removeProperty('width');
-        panel.style.removeProperty('height');
-        panel.style.removeProperty('max-width');
-        panel.style.removeProperty('max-height');
-        panel.style.removeProperty('transform');
         return panel;
     }
 
-    function syncDrawingDropdownOverlay() {
-        const panel = ensureDrawingDropdownPortal();
-        const overlay = panel?.parentElement;
-        if (!panel || !overlay?.classList.contains('pro-drawing-modal-overlay')) return;
-        overlay.classList.toggle('open', drawingState.dropdownOpen);
-        overlay.setAttribute('aria-hidden', drawingState.dropdownOpen ? 'false' : 'true');
+    function positionDrawingDropdown() {
+        if (!drawingState.dropdownOpen) return;
+        const panel = $('takeoffDrawingDropdown');
+        const trigger = $('takeoffSheetSelect');
+        if (!panel || !trigger?.getClientRects().length) return;
+        const anchor = trigger.getBoundingClientRect();
+        const overlay = panel.parentElement;
+        const edge = 8;
+        const left = Math.max(edge, Math.min(anchor.left, overlay.clientWidth - panel.offsetWidth - edge));
+        overlay.style.setProperty('--drawing-dropdown-left', `${left}px`);
+        overlay.style.setProperty('--drawing-dropdown-top', `${anchor.bottom + 4}px`);
     }
 
     function bindDropdownScrollGuards() {
@@ -8445,7 +8440,9 @@
         drawingState.dropdownOpen = true;
         panel.classList.add('open');
         trigger?.setAttribute('aria-expanded', 'true');
-        syncDrawingDropdownOverlay();
+        panel.parentElement.classList.add('open');
+        panel.parentElement.setAttribute('aria-hidden', 'false');
+        positionDrawingDropdown();
         bindDropdownScrollGuards();
         bindDocumentListDelegation();
         bindSheetListDelegation();
@@ -9315,6 +9312,10 @@
             drawingState.selectedDocumentId = drawingState.documents[0].id;
         }
         setDrawingLabel();
+        window.addEventListener('resize', positionDrawingDropdown);
+        window.addEventListener('scroll', event => {
+            if (!event.target.closest?.('.pro-drawing-modal-overlay')) positionDrawingDropdown();
+        }, true);
         $('takeoffSheetSelect')?.addEventListener('click', event => {
             event.stopPropagation();
             const panel = $('takeoffDrawingDropdown');

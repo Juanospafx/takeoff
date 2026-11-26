@@ -3489,16 +3489,14 @@ body.theme-dark .pro-takeoff-viewer {
 }
 
 .pro-drawing-dropdown {
-    position: fixed;
-    top: 50%;
-    left: 50%;
+    position: absolute;
+    top: var(--drawing-dropdown-top, 0px);
+    left: var(--drawing-dropdown-left, 8px);
     z-index: 100000;
     display: none;
-    width: min(840px, calc(100vw - 32px));
-    height: min(400px, calc(100vh - 32px));
-    max-width: calc(100vw - 32px);
-    max-height: calc(100vh - 32px);
-    transform: translate(-50%, -50%);
+    width: min(840px, calc(100% - 16px));
+    height: min(400px, max(0px, calc(100% - var(--drawing-dropdown-top, 0px) - 8px)));
+    box-sizing: border-box;
     overflow: hidden;
     background: var(--tk-bg-panel);
     border: 1px solid var(--tk-border);
@@ -4047,36 +4045,16 @@ body.theme-dark .pro-drawing-group-count {
     scrollbar-gutter: stable;
 }
 
-/* Drawings & Sheets is anchored to the live viewer, so browser zoom and
-   sidebar resizing are handled by native layout instead of viewport math. */
 .pro-drawing-modal-overlay {
-    position: absolute;
+    position: fixed;
     inset: 0;
     z-index: 100000;
     display: none;
-    place-items: center;
-    min-width: 0;
-    min-height: 0;
-    padding: clamp(8px, 2%, 16px);
     overflow: hidden;
-    box-sizing: border-box;
 }
 
 .pro-drawing-modal-overlay.open {
-    display: grid;
-}
-
-.pro-canvas-shell > .pro-drawing-modal-overlay > .pro-drawing-dropdown {
-    position: relative;
-    inset: auto;
-    top: auto;
-    left: auto;
-    width: min(840px, 100%);
-    height: min(400px, 100%);
-    max-width: 100%;
-    max-height: 100%;
-    transform: none;
-    box-sizing: border-box;
+    display: block;
 }
 
 .pro-preview-box {
@@ -5622,11 +5600,6 @@ body.theme-dark .pro-compare-actions {
         min-width: 100%;
     }
 
-    .pro-drawing-dropdown {
-        width: calc(100vw - 16px);
-        max-height: calc(100vh - 170px);
-    }
-
     .pro-drawing-grid {
         grid-template-columns: 1fr;
         overflow: auto;
@@ -6893,11 +6866,6 @@ body.theme-dark .takeoff-subhead-nav-btn:hover {
 .takeoff-subhead-drawing-wrap .pro-sheet-select:focus {
     outline: 2.5px solid var(--tk-focus-ring);
     border-color: var(--tk-primary);
-}
-
-.takeoff-subhead-drawing-wrap .pro-drawing-dropdown {
-    position: fixed;
-    z-index: 100000;
 }
 
 .takeoff-subhead-page-wrap {

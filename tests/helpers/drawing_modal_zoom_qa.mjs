@@ -31,8 +31,11 @@ function cdp(method, params = {}) {
 }
 
 const css = await fs.readFile(new URL('../../assets/project_takeoff.css', import.meta.url), 'utf8');
+const takeoff = await fs.readFile(new URL('../../assets/project_takeoff.js', import.meta.url), 'utf8');
+const positioning = takeoff.slice(takeoff.indexOf('function ensureDrawingDropdownPortal'), takeoff.indexOf('function bindDropdownScrollGuards'));
 const html = `<!doctype html><html style="height:100%"><head><meta charset="utf-8"><style>${css}</style></head>
 <body style="margin:0;height:100%"><section id="tab-takeoff" style="display:block;width:100vw;height:100vh">
+<button id="takeoffSheetSelect" style="position:absolute;left:30%;top:48px">Drawings &amp; Sheets</button>
 <div class="takeoff-workspace pro-takeoff-workspace" id="takeoffWorkspace">
 <aside class="pro-takeoff-items"></aside><div class="pro-sidebar-resizer"></div><aside class="pro-layer-drawer" hidden></aside>
 <section class="pro-takeoff-viewer"><div class="pro-canvas-shell" id="takeoffCanvasShell"><div class="pro-drawing-modal-overlay open" aria-hidden="false">
@@ -60,6 +63,16 @@ const evaluate = async expression => {
     return result.result.value;
 };
 
+await evaluate(`(() => {
+    const $ = id => document.getElementById(id);
+    const drawingState = { dropdownOpen: true };
+    const closeDrawingDropdown = () => {};
+    ${positioning}
+    ensureDrawingDropdownPortal();
+    window.addEventListener('resize', positionDrawingDropdown);
+    positionDrawingDropdown();
+})()`);
+
 const zoomLevels = [67, 75, 80, 90, 100, 110, 125, 150];
 const results = [];
 for (const zoom of zoomLevels) {
@@ -81,19 +94,17 @@ for (const zoom of zoomLevels) {
                 return { left: value.left, top: value.top, right: value.right, bottom: value.bottom,
                     width: value.width, height: value.height };
             };
-            const viewer = rect('.pro-takeoff-viewer');
             const overlay = rect('.pro-drawing-modal-overlay');
+            const trigger = rect('#takeoffSheetSelect');
             const panel = rect('.pro-drawing-dropdown');
             const button = rect('#takeoffOpenSheetBtn');
             const grid = getComputedStyle(document.querySelector('.pro-drawing-grid')).gridTemplateColumns.split(' ').filter(Boolean);
             return {
-                viewer, overlay, panel, button, columns: grid.length,
-                centerDeltaX: Math.abs((panel.left + panel.width / 2) - (overlay.left + overlay.width / 2)),
-                centerDeltaY: Math.abs((panel.top + panel.height / 2) - (overlay.top + overlay.height / 2)),
+                overlay, panel, button, columns: grid.length,
+                anchorDeltaX: Math.abs(panel.left - Math.max(8, Math.min(trigger.left, overlay.width - panel.width - 8))),
+                anchorDeltaY: Math.abs(panel.top - trigger.bottom - 4),
                 contained: panel.left >= overlay.left - 1 && panel.top >= overlay.top - 1
                     && panel.right <= overlay.right + 1 && panel.bottom <= overlay.bottom + 1,
-                overlayContained: overlay.left >= viewer.left - 2 && overlay.top >= viewer.top - 2
-                    && overlay.right <= viewer.right + 2 && overlay.bottom <= viewer.bottom + 2,
                 buttonVisible: button.width > 0 && button.height > 0
                     && button.left >= panel.left && button.right <= panel.right
                     && button.top >= panel.top && button.bottom <= panel.bottom
@@ -102,8 +113,8 @@ for (const zoom of zoomLevels) {
     }
     const failed = states.some(state => !Number.isFinite(state.panel.width) || !Number.isFinite(state.panel.height)
         || state.panel.width <= 0 || state.panel.height <= 0
-        || state.centerDeltaX > 1 || state.centerDeltaY > 1
-        || !state.contained || !state.overlayContained || !state.buttonVisible || state.columns !== 3);
+        || state.anchorDeltaX > 1 || state.anchorDeltaY > 1
+        || !state.contained || !state.buttonVisible || state.columns !== 3);
     results.push({ zoom, pass: !failed, expanded: states[0], sidebarCollapsed: states[1] });
 }
 
@@ -119,8 +130,8 @@ socket.close();
 console.log(JSON.stringify(results.map(result => ({
     zoom: result.zoom,
     pass: result.pass,
-    expandedCenterDelta: [result.expanded.centerDeltaX, result.expanded.centerDeltaY],
-    collapsedCenterDelta: [result.sidebarCollapsed.centerDeltaX, result.sidebarCollapsed.centerDeltaY],
+    expandedAnchorDelta: [result.expanded.anchorDeltaX, result.expanded.anchorDeltaY],
+    collapsedAnchorDelta: [result.sidebarCollapsed.anchorDeltaX, result.sidebarCollapsed.anchorDeltaY],
     panel: [result.expanded.panel.width, result.expanded.panel.height],
     buttonVisible: result.expanded.buttonVisible && result.sidebarCollapsed.buttonVisible
 })), null, 2));
