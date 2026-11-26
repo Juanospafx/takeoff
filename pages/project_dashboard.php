@@ -1029,12 +1029,12 @@ $state = [
                 </div>
                 <div class="project-header-actions">
                     <div class="pd-presence-wrap">
-                        <div class="pd-presence-stack" id="pdPresenceStack"
-                            title="Active users in this project (Click to view collaborators)">
+                        <div class="pd-presence-stack" id="pdPresenceStack" aria-label="Active users in this project">
                             <div class="pd-presence-avatar self" style="background: #5b4364; z-index: 4;"
-                                title="<?= htmlspecialchars($selfName) ?> (You) - <?= htmlspecialchars($selfRole) ?>">
-                                <span><?= htmlspecialchars($selfInitials) ?></span>
-                                <span class="pd-presence-dot" title="Active now"></span>
+                                tabindex="0" aria-label="<?= htmlspecialchars($selfName) ?> (You)"
+                                data-pro-tooltip="<?= htmlspecialchars($selfName) ?> (You)">
+                                <span aria-hidden="true"><?= htmlspecialchars($selfInitials) ?></span>
+                                <span class="pd-presence-dot" aria-hidden="true"></span>
                             </div>
                         </div>
                         <div class="pd-presence-menu" id="pdPresenceMenu">
@@ -2283,9 +2283,16 @@ $state = [
 
             if (window.TakeoffAuth.canWrite !== true) {
                 var nativeFetch = window.fetch.bind(window);
+                var presenceUrl = new URL('../api/project_presence.php', window.location.href).href;
                 window.fetch = function (input, init) {
                     var method = String(init?.method || (input instanceof Request ? input.method : 'GET') || 'GET').toUpperCase();
                     if (!['GET', 'HEAD', 'OPTIONS'].includes(method)) {
+                        if (method === 'POST' && typeof input === 'string'
+                            && new URL(input, window.location.href).href === presenceUrl && typeof init?.body === 'string') {
+                            try {
+                                if (['heartbeat', 'leave'].includes(JSON.parse(init.body)?.action)) return nativeFetch(input, init);
+                            } catch (_) {}
+                        }
                         return Promise.reject(new Error('Read-only access: mutation request blocked.'));
                     }
                     return nativeFetch(input, init);

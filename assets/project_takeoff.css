@@ -5119,6 +5119,7 @@ body.theme-dark .pro-status-pill {
 
 .pro-tool-btn[data-pro-tooltip]::after,
 .pro-toolbar-btn[data-pro-tooltip]::after,
+.pd-presence-stack [data-pro-tooltip]::after,
 .pro-chip-btn[data-pro-tooltip]::after {
     content: attr(data-pro-tooltip);
     position: absolute;
@@ -5141,6 +5142,7 @@ body.theme-dark .pro-status-pill {
 }
 
 .pro-toolbar-btn[data-pro-tooltip]::after,
+.pd-presence-stack [data-pro-tooltip]::after,
 .pro-chip-btn[data-pro-tooltip]::after {
     right: auto;
     left: 50%;
@@ -5148,10 +5150,19 @@ body.theme-dark .pro-status-pill {
     transform: translateX(-50%);
 }
 
+.pd-presence-stack [data-pro-tooltip]::after {
+    width: max-content;
+    text-align: center;
+    white-space: pre-line;
+    overflow-wrap: anywhere;
+}
+
 .pro-tool-btn[data-pro-tooltip]:hover::after,
 .pro-tool-btn[data-pro-tooltip]:focus-visible::after,
 .pro-toolbar-btn[data-pro-tooltip]:hover::after,
 .pro-toolbar-btn[data-pro-tooltip]:focus-visible::after,
+.pd-presence-stack [data-pro-tooltip]:hover::after,
+.pd-presence-stack [data-pro-tooltip]:focus-visible::after,
 .pro-chip-btn[data-pro-tooltip]:hover::after,
 .pro-chip-btn[data-pro-tooltip]:focus-visible::after {
     opacity: 1;

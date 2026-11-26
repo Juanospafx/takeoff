@@ -4657,36 +4657,26 @@
         });
 
         // Server-backed project presence shared across browsers, devices, and sessions.
-        const currentUserPresence = window.ProjectPresenceUser || {
-            id: 1,
-            name: 'User (You)',
-            initials: 'US',
-            color: '#5b4364',
-            role: 'Estimator',
-            isSelf: true
-        };
-        const currentPresenceProjId = window.ProjectState?.id || window.WonProjectConfig?.projectId || 0;
-        const presenceClientId = (() => {
-            try {
-                const key = 'takeoff.presence.client';
-                const existing = sessionStorage.getItem(key);
-                if (existing) return existing;
-                const created = 'presence_' + (window.crypto?.randomUUID?.() || Math.random().toString(36).slice(2) + Date.now().toString(36));
-                sessionStorage.setItem(key, created);
-                return created;
-            } catch (error) {
-                return 'presence_' + Math.random().toString(36).slice(2) + Date.now().toString(36);
-            }
-        })();
+        const currentUserPresence = window.ProjectPresenceUser;
+        const currentPresenceProjId = window.ProjectState?.projectId || window.ProjectState?.id || window.WonProjectConfig?.projectId || 0;
+        const newPresenceClientId = () => 'presence_' + (window.crypto?.randomUUID?.()
+            || Math.random().toString(36).slice(2) + Date.now().toString(36));
+        let presenceClientId = newPresenceClientId();
+        let presencePageActive = true;
+        let nextPresenceHeartbeat = 0;
         const presenceEndpoint = '../api/project_presence.php';
 
-        async function fetchProjectPresence(action = 'heartbeat') {
-            if (!currentPresenceProjId) return [{ ...currentUserPresence, isSelf: true }];
-            const response = await fetch(presenceEndpoint, {
+        async function fetchProjectPresence(action, clientId) {
+            if (!currentPresenceProjId) return currentUserPresence ? [currentUserPresence] : [];
+            const query = new URLSearchParams({ action: 'list', project_id: currentPresenceProjId });
+            const response = action === 'list' ? await fetch(`${presenceEndpoint}?${query}`, {
+                credentials: 'same-origin',
+                cache: 'no-store'
+            }) : await fetch(presenceEndpoint, {
                 method: 'POST',
                 credentials: 'same-origin',
                 headers: { 'Content-Type': 'application/json' },
-                body: JSON.stringify({ action, project_id: currentPresenceProjId, client_id: presenceClientId })
+                body: JSON.stringify({ action, project_id: currentPresenceProjId, client_id: clientId })
             });
             if (!response.ok) throw new Error(`Presence request failed (${response.status})`);
             const payload = await response.json();
@@ -4696,8 +4686,8 @@
             return payload.users.map(user => ({
                 ...user,
                 name: user.isSelf ? `${String(user.name || '').replace(/\s*\(You\)\s*$/, '')} (You)` : user.name,
-                color: user.color || '#5b4364'
-            }));
+                color: /^#[0-9a-f]{6}$/i.test(user.color || '') ? user.color : '#5b4364'
+            })).sort((a, b) => Number(b.isSelf) - Number(a.isSelf) || a.name.localeCompare(b.name) || a.id - b.id);
         }
 
         function removePresenceClient() {
@@ -4709,24 +4699,32 @@
         }
 
         window.ProjectPresence = {
-            users: [{ ...currentUserPresence, isSelf: true }],
-            syncing: false,
+            users: currentUserPresence ? [currentUserPresence] : [],
+            syncing: null,
             getUsers() { return this.users; },
             setUsers(newUsers) {
                 this.users = Array.isArray(newUsers) ? newUsers : [];
                 this.render();
             },
-            async syncRealtime() {
-                if (this.syncing) return;
-                this.syncing = true;
+            async syncRealtime(forceHeartbeat = false) {
+                const clientId = presenceClientId;
+                if (!presencePageActive || this.syncing === clientId) return;
+                const heartbeat = forceHeartbeat || Date.now() >= nextPresenceHeartbeat;
+                this.syncing = clientId;
                 try {
-                    this.users = await fetchProjectPresence('heartbeat');
-                } catch (error) {
-                    this.users = [{ ...currentUserPresence, isSelf: true }];
+                    const users = await fetchProjectPresence(heartbeat ? 'heartbeat' : 'list', clientId);
+                    if (!presencePageActive || presenceClientId !== clientId) return;
+                    if (heartbeat) nextPresenceHeartbeat = Date.now() + 10000;
+                    const unchanged = users.length === this.users.length && users.every((user, index) => {
+                        const current = this.users[index];
+                        return ['id', 'name', 'initials', 'role', 'isSelf', 'color'].every(key => user[key] === current[key]);
+                    });
+                    if (!unchanged) this.setUsers(users);
+                } catch (_) {
+                    // Keep the last roster visible through transient connection errors.
                 } finally {
-                    this.syncing = false;
+                    if (this.syncing === clientId) this.syncing = null;
                 }
-                this.render();
             },
             addUser(user) {
                 if (!this.users.some(u => u.id === user.id)) {
@@ -4750,17 +4748,20 @@
                 let html = '';
                 visible.forEach((u, i) => {
                     const z = 10 - i;
-                    const tooltip = `${escapeHtml(u.name)} (${escapeHtml(u.role || 'Collaborator')})`;
+                    const name = escapeHtml(u.name);
                     html += `
-                        <div class="pd-presence-avatar ${u.isSelf ? 'self' : ''}" style="background: ${u.color || '#5b4364'}; z-index: ${z};" title="${tooltip}">
-                            <span>${escapeHtml(u.initials || (u.name || 'U').slice(0, 2).toUpperCase())}</span>
-                            <span class="pd-presence-dot" title="Active in project"></span>
+                        <div class="pd-presence-avatar ${u.isSelf ? 'self' : ''}" style="background: ${u.color || '#5b4364'}; z-index: ${z};"
+                            tabindex="0" aria-label="${name}" data-pro-tooltip="${name}">
+                            <span aria-hidden="true">${escapeHtml(u.initials || (u.name || 'U').slice(0, 2).toUpperCase())}</span>
+                            <span class="pd-presence-dot" aria-hidden="true"></span>
                         </div>
                     `;
                 });
 
                 if (overflow > 0) {
-                    html += `<div class="pd-presence-overflow" title="${overflow} more users active">+${overflow}</div>`;
+                    const names = escapeHtml(this.users.slice(4).map(user => user.name).join('\n'));
+                    html += `<div class="pd-presence-overflow" tabindex="0" aria-label="${overflow} more active users"
+                        data-pro-tooltip="${names}">+${overflow}</div>`;
                 }
 
                 stack.innerHTML = html;
@@ -4785,13 +4786,34 @@
             }
         };
 
-        window.ProjectPresence.syncRealtime();
-        setInterval(() => window.ProjectPresence.syncRealtime(), 5000);
-        window.addEventListener('beforeunload', removePresenceClient);
+        if (currentPresenceProjId) {
+            window.ProjectPresence.syncRealtime(true);
+            setInterval(() => window.ProjectPresence.syncRealtime(), 2000);
+            window.addEventListener('focus', () => window.ProjectPresence.syncRealtime());
+            document.addEventListener('visibilitychange', () => {
+                if (!document.hidden) window.ProjectPresence.syncRealtime();
+            });
+            window.addEventListener('pagehide', () => {
+                presencePageActive = false;
+                removePresenceClient();
+            });
+            window.addEventListener('pageshow', event => {
+                if (!event.persisted) return;
+                presenceClientId = newPresenceClientId();
+                presencePageActive = true;
+                nextPresenceHeartbeat = 0;
+                window.ProjectPresence.syncRealtime(true);
+            });
+        }
 
         $('pdPresenceStack')?.addEventListener('click', (e) => {
             e.stopPropagation();
             $('pdPresenceMenu')?.classList.toggle('open');
+        });
+        $('pdPresenceStack')?.addEventListener('keydown', event => {
+            if (event.key !== 'Enter' && event.key !== ' ') return;
+            event.preventDefault();
+            event.target.click();
         });
 
         $('projectStatusButton')?.addEventListener('click', event => {

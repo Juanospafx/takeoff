@@ -67,7 +67,7 @@ try {
 
     if ($action === 'heartbeat') {
         $displayName = trim((string) ($_SESSION['display_name'] ?? $_SESSION['name'] ?? $user['username'] ?? 'User'));
-        if ($displayName === '') $displayName = 'User';
+        if ($displayName === '') $displayName = trim((string) ($user['username'] ?? '')) ?: 'User';
         $role = ucfirst((string) ($user['role'] ?? 'viewer'));
         $upsert = $pdo->prepare(
             'INSERT INTO project_presence (project_id,user_id,client_id,display_name,user_role,last_seen)
@@ -75,15 +75,17 @@ try {
              ON DUPLICATE KEY UPDATE display_name=VALUES(display_name),user_role=VALUES(user_role),last_seen=NOW(6)'
         );
         $upsert->execute([$projectId, $userId, $clientId, $displayName, $role]);
+        $pdo->prepare('DELETE FROM project_presence WHERE project_id=? AND last_seen < (NOW(6) - INTERVAL 2 MINUTE)')
+            ->execute([$projectId]);
     }
 
-    $pdo->prepare('DELETE FROM project_presence WHERE project_id=? AND last_seen < (NOW(6) - INTERVAL 2 MINUTE)')
-        ->execute([$projectId]);
     $query = $pdo->prepare(
-        'SELECT user_id, MAX(display_name) AS display_name, MAX(user_role) AS user_role, MAX(last_seen) AS last_seen
-         FROM project_presence
-         WHERE project_id=? AND last_seen >= (NOW(6) - INTERVAL 15 SECOND)
-         GROUP BY user_id
+        'SELECT presence.user_id, MAX(presence.display_name) AS display_name,
+                MAX(presence.user_role) AS user_role, MAX(presence.last_seen) AS last_seen
+         FROM project_presence AS presence
+         INNER JOIN users ON users.id = presence.user_id AND users.active = 1
+         WHERE presence.project_id=? AND presence.last_seen >= (NOW(6) - INTERVAL 35 SECOND)
+         GROUP BY presence.user_id
          ORDER BY last_seen DESC'
     );
     $query->execute([$projectId]);
