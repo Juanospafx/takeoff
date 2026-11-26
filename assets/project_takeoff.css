@@ -1210,59 +1210,6 @@ body.theme-dark .pro-layer-modal .pro-layer-form textarea::placeholder {
     opacity: 0.8 !important;
 }
 
-/* Dark Theme: takeoffItemSearch matching Bid Board Table Search (Compact for Sidebar) */
-[data-theme="dark"] #takeoffItemSearch,
-[data-theme="dark"] .pro-search-input #takeoffItemSearch,
-body.theme-dark #takeoffItemSearch,
-body.theme-dark .pro-search-input #takeoffItemSearch {
-    width: 100% !important;
-    height: 26px !important;
-    min-height: 26px !important;
-    background: var(--bg-input, var(--tk-bg-input, #1f2633)) !important;
-    color: var(--text-main, var(--tk-text-main, #ffffff)) !important;
-    border: 1px solid var(--border, var(--tk-border, #2f384a)) !important;
-    border-radius: 4px !important;
-    padding: 2px 24px 2px 8px !important;
-    font-size: 11.5px !important;
-    outline: none !important;
-    box-shadow: none !important;
-    transition: border-color 0.15s ease, outline 0.15s ease, background 0.15s ease !important;
-}
-
-[data-theme="dark"] #takeoffItemSearch::placeholder,
-[data-theme="dark"] .pro-search-input #takeoffItemSearch::placeholder,
-body.theme-dark #takeoffItemSearch::placeholder,
-body.theme-dark .pro-search-input #takeoffItemSearch::placeholder {
-    color: var(--text-muted, var(--tk-text-muted, #94a3b8)) !important;
-    opacity: 0.8 !important;
-    font-size: 11px !important;
-}
-
-[data-theme="dark"] #takeoffItemSearch:focus,
-[data-theme="dark"] #takeoffItemSearch:focus-visible,
-[data-theme="dark"] .pro-search-input #takeoffItemSearch:focus,
-[data-theme="dark"] .pro-search-input #takeoffItemSearch:focus-visible,
-body.theme-dark #takeoffItemSearch:focus,
-body.theme-dark #takeoffItemSearch:focus-visible,
-body.theme-dark .pro-search-input #takeoffItemSearch:focus,
-body.theme-dark .pro-search-input #takeoffItemSearch:focus-visible {
-    border-color: var(--primary, var(--tk-primary, #fb5a3a)) !important;
-    outline: 2px solid rgba(251, 90, 58, 0.25) !important;
-    outline-offset: 1px !important;
-    box-shadow: none !important;
-}
-
-[data-theme="dark"] .pro-takeoff-searchbar .pro-search-input i,
-[data-theme="dark"] .pro-search-input:has(#takeoffItemSearch) i,
-body.theme-dark .pro-takeoff-searchbar .pro-search-input i,
-body.theme-dark .pro-search-input:has(#takeoffItemSearch) i {
-    color: var(--text-muted, var(--tk-text-muted, #94a3b8)) !important;
-    font-size: 11px !important;
-    right: 8px !important;
-    pointer-events: none !important;
-}
-
-
 /* Header-referenced Selectors & Controls: dark mode matching subhead background */
 [data-theme="dark"] .pro-sheet-select,
 [data-theme="dark"] .pro-sheet-select.pro-sheet-trigger,
@@ -2181,6 +2128,7 @@ body.theme-dark .pro-row-action-btn:hover {
     transform: translateY(-50%);
     color: var(--tk-text-muted);
     font-size: .72rem;
+    pointer-events: none;
 }
 
 .pro-menu-wrap {
@@ -10886,8 +10834,14 @@ body.theme-dark .pro-takeoff-panel-head .pro-takeoff-searchbar {
     font-size: 12px;
 }
 
+.pro-takeoff-panel-head #takeoffItemSearch:focus {
+    border-color: var(--tk-primary) !important;
+    box-shadow: 0 0 0 2px var(--tk-focus-ring) !important;
+}
+
 .pro-takeoff-panel-head .pro-takeoff-searchbar .pro-search-input i {
     left: 9px;
+    right: auto;
     font-size: 11px;
 }
 

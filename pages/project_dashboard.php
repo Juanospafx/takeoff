@@ -1719,8 +1719,8 @@ $state = [
                             </div>
                             <div class="pro-takeoff-searchbar">
                                 <div class="pro-search-input">
-                                    <input id="takeoffItemSearch" type="search" placeholder="Search Takeoffs">
-                                    <i class="fas fa-magnifying-glass"></i>
+                                    <input id="takeoffItemSearch" type="search" placeholder="Search Takeoffs" aria-label="Search Takeoffs">
+                                    <i class="fas fa-magnifying-glass" aria-hidden="true"></i>
                                 </div>
                             </div>
                         </div>
