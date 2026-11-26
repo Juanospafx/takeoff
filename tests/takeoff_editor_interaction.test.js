@@ -14,7 +14,7 @@ test('existing count, linear, and area geometry remains draggable unless locked'
 test('dragging a segment vertex updates stored geometry, recalculates it, and persists it', () => {
     assert.match(source, /handle\.on\('dragstart',[\s\S]*?snapshot\(\)/);
     assert.match(source, /handle\.on\('dragmove',[\s\S]*?segment\.points_json\[index\]\s*=\s*\{\s*x:\s*position\.x,\s*y:\s*position\.y\s*\};[\s\S]*?refreshSegment\(segment\)/);
-    assert.match(source, /handle\.on\('dragend',[\s\S]*?markDirty\(\);/);
+    assert.match(source, /handle\.on\('dragend',[\s\S]*?trackTakeoffObjects\(\[\{ type: 'segment', ref: segment \}\]\);[\s\S]*?markDirty\(\{ objectsTracked: true \}\);/);
     assert.match(source, /function refreshSegment\(segment[\s\S]*?calculateAreaQuantity\(segment\)[\s\S]*?calculateLinearLength\(segment\)/);
 });
 

@@ -31,6 +31,20 @@
         }
     }
 
+    window.canChangeTakeoffDrawing = () => {
+        const visible = $('tab-takeoff')?.classList.contains('active');
+        if (takeoffWindow()?.projectTakeoffCanChangeDrawing?.(visible) !== false) return true;
+        if (!visible) window.TakeoffAnnouncement?.show({
+            type: 'warning',
+            title: 'Drawing in progress',
+            message: 'Return to Takeoff and finish the drawing with Enter or double-click, or press Esc to cancel.',
+            primaryText: 'Continue',
+            force: true,
+            showDontShow: false
+        });
+        return false;
+    };
+
     const takeoffSaveCoordinator = window.TakeoffSaveCoordinator.create({
         getElement: $,
         getEditorWindow: takeoffWindow,
@@ -2225,6 +2239,7 @@
 
     function activateEstimate(estimateId) {
         if (String(takeoffState.activeEstimateId) === String(estimateId)) return;
+        if (!window.canChangeTakeoffDrawing()) return;
         takeoffState.activeEstimateId = String(estimateId);
 
         const tree = $('takeoffItemsTree');
@@ -9177,7 +9192,7 @@
     window.hideTakeoffCanvasLoader = hideTakeoffCanvasLoader;
 
     function selectDrawingSheet(doc, pageNumber) {
-        if (!doc) return;
+        if (!doc || !window.canChangeTakeoffDrawing()) return;
         const targetPage = Math.max(1, Number(pageNumber) || 1);
         syncProjectDocument(doc);
         drawingState.selectedPage = targetPage;

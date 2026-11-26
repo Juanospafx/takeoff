@@ -5253,7 +5253,7 @@
                 }
             }
         }
-        if (actionName === 'copy') { selectEstimate(estimateId); ui.modal = 'new'; renderModal(); }
+        if (actionName === 'copy' && selectEstimate(estimateId)) { ui.modal = 'new'; renderModal(); }
         if (actionName === 'delete') deleteEstimateAuthoritative(estimateId);
         if (actionName === 'set-primary') {
             state.estimates.forEach(row => {
@@ -6488,8 +6488,9 @@
 
     function selectEstimate(estimateId) {
         const prevActiveId = String(state.activeEstimateId || '');
+        if (prevActiveId !== String(estimateId) && window.canChangeTakeoffDrawing?.() === false) return false;
         const selected = Workspace.selectEstimate(state, estimateId);
-        if (!selected) return;
+        if (!selected) return false;
         const switched = prevActiveId !== String(selected.id);
         if (switched && isEstimatingTabActive()) {
             setEstimatingLoading(true, 'Loading estimate...', 'switch');
@@ -6512,6 +6513,7 @@
                 detail: { projectId, estimateId: selected.id, source: 'estimating' }
             }));
         }
+        return true;
     }
 
     function refreshTableIfActive() {

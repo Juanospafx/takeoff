@@ -61,6 +61,8 @@
     let takeoffRemoteSyncInFlight = false;
     let takeoffRemotePollTimer = null;
     let takeoffSaveQueue = Promise.resolve();
+    const activeLinearVertexDrags = new Set();
+    let deferredTakeoffSnapshot = null;
 
     function layerTrackingKeys(layer) {
         if (!layer) return [];
@@ -1256,19 +1258,10 @@
         konvaLayer.batchDraw();
     }
 
-    function refreshSegment(segment, draggingHandleIndex = -1, options = {}) {
+    function refreshSegment(segment, draggingHandleIndex = -1) {
         if (!segment.node) return;
         const isArea = String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area';
         segment.node.points((segment.points_json || []).flatMap(p => [p.x, p.y]));
-        if (options && options.deferMeasurement && !isArea) {
-            (segment.handles || []).forEach((handle, index) => {
-                if (index !== draggingHandleIndex && segment.points_json[index]) {
-                    handle.position(segment.points_json[index]);
-                }
-            });
-            konvaLayer.batchDraw();
-            return;
-        }
         if (isArea) calculateAreaQuantity(segment);
         else calculateLinearLength(segment);
         const points = segment.points_json || [];
@@ -1527,7 +1520,10 @@
     function destroySegmentNodes(segment) {
         if (segment.node) segment.node.destroy();
         if (segment.labelNode) segment.labelNode.destroy();
-        (segment.handles || []).forEach(h => h.destroy());
+        (segment.handles || []).forEach(handle => {
+            finishLinearVertexDrag(handle);
+            handle.destroy();
+        });
         delete segment.node;
         delete segment.labelNode;
         delete segment.handles;
@@ -1632,28 +1628,38 @@
                 e.cancelBubble = true;
                 handle.moveToTop();
                 snapshot();
+                if (!isArea) activeLinearVertexDrags.add(handle);
             });
             handle.on('dragmove', (e) => {
                 e.cancelBubble = true;
                 const position = handle.position();
-                segment.points_json[index] = { x: position.x, y: position.y };
-                const isAreaSeg = String(segment.takeoff_type || segment.type || '').toLowerCase() === 'area';
-                refreshSegment(segment, index, { deferMeasurement: !isAreaSeg });
-                if (isAreaSeg) {
-                    renderProperties();
-                    emitProjectState();
+                if (!isArea) {
+                    // Only the canvas preview moves. Autosave reads the last committed geometry.
+                    line.points(segment.points_json.flatMap((point, vertexIndex) =>
+                        vertexIndex === index ? [position.x, position.y] : [point.x, point.y]));
+                    konvaLayer.batchDraw();
+                    return;
                 }
+                segment.points_json[index] = { x: position.x, y: position.y };
+                refreshSegment(segment, index);
+                renderProperties();
+                emitProjectState();
             });
             handle.on('dragend', (e) => {
                 e.cancelBubble = true;
-                const position = handle.position();
-                segment.points_json[index] = { x: position.x, y: position.y };
-                segment.updatedAt = timestamp();
-                segment.updated_at = segment.updatedAt;
-                refreshSegment(segment);
-                renderProperties();
-                emitProjectState();
-                markDirty();
+                if (!isArea && !activeLinearVertexDrags.has(handle)) return;
+                try {
+                    const position = handle.position();
+                    segment.points_json[index] = { x: position.x, y: position.y };
+                    segment.updatedAt = timestamp();
+                    segment.updated_at = segment.updatedAt;
+                    trackTakeoffObjects([{ type: 'segment', ref: segment }]);
+                    refreshSegment(segment);
+                    renderProperties();
+                    markDirty({ objectsTracked: true });
+                } finally {
+                    if (!isArea) finishLinearVertexDrag(handle);
+                }
             });
             handle.on('mouseenter', () => {
                 document.body.style.cursor = 'move';
@@ -2155,6 +2161,7 @@
         state.draftLine.lengthLabel?.destroy();
         (state.draftLine.vertices || []).forEach(vertex => vertex.destroy());
         state.draftLine = null;
+        scheduleDeferredTakeoffSnapshot();
         flushKonvaCanvasDraw();
     }
 
@@ -2289,6 +2296,7 @@
         state.draftArea.areaLabel?.destroy();
         (state.draftArea.vertices || []).forEach(v => v.destroy());
         state.draftArea = null;
+        scheduleDeferredTakeoffSnapshot();
         flushKonvaCanvasDraw();
     }
 
@@ -2634,6 +2642,7 @@
     function isEditorTakeoffDirty() {
         return Boolean(
             state.dirty
+            || hasActiveTakeoffGesture()
             || hasPendingManualCanvasCheckpoint
             || dirtyTakeoffPages.size > 0
             || dirtyTakeoffObjects.size > 0
@@ -3331,6 +3340,7 @@
             }
         });
         konvaStage.on('dblclick dbltap', () => {
+            if (state.panMode || state.temporaryPan) return;
             if (state.tool === 'takeoff_linear') finishLinear();
             if (state.tool === 'takeoff_area') finishArea();
         });
@@ -4235,11 +4245,38 @@
         });
     }
 
+    function hasActiveTakeoffGesture() {
+        return Boolean(state.draftLine || state.draftArea || activeLinearVertexDrags.size);
+    }
+
+    function finishLinearVertexDrag(handle) {
+        if (activeLinearVertexDrags.delete(handle)) scheduleDeferredTakeoffSnapshot();
+    }
+
+    function scheduleDeferredTakeoffSnapshot() {
+        if (!deferredTakeoffSnapshot || hasActiveTakeoffGesture()) return;
+        // Finishing a draft marks the new segment dirty later in the same turn.
+        queueMicrotask(() => {
+            if (!deferredTakeoffSnapshot || hasActiveTakeoffGesture()) return;
+            const { data, options } = deferredTakeoffSnapshot;
+            deferredTakeoffSnapshot = null;
+            applyRemoteTakeoffSnapshot(data, options);
+        });
+    }
+
     function applyRemoteTakeoffSnapshot(data, options = {}) {
         const reconciler = window.TakeoffCollaborationReconciler;
         const incomingRevision = Number(data?.revision || 0);
         takeoffKnownServerRevision = Math.max(takeoffKnownServerRevision, incomingRevision);
         if (!reconciler || !reconciler.shouldApplyRevision(takeoffAppliedServerRevision, incomingRevision)) return false;
+        if (hasActiveTakeoffGesture()) {
+            // A pause between clicks is still part of the same drawing gesture.
+            // Acknowledge prior writes now and reconcile the canvas after the gesture.
+            if (incomingRevision > Number(deferredTakeoffSnapshot?.data.revision || 0)) {
+                deferredTakeoffSnapshot = { data, options };
+            }
+            return false;
+        }
 
         const normalized = normalizeServerTakeoffState(data || {});
         const dirtyObjectIds = new Set(dirtyTakeoffObjects.keys());
@@ -4677,7 +4714,7 @@
     }
 
     async function pollTakeoffRemoteRevision() {
-        if (takeoffRemoteSyncInFlight || document.hidden) return;
+        if (takeoffRemoteSyncInFlight || hasActiveTakeoffGesture() || document.hidden) return;
         if (typeof fileId === 'undefined' || !fileId || !currentEstimateKey()) return;
         takeoffRemoteSyncInFlight = true;
         try {
@@ -5172,6 +5209,12 @@
         return false;
     };
 
+    window.projectTakeoffCanChangeDrawing = function (showNotice = true) {
+        if (!hasActiveTakeoffGesture()) return true;
+        if (showNotice) showToast('Finish the drawing with Enter or double-click, or press Esc to cancel. Release any vertex you are dragging.', 'warning');
+        return false;
+    };
+
     window.projectTakeoffResolveDraftOnPointer = function () {
         if (state.draftLine) {
             if (state.draftLine.points.length >= 2) {
@@ -5209,7 +5252,7 @@
         const normalized = String(tool || '').toLowerCase();
         if (normalized === 'pan') {
             flushPendingProjectStateEmit();
-            setTool('smart');
+            if (!state.draftLine && !state.draftArea) setTool('smart');
             state.panMode = true;
             applyTakeoffDrawingInteractivity();
             window.setTakeoffPanMode?.(true, false);
@@ -5683,12 +5726,18 @@
     };
 
     window.projectTakeoffSave = function () {
+        if (!window.projectTakeoffCanChangeDrawing()) {
+            return Promise.reject(new Error('Finish or cancel the active drawing before saving the project.'));
+        }
         flushPendingProjectStateEmit();
         return (async () => {
             let result = null;
             for (let attempt = 0; attempt < 4; attempt += 1) {
                 result = await saveTakeoff(true, true);
                 if (!hasPendingTakeoffMutations()) {
+                    if (hasActiveTakeoffGesture()) {
+                        return { ...result, dirtyRemaining: true };
+                    }
                     hasPendingManualCanvasCheckpoint = false;
                     return { ...result, dirtyRemaining: false };
                 }

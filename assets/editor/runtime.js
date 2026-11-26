@@ -2880,6 +2880,7 @@
         function jumpToPage(targetPage) {
             const nextPage = Math.max(1, Number(targetPage) || 1);
             if (nextPage === pageNum && canvas.backgroundImage && !isRenderingPage) return;
+            if (nextPage !== pageNum && window.projectTakeoffCanChangeDrawing?.() === false) return;
             const startedAt = typeof performance !== 'undefined' && performance.now ? performance.now() : Date.now();
             activePageSwitch = { page: nextPage, startedAt };
             saveCurrentPageAnnotations();
@@ -3000,7 +3001,7 @@
         function takeoffJumpToPage(targetPage) {
             const requested = Math.max(1, Number(targetPage) || 1);
             if (!pdfDoc) {
-                pageNum = requested;
+                if (requested === pageNum || window.projectTakeoffCanChangeDrawing?.() !== false) pageNum = requested;
                 return takeoffGetDocumentInfo();
             }
             const pg = Math.max(1, Math.min(pdfDoc.numPages, requested));
