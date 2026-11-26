@@ -337,7 +337,9 @@
             else if (Array.isArray(copied)) selectionState.selectedObjectIds = copied;
         }
         if (action === 'delete') {
-            const deleted = callEditor('projectTakeoffDeleteSelection', selectionState.selectedObjectIds);
+            const deleted = selectionState.selectedObjectIds.length
+                ? callEditor('projectTakeoffDeleteSelection', selectionState.selectedObjectIds)
+                : callEditor('projectTakeoffDeleteSelectedAnnotation');
             if (!deleted) showPrepared('Select an unlocked element before deleting.');
             else {
                 selectionState.selectedObjectIds = [];
@@ -754,6 +756,79 @@
         }
     }
 
+    function bindKeyboardShortcuts(syncTakeoffSubheadAlignment) {
+            const headerToggle = $('bt-header-collapse-btn');
+            headerToggle?.addEventListener('click', () => {
+                const header = $('projectWorkspaceHeader');
+                if (!header) return;
+                header.hidden = !header.hidden;
+                const label = header.hidden ? 'Show header' : 'Hide header';
+                headerToggle.setAttribute('aria-expanded', String(!header.hidden));
+                headerToggle.setAttribute('aria-label', label);
+                headerToggle.title = `${label} (H)`;
+                const icon = headerToggle.querySelector('i');
+                if (icon) icon.className = `fas fa-chevron-${header.hidden ? 'down' : 'up'}`;
+                syncTakeoffSubheadAlignment();
+            });
+
+            const toolShortcuts = { v: 'smart', m: 'measure', c: 'cloud', n: 'text', a: 'multi-select' };
+            function handleWorkspaceShortcut(event) {
+                if (event.defaultPrevented || event.isComposing || event.repeat || event.altKey) return false;
+                const key = event.key.toLowerCase();
+                const target = event.target;
+                const editing = target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]');
+                const dialog = Array.from(document.querySelectorAll('[aria-modal="true"], #takeoffLayerModal'))
+                    .filter(element => element.getClientRects().length > 0 && window.getComputedStyle(element).visibility === 'visible')
+                    .at(-1);
+                const control = event.ctrlKey || event.metaKey;
+                if (dialog) {
+                    if (key !== 'enter' || control || event.shiftKey
+                        || target?.closest?.('textarea, select, button, a, [contenteditable], [role="textbox"], form')) return false;
+                    const actions = Array.from(dialog.querySelectorAll('.pd-modal-foot button.btn-main, button[data-keyboard-accept], button[type="submit"]'))
+                        .filter(button => !button.disabled && button.getClientRects().length > 0);
+                    if (actions.length !== 1) return false;
+                    actions[0].click();
+                    return true;
+                }
+                if (editing) return false;
+                if (key === 'h' && !control && !event.shiftKey && headerToggle) {
+                    headerToggle.click();
+                    return true;
+                }
+                if (key === 'f' && !control && !event.shiftKey && $('tab-estimating')?.classList.contains('active')) {
+                    const button = $('estBtnFullscreen');
+                    if (!button || button.disabled || button.hidden) return false;
+                    button.click();
+                    return true;
+                }
+                if (!$('tab-takeoff')?.classList.contains('active')) return false;
+                const readOnly = document.body.dataset.readOnly === 'true';
+                if (control) {
+                    if (readOnly || (key !== 'z' && key !== 'y')) return false;
+                    runTool(key === 'y' || event.shiftKey ? 'redo' : 'undo');
+                    return true;
+                }
+                if (event.shiftKey) return false;
+                if (key === 'f') {
+                    runViewerCommand('fullscreen');
+                    return true;
+                }
+                if (key === 'enter' && !readOnly && !target?.closest?.('button, a, [role="button"]')) {
+                    return callEditor('projectTakeoffFinishActiveDraft') === true;
+                }
+                if (key === 'delete' && !readOnly) {
+                    runSelectionAction('delete');
+                    return true;
+                }
+                const tool = toolShortcuts[key];
+                if (!tool || (readOnly && tool !== 'smart' && tool !== 'multi-select')) return false;
+                runTool(tool);
+                return true;
+            }
+            window.handleProjectWorkspaceShortcut = handleWorkspaceShortcut;
+        return handleWorkspaceShortcut;
+    }
+
     function runViewerCommand(command) {
         if (command === 'zoom-out') return setZoom(currentZoomPercent() - 25);
         if (command === 'zoom-in') return setZoom(currentZoomPercent() + 25);
@@ -932,6 +1007,7 @@
             setActiveTool,
             runTool,
             runViewerCommand,
+            bindKeyboardShortcuts,
             showPrepared,
             getTakeoffBoundary,
             positionRowMenu,

@@ -2370,17 +2370,17 @@
             const takeoffSelectionIds = window.projectTakeoffGetSelectionIds?.() || [];
             if (window.projectTakeoffDeleteCurrentSelection?.()) {
                 showToast("Selection deleted", "success");
-                return;
+                return true;
             }
             // A locked Takeoff selection is still authoritative. Do not fall through
             // and accidentally delete an unrelated Fabric annotation.
-            if (takeoffSelectionIds.length) return;
+            if (takeoffSelectionIds.length) return false;
             if (useKonvaRuler && deleteKonvaSelection()) {
                 showToast("Selection deleted", "success");
-                return;
+                return true;
             }
             const activeObjects = canvas.getActiveObjects();
-            if (!activeObjects.length) return;
+            if (!activeObjects.length) return false;
 
             // MODIFICADO: Eliminado confirm() y agrupado el historial
             historyProcessing = true; // Pausar guardado automÃ¡tico por objeto para agrupar la acciÃ³n
@@ -2402,7 +2402,9 @@
             historyProcessing = false; // Reactivar historial
             saveHistory(); // Guardar el estado UNA vez con todos los objetos borrados
             showToast("Selection deleted", "success");
+            return true;
         }
+        window.projectTakeoffDeleteSelectedAnnotation = deleteSelected;
 
         // --- PINCH ZOOM & PAN (GESTOS TÃCTILES MEJORADOS) ---
         const canvasWrapper = document.querySelector('.upper-canvas');
@@ -3070,7 +3072,9 @@
                 canvas.loadFromJSON(state, () => {
                     reLinkObjects(); historyProcessing = false; updateTextScales(canvas.getZoom()); updateHistoryButtons();
                 });
+                return true;
             }
+            return false;
         }
 
         function redo() {
@@ -3080,8 +3084,12 @@
                 canvas.loadFromJSON(state, () => {
                     reLinkObjects(); historyProcessing = false; updateTextScales(canvas.getZoom()); updateHistoryButtons();
                 });
+                return true;
             }
+            return false;
         }
+        window.undo = undo;
+        window.redo = redo;
 
         function updateHistoryButtons() {
             const btnUndo = document.getElementById('btn-undo');
@@ -4353,8 +4361,17 @@
         });
 
         window.addEventListener('keydown', e => {
-            if ((e.ctrlKey || e.metaKey) && e.key === 'z') { e.preventDefault(); undo(); }
-            if ((e.ctrlKey || e.metaKey) && e.key === 'y') { e.preventDefault(); redo(); }
+            if (e.defaultPrevented || e.isComposing
+                || e.target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return;
+            if ((e.ctrlKey || e.metaKey) && !e.altKey && !e.repeat) {
+                const key = e.key.toLowerCase();
+                if (key === 'z' || key === 'y') {
+                    e.preventDefault();
+                    if (key === 'y' || e.shiftKey) redo();
+                    else undo();
+                    return;
+                }
+            }
             if (e.key === 'Delete' || e.key === 'Backspace') {
                 if (window.projectTakeoffHandleDeleteKey?.(e)) {
                     e.preventDefault();

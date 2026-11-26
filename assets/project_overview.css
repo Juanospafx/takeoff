@@ -214,6 +214,10 @@ body.header-is-collapsed .project-subhead-wrapper,
     z-index: 99999 !important;
 }
 
+.project-header[hidden] {
+    display: none;
+}
+
 .project-header {
     background: transparent !important;
     border-bottom: 1px solid var(--border-soft) !important;

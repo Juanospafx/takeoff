@@ -321,7 +321,7 @@
                     <button type="button" class="pro-foot-btn" data-layer-act="lock" title="Lock/Unlock takeoff layer"><i class="fas fa-lock"></i> <span id="layerModalLockLabel">Lock</span></button>
                 </div>
                 <div class="pro-modal-foot-right">
-                    <button type="button" class="pro-btn-save-layer" id="layerDrawerSaveBtn"><i class="fas fa-xmark"></i> Close</button>
+                    <button type="button" class="pro-btn-save-layer" id="layerDrawerSaveBtn" data-keyboard-accept><i class="fas fa-xmark"></i> Close</button>
                 </div>
             </div>
         </div>`;

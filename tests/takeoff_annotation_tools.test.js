@@ -17,8 +17,8 @@ function section(source, startMarker, endMarker) {
 }
 
 test('Notes and Cloud have distinct toolbar buttons and activate their placement APIs', () => {
-    assert.match(dashboard, /data-tool-command="text"[^>]*title="Note"[\s\S]*?fa-note-sticky/);
-    assert.match(dashboard, /data-tool-command="cloud"[^>]*title="Cloud"[\s\S]*?fa-cloud/);
+    assert.match(dashboard, /data-tool-command="text"[^>]*title="Note \(N\)"[\s\S]*?fa-note-sticky/);
+    assert.match(dashboard, /data-tool-command="cloud"[^>]*title="Cloud \(C\)"[\s\S]*?fa-cloud/);
     const tools = section(viewerController, 'function runTool', 'function runViewerCommand');
     const textBranch = section(tools, "if (command === 'text')", "if (command === 'cloud')");
     const cloudBranch = section(tools, "if (command === 'cloud')", "if (command === 'stamp')");
@@ -58,7 +58,7 @@ test('Select, Pan, and Escape cancel pending annotation placement and restore th
     const tools = section(viewerController, 'function runTool', 'function runViewerCommand');
     const selectPan = section(tools, "if (command === 'smart' || command === 'pan')", 'const modeMap');
     assert.match(selectPan, /callEditor\('clearPlacementTool'\)/);
-    const escapeHandler = section(parent, "if (event.key === 'Escape')", "if ((event.ctrlKey || event.metaKey)");
+    const escapeHandler = section(parent, "if (handleWorkspaceShortcut(event))", "if (event.code === 'Space'");
     assert.match(escapeHandler, /callEditor\('clearPlacementTool'\)/);
     const clear = section(editor, 'function clearPlacementTool', 'function addText');
     assert.match(clear, /style\.cursor = 'default'/);

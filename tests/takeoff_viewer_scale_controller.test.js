@@ -1,5 +1,6 @@
 const test = require('node:test');
 const assert = require('node:assert/strict');
+const { JSDOM } = require('jsdom');
 const fs = require('node:fs');
 const path = require('node:path');
 
@@ -10,6 +11,74 @@ const projectSource = read('assets/project_takeoff.js');
 const viewerSource = read('assets/takeoff_viewer_controller.js');
 const scaleSource = read('assets/takeoff_scale_controller.js');
 const dashboardSource = read('pages/project_dashboard.php');
+
+test('workspace shortcuts route to the tools and respect editing and dialog context', () => {
+    const dom = new JSDOM(`
+        <header id="projectWorkspaceHeader"></header><button id="bt-header-collapse-btn"></button>
+        <section id="tab-takeoff" class="active"></section><div id="takeoffWorkspace"></div>
+        <input id="field"><div role="dialog" aria-modal="true"><button data-keyboard-accept>OK</button></div>
+    `);
+    try {
+        const { window } = dom;
+        const { document } = window;
+        const $ = id => document.getElementById(id);
+        const viewerState = {};
+        const selectionState = { selectedGroupIds: [], selectedObjectIds: [] };
+        const calls = [];
+        const noop = () => {};
+        $('takeoffWorkspace').requestFullscreen = async () => { calls.push('fullscreen'); };
+        const controller = require('../assets/takeoff_viewer_controller.js').create({
+            dom: { document, window, getElement: $ },
+            state: { viewerState, selectionState, takeoffState: {} },
+            actions: {
+                callEditor: name => { calls.push(name); return true; },
+                esc: String,
+                clearActiveTakeoffLayer: noop, renderTakeoffPanel: noop,
+                patchTakeoffSelectionClassesDom: () => true,
+                updateSubheadSelectedItem: noop, renderInspector: noop, pushTakeoffHistory: noop,
+                syncTakeoffFromCanvasSnapshot: noop,
+                undoTakeoff: () => calls.push('undo'), redoTakeoff: () => calls.push('redo')
+            }
+        });
+        const handle = controller.bindKeyboardShortcuts(noop);
+        const press = (key, options = {}) => handle({ key, target: document.body, ...options });
+        for (const [key, tool] of Object.entries({ v: 'smart', m: 'measure', c: 'cloud', n: 'text', a: 'multi-select' })) {
+            assert.equal(press(key), true);
+            assert.equal(viewerState.activeTool, tool);
+        }
+        assert.equal(press('z', { ctrlKey: true }), true);
+        assert.equal(press('Z', { ctrlKey: true, shiftKey: true }), true);
+        assert.deepEqual(calls.slice(-2), ['undo', 'redo']);
+        assert.equal(press('f'), true);
+        assert.equal(calls.at(-1), 'fullscreen');
+        assert.equal(press('h'), true);
+        assert.equal($('projectWorkspaceHeader').hidden, true);
+        assert.equal(press('h'), true);
+        assert.equal($('projectWorkspaceHeader').hidden, false);
+        assert.equal(press('Enter'), true);
+        assert.equal(calls.at(-1), 'projectTakeoffFinishActiveDraft');
+        selectionState.selectedObjectIds = ['item'];
+        assert.equal(press('Delete'), true);
+        assert.deepEqual(calls.slice(-2), ['projectTakeoffDeleteSelection', 'projectTakeoffSnapshot']);
+        assert.equal(press('Delete', { target: $('field') }), false);
+        assert.equal(press('z', { target: $('field'), ctrlKey: true }), false);
+        document.body.dataset.readOnly = 'true';
+        assert.equal(press('Delete'), false);
+        assert.equal(press('c'), false);
+        $('tab-takeoff').classList.remove('active');
+        assert.equal(press('v'), false);
+        const dialog = document.querySelector('[role="dialog"]');
+        const accept = dialog.querySelector('button');
+        dialog.getClientRects = accept.getClientRects = () => [{}];
+        accept.addEventListener('click', () => calls.push('accept'));
+        assert.equal(press('Enter'), true);
+        assert.equal(calls.at(-1), 'accept');
+        accept.disabled = true;
+        assert.equal(press('Enter'), false);
+    } finally {
+        dom.window.close();
+    }
+});
 
 test('project takeoff stays below the 512 KiB Phase 3 target', () => {
     const bytes = Buffer.byteLength(projectSource.replace(/\r\n/g, '\n'), 'utf8');

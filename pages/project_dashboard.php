@@ -902,7 +902,7 @@ $state = [
     <div class="workspace-shell">
         <div
             class="project-subhead-wrapper <?= $activeTab === 'takeoff' ? 'is-takeoff-tab' : ($activeTab === 'documents' ? 'is-documents-tab' : ($activeTab === 'estimating' ? 'is-estimating-tab' : '')) ?>">
-            <header class="project-header">
+            <header class="project-header" id="projectWorkspaceHeader">
                 <div class="pd-header-left">
                     <?php
                     $bbStatus = $project['status'] ?? 'to_do';
@@ -1080,6 +1080,9 @@ $state = [
                     <button type="button" data-tab="estimating">Estimating</button>
                     <button type="button" data-tab="proposal">Proposal</button>
                 </div>
+                <button type="button" class="bt-header-collapse-btn" id="bt-header-collapse-btn"
+                    aria-controls="projectWorkspaceHeader" aria-expanded="true" aria-keyshortcuts="H"
+                    aria-label="Hide header" title="Hide header (H)"><i class="fas fa-chevron-up" aria-hidden="true"></i></button>
                 <!-- Drawings & Sheets + Page Count (Point 7: right next to proposal tab) -->
                 <div class="takeoff-subhead-sheet-group" id="takeoffSubheadSheetGroup">
                     <div class="takeoff-subhead-nav-arrows">
@@ -1758,11 +1761,11 @@ $state = [
                             <!-- Floating tool buttons inside canvas (Point 5) -->
                             <div class="pro-floating-tools" id="takeoffFloatingTools" aria-label="Takeoff tools">
                                 <button class="pro-tool-btn active" type="button" data-tool-command="smart"
-                                    title="Select"><i class="fas fa-mouse-pointer"></i></button>
+                                    title="Pointer (V)" aria-keyshortcuts="V"><i class="fas fa-mouse-pointer"></i></button>
                                 <button class="pro-tool-btn" type="button" data-tool-command="pan" title="Pan"><i
                                         class="fas fa-hand"></i></button>
                                 <button class="pro-tool-btn" type="button" data-tool-command="multi-select"
-                                    title="Rectangle Select"><i class="fas fa-object-group"></i></button>
+                                    title="Rectangle Select (A)" aria-keyshortcuts="A"><i class="fas fa-object-group"></i></button>
                                 <div class="pro-tool-separator"></div>
                                 <button class="pro-tool-btn" type="button" data-tool-command="count" title="Count"><i
                                         class="fas fa-circle-dot"></i></button>
@@ -1771,15 +1774,15 @@ $state = [
                                 <button class="pro-tool-btn" type="button" data-tool-command="area" title="Area"><i
                                         class="fas fa-draw-polygon"></i></button>
                                 <button class="pro-tool-btn" type="button" data-tool-command="measure"
-                                    title="Measure"><i class="fas fa-ruler-horizontal"></i></button>
-                                <button class="pro-tool-btn" type="button" data-tool-command="text" title="Note"><i
+                                    title="Ruler (M)" aria-keyshortcuts="M"><i class="fas fa-ruler-horizontal"></i></button>
+                                <button class="pro-tool-btn" type="button" data-tool-command="text" title="Note (N)" aria-keyshortcuts="N"><i
                                         class="fas fa-note-sticky"></i></button>
-                                <button class="pro-tool-btn" type="button" data-tool-command="cloud" title="Cloud"><i
+                                <button class="pro-tool-btn" type="button" data-tool-command="cloud" title="Cloud (C)" aria-keyshortcuts="C"><i
                                         class="fas fa-cloud"></i></button>
                                 <div class="pro-tool-separator"></div>
-                                <button class="pro-tool-btn" type="button" data-tool-command="undo" title="Undo"><i
+                                <button class="pro-tool-btn" type="button" data-tool-command="undo" title="Undo (Ctrl+Z)" aria-keyshortcuts="Control+Z"><i
                                         class="fas fa-rotate-left"></i></button>
-                                <button class="pro-tool-btn" type="button" data-tool-command="redo" title="Redo"><i
+                                <button class="pro-tool-btn" type="button" data-tool-command="redo" title="Redo (Ctrl+Shift+Z)" aria-keyshortcuts="Control+Shift+Z"><i
                                         class="fas fa-rotate-right"></i></button>
                                 <div class="pro-tool-separator"></div>
                                 <button class="pro-tool-btn" type="button" id="takeoffToolsDockToggle"
@@ -1826,7 +1829,7 @@ $state = [
                                 <button class="pro-chip-btn pro-floating-fit-btn" type="button"
                                     data-viewer-command="fit" title="Fit to view">Fit</button>
                                 <button class="pro-icon-btn" type="button" data-viewer-command="fullscreen"
-                                    title="Fullscreen"><i class="fas fa-expand"></i></button>
+                                    title="Fullscreen (F)" aria-keyshortcuts="F"><i class="fas fa-expand"></i></button>
                             </div>
                         </div>
 

@@ -3450,23 +3450,28 @@
             }
         });
         document.addEventListener('keydown', event => {
+            if (event.defaultPrevented || event.isComposing
+                || event.target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return;
             if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 's') {
                 event.preventDefault();
                 saveTakeoff();
             }
-            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
-                event.preventDefault();
+            if (workspaceShortcutHandler() || event.altKey || event.repeat) return;
+            const key = event.key.toLowerCase();
+            if ((event.ctrlKey || event.metaKey) && key === 'z' && !event.shiftKey) {
                 if (state.draftLine) {
+                    event.preventDefault();
                     undoLinearPoint();
                     return;
                 }
                 if (!state.undo.length) return;
+                event.preventDefault();
                 state.redo.push(JSON.stringify({ layers: state.layers, markers: state.markers.map(stripNodes), segments: state.segments.map(stripNodes) }));
                 restore(state.undo.pop());
             }
-            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {
-                event.preventDefault();
+            if ((event.ctrlKey || event.metaKey) && (key === 'y' || (key === 'z' && event.shiftKey))) {
                 if (!state.redo.length) return;
+                event.preventDefault();
                 state.undo.push(JSON.stringify({ layers: state.layers, markers: state.markers.map(stripNodes), segments: state.segments.map(stripNodes) }));
                 restore(state.redo.pop());
             }
@@ -4714,6 +4719,20 @@
             };
         }
         window.addEventListener('keydown', e => {
+            const workspaceShortcut = workspaceShortcutHandler();
+            if (!workspaceShortcut || e.defaultPrevented || e.isComposing
+                || e.target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return;
+            if (workspaceShortcut(e)) {
+                e.preventDefault();
+                e.stopImmediatePropagation();
+            } else if (e.key === 'Delete' || ((e.ctrlKey || e.metaKey) && ['z', 'y'].includes(e.key.toLowerCase()))) {
+                // The dashboard owns these commands even when its current context blocks them.
+                e.stopImmediatePropagation();
+            }
+        }, true);
+        window.addEventListener('keydown', e => {
+            if (e.defaultPrevented || e.isComposing) return;
+            if (e.target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return;
             if (e.key === 'Shift' && state.draftLine) {
                 linearShiftPressed = true;
                 renderLinearPreview();
@@ -4726,7 +4745,7 @@
                 clearTakeoffSelection();
                 return;
             }
-            if (e.target && ['INPUT', 'TEXTAREA', 'SELECT'].includes(e.target.tagName)) return;
+            if ((e.key === 'Delete' || e.key === 'Enter') && workspaceShortcutHandler()) return;
             if ((e.key === 'Delete' || e.key === 'Backspace') && !state.draftLine && !state.draftArea) {
                 if (state.selectedObjectUids.size > 0 || state.selectedElement) {
                     e.preventDefault();
@@ -4739,9 +4758,9 @@
                 undoLinearPoint();
                 return;
             }
-            if (state.draftLine && e.key === 'Enter') {
+            if (!e.repeat && !e.ctrlKey && !e.metaKey && !e.altKey && !e.shiftKey && e.key === 'Enter'
+                && !e.target?.closest?.('button, a, [role="button"]') && window.projectTakeoffFinishActiveDraft()) {
                 e.preventDefault();
-                finishLinear();
                 return;
             }
             if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === 'c' && state.selectedElement) {
@@ -5132,6 +5151,25 @@
 
     window.projectTakeoffSnapshot = function () {
         return projectSnapshot();
+    };
+
+    function workspaceShortcutHandler() {
+        try {
+            if (window.parent !== window) return window.parent.handleProjectWorkspaceShortcut;
+        } catch (_) { }
+        return null;
+    }
+
+    window.projectTakeoffFinishActiveDraft = function () {
+        if (state.draftLine?.points.length >= 2) {
+            finishLinear();
+            return true;
+        }
+        if (state.draftArea?.points.length >= 3) {
+            finishArea();
+            return true;
+        }
+        return false;
     };
 
     window.projectTakeoffResolveDraftOnPointer = function () {

@@ -3926,7 +3926,7 @@
                 </div>
                 <div class="pro-create-layer-foot">
                     <button type="button" class="pro-btn-create-cancel" data-create-layer-close>Cancel</button>
-                    <button type="button" class="pro-btn-create-submit" id="createLayerSubmitBtn">Create</button>
+                    <button type="button" class="pro-btn-create-submit" id="createLayerSubmitBtn" data-keyboard-accept>Create</button>
                 </div>
             </div>`;
         document.body.appendChild(modal);
@@ -6577,7 +6577,7 @@
                 </div>
                 <div class="tk-action-modal-foot">
                     <button type="button" class="tk-btn-cancel" data-tk-modal-close>Cancel</button>
-                    <button type="button" class="tk-btn-primary" id="tkMoveSubmitBtn"><i class="fas fa-arrow-right"></i> Move ${layers.length === 1 ? 'Item' : `${layers.length} Items`}</button>
+                    <button type="button" class="tk-btn-primary" id="tkMoveSubmitBtn" data-keyboard-accept><i class="fas fa-arrow-right"></i> Move ${layers.length === 1 ? 'Item' : `${layers.length} Items`}</button>
                 </div>
             </div>
         `;
@@ -7010,7 +7010,7 @@
                 </div>
                 <div class="tk-action-modal-foot">
                     <button type="button" class="tk-btn-cancel" data-tk-modal-close>Cancel</button>
-                    <button type="button" class="tk-btn-primary" id="tkCopySubmitBtn"><i class="fas fa-copy"></i> Copy ${layers.length === 1 ? 'Item' : `${layers.length} Items`}</button>
+                    <button type="button" class="tk-btn-primary" id="tkCopySubmitBtn" data-keyboard-accept><i class="fas fa-copy"></i> Copy ${layers.length === 1 ? 'Item' : `${layers.length} Items`}</button>
                 </div>
             </div>
         `;
@@ -10180,7 +10180,10 @@
         $('takeoffComparePanel')?.addEventListener('click', event => event.stopPropagation());
         $('takeoffMoreToolsPanel')?.addEventListener('click', event => event.stopPropagation());
 
+        const handleWorkspaceShortcut = takeoffViewerController.bindKeyboardShortcuts(syncTakeoffSubheadAlignment);
+
         document.addEventListener('keydown', event => {
+            if (event.defaultPrevented || event.isComposing) return;
             const layerModal = $('takeoffLayerModal');
             if (layerModal && !layerModal.hidden && event.key === 'Escape') {
                 event.preventDefault();
@@ -10213,12 +10216,12 @@
                 }
                 return;
             }
-            if (event.key === 'Delete' && !event.repeat && !event.ctrlKey && !event.metaKey && !event.altKey
-                && !event.target?.matches?.('input, textarea, select, option, [contenteditable="true"], [role="textbox"]')) {
+            if (handleWorkspaceShortcut(event)) {
                 event.preventDefault();
-                runSelectionAction('delete');
                 return;
             }
+            if (!$('tab-takeoff')?.classList.contains('active') || (layerModal && !layerModal.hidden)
+                || event.target?.closest?.('input, textarea, select, [contenteditable]:not([contenteditable="false"]), [role="textbox"]')) return;
             if (event.key === 'Escape') {
                 viewerState.continuousTool = false;
                 callEditor('clearPlacementTool');
@@ -10229,20 +10232,6 @@
                 callEditor('setMode', 'smart');
                 setActiveTool('smart');
                 renderActiveLayerToolbar();
-                return;
-            }
-            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'z') {
-                event.preventDefault();
-                if (event.shiftKey) {
-                    redoTakeoff();
-                } else {
-                    undoTakeoff();
-                }
-                return;
-            }
-            if ((event.ctrlKey || event.metaKey) && event.key.toLowerCase() === 'y') {
-                event.preventDefault();
-                redoTakeoff();
                 return;
             }
             if (event.code === 'Space' && !event.repeat && document.activeElement?.tagName !== 'INPUT' && document.activeElement?.tagName !== 'TEXTAREA') {

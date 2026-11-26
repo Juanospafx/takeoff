@@ -59,7 +59,7 @@ test('multiple selected objects expose the same resize and vertex controls as ma
 });
 
 test('Escape cancels drafts, returns to Pointer, and clears every selected object', () => {
-    const keyboard = section(editor, "window.addEventListener('keydown'", "if (e.target && ['INPUT'");
+    const keyboard = section(editor, "window.addEventListener('keydown'", "if ((e.key === 'Delete' || e.key === 'Enter')");
     assert.match(keyboard, /e\.key === 'Escape'[\s\S]*clearDrafts\(\)[\s\S]*setTool\('smart'\)[\s\S]*clearTakeoffSelection\(\)/);
     assert.match(parent, /event\.key === 'Escape'[\s\S]*callEditor\('projectTakeoffClearSelection'\)/);
 });
@@ -84,7 +84,7 @@ test('Dragging any selected marker, line, or area applies one common delta and p
 test('Delete and trash reuse the authoritative selection deletion flow', () => {
     const action = section(viewerController, 'function runSelectionAction', 'function runLayerTool');
     assert.match(action, /action === 'delete'[\s\S]*projectTakeoffDeleteSelection/);
-    assert.match(parent, /event\.key === 'Delete'[\s\S]*runSelectionAction\('delete'\)/);
+    assert.match(viewerController, /key === 'delete'[\s\S]*runSelectionAction\('delete'\)/);
     assert.match(shell, /projectTakeoffHandleDeleteKey\?\.\(e\)[\s\S]*stopImmediatePropagation\(\)/);
     const deletion = section(editor, 'function deleteTakeoffSelection', 'function deleteSelected');
     assert.match(deletion, /selectedTakeoffObjectIds\(\)/);
