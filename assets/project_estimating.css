@@ -8611,6 +8611,14 @@ body.theme-dark .est-cu-group-items .est-cu-item.is-selected {
 .est-loading-overlay[hidden] {
     display: none !important;
 }
+.est-main.is-switching-estimate > :not(.est-loading-overlay) {
+    visibility: hidden;
+}
+.est-main.is-switching-estimate > .est-loading-overlay {
+    background: var(--est-bg, #eef2f6);
+    backdrop-filter: none;
+    -webkit-backdrop-filter: none;
+}
 .est-loading-card {
     display: flex;
     align-items: center;
@@ -8627,6 +8635,11 @@ body.theme-dark .est-cu-group-items .est-cu-item.is-selected {
 .est-loading-card i {
     font-size: 18px;
     color: var(--primary, #fb5a3a);
+}
+@media (prefers-reduced-motion: reduce) {
+    .est-loading-card i {
+        animation: none;
+    }
 }
 
 /* Estimating modal layout: shared by the extracted classic modal module. */

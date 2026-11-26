@@ -46,7 +46,7 @@
     const pendingTakeoffByEstimate = new Map();
     let estimatingHasUnsavedCheckpoint = false;
     let estimatingTableDirty = false;
-    let estimatingLoadingActive = false;
+    const estimatingLoadingMessages = new Map();
     let estimatingTableRenderGeneration = 0;
     const ESTIMATING_TABLE_CHUNK_SIZE = 60;
     const ESTIMATING_TABLE_CHUNK_THRESHOLD = 120;
@@ -56,11 +56,17 @@
         return !tab || (!tab.hidden && tab.classList.contains('active'));
     }
 
-    function setEstimatingLoading(visible, message = 'Loading estimate...') {
+    function setEstimatingLoading(visible, message = 'Loading estimate...', reason = 'workspace') {
         const main = root.querySelector('.est-main');
         if (!main) return;
+        if (visible) estimatingLoadingMessages.set(reason, message);
+        else estimatingLoadingMessages.delete(reason);
+        const switching = estimatingLoadingMessages.has('switch');
+        const activeMessage = estimatingLoadingMessages.get('switch')
+            || estimatingLoadingMessages.values().next().value;
+        main.classList.toggle('is-switching-estimate', switching);
         let overlay = main.querySelector('#estLoadingOverlay');
-        if (!overlay && visible) {
+        if (!overlay && activeMessage) {
             overlay = document.createElement('div');
             overlay.id = 'estLoadingOverlay';
             overlay.className = 'est-loading-overlay';
@@ -70,14 +76,11 @@
             main.appendChild(overlay);
         }
         if (!overlay) return;
-        estimatingLoadingActive = Boolean(visible);
-        if (visible) {
+        if (activeMessage) {
             const textEl = overlay.querySelector('#estLoadingOverlayText');
-            if (textEl) textEl.textContent = message;
-            overlay.hidden = false;
-        } else {
-            overlay.hidden = true;
+            if (textEl) textEl.textContent = activeMessage;
         }
+        overlay.hidden = !activeMessage;
     }
 
     function restoreDirtyTracking() {
@@ -2643,6 +2646,19 @@
         root.querySelectorAll('input[type="checkbox"][data-indeterminate="true"]').forEach(cb => {
             cb.indeterminate = true;
         });
+        if (estimatingLoadingMessages.has('switch')) {
+            const reveal = () => {
+                if (generation === estimatingTableRenderGeneration) {
+                    setEstimatingLoading(false, undefined, 'switch');
+                }
+            };
+            // Let the loader paint even when the new table fits in a single render.
+            if (typeof requestAnimationFrame === 'function') {
+                requestAnimationFrame(() => requestAnimationFrame(reveal));
+            } else {
+                setTimeout(reveal, 0);
+            }
+        }
     }
 
     function renderEstimatingRows(body, rows, emptyHtml, generation) {
@@ -6474,11 +6490,24 @@
         const prevActiveId = String(state.activeEstimateId || '');
         const selected = Workspace.selectEstimate(state, estimateId);
         if (!selected) return;
+        const switched = prevActiveId !== String(selected.id);
+        if (switched && isEstimatingTabActive()) {
+            setEstimatingLoading(true, 'Loading estimate...', 'switch');
+        }
         // Selecting a tab is local UI state, not an estimate content edit. It
         // must not increment the estimate revision or conflict with another
         // estimator editing that same estimate.
-        ui.selected.clear(); syncEstimatingSubheadInfo(); saveLocal(); render(); publish();
-        if (prevActiveId !== String(selected.id)) {
+        try {
+            ui.selected.clear();
+            syncEstimatingSubheadInfo();
+            saveLocal();
+            render();
+            publish();
+        } catch (error) {
+            setEstimatingLoading(false, undefined, 'switch');
+            throw error;
+        }
+        if (switched) {
             window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', {
                 detail: { projectId, estimateId: selected.id, source: 'estimating' }
             }));
@@ -6502,7 +6531,7 @@
             }
             return;
         }
-        setEstimatingLoading(true, 'Synchronizing estimate items...');
+        setEstimatingLoading(true, 'Synchronizing estimate items...', 'sync');
         const raf = typeof requestAnimationFrame === 'function' ? requestAnimationFrame : cb => setTimeout(cb, 0);
         raf(() => setTimeout(() => {
             try {
@@ -6514,7 +6543,7 @@
                     hydrateBrokenAssembliesInCurrentEstimate();
                 }
             } finally {
-                if (ui.loadState !== 'loading') setEstimatingLoading(false);
+                setEstimatingLoading(false, undefined, 'sync');
             }
         }, 0));
     }

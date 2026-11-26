@@ -7,7 +7,8 @@ const { JSDOM } = require('jsdom');
 const root = path.join(__dirname, '..');
 const Workspace = require('../assets/estimating_workspace_service.js');
 const sources = ['quantity_format_service.js', 'estimate_calculation_service.js', 'project_estimate_footer.js',
-    'takeoff_estimating_sync_service.js', 'estimating_workspace_service.js', 'project_estimating.js']
+    'takeoff_estimating_sync_service.js', 'estimating_workspace_service.js', 'project_estimating_modals.js',
+    'project_estimating.js']
     .map(file => fs.readFileSync(path.join(root, 'assets', file), 'utf8'));
 
 test('persisted and temporary estimates switch without sharing groups, notes, or active flags', () => {
@@ -81,4 +82,52 @@ test('New Estimate saves immediately and survives a remote load response already
     assert.ok(stored.estimates.some(row => row.name === 'Local during load'));
     assert.ok(posts.at(-1).state.estimates.some(row => row.name === 'Local during load'));
     dom.window.close();
+});
+
+test('switching conceals chunked rows until the latest estimate finishes rendering', () => {
+    const dom = new JSDOM('<div id="estimatingModule" data-project-id="0"></div>', {
+        url: 'https://takeoff.test/project/draft', runScripts: 'outside-only', pretendToBeVisual: true
+    });
+    try {
+        const { window } = dom;
+        const frames = [];
+        window.requestAnimationFrame = callback => frames.push(callback);
+        const advanceFrame = () => frames.splice(0).forEach(callback => callback());
+        const estimate = (id, count) => ({
+            id, name: id,
+            groups: [{ id: `${id}-group`, items: Array.from({ length: count }, (_, index) => ({
+                id: `${id}-${index}`, name: `${id} item ${index}`
+            })) }]
+        });
+        window.ProjectState = { projectId: 0, estimateItems: [], projectMeta: {} };
+        window.localStorage.setItem('takeoff.estimating.module.draft', JSON.stringify({
+            activeEstimateId: 'first', estimates: [estimate('first', 1), estimate('second', 180), estimate('third', 180)]
+        }));
+        sources.forEach(source => window.eval(source));
+        const select = estimateId => window.dispatchEvent(new window.CustomEvent('takeoff:active-estimate-changed', {
+            detail: { estimateId }
+        }));
+        const getItem = id => window.document.querySelector(`[data-item-id="${id}"]`);
+        select('second');
+        const overlay = window.document.getElementById('estLoadingOverlay');
+        const main = overlay.parentElement;
+        assert.equal(overlay.hidden, false);
+        assert.ok(main.classList.contains('is-switching-estimate'));
+        assert.equal(getItem('second-179'), null);
+
+        advanceFrame();
+        select('third');
+        while (frames.length && !getItem('third-179')) {
+            advanceFrame();
+            assert.equal(overlay.hidden, false);
+        }
+        assert.ok(getItem('third-179'));
+        assert.equal(getItem('second-179'), null);
+        advanceFrame();
+        advanceFrame();
+        assert.equal(overlay.hidden, true);
+        assert.equal(main.classList.contains('is-switching-estimate'), false);
+    } finally {
+        dom.window.close();
+    }
 });
