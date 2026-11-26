@@ -2,6 +2,7 @@ const test = require('node:test');
 const assert = require('node:assert/strict');
 const fs = require('node:fs');
 const path = require('node:path');
+const vm = require('node:vm');
 
 const source = fs.readFileSync(path.join(__dirname, '..', 'assets', 'editor', 'runtime.js'), 'utf8');
 const takeoffSource = fs.readFileSync(path.join(__dirname, '..', 'assets', 'editor', 'takeoff.js'), 'utf8');
@@ -11,6 +12,69 @@ test('PDF zoom refresh remains silent while the existing background is visible',
     assert.match(source, /const isBackgroundRefresh = !loadAnnotations && !!canvas\.backgroundImage/);
     assert.match(source, /if \(!isBackgroundRefresh\) showDrawingLoading\(true\)/);
     assert.match(source, /if \(isBackgroundRefresh\) return/);
+});
+
+test('PDF detail waits for zoom to settle and follows the visible region', () => {
+    const start = source.indexOf('function pdfDetailRenderScale');
+    const schedule = source.indexOf('function schedulePdfRerender');
+    const policy = source.slice(start, source.indexOf('function clearPdfDetail', start))
+        + source.slice(schedule, source.indexOf('function setBg', schedule));
+    const pending = new Map();
+    let nextTimer = 0;
+    let zoom = 0.35;
+    const renders = [];
+    const sandbox = {
+        PDF_DETAIL_MAX_DIMENSION: 4096,
+        PDF_DETAIL_MAX_PIXELS: 16_000_000,
+        PDF_DETAIL_IDLE_MS: 220,
+        PDF_DETAIL_MIN_GAIN: 1.2,
+        pdfRerenderTimer: null,
+        pdfDoc: {},
+        pdfWorldWidth: 2592,
+        pdfWorldHeight: 1728,
+        canvas: {
+            backgroundImage: {}, getZoom: () => zoom, getWidth: () => 1200, getHeight: () => 800,
+            viewportTransform: [1, 0, 0, 1, 0, 0]
+        },
+        window: { devicePixelRatio: 2 },
+        document: { hidden: false },
+        currentPdfRenderScale: 1.2,
+        currentPdfDetail: null,
+        konvaIsPanning: false,
+        isRenderingPage: false,
+        pageNum: 3,
+        clearTimeout: id => pending.delete(id),
+        setTimeout: (callback, delay) => { pending.set(++nextTimer, { callback, delay }); return nextTimer; },
+        renderPage: (...args) => renders.push(args)
+    };
+    vm.runInNewContext(policy, sandbox);
+    assert.equal(sandbox.pdfDetailRenderScale(2592, 1728, 0.6, 2), 1.2);
+    const capped = sandbox.pdfDetailRenderScale(2592, 1728, 4, 2);
+    assert.ok(capped < 8);
+    assert.ok(2592 * 1728 * capped ** 2 <= 16_000_001);
+    sandbox.schedulePdfRerender();
+    assert.equal(pending.size, 0);
+
+    zoom = 1.2;
+    sandbox.schedulePdfRerender();
+    zoom = 1.6;
+    sandbox.schedulePdfRerender();
+    assert.equal(pending.size, 1);
+    const [timer] = pending.values();
+    assert.equal(timer.delay, 220);
+    assert.deepEqual(renders, []);
+    timer.callback();
+    assert.deepEqual(renders, [[3, false]]);
+    zoom = 4;
+    sandbox.canvas.viewportTransform[4] = -1200;
+    const detail = sandbox.requestedPdfDetail();
+    assert.equal(detail.scale, 8);
+    assert.equal(detail.x, 276);
+    assert.ok((detail.right - detail.x) * detail.scale <= 4096);
+    sandbox.currentPdfDetail = detail;
+    assert.equal(sandbox.requestedPdfDetail(), null);
+    sandbox.canvas.viewportTransform[4] = -2200;
+    assert.ok(sandbox.requestedPdfDetail().x > detail.x);
 });
 
 test('page switching uses a bounded screen-resolution raster without PNG transcoding', () => {

@@ -177,17 +177,20 @@
         let konvaPanMode = false;
         let konvaTemporaryPan = false;
         const isMobileViewport = window.innerWidth <= 768;
-        const dpr = window.devicePixelRatio || 1;
         const PDF_PADDING = isMobileViewport ? 18 : 36;
         const MAX_PDF_RENDER_SCALE = 2.5;
         const PAGE_SWITCH_MAX_DIMENSION = 3072;
+        const PDF_DETAIL_MAX_DIMENSION = 4096;
+        const PDF_DETAIL_MAX_PIXELS = isMobileViewport ? 10_000_000 : 16_000_000;
+        const PDF_DETAIL_IDLE_MS = 220;
+        const PDF_DETAIL_MIN_GAIN = 1.2;
         const initialRequestedPage = Math.max(1, Number.parseInt(new URLSearchParams(window.location.search).get('page') || '1', 10) || 1);
         let pdfDoc = null, pageNum = initialRequestedPage;
         let pdfWorldWidth = 0;
         let pdfWorldHeight = 0;
         let pdfFitZoom = 1;
-        let currentPdfRenderZoom = 0;
         let currentPdfRenderScale = 0;
+        let currentPdfDetail = null;
         let renderToken = 0;
         let activePdfRenderTask = null;
         let pdfRerenderTimer = null;
@@ -202,6 +205,7 @@
 
         function notifyTakeoffZoomChanged(source = 'editor') {
             const zoom = Number(canvas?.getZoom?.() || 1);
+            schedulePdfRerender();
             const percent = Math.round(zoom * 100);
             const zoomEl = document.getElementById('zoom-disp');
             if (zoomEl) zoomEl.innerText = percent + '%';
@@ -1928,6 +1932,7 @@
                 if (wasPanning) {
                     canvas?.requestRenderAll();
                     syncKonvaToFabric({ panOnly: true, immediate: true });
+                    schedulePdfRerender();
                 }
                 if (canvas) {
                     canvas.isDragging = false;
@@ -2479,8 +2484,10 @@
         }
 
         canvas.on('mouse:up', function (opt) {
+            const wasPanning = this.isDragging;
             this.setViewportTransform(this.viewportTransform);
             this.isDragging = false;
+            if (wasPanning) schedulePdfRerender();
             if (currentMode === 'smart') this.selection = true;
             if (this.isDrawingModeWasOn) { canvas.isDrawingMode = true; this.isDrawingModeWasOn = false; }
 
@@ -2676,6 +2683,66 @@
             return Math.min(MAX_PDF_RENDER_SCALE, Math.max(0.5, PAGE_SWITCH_MAX_DIMENSION / largestSide));
         }
 
+        function pdfDetailRenderScale(width, height, zoom, pixelRatio) {
+            const target = zoom * pixelRatio;
+            return Math.min(target, PDF_DETAIL_MAX_DIMENSION / Math.max(width, height),
+                Math.sqrt(PDF_DETAIL_MAX_PIXELS / (width * height)));
+        }
+
+        function pdfVisibleRegion(padding = 0) {
+            const zoom = canvas.getZoom();
+            const [, , , , translateX, translateY] = canvas.viewportTransform;
+            const x = Math.max(0, (-translateX - padding) / zoom);
+            const y = Math.max(0, (-translateY - padding) / zoom);
+            const right = Math.min(pdfWorldWidth, (canvas.getWidth() - translateX + padding) / zoom);
+            const bottom = Math.min(pdfWorldHeight, (canvas.getHeight() - translateY + padding) / zoom);
+            return right > x && bottom > y ? { x, y, right, bottom } : null;
+        }
+
+        function requestedPdfDetail() {
+            const visible = pdfVisibleRegion();
+            const region = pdfVisibleRegion(96);
+            if (!visible || !region) return null;
+            const scale = pdfDetailRenderScale(region.right - region.x, region.bottom - region.y,
+                canvas.getZoom(), window.devicePixelRatio || 1);
+            if (scale < currentPdfRenderScale * PDF_DETAIL_MIN_GAIN) return null;
+            const detail = currentPdfDetail;
+            if (detail && detail.scale * PDF_DETAIL_MIN_GAIN > scale
+                && detail.x <= visible.x && detail.y <= visible.y
+                && detail.right >= visible.right && detail.bottom >= visible.bottom) return null;
+            return { ...region, scale };
+        }
+
+        function clearPdfDetail() {
+            if (!currentPdfDetail) return;
+            currentPdfDetail.canvas.width = currentPdfDetail.canvas.height = 0;
+            currentPdfDetail = null;
+        }
+
+        async function renderPdfDetail(page, token, region) {
+            const { x, y, right, bottom, scale } = region;
+            const tile = document.createElement('canvas');
+            tile.width = Math.max(1, Math.min(PDF_DETAIL_MAX_DIMENSION, Math.ceil((right - x) * scale)));
+            tile.height = Math.max(1, Math.min(PDF_DETAIL_MAX_DIMENSION, Math.ceil((bottom - y) * scale)));
+            const renderTask = page.render({
+                canvasContext: tile.getContext('2d', { alpha: false }),
+                viewport: page.getViewport({ scale }),
+                transform: [1, 0, 0, 1, -x * scale, -y * scale]
+            });
+            activePdfRenderTask = renderTask;
+            try {
+                await renderTask.promise;
+                if (token !== renderToken) return false;
+                clearPdfDetail();
+                currentPdfDetail = { ...region, canvas: tile };
+                canvas.requestRenderAll();
+                return true;
+            } finally {
+                if (activePdfRenderTask === renderTask) activePdfRenderTask = null;
+                if (currentPdfDetail?.canvas !== tile) tile.width = tile.height = 0;
+            }
+        }
+
         function pdfBitmapCacheKey(num, renderScale) {
             return `${num}@${Number(renderScale || 1).toFixed(3)}`;
         }
@@ -2728,10 +2795,16 @@
             activePdfRenderTask = renderTask;
             try {
                 await renderTask.promise;
+            } catch (error) {
+                renderCanvas.width = renderCanvas.height = 0;
+                throw error;
             } finally {
                 if (activePdfRenderTask === renderTask) activePdfRenderTask = null;
             }
-            if (token !== renderToken) return null;
+            if (token !== renderToken) {
+                renderCanvas.width = renderCanvas.height = 0;
+                return null;
+            }
 
             const bitmap = {
                 canvas: renderCanvas,
@@ -2739,10 +2812,9 @@
                 bitmapHeight: renderCanvas.height,
                 worldWidth: baseViewport.width,
                 worldHeight: baseViewport.height,
-                renderScale,
-                requestedZoom: Number(canvas.getZoom()) || 1
+                renderScale
             };
-            if (bitmap) touchPdfBitmapCache(cacheKey, bitmap);
+            touchPdfBitmapCache(cacheKey, bitmap);
             return bitmap;
         }
 
@@ -2774,8 +2846,23 @@
         function applyPdfBackground(bitmap, token, loadAnnotations) {
             const commit = img => {
                 if (token !== renderToken) return;
+                clearPdfDetail();
+                const renderBase = img._render;
+                img.objectCaching = false;
+                img._render = function (context) {
+                    renderBase.call(this, context);
+                    const detail = currentPdfDetail;
+                    if (!detail) return;
+                    const pixelsPerWorldX = this.width / bitmap.worldWidth;
+                    const pixelsPerWorldY = this.height / bitmap.worldHeight;
+                    context.drawImage(detail.canvas, 0, 0,
+                        (detail.right - detail.x) * detail.scale, (detail.bottom - detail.y) * detail.scale,
+                        detail.x * pixelsPerWorldX - this.width / 2,
+                        detail.y * pixelsPerWorldY - this.height / 2,
+                        (detail.right - detail.x) * pixelsPerWorldX,
+                        (detail.bottom - detail.y) * pixelsPerWorldY);
+                };
                 setBg(img, bitmap.worldWidth, bitmap.worldHeight);
-                currentPdfRenderZoom = bitmap.requestedZoom;
                 currentPdfRenderScale = bitmap.renderScale;
                 showDrawingLoading(false);
                 if (typeof window.setTakeoffPage === 'function') window.setTakeoffPage(pageNum);
@@ -2804,13 +2891,15 @@
                 cancelActivePdfRender();
                 return;
             }
+            clearTimeout(pdfRerenderTimer);
             isRenderingPage = true;
-            updatePageListUI(num);
+            if (loadAnnotations) updatePageListUI(num);
             if (!pdfDoc) {
                 isRenderingPage = false;
                 return;
             }
             const isBackgroundRefresh = !loadAnnotations && !!canvas.backgroundImage;
+            let committed = false;
             if (!isBackgroundRefresh) showDrawingLoading(true);
             try {
                 await waitForWrapperSize();
@@ -2822,12 +2911,18 @@
                 const baseViewport = page.getViewport({ scale: 1 });
                 pdfWorldWidth = baseViewport.width;
                 pdfWorldHeight = baseViewport.height;
-                fitPdfToView(loadAnnotations);
+                if (!loadAnnotations) {
+                    const detail = requestedPdfDetail();
+                    if (detail && !konvaIsPanning && !canvas.isDragging) committed = await renderPdfDetail(page, token, detail);
+                    return;
+                }
+                fitPdfToView(true);
                 const renderScale = pdfRenderScaleForViewport(baseViewport);
                 const bitmap = await renderPageToBitmap(num, renderScale, token, page, baseViewport);
                 if (token !== renderToken) return;
                 if (!bitmap) throw new Error('PDF bitmap generation failed');
                 applyPdfBackground(bitmap, token, loadAnnotations);
+                committed = true;
             } catch (error) {
                 if (error?.name === 'RenderingCancelledException') return;
                 console.error(error);
@@ -2840,14 +2935,19 @@
                     const nextReq = pendingRenderRequest;
                     pendingRenderRequest = null;
                     renderPage(nextReq.num, nextReq.loadAnnotations);
+                } else if (committed) {
+                    schedulePdfRerender();
                 }
             }
         }
 
         function schedulePdfRerender() {
-            // Disabled: PDF is rendered once at fixed optimal resolution (150%).
-            // Canvas zooms via GPU hardware acceleration without CPU rasterization overhead.
-            return;
+            clearTimeout(pdfRerenderTimer);
+            if (!pdfDoc || !canvas.backgroundImage || !pdfWorldWidth || !pdfWorldHeight || document.hidden) return;
+            if (konvaIsPanning || canvas.isDragging || !requestedPdfDetail()) return;
+            pdfRerenderTimer = setTimeout(() => {
+                if (!isRenderingPage && !document.hidden) renderPage(pageNum, false);
+            }, PDF_DETAIL_IDLE_MS);
         }
 
         function setBg(img, worldWidth = img.width, worldHeight = img.height) {
@@ -2889,6 +2989,7 @@
             renderToken++;
             cancelActivePdfRender();
             canvas.clear(); undoStack = []; historyIndex = -1;
+            clearPdfDetail();
             pageNum = nextPage;
             loadCalibrationForPage(false);
             if (typeof window.setTakeoffPage === 'function') window.setTakeoffPage(pageNum);
@@ -4406,6 +4507,7 @@
 
         window.addEventListener('beforeunload', () => {
             saveCurrentPageAnnotations();
+            clearPdfDetail();
             pdfBitmapCache.forEach(bitmap => {
                 if (bitmap?.url) URL.revokeObjectURL(bitmap.url);
                 if (bitmap?.canvas) {
