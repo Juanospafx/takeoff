@@ -921,6 +921,13 @@ $state = [
                             </button>
                             <div class="bb-status-menu-panel project-status-menu" id="projectStatusMenu"></div>
                         </div>
+                        <?php if ($canWrite): ?>
+                            <span id="takeoffAutosaveStatus" class="takeoff-autosave-status is-idle" role="status"
+                                aria-live="polite" aria-atomic="true" title="Autosave ready">
+                                <i class="fas fa-cloud" aria-hidden="true"></i>
+                                <span class="takeoff-autosave-label">Autosave ready</span>
+                            </span>
+                        <?php endif; ?>
                         <?php if ($projectId > 0): ?>
                             <div class="won-export-container" id="wonProjectExportContainer">
                                 <?php if ($isAdminUser): ?>

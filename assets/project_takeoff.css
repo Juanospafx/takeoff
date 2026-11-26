@@ -11290,39 +11290,64 @@ body.theme-dark .tk-action-modal-foot {
     }
 }
 .takeoff-autosave-status {
-    display: inline-flex;
-    align-items: center;
-    min-height: 28px;
-    padding: 0 9px;
-    border-radius: 999px;
-    background: #f3f4f6;
-    color: #667085;
-    font-size: 11px;
-    font-weight: 700;
-    line-height: 1;
-    white-space: nowrap;
+    position: relative;
+    display: inline-grid;
+    place-items: center;
+    box-sizing: border-box;
+    width: var(--pd-presence-avatar-size, 28px);
+    height: var(--pd-presence-avatar-size, 28px);
+    flex: none;
+    border: 1px solid var(--border, #e2e8f0);
+    border-radius: 50%;
+    background: var(--bg-panel, #f8fafc);
+    color: var(--text-muted, #64748b);
+    font-size: 13px;
 }
 
-.takeoff-autosave-status.is-saving,
+.takeoff-autosave-status.is-saving {
+    border-color: #ef4444;
+    color: #dc2626;
+}
+
+.takeoff-autosave-status.is-saving i {
+    animation: fa-spin 0.85s linear infinite;
+}
+
 .takeoff-autosave-status.is-pending {
-    background: #fff4ed;
-    color: #c2410c;
+    color: #b45309;
 }
 
 .takeoff-autosave-status.is-saved {
-    background: #ecfdf3;
-    color: #027a48;
+    border-color: #15803d;
+    background: #15803d;
+    color: #fff;
 }
 
 .takeoff-autosave-status.is-error {
-    background: #fef3f2;
-    color: #b42318;
+    border-color: #b91c1c;
+    background: #b91c1c;
+    color: #fff;
 }
 
-@media (max-width: 900px) {
-    .takeoff-autosave-status {
-        max-width: 126px;
-        overflow: hidden;
-        text-overflow: ellipsis;
+[data-theme="dark"] .takeoff-autosave-status.is-saving {
+    color: #f87171;
+}
+
+[data-theme="dark"] .takeoff-autosave-status.is-pending {
+    color: #fbbf24;
+}
+
+.takeoff-autosave-label {
+    position: absolute;
+    width: 1px;
+    height: 1px;
+    overflow: hidden;
+    clip-path: inset(50%);
+    white-space: nowrap;
+}
+
+@media (prefers-reduced-motion: reduce) {
+    .takeoff-autosave-status.is-saving i {
+        animation: none;
     }
 }

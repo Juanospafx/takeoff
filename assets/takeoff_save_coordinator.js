@@ -42,34 +42,23 @@
             }
         }
 
-        function ensureStatusElement() {
-            let status = getElement('takeoffAutosaveStatus');
-            if (status) return status;
-            const saveButton = getElement('saveProjectBtn');
-            if (!saveButton?.parentElement) return null;
-            status = saveButton.ownerDocument.createElement('span');
-            status.id = 'takeoffAutosaveStatus';
-            status.className = 'takeoff-autosave-status is-idle';
-            status.setAttribute('role', 'status');
-            status.setAttribute('aria-live', 'polite');
-            status.textContent = 'Autosave ready';
-            saveButton.insertAdjacentElement('afterend', status);
-            return status;
-        }
-
         function setStatus(state, message = '') {
-            const status = ensureStatusElement();
+            const status = getElement('takeoffAutosaveStatus');
             if (!status) return;
-            const labels = {
-                idle: 'Autosave ready',
-                pending: 'Changes pending',
-                saving: 'Saving…',
-                saved: 'All changes saved',
-                error: 'Save failed — Retry'
+            const states = {
+                idle: { label: 'Autosave ready', icon: 'fa-cloud' },
+                pending: { label: 'Changes pending', icon: 'fa-clock' },
+                saving: { label: 'Saving…', icon: 'fa-circle-notch' },
+                saved: { label: 'All changes saved', icon: 'fa-check' },
+                error: { label: 'Save failed — Retry', icon: 'fa-exclamation' }
             };
-            status.className = `takeoff-autosave-status is-${state}`;
-            status.textContent = labels[state] || labels.idle;
-            status.title = message || status.textContent;
+            const statusKey = Object.hasOwn(states, state) ? state : 'idle';
+            const { label, icon } = states[statusKey];
+            status.className = `takeoff-autosave-status is-${statusKey}`;
+            status.querySelector('i').className = `fas ${icon}`;
+            const text = status.querySelector('.takeoff-autosave-label');
+            if (text.textContent !== label) text.textContent = label;
+            status.title = message || label;
         }
 
         function handleStatus(payload = {}) {
