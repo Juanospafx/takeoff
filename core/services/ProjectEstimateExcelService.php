@@ -13,6 +13,10 @@ final class ExcelRuntimeException extends RuntimeException
 {
 }
 
+final class ExcelSummaryException extends RuntimeException
+{
+}
+
 /**
  * Unified Excel Import / Export service for Estimating & Project Templates:
  * 1. Matches Excel rows against live Cost Catalog items & assemblies (exact + safe electrical fuzzy matching)
@@ -777,6 +781,33 @@ class ProjectEstimateExcelService
     /**
      * Generates an .xlsx binary using templates/Project Estimate Export_Template.xlsx
      */
+    private static function writeCalculatedSummary(Worksheet $sheet, array $summary): void
+    {
+        $numbers = static function (array $values, array $keys): array {
+            return array_map(static function (string $key) use ($values): float {
+                $value = $values[$key] ?? null;
+                if ((!is_int($value) && !is_float($value)) || !is_finite((float)$value)) {
+                    throw new ExcelSummaryException('The estimate summary is incomplete or contains invalid numbers.');
+                }
+                return (float)$value;
+            }, $keys);
+        };
+        $section = static function (string $key) use ($summary): array {
+            return is_array($summary[$key] ?? null) ? $summary[$key] : [];
+        };
+        $financialKeys = ['cost', 'margin', 'sales', 'profit'];
+        $categoryKeys = array_merge(['laborHours', 'difficulty', 'waste'], $financialKeys);
+        foreach (['labor' => 4, 'materials' => 5, 'equipment' => 6] as $key => $row) {
+            $sheet->fromArray($numbers($section($key), $categoryKeys), null, "B{$row}", true);
+        }
+        $sheet->fromArray($numbers($section('direct'), $financialKeys), null, 'E7', true);
+        $totalCells = ['preTax' => 'H11', 'tax' => 'H15', 'postTax' => 'H19', 'total' => 'A23'];
+        $totals = $numbers($summary, array_keys($totalCells));
+        foreach (array_values($totalCells) as $index => $cell) {
+            $sheet->setCellValue($cell, $totals[$index]);
+        }
+    }
+
     public static function exportEstimateWorkbook(
         PDO $pdo,
         int $projectId,
@@ -1060,7 +1091,9 @@ class ProjectEstimateExcelService
 
             // 3. SUMMARY SHEET
             $wsSum = $spreadsheet->getSheetByName('Summary');
-            if ($wsSum) {
+            if ($wsSum && is_array($livePayload['summary'] ?? null)) {
+                self::writeCalculatedSummary($wsSum, $livePayload['summary']);
+            } elseif ($wsSum) {
                 $lMargin = (float)($settings['globalLaborMargin'] ?? 34.6);
                 $lFrac = min(0.999, max(0.0, $lMargin / 100.0));
                 $laborSalesTotal = $lMargin > 0 ? ($totals['totLaborCost'] / (1.0 - $lFrac)) : $totals['totLaborCost'];

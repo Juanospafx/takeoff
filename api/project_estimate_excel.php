@@ -106,6 +106,10 @@ try {
         if ($projectId > 0) {
             takeoff_guard_project_access($pdo, $user, $projectId, ProjectAccess::READ);
         }
+        if ($action === 'export_estimate_live'
+            && (!is_array($livePayload['estimate'] ?? null) || !is_array($livePayload['summary'] ?? null))) {
+            excel_json_error('The current estimate and its calculated summary are required.', 422, 'ESTIMATE_SUMMARY_REQUIRED');
+        }
 
         $result = ProjectEstimateExcelService::exportEstimateWorkbook(
             $pdo,
@@ -186,6 +190,8 @@ try {
 } catch (ExcelRuntimeException $e) {
     error_log('ProjectEstimateExcelService runtime prerequisite failed');
     excel_json_error($e->getMessage(), 503, 'EXCEL_RUNTIME_UNAVAILABLE');
+} catch (ExcelSummaryException $e) {
+    excel_json_error($e->getMessage(), 422, 'ESTIMATE_SUMMARY_INVALID');
 } catch (\PhpOffice\PhpSpreadsheet\Reader\Exception $e) {
     error_log('ProjectEstimateExcelService rejected an unreadable workbook');
     excel_json_error('The uploaded Excel workbook could not be read.', 422, 'WORKBOOK_UNREADABLE');

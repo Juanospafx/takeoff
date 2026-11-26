@@ -4329,6 +4329,38 @@
         return true;
     }
 
+    function buildExcelSummary(estimate) {
+        const settings = estimate.settings || {};
+        const total = Calc.calculateSummary(estimate.groups || [], settings);
+        const category = (name, waste, difficulty = 0) => {
+            const values = total.byCategory[name];
+            return {
+                laborHours: values.adjustedLaborHours,
+                difficulty,
+                waste,
+                cost: values.totalCost,
+                margin: resolvedCategorySummaryMargin(name, settings, total),
+                sales: values.totalSales,
+                profit: values.profit
+            };
+        };
+        return {
+            labor: category('Labor', Number(settings.laborWaste ?? 0), Number(settings.laborDifficulty ?? 1)),
+            materials: category('Materials', Number(settings.materialWaste ?? 0)),
+            equipment: category('Equipment', Number(settings.equipmentWaste ?? 0)),
+            direct: {
+                cost: total.direct.totalCost,
+                margin: total.direct.marginPercent,
+                sales: total.direct.totalSales,
+                profit: total.direct.profit
+            },
+            preTax: total.preTaxTotal,
+            tax: total.totalTax,
+            postTax: total.postTaxTotal,
+            total: total.estimateTotal
+        };
+    }
+
     async function exportEstimate(mode = 'estimate-xlsx') {
         let Exporter = getExporter();
         if (!Exporter && typeof window.ensureDashboardFeature === 'function') {
@@ -4337,6 +4369,8 @@
         }
         if (!Exporter && mode !== 'estimate-xlsx') return false;
         let estimate = Workspace.clone(current());
+        // Capture the same state the Summary panel uses before enriching the export detail.
+        const excelSummary = mode === 'estimate-xlsx' ? buildExcelSummary(estimate) : null;
         if ((mode === 'estimate-xlsx' || mode === 'flat' || mode === 'bom-excel' || mode === 'bom-csv' || mode === 'summary-csv') && Exporter?.needsCatalog?.(estimate)) {
             try {
                 const catalogSnapshot = await window.CatalogService.getSnapshot({ enabledForProjectsOnly: true });
@@ -4372,21 +4406,14 @@
 
         if (mode === 'estimate-xlsx') {
             try {
-                const readOnly = document.body?.dataset?.readOnly === 'true';
-                if (readOnly) {
-                    return triggerFileDownload(
-                        `../api/project_estimate_excel.php?action=export_estimate&project_id=${encodeURIComponent(projectId)}&estimate_id=${encodeURIComponent(estimate.id || '')}`,
-                        `${safeName}.xlsx`,
-                        false
-                    );
-                }
                 const resp = await fetch(`../api/project_estimate_excel.php?action=export_estimate&project_id=${encodeURIComponent(projectId)}`, {
                     method: 'POST',
                     headers: { 'Content-Type': 'application/json' },
                     body: JSON.stringify({
                         project_id: projectId,
                         estimate_id: estimate.id || '',
-                        estimate
+                        estimate,
+                        summary: excelSummary
                     })
                 });
                 if (!resp.ok) {
