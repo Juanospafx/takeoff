@@ -8613,11 +8613,14 @@ body.theme-dark .est-cu-group-items .est-cu-item.is-selected {
 }
 .est-main.is-switching-estimate > :not(.est-loading-overlay) {
     visibility: hidden;
+    opacity: 0;
+    pointer-events: none;
 }
 .est-main.is-switching-estimate > .est-loading-overlay {
     background: var(--est-bg, #eef2f6);
     backdrop-filter: none;
     -webkit-backdrop-filter: none;
+    cursor: wait;
 }
 .est-loading-card {
     display: flex;

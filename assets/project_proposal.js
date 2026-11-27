@@ -1377,6 +1377,126 @@
         `;
     }
 
+    function paginateProposalItemLists() {
+        const overview = documentNode.querySelector('[data-proposal-overview-sheet]');
+        const sections = Array.from(overview?.querySelectorAll('[data-proposal-item-list]') || []);
+        if (!sections.length) return;
+
+        // Measure at the same Letter size and padding used by the PDF renderer.
+        const sandbox = document.createElement('div');
+        sandbox.className = 'proposal-pdf-export-sandbox';
+        sandbox.style.cssText = 'position:fixed;left:-9999px;top:0;width:816px;visibility:hidden;pointer-events:none';
+        document.body.appendChild(sandbox);
+        let sheet = overview;
+        let content = overview.querySelector('.proposal-sheet-content');
+        const footer = overview.querySelector('.proposal-sheet-footer');
+        const trailing = Array.from(content.children).filter(element =>
+            element.compareDocumentPosition(sections.at(-1)) & Node.DOCUMENT_POSITION_PRECEDING);
+        sections.forEach(section => section.remove());
+        trailing.forEach(element => element.remove());
+
+        let measureContent;
+        let bottomLimit;
+        function measureSheet() {
+            const clone = sheet.cloneNode(true);
+            sandbox.replaceChildren(clone);
+            measureContent = clone.querySelector('.proposal-sheet-content');
+            const measuredFooter = clone.querySelector('.proposal-sheet-footer');
+            bottomLimit = clone.getBoundingClientRect().bottom
+                - parseFloat(getComputedStyle(clone).paddingBottom)
+                - measuredFooter.getBoundingClientRect().height
+                - parseFloat(getComputedStyle(measuredFooter).marginTop) - 12;
+        }
+        function nextSheet() {
+            const next = overview.cloneNode(false);
+            next.removeAttribute('data-proposal-overview-sheet');
+            const nextContent = content.cloneNode(false);
+            next.append(nextContent, footer.cloneNode(true));
+            sheet.after(next);
+            sheet = next;
+            content = nextContent;
+            measureSheet();
+        }
+        const fits = node => node.getBoundingClientRect().bottom <= bottomLimit;
+
+        try {
+            measureSheet();
+            for (const template of sections) {
+                const items = Array.from(template.querySelectorAll('li'), li => li.textContent);
+                let block;
+                let measuredBlock;
+                function openList(index) {
+                    block = template.cloneNode(true);
+                    const list = block.querySelector('ol');
+                    list.replaceChildren();
+                    list.start = index + 1;
+                    measuredBlock = block.cloneNode(true);
+                    content.append(block);
+                    measureContent.append(measuredBlock);
+                }
+                items.forEach((text, index) => {
+                    let remaining = Array.from(text);
+                    while (remaining.length) {
+                        if (!block) openList(index);
+                        const list = block.querySelector('ol');
+                        const measuredList = measuredBlock.querySelector('ol');
+                        const item = document.createElement('li');
+                        measuredList.append(item);
+                        item.textContent = remaining.join('');
+                        if (!fits(item)) {
+                            const canMove = list.children.length || content.children.length > 1;
+                            if (canMove) {
+                                item.remove();
+                                if (!list.children.length) { block.remove(); measuredBlock.remove(); }
+                                nextSheet();
+                                block = null;
+                                continue;
+                            }
+                            // A single note can exceed a whole sheet. Split it without dropping text.
+                            let low = 1;
+                            let high = remaining.length;
+                            while (low < high) {
+                                const middle = Math.ceil((low + high) / 2);
+                                item.textContent = remaining.slice(0, middle).join('');
+                                if (fits(item)) low = middle;
+                                else high = middle - 1;
+                            }
+                            const prefix = remaining.slice(0, low).join('');
+                            const lastSpace = prefix.lastIndexOf(' ');
+                            const length = lastSpace > prefix.length / 2 ? Array.from(prefix.slice(0, lastSpace + 1)).length : low;
+                            item.textContent = remaining.slice(0, length).join('');
+                            remaining = remaining.slice(length);
+                        } else {
+                            remaining = [];
+                        }
+                        list.append(item.cloneNode(true));
+                        if (remaining.length) {
+                            nextSheet();
+                            block = null;
+                        }
+                    }
+                });
+            }
+            trailing.forEach(element => {
+                const measured = element.cloneNode(true);
+                measureContent.append(measured);
+                if (!fits(measured) && content.children.length) {
+                    measured.remove();
+                    nextSheet();
+                    measureContent.append(measured);
+                }
+                content.append(element);
+            });
+            const sheets = Array.from(documentNode.querySelectorAll('.proposal-page-sheet'));
+            sheets.forEach((page, index) => {
+                const count = page.querySelector('.proposal-sheet-footer > :last-child');
+                if (count) count.textContent = `Page ${index + 1} of ${sheets.length}`;
+            });
+        } finally {
+            sandbox.remove();
+        }
+    }
+
     function renderPreview() {
         try {
             const project = state.projectInfo || {};
@@ -1464,12 +1584,12 @@
 
         const notesHtml = [
             notes.included && notes.included.length ? `
-                <section class="proposal-doc-section">
+                <section class="proposal-doc-section" data-proposal-item-list>
                     <h4>Included Items</h4>
                     <ol class="proposal-bullets">${notes.included.map((item) => `<li>${esc(item)}</li>`).join('')}</ol>
                 </section>` : '',
             notes.excluded && notes.excluded.length ? `
-                <section class="proposal-doc-section">
+                <section class="proposal-doc-section" data-proposal-item-list>
                     <h4>Excluded Items</h4>
                     <ol class="proposal-bullets">${notes.excluded.map((item) => `<li>${esc(item)}</li>`).join('')}</ol>
                 </section>` : '',
@@ -1580,7 +1700,7 @@
 
             // 2. Project Overview & Scope Sheet
             sheetsHtml += `
-                <div class="proposal-page-sheet ${widthClass}">
+                <div class="proposal-page-sheet ${widthClass}" data-proposal-overview-sheet>
                     <div class="proposal-sheet-content">
                         ${headerHtml}
                         ${titleHtml}
@@ -1699,6 +1819,7 @@
             }
 
             documentNode.innerHTML = `${toolbarHtml}<div class="proposal-paged-wrap">${sheetsHtml}</div>`;
+            paginateProposalItemLists();
         } else {
             // Continuous Extended Single Page Mode
             const continuousCover = hasCover ? `
@@ -1905,8 +2026,12 @@
 
         // 1. Ensure we are in paged mode so each sheet exists in the DOM
         const wasContinuous = proposalSettings.pageMode !== 'paged';
+        const fontsWereLoading = document.fonts?.status === 'loading';
+        if (fontsWereLoading) await document.fonts.ready;
         if (wasContinuous) {
             proposalSettings.pageMode = 'paged';
+        }
+        if (wasContinuous || fontsWereLoading) {
             renderPreview();
         }
 

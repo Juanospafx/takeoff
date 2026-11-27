@@ -1071,6 +1071,11 @@ body.theme-dark .proposal-dep-badge.is-info {
     color: #334155;
 }
 
+.proposal-bullets li {
+    overflow-wrap: anywhere;
+    white-space: pre-wrap;
+}
+
 .proposal-bullets li + li {
     margin-top: 3px;
 }

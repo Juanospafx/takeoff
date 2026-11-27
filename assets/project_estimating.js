@@ -48,6 +48,8 @@
     let estimatingTableDirty = false;
     const estimatingLoadingMessages = new Map();
     let estimatingTableRenderGeneration = 0;
+    let estimateSwitchGeneration = 0;
+    let preparingEstimateSwitch = false;
     const ESTIMATING_TABLE_CHUNK_SIZE = 60;
     const ESTIMATING_TABLE_CHUNK_THRESHOLD = 120;
 
@@ -1375,11 +1377,12 @@
     }
 
     function render(forceTable = false) {
+        if (preparingEstimateSwitch) return;
         if (!forceTable && !isEstimatingTabActive()) {
             estimatingTableDirty = true;
             renderFooter();
             renderStatus();
-            renderModal();
+            renderModal(true);
             return;
         }
         estimatingTableDirty = false;
@@ -1387,7 +1390,7 @@
         renderDetails();
         renderFooter();
         renderStatus();
-        renderModal();
+        renderModal(true);
     }
 
     const ALL_CONFIG_COLUMNS = [
@@ -2076,7 +2079,8 @@
         }
     }
 
-    async function hydrateBrokenAssembliesInCurrentEstimate() {
+    async function hydrateBrokenAssembliesInCurrentEstimate(renderWhenUpdated = true) {
+        const estimate = current();
         const broken = allItems()
             .map(r => r.item)
             .filter(it => assemblyNeedsHydration(it));
@@ -2086,7 +2090,7 @@
             const catId = it.catalogItemId || it.catalog_item_id || it.catalogSnapshot?.catalogItemId || it.catalogSnapshot?.id || it.catalog_id;
             if (await hydrateAssemblyPartsFromCatalog(it, catId)) updatedAny = true;
         }
-        if (updatedAny) {
+        if (updatedAny && renderWhenUpdated && current() === estimate) {
             renderTable();
             renderDetails();
         }
@@ -2646,9 +2650,9 @@
         root.querySelectorAll('input[type="checkbox"][data-indeterminate="true"]').forEach(cb => {
             cb.indeterminate = true;
         });
-        if (estimatingLoadingMessages.has('switch')) {
+        if (!preparingEstimateSwitch && estimatingLoadingMessages.has('switch')) {
             const reveal = () => {
-                if (generation === estimatingTableRenderGeneration) {
+                if (!preparingEstimateSwitch && generation === estimatingTableRenderGeneration) {
                     setEstimatingLoading(false, undefined, 'switch');
                 }
             };
@@ -4183,13 +4187,21 @@
         }
     }
 
-    function renderModal() {
+    function renderModal(preserveDraft = false) {
+        if (preserveDraft && ui.modal === 'new' && document.querySelector('#copyEstimateName')) return;
         const modalRenderer = window.ProjectEstimatingModals?.renderEstimatingModal;
         if (typeof modalRenderer !== 'function') {
             console.error('ProjectEstimatingModals must load before project_estimating.js');
             return;
         }
-        return modalRenderer({ ui, esc, current, renderCatalogChoices });
+        const source = state.estimates.find(row => String(row.id) === ui.copySourceEstimateId);
+        return modalRenderer({ ui, esc, current: () => source || current(), renderCatalogChoices });
+    }
+
+    function openNewEstimate(sourceId = '') {
+        ui.copySourceEstimateId = String(sourceId);
+        ui.modal = 'new';
+        renderModal();
     }
     function moveEstimatingItem(draggedItemId, targetItemId, targetGroupId, isBefore = true) {
         if (!draggedItemId) return;
@@ -5253,7 +5265,9 @@
                 }
             }
         }
-        if (actionName === 'copy' && selectEstimate(estimateId)) { ui.modal = 'new'; renderModal(); }
+        if (actionName === 'copy' && state.estimates.some(row => String(row.id) === String(estimateId))) {
+            openNewEstimate(estimateId);
+        }
         if (actionName === 'delete') deleteEstimateAuthoritative(estimateId);
         if (actionName === 'set-primary') {
             state.estimates.forEach(row => {
@@ -6149,7 +6163,7 @@
         const version = target.closest('[data-version]')?.dataset.version;
         if (version) selectEstimate(version);
         const footerAction = target.closest('[data-estimating-action]')?.dataset.estimatingAction;
-        if (footerAction === 'new-estimate') { ui.modal = 'new'; renderModal(); }
+        if (footerAction === 'new-estimate') openNewEstimate();
         if (target.closest('[data-retry-save]')) saveServer();
     });
 
@@ -6359,10 +6373,18 @@
         if (event.target.closest('[data-create-estimate]')) {
             const createButton = event.target.closest('[data-create-estimate]');
             if (createButton.disabled) return;
-            const sourceEstimateId = String(current()?.id || '');
+            const source = ui.copySourceEstimateId
+                ? state.estimates.find(row => String(row.id) === ui.copySourceEstimateId) : current();
+            if (!source || window.canChangeTakeoffDrawing?.() === false) return;
+            const sourceEstimateId = String(source.id);
             const name = portal.querySelector('#copyEstimateName')?.value;
             const mode = portal.querySelector('input[name="copyEstimateMode"]:checked')?.value || 'blank';
-            Workspace.createEstimate(state, name, mode);
+            if (preparingEstimateSwitch) {
+                ++estimateSwitchGeneration;
+                preparingEstimateSwitch = false;
+                if (!isEstimatingTabActive()) setEstimatingLoading(false, undefined, 'switch');
+            }
+            Workspace.createEstimate(state, name, mode, ensureDefaultMarkups(source));
             ui.modal = null;
             renderModal();
             saveLocal();
@@ -6488,30 +6510,54 @@
 
     function selectEstimate(estimateId) {
         const prevActiveId = String(state.activeEstimateId || '');
-        if (prevActiveId !== String(estimateId) && window.canChangeTakeoffDrawing?.() === false) return false;
+        if (prevActiveId === String(estimateId)) return true;
+        if (window.canChangeTakeoffDrawing?.() === false) return false;
         const selected = Workspace.selectEstimate(state, estimateId);
         if (!selected) return false;
-        const switched = prevActiveId !== String(selected.id);
-        if (switched && isEstimatingTabActive()) {
-            setEstimatingLoading(true, 'Loading estimate...', 'switch');
-        }
+        const generation = ++estimateSwitchGeneration;
+        const visible = isEstimatingTabActive();
+        preparingEstimateSwitch = visible;
+        ++estimatingTableRenderGeneration;
         // Selecting a tab is local UI state, not an estimate content edit. It
         // must not increment the estimate revision or conflict with another
         // estimator editing that same estimate.
-        try {
+        const complete = () => {
+            if (generation !== estimateSwitchGeneration) return;
+            preparingEstimateSwitch = false;
+            if (!isEstimatingTabActive()) setEstimatingLoading(false, undefined, 'switch');
             ui.selected.clear();
             syncEstimatingSubheadInfo();
-            saveLocal();
+            saveLocal({ publish: false });
             render();
             publish();
-        } catch (error) {
-            setEstimatingLoading(false, undefined, 'switch');
-            throw error;
+            if (String(state.activeEstimateId) === String(selected.id)) {
+                window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', {
+                    detail: { projectId, estimateId: selected.id, source: 'estimating' }
+                }));
+            }
+        };
+        if (!visible) {
+            complete();
+            return true;
         }
-        if (switched) {
-            window.dispatchEvent(new CustomEvent('takeoff:active-estimate-changed', {
-                detail: { projectId, estimateId: selected.id, source: 'estimating' }
-            }));
+        setEstimatingLoading(true, 'Loading estimate...', 'switch');
+        const prepare = async () => {
+            if (generation !== estimateSwitchGeneration) return;
+            try {
+                await hydrateBrokenAssembliesInCurrentEstimate(false);
+                complete();
+            } catch (error) {
+                if (generation === estimateSwitchGeneration) {
+                    preparingEstimateSwitch = false;
+                    setEstimatingLoading(false, undefined, 'switch');
+                }
+                console.error('Could not switch estimate:', error);
+            }
+        };
+        if (typeof requestAnimationFrame === 'function') {
+            requestAnimationFrame(() => requestAnimationFrame(prepare));
+        } else {
+            setTimeout(prepare, 0);
         }
         return true;
     }
@@ -6732,8 +6778,7 @@
         changed('Reordered Takeoff groups');
     });
     window.addEventListener('takeoff:estimating-action-requested', event => {
-        if (event.detail?.action === 'new-estimate') ui.modal = 'new';
-        renderModal();
+        if (event.detail?.action === 'new-estimate') openNewEstimate();
     });
     window.addEventListener('takeoff:estimating-estimate-action-requested', event => {
         const detail = event.detail || {};

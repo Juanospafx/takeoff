@@ -378,8 +378,7 @@
         return touch(state, 'Synchronized items from Takeoff');
     }
 
-    function createEstimate(state, name, mode = 'blank') {
-        const source = active(state);
+    function createEstimate(state, name, mode = 'blank', source = active(state)) {
         const creationMode = ['all', 'structure', 'blank'].includes(mode) ? mode : 'blank';
         const sourceGroups = creationMode === 'blank' ? [] : clone(source.groups);
         const groupIds = new Map(sourceGroups.map(row => [String(row.id), uid('group')]));

@@ -28,7 +28,7 @@ test('persisted and temporary estimates switch without sharing groups, notes, or
     assert.equal(state.estimates[1].groups[0].items[0].name, 'Edited temporary item');
 });
 
-test('estimate selection intent is handled by the sole Estimating workspace owner', () => {
+test('estimate selection intent is handled by the sole Estimating workspace owner', async () => {
     const dom = new JSDOM('<div id="estimatingModule" data-project-id="0"></div>', {
         url: 'https://takeoff.test/project/draft', runScripts: 'outside-only', pretendToBeVisual: true
     });
@@ -42,6 +42,8 @@ test('estimate selection intent is handled by the sole Estimating workspace owne
     dom.window.dispatchEvent(new dom.window.CustomEvent('takeoff:active-estimate-changed', {
         detail: { projectId: '', estimateId: 'two' }
     }));
+    await new Promise(resolve => dom.window.requestAnimationFrame(() => dom.window.requestAnimationFrame(resolve)));
+    await Promise.resolve();
 
     const saved = JSON.parse(dom.window.localStorage.getItem('takeoff.estimating.module.draft'));
     assert.equal(saved.activeEstimateId, 'two');
@@ -84,7 +86,7 @@ test('New Estimate saves immediately and survives a remote load response already
     dom.window.close();
 });
 
-test('switching conceals chunked rows until the latest estimate finishes rendering', () => {
+test('switching paints the loader first and conceals chunked rows until the latest estimate finishes rendering', async () => {
     const dom = new JSDOM('<div id="estimatingModule" data-project-id="0"></div>', {
         url: 'https://takeoff.test/project/draft', runScripts: 'outside-only', pretendToBeVisual: true
     });
@@ -92,7 +94,7 @@ test('switching conceals chunked rows until the latest estimate finishes renderi
         const { window } = dom;
         const frames = [];
         window.requestAnimationFrame = callback => frames.push(callback);
-        const advanceFrame = () => frames.splice(0).forEach(callback => callback());
+        const advanceFrame = async () => frames.splice(0).forEach(callback => callback());
         const estimate = (id, count) => ({
             id, name: id,
             groups: [{ id: `${id}-group`, items: Array.from({ length: count }, (_, index) => ({
@@ -113,20 +115,66 @@ test('switching conceals chunked rows until the latest estimate finishes renderi
         const main = overlay.parentElement;
         assert.equal(overlay.hidden, false);
         assert.ok(main.classList.contains('is-switching-estimate'));
+        assert.equal(getItem('second-0'), null);
         assert.equal(getItem('second-179'), null);
 
-        advanceFrame();
+        await advanceFrame();
         select('third');
         while (frames.length && !getItem('third-179')) {
-            advanceFrame();
+            await advanceFrame();
             assert.equal(overlay.hidden, false);
         }
         assert.ok(getItem('third-179'));
         assert.equal(getItem('second-179'), null);
-        advanceFrame();
-        advanceFrame();
+        await advanceFrame();
+        await advanceFrame();
         assert.equal(overlay.hidden, true);
         assert.equal(main.classList.contains('is-switching-estimate'), false);
+    } finally {
+        dom.window.close();
+    }
+});
+
+test('the three-dot copy action opens immediately and uses the chosen source without activating it', () => {
+    const dom = new JSDOM('<div id="estimatingModule" data-project-id="0"></div>', {
+        url: 'https://takeoff.test/project/draft', runScripts: 'outside-only', pretendToBeVisual: true
+    });
+    try {
+        const { window } = dom;
+        const key = 'takeoff.estimating.module.draft';
+        window.ProjectState = { projectId: 0, estimateItems: [], projectMeta: {} };
+        window.localStorage.setItem(key, JSON.stringify({ activeEstimateId: 'one', estimates: [
+            { id: 'one', name: 'One', groups: [] },
+            { id: 'two', name: 'Two', notes: { scope: 'Source scope' }, groups: [
+                { id: 'g2', items: [{ id: 'i2', name: 'Source item', quantity: 7 }] }
+            ] }
+        ] }));
+        sources.forEach(source => window.eval(source));
+        const events = [];
+        const cloneSources = [];
+        window.cloneTakeoffWorkspaceForEstimate = sourceId => { cloneSources.push(sourceId); };
+        window.addEventListener('takeoff:active-estimate-changed', event => events.push(event.detail.estimateId));
+        window.dispatchEvent(new window.CustomEvent('takeoff:estimating-estimate-action-requested', {
+            detail: { action: 'copy', estimateId: 'two' }
+        }));
+        const name = window.document.getElementById('copyEstimateName');
+        assert.equal(name.value, 'Two Copy');
+        assert.equal(JSON.parse(window.localStorage.getItem(key)).activeEstimateId, 'one');
+        assert.deepEqual(events, []);
+        name.value = 'My copy';
+        window.dispatchEvent(new window.StorageEvent('storage', {
+            key, newValue: window.localStorage.getItem(key)
+        }));
+        assert.equal(window.document.getElementById('copyEstimateName'), name);
+        window.document.querySelector('[data-create-estimate]').click();
+        const saved = JSON.parse(window.localStorage.getItem(key));
+        const copy = saved.estimates.find(estimate => estimate.id === saved.activeEstimateId);
+        assert.equal(copy.name, 'My copy');
+        assert.deepEqual(cloneSources, ['two']);
+        assert.equal(copy.groups[0].items[0].quantity, 7);
+        assert.notEqual(copy.groups[0].items[0].id, 'i2');
+        assert.equal(copy.notes.scope, 'Source scope');
+        assert.deepEqual(events, [copy.id]);
     } finally {
         dom.window.close();
     }
